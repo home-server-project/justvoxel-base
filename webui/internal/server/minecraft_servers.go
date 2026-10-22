@@ -16,6 +16,8 @@ import (
 type minecraftServerSummary struct {
 	Name, URL, Software, Version, State, ConfigurationError string
 	ContextID                                               string
+	JavaMemory, ContainerMemory, StateClass                 string
+	Running, CanSwitch, CanConfigureBoot                    bool
 	JavaPort, BedrockPort                                   int
 	ConfigurationAvailable, BedrockEnabled                  bool
 	BootKnown, StartOnBoot                                  bool
@@ -62,13 +64,18 @@ func serverSoftware(value string) string {
 
 func (s *minecraftServerSummary) setState(state string) {
 	// Presentation of authoritative states only; no runtime inference here.
+	s.StateClass = "warning"
 	switch strings.ToLower(state) {
 	case "running":
 		s.State = "Running"
+		s.StateClass = "success"
+		s.Running, s.CanSwitch = true, true
 		s.CanStop = true
 		s.CanRestart = true
 	case "stopped":
 		s.State = "Stopped"
+		s.StateClass = "error"
+		s.CanSwitch, s.CanConfigureBoot = true, true
 		s.CanStart = true
 	case "starting":
 		s.State = "Starting"
@@ -76,6 +83,7 @@ func (s *minecraftServerSummary) setState(state string) {
 		s.State = "Stopping"
 	case "failed":
 		s.State = "Failed"
+		s.StateClass = "error"
 		s.CanStart = true
 	case "configured":
 		s.State = "Configured"
@@ -145,7 +153,7 @@ func (a *App) independentServerInventory(ctx context.Context, session string) ([
 }
 
 func (a *App) independentServerSummary(ctx context.Context, session string, instance api.RegisteredMinecraftInstance) minecraftServerSummary {
-	s := minecraftServerSummary{ContextID: instance.ID, Name: instance.DisplayName, URL: serverOverviewURL(instance.ID), Software: "Software unavailable", Version: "Version unavailable", State: "Status unavailable"}
+	s := minecraftServerSummary{ContextID: instance.ID, Name: instance.DisplayName, URL: serverOverviewURL(instance.ID), Software: "Software unavailable", Version: "Version unavailable", State: "Status unavailable", StateClass: "warning"}
 	if s.Name == "" {
 		s.Name = "Minecraft server"
 	}
@@ -162,6 +170,7 @@ func (a *App) independentServerSummary(ctx context.Context, session string, inst
 		}
 		s.JavaPort, s.BedrockEnabled, s.BedrockPort = c.JavaPort, c.BedrockEnabled, c.BedrockPort
 		s.MOTD = c.MOTD
+		s.JavaMemory, s.ContainerMemory = c.JavaMemory, c.ContainerMemory
 		s.BootKnown, s.StartOnBoot = true, c.StartOnBoot
 	} else {
 		s.ConfigurationError = "Server configuration could not be checked."
@@ -175,6 +184,7 @@ func (a *App) independentServerSummary(ctx context.Context, session string, inst
 	// A summary whose configuration cannot be checked offers no lifecycle controls.
 	if !s.ConfigurationAvailable {
 		s.CanStart, s.CanStop, s.CanRestart = false, false, false
+		s.CanSwitch, s.CanConfigureBoot = false, false
 	}
 	return s
 }
@@ -251,11 +261,24 @@ func (a *App) minecraftSelectedServerAction(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	jsonRequest := r.Header.Get("Accept") == "application/json"
+	if jsonRequest && (action != "restart" || !s.CanRestart) {
+		writeMinecraftWorkspaceError(w, 409, "Server state does not permit Restart.")
+		return
+	}
 	var err error
 	if client, supported := a.api.(minecraftServerLifecycleAPI); supported {
 		err = client.MinecraftInstanceAction(r.Context(), session, r.PathValue("id"), action)
 	} else {
 		err = errors.New("lifecycle unavailable")
+	}
+	if jsonRequest {
+		if err != nil {
+			a.writeMinecraftWorkspaceAPIError(w, err, "Restart could not be completed.")
+		} else {
+			writeMinecraftWorkspaceJSON(w, 200, map[string]bool{"ok": true})
+		}
+		return
 	}
 	if err == nil {
 		http.Redirect(w, r, s.URL, http.StatusSeeOther)
@@ -272,4 +295,48 @@ func (a *App) minecraftSelectedServerAction(w http.ResponseWriter, r *http.Reque
 	}
 	// Render the refusal in the selected workspace, without retries or overrides.
 	a.renderAdminDiscovery(w, "minecraft_server_overview.html", minecraftServersPageData{Title: s.Name, Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, Identity: identity, CSRF: csrfFromRequest(r), Selected: &s, Error: message})
+}
+
+// Card operations require explicit identity, even for a single-server appliance.
+func (a *App) explicitCardServer(w http.ResponseWriter, r *http.Request, session string) (selectedServerContext, bool) {
+	if _, exists := r.URL.Query()["server"]; !exists {
+		writeMinecraftWorkspaceError(w, 400, "Choose a Minecraft server.")
+		return selectedServerContext{}, false
+	}
+	return a.selectedMinecraft(w, r, session)
+}
+
+func (a *App) minecraftServersLifecycle(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, 403, "Invalid CSRF token.")
+		return
+	}
+	action := r.FormValue("action")
+	if action != "start" && action != "stop" {
+		writeMinecraftWorkspaceError(w, 400, "Choose Start or Stop.")
+		return
+	}
+	selected, ok := a.explicitCardServer(w, r, session)
+	if !ok {
+		return
+	}
+	summary := a.independentServerSummary(r.Context(), session, api.RegisteredMinecraftInstance{ID: selected.ID, DisplayName: selected.Name})
+	if !summary.CanSwitch || (action == "start" && !summary.CanStart) || (action == "stop" && !summary.CanStop) {
+		writeMinecraftWorkspaceError(w, 409, "Server state does not permit this action. Refresh Minecraft Servers.")
+		return
+	}
+	client, ok := a.api.(minecraftServerLifecycleAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, "Server controls are unavailable.")
+		return
+	}
+	if err := client.MinecraftInstanceAction(r.Context(), session, selected.ID, action); err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, "Server action could not be completed. Check server status before trying again.")
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, map[string]bool{"ok": true})
 }

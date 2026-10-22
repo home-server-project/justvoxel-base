@@ -58,7 +58,7 @@ func newServerInventoryApp(t *testing.T) (*App, *serverInventoryTestAPI) {
 	_, base := newAddServerTestApp(t)
 	base.instances = []api.RegisteredMinecraftInstance{{ID: "jv-legacy1", DisplayName: "Legacy registry name"}, {ID: "jv-kids001", DisplayName: "Kids Creative"}, {ID: "jv-family1", DisplayName: "family Survival"}}
 	base.runtimes = map[string]api.InstanceRuntimeSettings{
-		"jv-family1": {Software: "paper", Version: "1.21.8", JavaPort: 25567, BedrockEnabled: true, BedrockPort: 19134, StartOnBoot: true, MOTD: "Welcome family"},
+		"jv-family1": {Software: "paper", Version: "1.21.8", JavaMemory: "2G", ContainerMemory: "3G", JavaPort: 25567, BedrockEnabled: true, BedrockPort: 19134, StartOnBoot: true, MOTD: "Welcome family"},
 		"jv-kids001": {Software: "purpur", Version: "1.21.8", JavaPort: 25568, BedrockPort: 19135, MOTD: "Kids only"},
 	}
 	base.configuration.Minecraft.ServerType = "vanilla"
@@ -102,7 +102,7 @@ func requireNoPrivateServerContent(t *testing.T, body string) {
 		}
 	}
 }
-func TestMinecraftServersInventoryOrderAndCompactAdd(t *testing.T) {
+func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 	app, f := newServerInventoryApp(t)
 	response := inventoryRequest(app, "GET", "", "")
 	body := response.Body.String()
@@ -110,14 +110,14 @@ func TestMinecraftServersInventoryOrderAndCompactAdd(t *testing.T) {
 		t.Fatalf("status %d: %s", response.Code, body)
 	}
 	previous := -1
-	for _, label := range []string{`class="panel minecraft-add-server-card"`, "<h2>family Survival</h2>", "<h2>Kids Creative</h2>"} {
+	for _, label := range []string{`>Add Server</a>`, `>Rearrange</button>`, `>Import</a>`, "<h2>family Survival</h2>", "<h2>Kids Creative</h2>"} {
 		index := strings.Index(body, label)
 		if index <= previous {
 			t.Fatalf("wrong order/missing %s", label)
 		}
 		previous = index
 	}
-	for _, want := range []string{`href="/minecraft/servers/add"`, "Paper · 1.21.8", "Purpur · 1.21.8", "25567", "Enabled · 19134", "Disabled", "Running", "Stopped", "Open server"} {
+	for _, want := range []string{`href="/minecraft/servers/add"`, "Paper · 1.21.8", "Purpur · 1.21.8", "25567", "Enabled · 19134", "Disabled", "Running", "Stopped", "2G / 3G"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
 		}
@@ -129,107 +129,84 @@ func TestMinecraftServersInventoryOrderAndCompactAdd(t *testing.T) {
 	if len(f.actions) != 0 || f.action != "" {
 		t.Fatal("inventory mutated runtime")
 	}
-	compact, err := os.ReadFile("static/setup.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(compact), "width: 10rem; min-height: 9rem") {
-		t.Fatal("Add card lost compact dimensions")
+	if strings.Contains(body, "minecraft-add-server-card") || !strings.Contains(body, `href="/?workspace=migration&amp;tab=import"`) {
+		t.Fatal("incorrect action bar", body)
 	}
 	cards, err := os.ReadFile("static/minecraft-servers.css")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"width: 22rem; min-height: 17rem", "align-items: flex-start", ":focus-visible", "@media (max-width: 700px)"} {
+	for _, want := range []string{"repeat(2,minmax(0,1fr))", "box-shadow", ":focus-visible", "@media (max-width: 700px)", "@container (max-width: 600px)"} {
 		if !strings.Contains(string(cards), want) {
 			t.Errorf("missing card treatment %s", want)
 		}
 	}
+
 }
 
 func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 	app, f := newServerInventoryApp(t)
 	body := inventoryRequest(app, "GET", "", "").Body.String()
-	add := regexp.MustCompile(`<a class="panel minecraft-add-server-card"[^>]*>.*?</a>`).FindString(body)
-	if strings.Count(body, `class="panel minecraft-add-server-card"`) != 1 || !strings.Contains(add, `href="/minecraft/servers/add"`) {
-		t.Fatal("missing or duplicate Add Server tile")
-	}
-	for _, forbidden := range []string{"data-server-id", "data-minecraft-server-card", "data-server-move-"} {
-		if strings.Contains(add, forbidden) {
-			t.Fatal("Add Server participates in ordering", add)
-		}
-	}
 	cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card".*?</article>`).FindAllString(body, -1)
-	if len(cards) != 2 || strings.Index(body, add) > strings.Index(body, cards[0]) {
-		t.Fatal("Add Server must precede all real cards")
+	if len(cards) != 2 {
+		t.Fatal("incorrect inventory", body)
 	}
 	for i, id := range []string{"jv-family1", "jv-kids001"} {
 		card := cards[i]
-		for _, want := range []string{
-			`data-minecraft-server-card data-server-id="` + id + `"`,
-			`href="/?workspace=minecraft&amp;server=` + id + `">Settings</a>`,
-			`href="/minecraft/servers/view/` + id + `">Open server</a>`,
-			`href="/minecraft/how-to-connect?server=` + id + `">How to connect</a>`,
-			`href="/minecraft/how-to-connect?server=` + id + `&amp;invite=1">Invite friends</a>`,
-			"Start on Boot", ">More</summary>", "data-server-normal-actions", "data-server-arrange-actions hidden",
-			"data-server-move-earlier", "data-server-move-later",
-		} {
+		for _, want := range []string{`data-server-id="` + id + `"`, "data-server-running", "data-server-boot", "Start on Boot", "data-server-arrange-actions hidden", "data-server-move-earlier", "data-server-move-later"} {
 			if !strings.Contains(card, want) {
 				t.Errorf("%s missing %s", id, want)
 			}
 		}
-		for _, workspace := range []string{"backups", "version", "plugins"} {
-			if !strings.Contains(card, `href="/?workspace=`+workspace+`&amp;server=`+id+`"`) {
-				t.Errorf("%s missing selected %s", id, workspace)
+		heading := regexp.MustCompile(`(?s)<div class="minecraft-server-heading">.*?</div>`).FindString(card)
+		if !strings.Contains(heading, "<h2>") || !strings.Contains(heading, "minecraft-server-state") {
+			t.Fatal("name and status must share row", heading)
+		}
+		row := regexp.MustCompile(`(?s)<div class="minecraft-server-software-row">.*?</details>`).FindString(card)
+		if !strings.Contains(row, "· 1.21.8") || !strings.Contains(row, `>...</summary>`) {
+			t.Fatal("software/menu row", row)
+		}
+		previous := -1
+		for _, label := range []string{">Settings</a>", ">Backups</a>", ">Version</a>", ">Plugins</a>", ">Invite friends</button>", ">How to connect</a>", ">Delete server</button>"} {
+			index := strings.Index(row, label)
+			if index <= previous {
+				t.Errorf("missing/out-of-order %s", label)
+			}
+			previous = index
+		}
+		for _, workspace := range []string{"minecraft", "backups", "version", "plugins"} {
+			if !strings.Contains(row, `href="/?workspace=`+workspace+`&amp;server=`+id+`"`) {
+				t.Errorf("missing selected %s", workspace)
 			}
 		}
-		moreStart, moreEnd := strings.Index(card, "<details"), strings.Index(card, "</details>")
-		if moreStart < 0 || moreEnd < moreStart {
-			t.Fatalf("%s missing More menu", id)
+		if !strings.Contains(row, `href="/minecraft/how-to-connect?server=`+id+`"`) {
+			t.Error("lost guide selection")
 		}
-		more := card[moreStart:moreEnd]
-		inviteLinks := regexp.MustCompile(`<a href="/minecraft/how-to-connect[^"]*">Invite friends</a>`).FindAllString(more, -1)
-		if len(inviteLinks) != 1 || inviteLinks[0] != `<a href="/minecraft/how-to-connect?server=`+id+`&amp;invite=1">Invite friends</a>` {
-			t.Errorf("%s invitation must target only this immutable ID: %v", id, inviteLinks)
-		}
-		for _, forbidden := range []string{"Rename", "Delete", ">Settings<"} {
-			if strings.Contains(more, forbidden) {
-				t.Errorf("unexpected More entry %s", forbidden)
+		for _, forbidden := range []string{"Open server", ">More<", "invite=1", ">Start</button>", ">Stop</button>", "Kill", "Live RAM", "RAM usage"} {
+			if strings.Contains(card, forbidden) {
+				t.Errorf("obsolete/invalid control %s", forbidden)
 			}
 		}
-		wantActions, absentActions := []string{"stop", "restart"}, []string{"start"}
-		boot := "Enabled"
-		if id == "jv-kids001" {
-			wantActions, absentActions = []string{"start"}, []string{"stop", "restart"}
-			boot = "Disabled"
+		if !strings.Contains(row, `<hr>`) || !strings.Contains(row, `class="storage-action-danger" data-server-delete>Delete server`) {
+			t.Error("missing final destructive menu action")
 		}
-		if !strings.Contains(card, "<span>Start on Boot</span><strong>"+boot+"</strong>") {
-			t.Errorf("%s wrong boot status", id)
-		}
-		for _, action := range wantActions {
-			if !strings.Contains(card, `<form method="post" action="/minecraft/servers/view/`+id+`/`+action+`"><input type="hidden" name="csrf" value="csrf-token">`) {
-				t.Errorf("%s missing exact POST/CSRF %s", id, action)
+		running := regexp.MustCompile(`<input[^>]*data-server-running[^>]*>`).FindString(card)
+		boot := regexp.MustCompile(`<input[^>]*data-server-boot[^>]*>`).FindString(card)
+		if i == 0 {
+			if !strings.Contains(running, " checked") || !strings.Contains(boot, " checked") || !strings.Contains(card, `minecraft-server-state success`) || !strings.Contains(row, "data-server-restart") {
+				t.Error("running configuration lost", card)
+			}
+		} else {
+			if strings.Contains(running, " checked") || strings.Contains(boot, " checked") || !strings.Contains(card, `minecraft-server-state error`) || strings.Contains(row, "data-server-restart") {
+				t.Error("stopped configuration lost", card)
 			}
 		}
-		for _, action := range absentActions {
-			if strings.Contains(card, "/"+action+`"`) {
-				t.Errorf("%s invalid lifecycle %s", id, action)
-			}
-		}
-		if strings.Contains(card, "/restart") && !strings.Contains(more, "/restart") {
-			t.Error("Restart must be in More")
-		}
-		other := "jv-family1"
-		if id == other {
-			other = "jv-kids001"
+		other := "jv-kids001"
+		if i == 1 {
+			other = "jv-family1"
 		}
 		if strings.Contains(card, other) {
-			t.Error("another identity leaked into card")
-		}
-	}
-	for _, want := range []string{"data-server-arrange hidden>Arrange", "data-server-arrange-done hidden>Done"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("missing %s", want)
+			t.Error("cross-server identity")
 		}
 	}
 	if strings.Contains(body, `src="/static/minecraft-servers.js"`) {
@@ -249,13 +226,13 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 }
 
 func TestMinecraftServerCardsUnavailableLifecycle(t *testing.T) {
-	for _, state := range []string{"starting", "stopping", "configured", "recovery_required", "invalid_configuration", "degraded", "unknown"} {
+	for _, state := range []string{"starting", "stopping", "configured", "failed", "recovery_required", "invalid_configuration", "degraded", "unknown"} {
 		t.Run(state, func(t *testing.T) {
 			app, f := newServerInventoryApp(t)
 			f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: state}
 			body := inventoryRequest(app, "GET", "", "").Body.String()
 			card := regexp.MustCompile(`(?s)<article[^>]*data-server-id="jv-family1".*?</article>`).FindString(body)
-			if card == "" || strings.Contains(card, `<form method="post"`) {
+			if card == "" || !regexp.MustCompile(`<input[^>]*data-server-running[^>]* disabled>`).MatchString(card) || strings.Contains(card, "data-server-restart") {
 				t.Fatal("unavailable state exposes lifecycle", card)
 			}
 		})
@@ -264,7 +241,7 @@ func TestMinecraftServerCardsUnavailableLifecycle(t *testing.T) {
 	f.configurationErrors["jv-family1"] = true
 	body := inventoryRequest(app, "GET", "", "").Body.String()
 	card := regexp.MustCompile(`(?s)<article[^>]*data-server-id="jv-family1".*?</article>`).FindString(body)
-	if card == "" || strings.Contains(card, "Start on Boot") || strings.Contains(card, `<form method="post"`) {
+	if card == "" || !regexp.MustCompile(`<input[^>]*data-server-boot[^>]* disabled>`).MatchString(card) || !regexp.MustCompile(`<input[^>]*data-server-running[^>]* disabled>`).MatchString(card) {
 		t.Fatal("unknown configuration exposes boot or lifecycle", card)
 	}
 }
@@ -464,5 +441,74 @@ func TestMinecraftServersWorkspaceCompatibilityAndHeader(t *testing.T) {
 		if !strings.Contains(lane, `data-server-selector-slot data-server-workspace="`+name+`"`) || strings.Count(window, "data-server-selector-slot") != 1 {
 			t.Fatalf("missing common header slot: %s", name)
 		}
+	}
+}
+
+func TestMinecraftCardLifecycleJSON(t *testing.T) {
+	for _, tc := range []struct {
+		query, body, role string
+		code              int
+		action            string
+	}{
+		{"?server=jv-family1", "csrf=csrf-token&action=stop", "administrator", 200, "jv-family1:stop"},
+		{"?server=jv-kids001", "csrf=csrf-token&action=start", "administrator", 200, "jv-kids001:start"},
+		{"", "csrf=csrf-token&action=start", "administrator", 400, ""},
+		{"?server=jv-family1&server=jv-kids001", "csrf=csrf-token&action=stop", "administrator", 400, ""},
+		{"?server=jv-missing1", "csrf=csrf-token&action=start", "administrator", 404, ""},
+		{"?server=jv-family1", "action=stop", "administrator", 403, ""},
+		{"?server=jv-family1", "csrf=csrf-token&action=restart", "administrator", 400, ""},
+		{"?server=jv-family1", "csrf=csrf-token&action=kill", "administrator", 400, ""},
+		{"?server=jv-family1", "csrf=csrf-token&action=start", "administrator", 409, ""},
+		{"?server=jv-family1", "csrf=csrf-token&action=stop", "operator", 403, ""},
+		{"?server=jv-family1", "csrf=csrf-token&action=stop", "viewer", 403, ""},
+	} {
+		t.Run(tc.query+tc.body+tc.role, func(t *testing.T) {
+			app, client := newServerInventoryApp(t)
+			client.role = tc.role
+			response := httptestResponse(app, authenticatedAdminRequest("POST", "/api/minecraft/servers/lifecycle"+tc.query, tc.body))
+			if response.Code != tc.code {
+				t.Fatalf("%d: %s", response.Code, response.Body.String())
+			}
+			if tc.action == "" {
+				if len(client.actions) != 0 {
+					t.Fatal("unauthorized action", client.actions)
+				}
+			} else if !reflect.DeepEqual(client.actions, []string{tc.action}) {
+				t.Fatal("wrong selected lifecycle", client.actions)
+			}
+			requireNoPrivateServerContent(t, response.Body.String())
+		})
+	}
+	app, client := newServerInventoryApp(t)
+	client.actionError = errors.New("private /host/runtime token=secret")
+	response := httptestResponse(app, authenticatedAdminRequest("POST", "/api/minecraft/servers/lifecycle?server=jv-family1", "csrf=csrf-token&action=stop"))
+	if response.Code < 400 || strings.Contains(response.Body.String(), `"ok":true`) || len(client.actions) != 1 {
+		t.Fatal("false success/retry", response.Body.String())
+	}
+	requireNoPrivateServerContent(t, response.Body.String())
+	for _, state := range []string{"starting", "stopping", "failed", "recovery_required", "invalid_configuration"} {
+		app, client := newServerInventoryApp(t)
+		client.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: state}
+		response := httptestResponse(app, authenticatedAdminRequest("POST", "/api/minecraft/servers/lifecycle?server=jv-family1", "csrf=csrf-token&action=start"))
+		if response.Code != 409 || len(client.actions) != 0 {
+			t.Fatal("unsafe state", state, response.Body.String())
+		}
+	}
+}
+
+func TestMinecraftCardRestartJSON(t *testing.T) {
+	app, client := newServerInventoryApp(t)
+	request := authenticatedAdminRequest("POST", "/minecraft/servers/view/jv-family1/restart", "csrf=csrf-token")
+	request.Header.Set("Accept", "application/json")
+	response := httptestResponse(app, request)
+	if response.Code != 200 || response.Header().Get("Location") != "" || !reflect.DeepEqual(client.actions, []string{"jv-family1:restart"}) {
+		t.Fatal(response.Code, client.actions)
+	}
+	client.actionError = &api.ResponseError{StatusCode: 409, Message: "Players are online."}
+	request = authenticatedAdminRequest("POST", "/minecraft/servers/view/jv-family1/restart", "csrf=csrf-token")
+	request.Header.Set("Accept", "application/json")
+	response = httptestResponse(app, request)
+	if response.Code != 409 || strings.Contains(response.Body.String(), `"ok":true`) {
+		t.Fatal("restart refusal lost", response.Body.String())
 	}
 }

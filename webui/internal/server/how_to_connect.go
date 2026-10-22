@@ -285,3 +285,85 @@ func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, server
 	}
 	return guide
 }
+
+// Only the current guide's default method contributes to a direct invitation.
+func defaultConnectionInvitation(guide *connectionGuide) string {
+	methods := []string{}
+	for _, method := range guide.Methods {
+		if !method.Default || !method.Available {
+			continue
+		}
+		lines := []string{method.Name}
+		for _, endpoint := range method.Endpoints {
+			if endpoint.Edition == "Java" && endpoint.JoinAddress != "" {
+				lines = append(lines, "Java: "+endpoint.JoinAddress)
+			}
+			if endpoint.Edition == "Bedrock" && endpoint.Address != "" && endpoint.Port != "" {
+				lines = append(lines, "Bedrock: "+net.JoinHostPort(endpoint.Address, endpoint.Port))
+			}
+		}
+		if len(lines) > 1 {
+			methods = append(methods, strings.Join(lines, "\n"))
+		}
+	}
+	if len(methods) == 0 {
+		return ""
+	}
+	return "Join " + guide.ServerName + " on Minecraft\n\n" + strings.Join(methods, "\n\n")
+}
+
+func (a *App) minecraftServersInvitation(w http.ResponseWriter, r *http.Request) {
+	// Provider/discovery errors may contain internal details. Only auth errors and
+	// fixed presentation messages cross this read-only boundary.
+	failure := func(err error, message string) {
+		if errors.Is(err, api.ErrUnauthorized) || errors.Is(err, api.ErrPasswordChangeRequired) {
+			a.writeMinecraftWorkspaceAPIError(w, err, message)
+		} else {
+			writeMinecraftWorkspaceError(w, 502, message)
+		}
+	}
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator", "viewer")
+	if !ok {
+		return
+	}
+	selected, ok := a.explicitCardServer(w, r, session)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(minecraftServerInventoryAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, "Connection information is unavailable.")
+		return
+	}
+	configuration, err := client.MinecraftInstanceConfiguration(r.Context(), session, selected.ID)
+	if err != nil {
+		failure(err, "Server configuration could not be checked.")
+		return
+	}
+	status, err := a.api.Status(r.Context(), session)
+	if err != nil {
+		failure(err, "Connection information is unavailable.")
+		return
+	}
+	status.Minecraft = instancePresentation(configuration).Minecraft
+	var remote api.RemoteAccessStatus
+	if status.Minecraft.Configured {
+		if client, ok := a.api.(connectionStatusAPI); ok {
+			remote, err = client.RemoteAccessStatus(r.Context(), session)
+			if err != nil {
+				failure(err, "Connection information is unavailable.")
+				return
+			}
+		}
+	}
+	guide := newConnectionGuide(status, remote, selected.Name)
+	invitation := defaultConnectionInvitation(guide)
+	if invitation == "" {
+		writeMinecraftWorkspaceError(w, 409, "No default invitation is available. Open How to connect to choose a connection method.")
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, struct {
+		Name       string `json:"name"`
+		Invitation string `json:"invitation"`
+	}{guide.ServerName, invitation})
+}

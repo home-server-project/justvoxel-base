@@ -18,15 +18,12 @@ test('Add Server reuses the maintained wizard, software controls and six-step pr
   assert.deepEqual(designs, ['setup_wizard.html']);
 });
 
-test('compact first entry has native link semantics and a visible keyboard focus rule', () => {
+test('Add Server is a keyboard accessible native action outside the ordered cards', () => {
   const markup = read('templates/minecraft_servers.html');
-  const entries = markup.slice(markup.indexOf('<div class="minecraft-server-entries">'));
-  assert.match(entries, /^<div class="minecraft-server-entries">\s*<a class="panel minecraft-add-server-card" href="\{\{if \.Configured\}\}\/minecraft\/servers\/add\{\{else\}\}\/setup\{\{end\}\}" aria-label="Add Minecraft Server">/);
-  assert.ok(entries.includes('aria-hidden="true">+</span>'));
-  assert.equal((entries.match(/minecraft-add-server-card/g) || []).length, 1);
-  const css = read('static/setup.css');
-  assert.match(css, /\.minecraft-add-server-card[^}]*width: 10rem/);
-  assert.match(css, /\.minecraft-add-server-card:focus-visible\s*\{[^}]*outline: 2px solid var\(--jv-accent\)/);
+  assert.ok(markup.includes('<a href="{{if .Configured}}/minecraft/servers/add{{else}}/setup{{end}}">Add Server</a>'));
+  assert.ok(!markup.includes('minecraft-add-server-card'));
+  assert.ok(markup.indexOf('>Add Server</a>') < markup.indexOf('minecraft-server-entries'));
+  assert.ok(read('static/minecraft-servers.css').includes(':focus-visible'));
 });
 
 test('How to Connect remains a single implementation with no Add Server connection alternative', () => {

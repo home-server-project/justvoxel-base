@@ -128,8 +128,8 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`"/api/minecraft/workspace/settings/apply"`,
 		`"/api/minecraft/workspace/whitelist"`,
 		`"/api/minecraft/workspace/logs"`,
-		`section.className = "panel details minecraft-overview-logs"`,
-		`title.textContent = "Recent logs"`,
+		`else if (currentTab === "logs") await renderLogs(sequence, message)`,
+		`title.textContent = "Recent Minecraft logs"`,
 		`const settingsTabs = new Set(["memory", "gameplay", "crossplay"])`,
 	} {
 		if !strings.Contains(behavior, want) {

@@ -31,7 +31,7 @@
     for (const card of rendered) {
       if (!seen.has(card.dataset.serverId)) ordered.push(card);
     }
-    // Only real cards move; the existing Add Server link stays first.
+    // Ordering contains only real server cards, identified by immutable ID.
     for (const card of ordered) list.appendChild(card);
   }
 
@@ -48,9 +48,10 @@
     arrange.hidden = active;
     done.hidden = !active;
     for (const card of cards()) {
-      const normal = card.querySelector('[data-server-normal-actions]');
-      normal.hidden = active;
-      normal.inert = active;
+      for (const normal of card.querySelectorAll('[data-server-normal-actions]')) {
+        normal.hidden = active;
+        normal.inert = active;
+      }
       card.querySelector('[data-server-arrange-actions]').hidden = !active;
       if (active) card.querySelector('details').open = false;
     }
@@ -84,16 +85,167 @@
         (button.disabled ? card.querySelector(`[data-server-move-${direction === 'earlier' ? 'later' : 'earlier'}]`) : button).focus();
       });
     }
-    const normal = card.querySelector('[data-server-normal-actions]');
     const suppress = event => {
       if (!arranging) return;
       event.preventDefault();
       event.stopImmediatePropagation();
     };
-    normal.addEventListener('click', suppress, true);
-    normal.addEventListener('submit', suppress, true);
+    for (const normal of card.querySelectorAll('[data-server-normal-actions]')) {
+      normal.addEventListener('click', suppress, true);
+      normal.addEventListener('submit', suppress, true);
+    }
+    initializeCard(card, root, () => arranging);
   }
   updateBounds();
   };
+  function initializeCard(card, root, isArranging) {
+    const id = card.dataset.serverId;
+    const inventory = root.querySelector('[data-server-csrf]');
+    if (!inventory || !/^jv-[a-z0-9]{6,12}$/.test(id)) return;
+    const csrf = inventory.dataset.serverCsrf;
+    const selected = path => path + (path.includes('?') ? '&' : '?') + new URLSearchParams({server: id});
+    const settingsURL = selected('/?workspace=minecraft');
+    const connectURL = selected('/minecraft/how-to-connect');
+    const feedback = (message, connect = false, review = false) => {
+      const node = root.querySelector('[data-server-feedback]');
+      if (!node) return;
+      node.textContent = message;
+      node.hidden = !message;
+      if (connect || review) {
+        const link = document.createElement('a');
+        link.href = connect ? connectURL : settingsURL;
+        link.textContent = connect ? ' How to connect' : ' Open Minecraft Settings';
+        node.appendChild(link);
+      }
+    };
+    const request = async (path, options = {}) => {
+      const response = await fetch(selected(path), {credentials: 'same-origin', cache: 'no-store', ...options, headers: {Accept: 'application/json'}});
+      let payload;
+      try { payload = await response.json(); } catch (_) { throw new Error('Minecraft operation could not be completed. Refresh Minecraft Servers.'); }
+      if (!response.ok || response.redirected) throw new Error(payload.error || 'Minecraft operation could not be completed.');
+      return payload;
+    };
+    const refresh = async () => {
+      if (root.justVoxelRefreshServers) await root.justVoxelRefreshServers();
+    };
+    let pending = false;
+    const controls = Array.from(card.querySelectorAll('input, button'));
+    const originalDisabled = new Map(controls.map(control => [control, control.disabled]));
+    const operation = async (action, {connect = false} = {}) => {
+      if (pending || isArranging()) return;
+      pending = true;
+      controls.forEach(control => { control.disabled = true; });
+      feedback('');
+      try { await action(); }
+      catch (error) { feedback(error.message, connect); }
+      finally {
+        pending = false;
+        controls.forEach(control => { control.disabled = originalDisabled.get(control); });
+      }
+    };
+    const mutate = async action => {
+      let failure;
+      try { await action(); } catch (error) { failure = error; }
+      // Even a refused/failed request may have changed state. Reload authoritative cards.
+      await refresh();
+      if (failure) throw failure;
+    };
+    const running = card.querySelector('[data-server-running]');
+    running?.addEventListener('change', () => {
+      const requested = running.checked;
+      running.checked = !requested;
+      operation(() => mutate(async () => {
+        const result = await request('/api/minecraft/servers/lifecycle', {method: 'POST', body: new URLSearchParams({csrf, action: requested ? 'start' : 'stop'})});
+        if (!result.ok) throw new Error('Server action was not completed.');
+      }));
+    });
+    const requiresReview = plan => Object.entries(plan).some(([key, value]) => key.endsWith('_required') && value === true);
+    const boot = card.querySelector('[data-server-boot]');
+    boot?.addEventListener('change', () => {
+      const requested = boot.checked;
+      boot.checked = !requested;
+      operation(async () => {
+        let review = false;
+        await mutate(async () => {
+          const body = new URLSearchParams({csrf, tab: 'overview', start_on_boot: String(requested)});
+          const plan = await request('/api/minecraft/workspace/settings/plan', {method: 'POST', body});
+          if (requiresReview(plan)) { review = true; return; }
+          if (!plan.review) throw new Error('The settings review is unavailable. Open Minecraft Settings.');
+          body.set('review', plan.review);
+          const result = await request('/api/minecraft/workspace/settings/apply', {method: 'POST', body});
+          if (requiresReview(result) && !result.applied) { review = true; return; }
+          if (!result.applied) throw new Error(result.error || 'Minecraft settings were not applied.');
+        });
+        if (review) feedback('Review this change in Minecraft Settings.', false, true);
+      });
+    });
+    card.querySelector('[data-server-restart]')?.addEventListener('click', () => {
+      closeMenu();
+      operation(() => mutate(async () => {
+        const result = await request('/minecraft/servers/view/' + encodeURIComponent(id) + '/restart', {method: 'POST', body: new URLSearchParams({csrf})});
+        if (!result.ok) throw new Error('Restart was not completed.');
+      }));
+    });
+    card.querySelector('[data-server-delete]')?.addEventListener('click', () => {
+      if (pending || isArranging()) return;
+      closeMenu();
+      globalThis.justVoxelOpenDeleteServer({name: card.dataset.serverName,
+        description: 'Permanently removes this active server and its world data. Existing backup archives are preserved as historical archives.',
+        csrf, request, dismissOnDeleted: true, isCurrent: () => card.isConnected && !isArranging(),
+        onError: error => feedback(error.message), onDeleted: () => refresh(),
+      });
+    });
+    card.querySelector('[data-server-invite]')?.addEventListener('click', () => {
+      closeMenu();
+      operation(async () => {
+        const payload = await request('/api/minecraft/servers/invitation');
+        if (!card.isConnected || isArranging()) return;
+        if (!payload.invitation) throw new Error('No default invitation is available.');
+        const dialog = document.createElement('dialog');
+        dialog.className = 'minecraft-server-invitation';
+        dialog.setAttribute('aria-label', 'Invite friends');
+        const title = document.createElement('h2'); title.textContent = 'Invite friends';
+        const name = document.createElement('p'); name.textContent = payload.name;
+        const label = document.createElement('label'); label.textContent = 'Invitation';
+        const text = document.createElement('textarea'); text.readOnly = true; text.rows = 10; text.spellcheck = false; text.value = payload.invitation;
+        label.appendChild(text);
+        const status = document.createElement('p'); status.setAttribute('role', 'status');
+        const actions = document.createElement('div'); actions.className = 'action-row';
+        const close = document.createElement('button'); close.type = 'button'; close.className = 'secondary'; close.textContent = 'Close';
+        const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'Copy invitation';
+        close.addEventListener('click', () => dialog.close());
+        copy.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(text.value); status.textContent = 'Copied.'; }
+          catch (_) { status.textContent = 'Copy unavailable. Select the invitation text and copy it manually.'; }
+        });
+        actions.append(close, copy); dialog.append(title, name, label, status, actions);
+        dialog.addEventListener('close', () => dialog.remove());
+        document.body.appendChild(dialog); dialog.showModal();
+      }, {connect: true});
+    });
+    const menu = card.querySelector('details');
+    const choices = menu?.querySelector('[popover]');
+    const trigger = menu?.querySelector('summary');
+    function closeMenu() {
+      if (choices?.matches(':popover-open')) choices.hidePopover();
+      if (menu) menu.open = false;
+    }
+    if (menu && choices && trigger) {
+      menu.addEventListener('toggle', () => {
+        if (!menu.isConnected) return;
+        if (!menu.open || isArranging()) { closeMenu(); return; }
+        choices.showPopover();
+        const rect = trigger.getBoundingClientRect();
+        const bounds = choices.getBoundingClientRect();
+        choices.style.left = Math.max(8, Math.min(rect.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
+        choices.style.top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - bounds.height - 8)) + 'px';
+      });
+      choices.addEventListener('toggle', event => { if (event.newState === 'closed') menu.open = false; });
+      choices.addEventListener('click', event => { if (event.target.closest('a')) closeMenu(); });
+    }
+  }
+  window.addEventListener?.('resize', () => {
+    document.querySelectorAll('.minecraft-server-more[open]').forEach(menu => { menu.open = false; });
+  });
   globalThis.justVoxelMinecraftServers();
 })();

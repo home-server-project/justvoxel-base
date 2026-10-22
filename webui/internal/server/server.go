@@ -65,6 +65,7 @@ type dashboardOperationAPI interface {
 }
 
 type pageData struct {
+	DashboardURL        string
 	ConnectionGuide     *connectionGuide
 	ConnectionServers   []selectedServerContext
 	Title               string
@@ -156,6 +157,8 @@ func (a *App) Handler() http.Handler {
 	a.registerPluginsWorkspaceRoutes(mux)
 	a.registerSystemWorkspaceRoutes(mux)
 	mux.HandleFunc("GET /minecraft/how-to-connect", a.howToConnect)
+	mux.HandleFunc("GET /api/minecraft/servers/invitation", a.minecraftServersInvitation)
+	mux.HandleFunc("POST /api/minecraft/servers/lifecycle", a.minecraftServersLifecycle)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))
 	mux.HandleFunc("POST /minecraft/stop", a.minecraftAction("stop"))
@@ -302,7 +305,8 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	selected, ok := a.dashboardMinecraftSelection(w, r, session)
+	originalQuery := r.URL.RawQuery
+	selected, ok := a.dashboardBrowserSelection(w, r, session)
 	if !ok {
 		return
 	}
@@ -310,6 +314,9 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.handleDashboardError(w, r, err)
 		return
+	}
+	if originalQuery != r.URL.RawQuery {
+		data.DashboardURL = r.URL.RequestURI()
 	}
 	result := r.URL.Query().Get("result")
 	data.Message = actionResultMessage(result)
@@ -444,10 +451,50 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 	}
 }
 
+// Browser navigation must never use the selected-server API error writer.
+func (a *App) dashboardBrowserSelection(w http.ResponseWriter, r *http.Request, session string) (selectedServerContext, bool) {
+	instances, err := a.independentServerInventory(r.Context(), session)
+	if err != nil {
+		a.handleDashboardError(w, r, err)
+		return selectedServerContext{}, false
+	}
+	query := r.URL.Query()
+	originalQuery := query.Encode()
+	values, explicit := query["server"]
+	selected := selectedServerContext{}
+	if explicit {
+		if len(values) == 1 && addServerIDPattern.MatchString(values[0]) {
+			for _, instance := range instances {
+				if instance.ID == values[0] {
+					selected = selectedServerContext{ID: instance.ID, Name: instance.DisplayName}
+					break
+				}
+			}
+		}
+		if selected.ID == "" {
+			query.Del("server")
+		}
+	} else if len(instances) == 1 {
+		selected = selectedServerContext{ID: instances[0].ID, Name: instances[0].DisplayName}
+	}
+	if query.Get("workspace") == "version" && query.Get("tab") == "software" {
+		query.Set("tab", "switch")
+	}
+	// Render stale selections unselected, without resolving a different server.
+	// The dashboard passes this canonical URL to its existing browser script.
+	if query.Encode() != originalQuery {
+		r.URL.RawQuery = query.Encode()
+	}
+	return selected, true
+}
+
 // Preserve the empty-inventory setup experience, including the connection guide.
 // Only the appliance dashboard may leave a multi-server inventory unselected.
 func (a *App) dashboardMinecraftSelection(w http.ResponseWriter, r *http.Request, session string) (selectedServerContext, bool) {
 	if _, explicit := r.URL.Query()["server"]; !explicit {
+		if r.URL.Path == "/api/dashboard-status" && r.URL.Query().Get("selection") == "none" {
+			return selectedServerContext{}, true
+		}
 		instances, err := a.independentServerInventory(r.Context(), session)
 		if err != nil {
 			a.handleDashboardError(w, r, err)

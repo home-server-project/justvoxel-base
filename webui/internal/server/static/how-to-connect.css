@@ -8,7 +8,7 @@
 .connect-page p,.connect-page li{line-height:1.65}.connect-page p{margin:8px 0 14px}
 .connect-eyebrow{font-weight:800}
 .connect-title-row{align-items:center}.connect-title-row h1{margin:10px 0 16px}
-.connect-server{width:auto;max-width:100%;margin:0;min-width:0}
+
 .connect-methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 24px}
 .connect-method{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;min-width:0;border:1px solid var(--jv-border);background:var(--jv-surface-sunken);border-radius:var(--jv-radius)}
 .connect-method-label{margin:0;font-weight:700}
@@ -31,12 +31,13 @@
 .connect-guide-footer{text-align:center;margin-top:30px;padding-top:18px;border-top:1px solid var(--jv-border);font-size:.85rem;color:var(--jv-muted)}.connect-print-blocked{display:none}
 @media(max-width:640px){
  .connect-shell{padding:20px 14px 40px}.connect-controls,.connect-empty,.connect-guide{padding:20px}
- .connect-title-row{align-items:stretch;flex-direction:column;gap:0}.connect-server{width:100%}
+ .connect-title-row{flex-wrap:wrap;gap:.75rem}.connect-title-row [data-server-selector-slot]{max-width:100%}
  .connect-methods,.connect-cards{grid-template-columns:1fr}.connect-method{padding:14px}
  .connect-actions{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.connect-domain label{grid-column:1/-1}.connect-domain small{grid-column:1;grid-row:3}.connect-actions button{grid-column:1/-1;grid-row:4}
 }
 .connect-invite-controls{margin-top:16px}
 .connect-invitation{box-sizing:border-box;width:min(540px,calc(100% - 2rem));max-height:calc(100dvh - 2rem);overflow:auto;padding:24px;border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface);color:var(--jv-text)}
+.connect-invitation .action-row{justify-content:flex-end}
 .connect-invitation textarea{display:block;box-sizing:border-box;width:100%;padding:12px;background:var(--jv-surface-sunken);color:var(--jv-text);border:1px solid var(--jv-border);border-radius:var(--jv-radius);font:inherit;line-height:1.5;resize:vertical}
 @media print{
  .connect-invitation,.connect-invite-controls{display:none!important}
@@ -59,3 +60,6 @@
  .connect-card,.connect-endpoint{break-inside:avoid}.connect-instructions h2,.connect-card h3,.connect-endpoint h4{break-after:avoid}.connect-guide-footer{break-inside:avoid}
  .connect-page:not(.connect-print-ready) .connect-guide{display:none!important}.connect-page:not(.connect-print-ready) .connect-print-blocked{display:block!important}
 }
+/* Match the workspace selector without adding workspace window controls. */
+.connect-title-row [data-server-selector-slot] label{color:var(--jv-text);font-size:.88rem;line-height:1.35}
+.connect-title-row [data-server-selector-slot] select{box-sizing:border-box;max-width:100%;padding:.52rem .65rem;border-color:var(--jv-border-strong);border-radius:8px;background:var(--jv-surface-sunken);color:var(--jv-text);font:inherit}

@@ -1621,6 +1621,23 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-badge-enabled{color:#c1e8b1;border-color:#4e6740;background:#2c3d25}
 .plugins-badge-disabled{color:#ead293;border-color:#6a5830;background:#40351f}
 .plugins-badge-attention{color:#f1b5a5;border-color:#7a4940;background:#462c27}
+.minecraft-delete-dialog{width:min(540px,calc(100% - 1.4rem));max-height:calc(100dvh - 2rem);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 30px 90px #000c;overflow-y:auto;overscroll-behavior:contain}
+.minecraft-delete-dialog::backdrop{background:#050708b8;backdrop-filter:blur(4px)}
+.minecraft-delete-card{padding:1rem;min-width:0}
+.minecraft-delete-card>p{margin:.55rem 0;line-height:1.45}
+.minecraft-delete-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;padding-bottom:.5rem;border-bottom:1px solid #2b333b}
+.minecraft-delete-heading .eyebrow{margin:0}
+.minecraft-delete-heading h2{margin:0;font-size:1.1rem}
+.minecraft-delete-heading>button{padding:.25rem .5rem}
+.minecraft-delete-review{margin-top:.55rem;padding:.6rem;border:1px solid #303942;border-radius:10px;background:#10161a}
+.minecraft-delete-review dl div{padding:.3rem 0}
+.minecraft-delete-review dd{min-width:0;overflow-wrap:anywhere}
+.minecraft-delete-selected{margin:0 0 .65rem;color:#aab5bd;font-size:.88rem}
+.minecraft-delete-selected strong{display:block;margin-top:.15rem;color:#ff6b61;font-size:1rem;font-weight:800;overflow-wrap:anywhere}
+.minecraft-delete-dialog .action-row button{min-width:105px}
+@media(max-width:520px){.minecraft-delete-dialog{width:calc(100% - .8rem)}.minecraft-delete-dialog .destructive-confirm-slider-text{padding:0 54px;font-size:.78rem}}
+@media(prefers-color-scheme:light){.minecraft-delete-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 14px 36px #0003}.minecraft-delete-heading{border-color:#e2e7ea}.minecraft-delete-review{background:#f6f8f9;border-color:#d9dfe3}.minecraft-delete-selected strong{color:#b63f37}}
+
 @media(prefers-color-scheme:light){
 .plugins-badge-version{color:#284f7d;border-color:#b8cde4;background:#edf3fb}
 .plugins-badge-server{color:#63448b;border-color:#cec0e0;background:#f4effa}
@@ -1664,3 +1681,12 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .version-container-panel .version-container-actions {
   justify-content: space-between;
 }
+
+/* Approved Minecraft Overview controls and destructive review. */
+.minecraft-overview-playerline>.minecraft-summary-label{color:var(--jv-muted);font-size:.72rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.minecraft-overview-compact .minecraft-overview-boot-card{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-width:0;margin:0;padding:.8rem;border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface-sunken);color:var(--jv-text);font-size:.83rem;font-weight:700}
+.minecraft-overview-boot-card .date-time-switch{flex:none}
+.minecraft-overview-delete h3{margin:0;color:var(--jv-error);font-weight:800;overflow-wrap:anywhere}
+.minecraft-crossplay-status{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;margin-top:.8rem;min-width:0}
+.minecraft-crossplay-status [data-crossplay-compatibility]{min-width:0;overflow-wrap:anywhere}
+.system-logs-list.system-support-report-files{margin-top:.8rem}

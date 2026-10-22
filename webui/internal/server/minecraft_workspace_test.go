@@ -267,7 +267,7 @@ func TestMinecraftWorkspaceGameplayTabRendersGameModeAndDeferredReview(t *testin
 	players := source[start : start+1+end]
 	for _, want := range []string{
 		`<label>Maximum players<input name="max_players"`,
-		`<label>Server welcome message (MOTD)<input name="motd" required>`,
+		`<input name="motd" type="hidden">`,
 		`<label>Game mode<select name="game_mode" required>`,
 		`<option value="survival">Survival</option>`,
 		`<option value="creative">Creative</option>`,
@@ -304,7 +304,7 @@ func TestMinecraftWorkspaceCrossplayUsesExistingCheckboxSwitch(t *testing.T) {
 		`<label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>`,
 		`section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);`,
 		`section.querySelector('[name="bedrock_enabled"]').disabled = minecraft.server_type === "vanilla";`,
-		`Geyser/Floodgate compatible with ${status.geyser_supported_version}.`,
+		`Geyser/Floodgate compatible with ${status.geyser_supported_version}`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("Cross-play form missing %q", want)
@@ -353,7 +353,7 @@ func TestMinecraftWorkspaceReviewHumanizesOnlyBedrockValues(t *testing.T) {
 	}
 	source := string(sourceBytes)
 	helperStart := strings.Index(source, `const minecraftSettingsReviewValue = (change, value) => {`)
-	reviewStart := strings.Index(source, `const renderSettingsReview = (root, plan, params) => {`)
+	reviewStart := strings.Index(source, `const renderSettingsReview = (root, plan, params, options = {}) => {`)
 	if helperStart < 0 || reviewStart <= helperStart {
 		t.Fatal("Minecraft settings review source blocks not found")
 	}
@@ -681,4 +681,27 @@ func (f *fakeMinecraftWorkspaceAPI) MinecraftInstanceWhitelist(ctx context.Conte
 	}
 	v := request.(map[string]string)
 	return f.WhitelistChange(ctx, session, v["platform"], v["action"], v["name"])
+}
+
+func TestMinecraftRecentLogsKeepsOperatorPlusAuthorization(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		t.Run(role, func(t *testing.T) {
+			client := configuredMinecraftWorkspaceAPI()
+			client.role = role
+			client.logs = []string{"private Minecraft log"}
+			app, err := New(client, Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/minecraft/workspace/logs", ""))
+			if role == "viewer" {
+				if rr.Code != http.StatusForbidden || strings.Contains(rr.Body.String(), "private Minecraft log") {
+					t.Fatalf("Viewer log access status=%d body=%s", rr.Code, rr.Body.String())
+				}
+			} else if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "private Minecraft log") {
+				t.Fatalf("%s log access status=%d body=%s", role, rr.Code, rr.Body.String())
+			}
+		})
+	}
 }

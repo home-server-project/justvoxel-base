@@ -1,26 +1,47 @@
-/* Phase 6 inventory and read-only overview. Scoped to these pages. */
-.minecraft-servers-body .minecraft-server-entries { align-items: flex-start; }
-.minecraft-servers-body .minecraft-add-server-card { flex: 0 0 auto; box-sizing: border-box; }
-.minecraft-server-card { box-sizing: border-box; display: flex; flex-direction: column; gap: .75rem; width: 22rem; min-height: 17rem; max-width: 100%; margin: 0; }
-.minecraft-server-card h2, .minecraft-server-card p { margin: 0; overflow-wrap: anywhere; }
-.minecraft-server-card .button-link { align-self: flex-start; margin-top: auto; }
-.minecraft-server-card .minecraft-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Minecraft Servers inventory only; shared workspace and Settings remain unchanged. */
+.minecraft-server-inventory { min-width: 0; container-type: inline-size; }
+.minecraft-server-inventory .minecraft-server-arrange-toolbar { display: flex; flex-wrap: wrap; gap: var(--jv-space-xs,.35rem); padding: .42rem 0; margin-bottom: .8rem; border-bottom: 1px solid var(--jv-border); background: var(--jv-surface-sunken); }
+.minecraft-server-arrange-toolbar :is(a,button) { box-sizing: border-box; display: inline-flex; align-items: center; min-height: 34px; padding: .38rem .7rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--jv-muted); font-size: .86rem; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.minecraft-server-arrange-toolbar :is(a,button):is(:hover,:focus-visible) { background: var(--jv-surface); color: var(--jv-text); }
+.minecraft-server-inventory .minecraft-server-entries { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 1rem; }
+.minecraft-server-inventory .minecraft-server-card { box-sizing: border-box; display: flex; flex-direction: column; gap: .85rem; width: 100%; min-width: 0; margin: 0; padding: 1rem; border: 1px solid var(--jv-border-strong); border-radius: var(--jv-radius); background: var(--jv-surface); box-shadow: 0 5px 14px color-mix(in srgb,var(--jv-text) 12%,transparent); }
+.minecraft-server-card :is(h2,p) { margin: 0; overflow-wrap: anywhere; }
+.minecraft-server-card h2 { min-width: 0; font-size: 1.15rem; }
+.minecraft-server-heading,.minecraft-server-software-row { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }
+.minecraft-server-software-row>p { min-width: 0; }
+.minecraft-server-card .minecraft-server-state { text-align: right; font-weight: 800; font-size: .9rem; }
+.minecraft-server-card .minecraft-server-state.success { color: var(--jv-success); }
+.minecraft-server-card .minecraft-server-state.error { color: var(--jv-error); }
+.minecraft-server-card .minecraft-server-state.warning { color: var(--jv-warning); }
+.minecraft-server-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; padding-block: .6rem; border-block: 1px solid var(--jv-border); }
+.minecraft-server-metrics>div { display: grid; align-content: start; gap: .3rem; min-width: 0; overflow-wrap: anywhere; }
+.minecraft-server-metrics span { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--jv-muted); }
+.minecraft-server-metrics strong { font-size: .9rem; }
+.minecraft-server-switches { display: grid; gap: .6rem; }
+.minecraft-server-switches label { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0; }
+.minecraft-server-switches input { margin: 0; flex: none; }
+.minecraft-server-move-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.minecraft-server-more { position: relative; flex: none; }
+/* Storage Partition actions trigger/menu language, painted with JustVoxel tokens. */
+.minecraft-server-more>summary { box-sizing: border-box; display: grid; place-items: center; width: 38px; height: 34px; border: 1px solid var(--jv-border-strong); border-radius: 9px; background: var(--jv-surface-sunken); color: var(--jv-text); cursor: pointer; list-style: none; font-size: 1.25rem; font-weight: 800; line-height: 1; }
+.minecraft-server-more>summary::-webkit-details-marker { display: none; }
+.minecraft-server-more>summary:is(:hover,:focus-visible) { background: var(--jv-surface); }
+.minecraft-server-more .minecraft-server-more-items { box-sizing: border-box; position: fixed; inset: auto; margin: 0; z-index: 10; display: grid; width: 190px; max-width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); overflow: auto; padding: .4rem; border: 1px solid var(--jv-border-strong); border-radius: 10px; background: var(--jv-surface); color: var(--jv-text); box-shadow: 0 14px 36px color-mix(in srgb,var(--jv-text) 25%,transparent); }
+.minecraft-server-more .minecraft-server-more-items:not(:popover-open) { display: none; }
+.minecraft-server-more-items :is(a,button) { box-sizing: border-box; display: block; width: 100%; padding: .58rem .65rem; border: 0; border-radius: 7px; background: transparent; color: var(--jv-text); text-align: left; font-size: .82rem; font-weight: 650; text-decoration: none; }
+.minecraft-server-more-items :is(a,button):is(:hover,:focus-visible) { background: var(--jv-surface-sunken); }
+.minecraft-server-more-items .storage-action-danger { color: var(--jv-error); }
+.minecraft-server-more-items hr { width: 100%; border: 0; border-top: 1px solid var(--jv-border); }
+.minecraft-server-inventory [hidden] { display: none !important; }
+.minecraft-server-inventory :is(a,button,summary):focus-visible { outline: 2px solid var(--jv-accent); outline-offset: 3px; }
+.minecraft-server-invitation { box-sizing: border-box; width: min(540px,calc(100% - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; padding: 24px; border: 1px solid var(--jv-border); border-radius: var(--jv-radius); background: var(--jv-surface); color: var(--jv-text); }
+.minecraft-server-invitation textarea { display: block; box-sizing: border-box; width: 100%; padding: 12px; background: var(--jv-surface-sunken); color: var(--jv-text); border: 1px solid var(--jv-border); border-radius: var(--jv-radius); font: inherit; line-height: 1.5; resize: vertical; }
+.minecraft-server-invitation .action-row { justify-content: flex-end; }
 .minecraft-servers-body a:focus-visible, .minecraft-servers-body button:focus-visible { outline: 2px solid var(--jv-accent); outline-offset: 4px; }
 .minecraft-selected-workspace { height: auto; min-width: 0; padding: 0; }
 .minecraft-selected-workspace .minecraft-workspace-header { cursor: auto; touch-action: auto; user-select: auto; }
 .minecraft-selected-workspace .minecraft-workspace-body { overflow: visible; }
 .minecraft-selected-workspace h1, .minecraft-selected-workspace p { overflow-wrap: anywhere; }
-@media (max-width: 700px) { .minecraft-server-card { width: 100%; } }
-.minecraft-server-arrange-toolbar { display: flex; gap: .75rem; margin-bottom: .75rem; }
-.minecraft-server-actions, .minecraft-server-move-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: auto; }
-.minecraft-server-actions form { margin: 0; }
-.minecraft-server-actions .button-link { margin-top: 0; }
-.minecraft-server-more { max-width: 100%; }
-.minecraft-server-more summary { cursor: pointer; }
-.minecraft-server-more summary:focus-visible { outline: 2px solid var(--jv-accent); outline-offset: 4px; }
-.minecraft-server-more-items { display: flex; flex-direction: column; align-items: flex-start; gap: .75rem; padding-top: .75rem; overflow-wrap: anywhere; }
-.minecraft-server-card [hidden], .minecraft-server-arrange-toolbar [hidden] { display: none !important; }
-/* The inventory fragment keeps the existing card layout inside its workspace. */
-[data-minecraft-servers-content] .minecraft-server-entries { display: flex; flex-wrap: wrap; gap: 1rem; }
-[data-minecraft-servers-content] .minecraft-add-server-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; width: 10rem; min-height: 9rem; max-width: 100%; padding: 1rem; text-align: center; color: inherit; text-decoration: none; }
-[data-minecraft-servers-content] .minecraft-add-server-plus { font-size: 3rem; line-height: 1; color: var(--jv-accent); }
+@media (max-width: 700px) { .minecraft-server-inventory .minecraft-server-entries { grid-template-columns: 1fr; } }
+
+@container (max-width: 600px) { .minecraft-server-inventory .minecraft-server-entries { grid-template-columns: 1fr; } }

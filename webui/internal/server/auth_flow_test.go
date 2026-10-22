@@ -58,7 +58,7 @@ func (f *authFlowAPI) ChangePassword(ctx context.Context, session, currentPasswo
 	return f.fakeAPI.ChangePassword(ctx, session, currentPassword, newPassword)
 }
 
-func TestLoginPageUsesVoxelAdministrator(t *testing.T) {
+func TestLoginPageLeavesUsernameEmpty(t *testing.T) {
 	app, err := New(newAuthFlowAPI(), Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
@@ -70,8 +70,8 @@ func TestLoginPageUsesVoxelAdministrator(t *testing.T) {
 		t.Fatalf("got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, `value="voxel"`) || strings.Contains(body, `value="admin"`) {
-		t.Fatalf("login page does not expose voxel administrator: %s", body)
+	if strings.Contains(body, `value="voxel"`) || !strings.Contains(body, `name="username" autocomplete="username"`) {
+		t.Fatalf("login page must leave username empty: %s", body)
 	}
 }
 

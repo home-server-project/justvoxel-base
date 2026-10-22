@@ -1,3 +1,8 @@
+// Discard stale browser selection and normalize retired dashboard tab URLs.
+const dashboardURL = typeof document !== "undefined" && typeof document.querySelector === "function"
+  ? document.querySelector("#dashboard[data-dashboard-url]")?.dataset?.dashboardUrl : undefined;
+if (dashboardURL) window.history.replaceState(window.history.state, "", dashboardURL + window.location.hash);
+
 // Selection is explicit in each server-specific request. Workspaces detach old
 // presentation on selection changes; submitted operations keep their original target.
 globalThis.justVoxelSelectionGeneration = 0;
@@ -8,6 +13,15 @@ globalThis.justVoxelSelectedURL = (value) => {
   const target = new URL(value, location.origin);
   const selected = new URLSearchParams(location.search || "");
   if (!target.searchParams.has("server")) selected.getAll("server").forEach((id) => target.searchParams.append("server", id));
+  if (dashboardURL && !document.querySelector("#dashboard")?.dataset?.selectedMinecraftId &&
+      !target.searchParams.has("server")) {
+    if (["/api/dashboard-status", "/api/minecraft/workspace/selection"].includes(target.pathname)) {
+      target.searchParams.set("selection", "none");
+    } else {
+      // Keep server-specific controls from falling back to a different sole server.
+      target.searchParams.set("server", "");
+    }
+  }
   return target.pathname + target.search;
 };
 globalThis.justVoxelServerSelection = async (slot) => {
@@ -3291,6 +3305,80 @@ if (systemMonitorOpen && systemMonitorDialog) {
 
 
 const minecraftOpen = document.querySelector("[data-minecraft-open]");
+globalThis.justVoxelOpenDeleteServer = ({name, description, csrf, request, isCurrent, dismissOnDeleted = false, onError = () => {}, onDeleted = result => window.location.assign(result.redirect)}) => {
+    const selection = globalThis.justVoxelSelectionGeneration;
+    const dialog = document.createElement("dialog");
+    dialog.className = "minecraft-delete-dialog";
+    dialog.setAttribute("aria-labelledby", "minecraft-delete-title");
+    dialog.innerHTML = `
+      <form class="minecraft-delete-card">
+        <div class="minecraft-delete-heading"><div><p class="eyebrow">Minecraft action</p><h2 id="minecraft-delete-title">Delete server</h2></div><button type="button" class="secondary" data-delete-close aria-label="Close">×</button></div>
+        <p data-delete-description></p>
+        <div class="minecraft-delete-review"><dl><div><dt>Server</dt><dd data-delete-name></dd></div><div><dt>World data</dt><dd>Deleted</dd></div><div><dt>Backups</dt><dd>Preserved/history</dd></div></dl></div>
+        <div class="destructive-confirmation" data-destructive-confirmation data-destructive-idle="Slide to confirm destructive action">
+          <p class="minecraft-delete-selected">Selected server:<strong data-delete-selected></strong></p>
+          <div class="destructive-confirm-slider" data-destructive-slider-shell>
+            <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm destructive action</span>
+            <span class="destructive-confirm-slider-thumb" aria-hidden="true">›</span>
+            <input type="range" min="0" max="100" value="0" data-destructive-slider aria-label="Slide to confirm destructive action">
+          </div>
+          <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm</span><input type="checkbox" class="destructive-confirm-toggle" data-destructive-toggle aria-label="Confirm destructive action"></label>
+        </div>
+        <p class="notice error" data-delete-error role="status" hidden></p>
+        <div class="action-row"><button type="button" class="secondary" data-delete-cancel>Cancel</button><button type="submit" class="danger" data-destructive-submit disabled>Apply destructive action</button></div>
+      </form>`;
+    dialog.querySelector("[data-delete-description]").textContent = description;
+    dialog.querySelector("[data-delete-name]").textContent = name;
+    dialog.querySelector("[data-delete-selected]").textContent = `${name} will be deleted`;
+    const form = dialog.querySelector("form");
+    const apply = dialog.querySelector("[data-destructive-submit]");
+    const slider = dialog.querySelector("[data-destructive-slider]");
+    const toggle = dialog.querySelector("[data-destructive-toggle]");
+    const feedback = dialog.querySelector("[data-delete-error]");
+    let submitting = false;
+    const cancel = () => { if (!submitting) dialog.close(); };
+    const detach = () => dialog.close();
+    dialog.querySelector("[data-delete-close]").addEventListener("click", cancel);
+    dialog.querySelector("[data-delete-cancel]").addEventListener("click", cancel);
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); cancel(); });
+    dialog.addEventListener("close", () => {
+      window.removeEventListener("justvoxel:server-selection-changed", detach);
+      dialog.remove();
+    });
+    window.addEventListener("justvoxel:server-selection-changed", detach);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (submitting || Number(slider.value) < 100 || !toggle.checked) return;
+      if (selection !== globalThis.justVoxelSelectionGeneration || !isCurrent()) { dialog.close(); return; }
+      submitting = true;
+      apply.disabled = true;
+      slider.disabled = true;
+      toggle.disabled = true;
+      try {
+        const result = await request("/api/minecraft/workspace/delete", {
+          method: "POST", body: new URLSearchParams({csrf, confirm_name: name}),
+        });
+        if (result) {
+          await onDeleted(result);
+          if (dismissOnDeleted) dialog.close();
+        }
+      } catch (error) {
+        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+        feedback.textContent = error.message;
+        feedback.hidden = false;
+        onError(error);
+      } finally {
+        submitting = false;
+        slider.disabled = false;
+        toggle.disabled = false;
+        dialog.querySelector("[data-destructive-confirmation]")._justVoxelDestructiveSync?.();
+      }
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  };
+
+
 const minecraftDialog = document.querySelector("[data-minecraft-workspace-dialog]");
 if (minecraftOpen && minecraftDialog) {
   const closeButton = minecraftDialog.querySelector("[data-minecraft-close]");
@@ -3351,6 +3439,12 @@ if (minecraftOpen && minecraftDialog) {
     return payload;
   };
 
+  const openDeleteDialog = (name, description, sequence) => globalThis.justVoxelOpenDeleteServer({
+    name, description, csrf, request: requestWorkspaceJSON,
+    isCurrent: () => sequence === loadSequence,
+    onError: error => { if (state) state.textContent = error.message; },
+  });
+
   const renderOverview = async (sequence, message = "") => {
     const snapshot = await requestWorkspaceJSON("/api/dashboard-status");
     if (!snapshot || sequence !== loadSequence || !content) return;
@@ -3379,26 +3473,10 @@ if (minecraftOpen && minecraftDialog) {
       grid.appendChild(card);
     });
     root.appendChild(grid);
-    const selected = new URLSearchParams(globalThis.location?.search || "").get("server");
-    if (document.body.classList.contains("role-administrator")) {
-      const boot = document.createElement("form");boot.dataset.minecraftSettingsTab="overview";
-      boot.innerHTML='<label>Start on Boot <select name="start_on_boot"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Review changes</button>';
-      boot.querySelector("select").value=String(Boolean(minecraft.start_on_boot));
-      boot.addEventListener("submit",async(event)=>{ const selection = globalThis.justVoxelSelectionGeneration;event.preventDefault();try{const params=settingsParams(boot);const plan=await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan",{method:"POST",body:params});if(sequence===loadSequence)renderSettingsReview(root,plan,params);}catch(error){if(error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration)return;if(state)state.textContent=error.message;}});root.append(boot);
-      const context=await requestWorkspaceJSON("/api/minecraft/workspace/selection");if(sequence!==loadSequence)return;
-      const name=context.selected.name;
-      const rename=document.createElement("form");rename.innerHTML='<label>Server name<input name="display_name" required maxlength="64"></label><button type="submit">Rename</button>';rename.querySelector("input").value=name;
-      rename.addEventListener("submit",async(event)=>{ const selection = globalThis.justVoxelSelectionGeneration;event.preventDefault();try{const params=new URLSearchParams(new FormData(rename));params.set("csrf",csrf);await requestWorkspaceJSON("/api/minecraft/workspace/rename",{method:"POST",body:params});window.location.reload();}catch(error){if(error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration)return;if(state)state.textContent=error.message;}});root.append(rename);
-      const danger=document.createElement("section");danger.className="panel details minecraft-workspace-section";
-      const heading=document.createElement("h2");heading.textContent="Danger zone";const title=document.createElement("h3");title.textContent=`Delete ${name}`;
-      danger.append(heading,title,messageNode("Permanently removes this active server and its world data. Existing backup archives are preserved. The server must be stopped first."),messageNode("Backups are preserved as historical archives. Current Restore remains tied to this server identity."));
-      const form=document.createElement("form");form.innerHTML='<label>Type the current server name<input name="confirm_name" required autocomplete="off"></label><button type="submit" class="danger" disabled>Delete Server</button>';const input=form.querySelector("input"),button=form.querySelector("button");input.addEventListener("input",()=>{button.disabled=input.value!==name;});
-      form.addEventListener("submit",async(event)=>{ const selection = globalThis.justVoxelSelectionGeneration;event.preventDefault();if(input.value!==name)return;button.disabled=true;try{const params=new URLSearchParams({csrf,confirm_name:input.value});const result=await requestWorkspaceJSON("/api/minecraft/workspace/delete",{method:"POST",body:params});window.location.assign(result.redirect);}catch(error){if(error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration)return;if(state)state.textContent=error.message;button.disabled=input.value!==name;}});danger.append(form);root.append(danger);
-    }
-
     const playerLine = document.createElement("div");
     playerLine.className = "minecraft-overview-playerline";
     const playerLabel = document.createElement("strong");
+    playerLabel.className = "minecraft-summary-label";
     playerLabel.textContent = "Online";
     playerLine.appendChild(playerLabel);
     if (!minecraft.configured || players.state === "not_configured") playerLine.appendChild(messageNode("Minecraft is not configured yet."));
@@ -3420,28 +3498,118 @@ if (minecraftOpen && minecraftDialog) {
     }
     root.appendChild(playerLine);
 
-    const canViewLogs = document.body.classList.contains("role-administrator") || document.body.classList.contains("role-operator");
-    if (canViewLogs) {
-      const logs = await requestWorkspaceJSON("/api/minecraft/workspace/logs");
-      if (!logs || sequence !== loadSequence || !content) return;
-      const section = document.createElement("section");
-      section.className = "panel details minecraft-overview-logs";
-      const heading = document.createElement("div");
-      heading.className = "section-heading";
-      const headingText = document.createElement("div");
-      const eyebrow = document.createElement("p");
-      eyebrow.className = "eyebrow";
-      eyebrow.textContent = "Diagnostics";
-      const title = document.createElement("h2");
-      title.textContent = "Recent logs";
-      headingText.className = "diagnostics-heading";
-      headingText.append(eyebrow, title);
-      heading.appendChild(headingText);
-      const pre = document.createElement("pre");
-      pre.className = "log-box";
-      pre.textContent = Array.isArray(logs.lines) && logs.lines.length ? logs.lines.join("\n") : "No recent log lines available.";
-      section.append(heading, pre);
-      root.appendChild(section);
+    if (document.body.classList.contains("role-administrator")) {
+      const [context, payload] = await Promise.all([
+        requestWorkspaceJSON("/api/minecraft/workspace/selection"),
+        requestWorkspaceJSON("/api/minecraft/workspace/settings"),
+      ]);
+      if (!context || !payload || sequence !== loadSequence) return;
+      const name = context.selected.name;
+      const settings = payload.minecraft || {};
+      const boot = document.createElement("form");
+      boot.dataset.minecraftSettingsTab = "overview";
+      boot.innerHTML = '<label class="minecraft-overview-boot-card"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" name="start_on_boot"></label><div class="minecraft-native-actions"><button type="submit">Review changes</button></div>';
+      boot.querySelector("input").checked = Boolean(settings.start_on_boot);
+      boot.addEventListener("submit", async (event) => {
+        const selection = globalThis.justVoxelSelectionGeneration;
+        event.preventDefault();
+        try {
+          const params = settingsParams(boot);
+          params.set("start_on_boot", String(boot.querySelector("input").checked));
+          const plan = await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan", {method: "POST", body: params});
+          if (plan && sequence === loadSequence) renderSettingsReview(root, plan, params);
+        } catch (error) {
+          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+          if (state) state.textContent = error.message;
+        }
+      });
+      root.appendChild(boot);
+
+      const details = document.createElement("form");
+      details.className = "panel details minecraft-workspace-section minecraft-overview-details";
+      details.innerHTML = '<div class="minecraft-native-grid"><label>Server name<input name="display_name" required maxlength="64"></label><label>Server welcome message (MOTD)<input name="motd" required></label></div><div class="minecraft-native-actions"><button type="submit">Save</button></div>';
+      details.elements.display_name.value = name;
+      details.elements.motd.value = settings.motd || "";
+      details.addEventListener("submit", async (event) => {
+        const selection = globalThis.justVoxelSelectionGeneration;
+        event.preventDefault();
+        const save = details.querySelector("button");
+        const proposedName = details.elements.display_name.value;
+        const motd = details.elements.motd.value.trim();
+        if (!motd) { if (state) state.textContent = "Server welcome message is required."; return; }
+        save.disabled = true;
+        const reloadAfterError = async (error) => {
+          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+          // Either operation may already have succeeded. Always show authoritative state.
+          let remainingError = error.message;
+          try {
+            const authoritative = await requestWorkspaceJSON("/api/minecraft/workspace/selection");
+            if (authoritative) document.querySelectorAll("[data-selected-server] select option").forEach((option) => {
+              const server = authoritative.servers.find((entry) => entry.id === option.value);
+              if (server) option.textContent = server.name;
+            });
+          } catch (refreshError) {
+            if (refreshError.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+            remainingError += " " + refreshError.message;
+          }
+          await loadCurrentTab();
+          if (selection === globalThis.justVoxelSelectionGeneration && state) state.textContent = remainingError;
+        };
+        const finishSave = async () => {
+          if (selection !== globalThis.justVoxelSelectionGeneration || sequence !== loadSequence) throw globalThis.justVoxelStaleSelection();
+          if (proposedName !== name) {
+            await requestWorkspaceJSON("/api/minecraft/workspace/rename", {
+              method: "POST", body: new URLSearchParams({csrf, display_name: proposedName}),
+            });
+          }
+          window.location.reload();
+        };
+        try {
+          const current = await requestWorkspaceJSON("/api/minecraft/workspace/settings");
+          if (!current || sequence !== loadSequence) return;
+          if (motd !== current.minecraft.motd) {
+            const params = new URLSearchParams({csrf, tab: "gameplay", motd,
+              max_players: String(current.minecraft.max_players), game_mode: current.minecraft.game_mode});
+            const plan = await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan", {method: "POST", body: params});
+            if (!plan || sequence !== loadSequence) return;
+            const reviewOptions = {form: details, onApplied: finishSave, onError: reloadAfterError};
+            if (plan.confirmation_required || plan.restart_required || plan.memory_restart_required) {
+              renderSettingsReview(root, plan, params, reviewOptions);
+              return;
+            }
+            if (plan.review) params.set("review", plan.review);
+            const result = await requestWorkspaceJSON("/api/minecraft/workspace/settings/apply", {method: "POST", body: params});
+            if (!result) return;
+            if (result.confirmation_required && !result.applied) {
+              renderSettingsReview(root, result, params, reviewOptions);
+              return;
+            }
+            if (!result.applied) throw new Error(result.error || "Minecraft settings were not applied.");
+          }
+          await finishSave();
+        } catch (error) {
+          await reloadAfterError(error);
+        } finally {
+          save.disabled = false;
+        }
+      });
+      root.appendChild(details);
+
+      const danger = document.createElement("section");
+      danger.className = "panel details minecraft-workspace-section minecraft-overview-delete";
+      const title = document.createElement("h3");
+      title.textContent = `Delete ${name}`;
+      const description = "Permanently removes this active server and its world data. Existing backup archives are preserved as historical archives.";
+      const actions = document.createElement("div");
+      actions.className = "minecraft-native-actions";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "danger";
+      remove.textContent = "Delete Server";
+      remove.addEventListener("click", () => openDeleteDialog(name, description, sequence));
+      actions.appendChild(remove);
+      danger.append(title, messageNode(description), actions);
+      root.appendChild(danger);
     }
 
     content.replaceChildren(root);
@@ -3578,7 +3746,7 @@ if (minecraftOpen && minecraftDialog) {
         <div class="section-heading"><div><p class="eyebrow">Server</p><h2>Gameplay</h2></div></div>
         <div class="minecraft-native-grid">
           <label>Maximum players<input name="max_players" type="number" min="1" step="1" required></label>
-          <label>Server welcome message (MOTD)<input name="motd" required></label>
+          <input name="motd" type="hidden">
           <label>Game mode<select name="game_mode" required>
             <option value="survival">Survival</option>
             <option value="creative">Creative</option>
@@ -3599,7 +3767,7 @@ if (minecraftOpen && minecraftDialog) {
         </div>
         <label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>
         <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Minecraft is not restarted automatically for these non-memory changes.</p>
-        <div data-crossplay-compatibility class="muted compact">Checking Geyser/Floodgate compatibility…</div><button type="button" class="secondary" data-open-version>Open Version</button>`;
+        <div class="minecraft-crossplay-status"><span data-crossplay-compatibility class="muted">Checking Geyser/Floodgate compatibility…</span><span class="muted">· open</span><button type="button" class="secondary" data-open-version>Version</button></div>`;
       section.querySelector('[name="java_port"]').value = String(minecraft.java_port || 25565);
       section.querySelector('[name="bedrock_port"]').value = String(minecraft.bedrock_port || 19132);
       section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
@@ -3612,7 +3780,7 @@ if (minecraftOpen && minecraftDialog) {
         const installed = status.installed || "Unknown";
         if (minecraft.server_type === "vanilla") { node.textContent = "Managed Bedrock cross-play currently requires Paper or Purpur."; return; }
         if (!status.crossplay_enabled) node.textContent = `Cross-play disabled · Minecraft ${installed}.`;
-        else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}.`;
+        else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}`;
         else node.textContent = status.reason || "Geyser/Floodgate compatibility is unavailable.";
       }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node && minecraft.server_type !== "vanilla") node.textContent = "Geyser/Floodgate compatibility is unavailable."; });
       form.appendChild(section);
@@ -3656,9 +3824,9 @@ if (minecraftOpen && minecraftDialog) {
     }
   };
 
-  const renderSettingsReview = (root, plan, params) => {
+  const renderSettingsReview = (root, plan, params, options = {}) => {
     root.querySelector("[data-minecraft-native-review]")?.remove();
-    const settingsForm = root.querySelector("[data-minecraft-settings-tab]");
+    const settingsForm = options.form || root.querySelector("[data-minecraft-settings-tab]");
     if (settingsForm) settingsForm.hidden = false;
     const review = document.createElement("section");
     review.className = "panel details minecraft-native-review";
@@ -3764,16 +3932,18 @@ if (minecraftOpen && minecraftDialog) {
         if (!result) return;
         if (result.confirmation_required && !result.applied) {
           if (state) state.textContent = "Player confirmation required.";
-          renderSettingsReview(root, result, params);
+          renderSettingsReview(root, result, params, options);
           return;
         }
         if (!result.applied) throw new Error(result.error || "Minecraft settings were not applied.");
+        if (options.onApplied) { await options.onApplied(); return; }
         let savedMessage = result.message || "Minecraft settings saved.";
         if (result.restarted) savedMessage = "Minecraft settings saved and Minecraft restarted.";
         else if (result.restart_deferred) savedMessage = "Minecraft settings saved. Restart remains pending.";
         await loadCurrentTab(savedMessage);
       } catch (error) {
         if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (options.onError) { await options.onError(error); return; }
         if (state) state.textContent = error?.message || "Minecraft settings could not be applied.";
         apply.disabled = false;
         cancel.disabled = false;
@@ -4467,7 +4637,6 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const fileColumn = makeColumn("Files", "system-logs-files");
     const generateSupport = document.createElement("button");
     generateSupport.type = "button";
-    generateSupport.className = "secondary";
     generateSupport.textContent = "Generate support report";
     const supportProgress = document.createElement("p");
     supportProgress.className = "muted";
@@ -4497,6 +4666,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       download.hidden = true;
       const live = selectedGroup === "Failed units";
       generateSupport.hidden = selectedGroup !== "Support";
+      fileList.className = selectedGroup === "Support"
+        ? "system-logs-list system-support-report-files" : "system-logs-list";
       supportProgress.hidden = selectedGroup !== "Support" || !supportProgress.textContent;
       fileColumn.children[0].textContent = live ? "Units" : "Files";
       documentText.textContent = live ? "Select a unit to read its last 60 current-boot journal lines here." : "Select a file to read it here.";
@@ -5108,7 +5279,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       retry.type = "button";
       retry.className = "danger";
       retry.textContent = operation.instance_id ? "Retry Reset Minecraft" : "Continue removal";
-      retry.addEventListener("click", () => planReset("minecraft"));
+      retry.addEventListener("click", () => planReset("minecraft", true));
       actions.appendChild(retry);
       built.panel.appendChild(actions);
     }
@@ -5360,9 +5531,17 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     syncApply();
   };
 
-  const planReset = async (mode) => {
+  const planReset = async (mode, retry = false) => {
     if (state) state.textContent = "Checking current reset impact…";
     try {
+      if (mode === "minecraft" && !retry) {
+        const current = await systemFetchJSON("/api/system/workspace/reset/minecraft/current");
+        if (!current) return;
+        if (current.operation) {
+          renderResetOperation(current.operation);
+          return;
+        }
+      }
       const endpoint = mode === "factory"
         ? "/api/system/workspace/reset/factory/plan"
         : "/api/system/workspace/reset/minecraft/plan";
@@ -7061,6 +7240,7 @@ if (minecraftServersDialog && minecraftServersOpen) {
       range.selectNodeContents(content);
       const fragment = range.createContextualFragment(html);
       content.replaceChildren(fragment);
+      content.justVoxelRefreshServers = load;
       globalThis.justVoxelMinecraftServers(content);
       state.textContent = "";
     } catch (error) {
@@ -7111,10 +7291,12 @@ if (dashboard) {
       let tab = destination.get("tab") || "";
       if (workspace === "minecraft") {
         if (window.location.hash === "#whitelist") tab = "players";
-        if (window.location.hash === "#minecraft-logs") tab = "overview";
+        if (window.location.hash === "#minecraft-logs") tab = "logs";
       }
+      // The Switch tab retains its existing internal control name.
+      if (workspace === "version" && tab === "switch") tab = "software";
       const allowedTabs = {
-        minecraft: ["overview", "memory", "gameplay", "players", "crossplay"],
+        minecraft: ["overview", "logs", "memory", "gameplay", "players", "crossplay"],
         version: ["software", "minecraft"],
         plugins: ["discover", "installed", "addons"],
         system: ["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "ups", "about"],

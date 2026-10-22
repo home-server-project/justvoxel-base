@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -506,5 +507,70 @@ func TestConnectionGuideOwnServerSelection(t *testing.T) {
 	response = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect", ""))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Kids Creative — Purpur 1.21.8") || strings.Join(client.reads, ",") != "configuration:jv-kids001" {
 		t.Fatalf("single automatic selection: %d %v", response.Code, client.reads)
+	}
+}
+
+func TestDirectServerInvitationUsesOnlyGuideDefaults(t *testing.T) {
+	status := guideFixture()
+	status.System.IPv4 = "192.0.2.10"
+	guide := newConnectionGuide(status, api.RemoteAccessStatus{}, "Family")
+	text := defaultConnectionInvitation(guide)
+	if !strings.Contains(text, "Join Family on Minecraft\n\nLocal connection IPv4\nJava: 192.0.2.10:25571") {
+		t.Fatal(text)
+	}
+	status.System.IPv4 = ""
+	remote := api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{{ID: "tailscale", Connected: true, IP: "100.80.0.8"}}}
+	if text := defaultConnectionInvitation(newConnectionGuide(status, remote, "Family")); text != "" {
+		t.Fatal("invented non-default selection", text)
+	}
+}
+
+func TestDirectServerInvitationIdentityRolesAndPrivacy(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		app, client := newServerInventoryApp(t)
+		client.role = role
+		response := httptestResponse(app, authenticatedAdminRequest("GET", "/api/minecraft/servers/invitation?server=jv-family1", ""))
+		if response.Code != 200 {
+			t.Fatal(role, response.Code, response.Body.String())
+		}
+		var payload map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(payload) != 2 || payload["name"] != "family Survival" || !strings.Contains(payload["invitation"], "192.0.2.10:25567") || strings.Contains(payload["invitation"], "25568") {
+			t.Fatal(payload)
+		}
+		requireNoPrivateServerContent(t, response.Body.String())
+		if len(client.actions) != 0 {
+			t.Fatal("invitation mutated runtime")
+		}
+	}
+	app, client := newServerInventoryApp(t)
+	for _, query := range []string{"", "?server=family+Survival", "?server=jv-missing1", "?server=jv-family1&server=jv-kids001"} {
+		response := httptestResponse(app, authenticatedAdminRequest("GET", "/api/minecraft/servers/invitation"+query, ""))
+		if response.Code < 400 {
+			t.Fatal("implicit/invalid selection accepted", query)
+		}
+	}
+	client.configurationErrors["jv-family1"] = true
+	response := httptestResponse(app, authenticatedAdminRequest("GET", "/api/minecraft/servers/invitation?server=jv-family1", ""))
+	if response.Code < 400 {
+		t.Fatal("unknown configuration invited")
+	}
+	requireNoPrivateServerContent(t, response.Body.String())
+	response = httptestResponse(app, httptest.NewRequest("GET", "/api/minecraft/servers/invitation?server=jv-family1", nil))
+	if response.Code != 401 {
+		t.Fatal("anonymous invitation", response.Code)
+	}
+}
+
+func TestDirectServerInvitationUnavailableDefault(t *testing.T) {
+	app, client := newServerInventoryApp(t)
+	status := defaultStatus()
+	status.System.IPv4 = ""
+	client.statusResult = status
+	response := httptestResponse(app, authenticatedAdminRequest("GET", "/api/minecraft/servers/invitation?server=jv-family1", ""))
+	if response.Code != 409 || !strings.Contains(response.Body.String(), "No default invitation") || strings.Contains(response.Body.String(), `"invitation":`) {
+		t.Fatal("invented address", response.Body.String())
 	}
 }

@@ -301,6 +301,10 @@ func TestResetAllContinueSameOperationResumesIncompleteFirst(t *testing.T) {
 	if err = executeMinecraftResetAll(context.Background(), x.s, retry.OperationID, next.PlanFingerprint, false, session{}); err != nil {
 		t.Fatal(err)
 	}
+	finished, err := x.s.operations.get(op.OperationID)
+	if err != nil || finished.OperationID != op.OperationID || finished.State != operationSucceeded {
+		t.Fatal("continuation did not complete the original persistent operation", finished, err)
+	}
 	for _, id := range []string{first, second, third} {
 		if x.removedData[id] != 1 {
 			t.Fatal("duplicate or missing data removal", x.removedData)
@@ -583,5 +587,24 @@ func TestResetAllRecoveryRejectsReplacementArtifacts(t *testing.T) {
 				t.Fatal("replacement artifact accepted", artifact)
 			}
 		})
+	}
+}
+
+func TestResetAllPlanFailureWithoutRecoveryDoesNotPromiseContinuation(t *testing.T) {
+	x := newResetAllFixture(t, 2)
+	if err := os.Remove(filepath.Join(x.f.x.b.identities().directory, x.f.x.records[0].Runtime.ID+".json")); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("POST", "/v1/admin/reset/minecraft/plan", nil)
+	r = r.WithContext(context.WithValue(r.Context(), peerUIDKey{}, uint32(0)))
+	w := httptest.NewRecorder()
+	x.f.x.calls = nil
+	x.s.adminMinecraftResetAllPlan(w, r)
+	if w.Code != 409 || strings.Contains(w.Body.String(), "Continue removal") || !strings.Contains(w.Body.String(), "No additional removal was performed.") || len(startOverMutations(x.f.x.calls)) != 0 {
+		t.Fatal(w.Code, w.Body.String(), x.f.x.calls)
+	}
+	current, err := x.s.operations.currentMinecraftReset()
+	if err != nil || current != nil {
+		t.Fatal(current, err)
 	}
 }

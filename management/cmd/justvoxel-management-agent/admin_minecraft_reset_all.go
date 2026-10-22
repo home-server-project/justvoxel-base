@@ -168,7 +168,7 @@ func registerAdminMinecraftResetAllRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/reset/minecraft/current-operation", s.adminMinecraftResetAllCurrent)
 }
 func resetAllFailure(w http.ResponseWriter) {
-	writeError(w, http.StatusConflict, "Minecraft removal stopped before completion. Continue removal to finish removing the remaining servers.")
+	writeError(w, http.StatusConflict, "Minecraft reset recovery could not be verified. No additional removal was performed.")
 }
 func (s *server) resetAllCurrent() (*operationJournal, error) {
 	if s.operations == nil {

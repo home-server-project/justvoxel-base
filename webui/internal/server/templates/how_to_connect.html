@@ -16,7 +16,7 @@
 {{else}}
 <section class="connect-controls panel" aria-labelledby="connect-title">
   <p class="connect-eyebrow eyebrow">JUSTVOXEL · SHARE THE ADVENTURE</p>
-  <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><select class="connect-server" aria-label="Server">{{if not .SelectedMinecraftID}}<option value="">Choose server</option>{{end}}{{range .ConnectionServers}}<option value="{{.ID}}"{{if eq .ID $.SelectedMinecraftID}} selected{{end}}>{{.Name}}</option>{{end}}</select></div>
+  <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><div data-server-selector-slot><label>Server: <select class="connect-server" aria-label="Server">{{if not .SelectedMinecraftID}}<option value="">Choose server</option>{{end}}{{range .ConnectionServers}}<option value="{{.ID}}"{{if eq .ID $.SelectedMinecraftID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label></div></div>
   {{if not .SelectedMinecraftID}}<p>Choose a server to see its connection guide.</p>
 </section>
   {{else}}
@@ -43,7 +43,7 @@
   <label for="connect-invitation-text">Invitation</label>
   <textarea id="connect-invitation-text" data-connect-invitation-text readonly rows="10" spellcheck="false"></textarea>
   <p data-connect-copy-status role="status" aria-live="polite"></p>
-  <div class="action-row"><button type="button" data-connect-copy>Copy invitation</button><button type="button" class="secondary" data-connect-invitation-close>Close</button></div>
+  <div class="action-row"><button type="button" class="secondary" data-connect-invitation-close>Close</button><button type="button" data-connect-copy>Copy invitation</button></div>
 </dialog>
 <article class="connect-guide" data-connect-guide hidden>
   <header class="connect-guide-heading"><div class="connect-guide-top-row"><img class="connect-print-logo" src="/static/justvoxel-login-logo.png" alt="JustVoxel" width="2172" height="724"><p>{{.ConnectionGuide.Server}}</p></div><h1>JustVoxel Connection Guide</h1><span class="connect-editions badge">Java Edition{{if .ConnectionGuide.Bedrock}} + Bedrock Edition{{end}}</span><p>Connection methods: <span data-connect-summary></span></p></header>

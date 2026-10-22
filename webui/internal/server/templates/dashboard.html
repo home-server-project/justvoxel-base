@@ -11,7 +11,7 @@
 </head>
 <body class="role-pending">
 {{template "app-header" .}}
-<main id="dashboard" data-selected-minecraft-id="{{.SelectedMinecraftID}}" data-dashboard-status="/api/dashboard-status{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" data-session-info="/api/session-info" data-workspace-username="{{.Username}}" data-pending-action="{{.PendingAction}}" data-configured="{{.Status.Minecraft.Configured}}" data-instance-required="{{.InstanceRequired}}">
+<main id="dashboard" {{if .DashboardURL}}data-dashboard-url="{{.DashboardURL}}" {{end}}data-selected-minecraft-id="{{.SelectedMinecraftID}}" data-dashboard-status="/api/dashboard-status{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" data-session-info="/api/session-info" data-workspace-username="{{.Username}}" data-pending-action="{{.PendingAction}}" data-configured="{{.Status.Minecraft.Configured}}" data-instance-required="{{.InstanceRequired}}">
   <img class="dashboard-wallpaper" data-dashboard-wallpaper hidden alt="" aria-hidden="true">
   <section class="first-run-choice" data-first-run-choice hidden aria-labelledby="first-run-choice-title">
     <div class="first-run-choice-panel">

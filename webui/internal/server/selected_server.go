@@ -75,7 +75,7 @@ func (a *App) minecraftSelection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	selected := selectedServerContext{}
-	if _, explicit := r.URL.Query()["server"]; explicit || len(instances) == 1 {
+	if _, explicit := r.URL.Query()["server"]; explicit || (len(instances) == 1 && r.URL.Query().Get("selection") != "none") {
 		var valid bool
 		selected, valid = a.selectedMinecraft(w, r, session)
 		if !valid {

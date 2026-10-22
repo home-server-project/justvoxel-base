@@ -120,11 +120,11 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	app, client := newAddServerTestApp(t)
 	workspace := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))
 	body := workspace.Body.String()
-	if workspace.Code != http.StatusOK || !strings.Contains(body, `class="panel minecraft-add-server-card" href="/minecraft/servers/add" aria-label="Add Minecraft Server"`) {
+	if workspace.Code != http.StatusOK || !strings.Contains(body, `href="/minecraft/servers/add">Add Server</a>`) {
 		t.Fatalf("entry missing: %d %s", workspace.Code, body)
 	}
-	if strings.Count(body, "minecraft-add-server-card") != 1 || strings.Contains(body, "data-minecraft-action") {
-		t.Fatal("entry must be the only Phase 5 card")
+	if strings.Contains(body, "minecraft-add-server-card") || strings.Contains(body, "data-minecraft-action") {
+		t.Fatal("Add Server must be an action, not a card")
 	}
 	legacy := draftFromSetupDefaults(client.defaults, api.AdminStorageDiscovery{})
 	firstRunSetupDrafts.save(app, "session-token", legacy)
@@ -508,7 +508,7 @@ func TestLegacyWizardKeepsEditableDestinationsAndIndependentDraft(t *testing.T) 
 	}
 }
 
-func TestMinecraftServersAddTileUsesApplianceConfiguration(t *testing.T) {
+func TestMinecraftServersAddActionUsesApplianceConfiguration(t *testing.T) {
 	for _, configured := range []bool{false, true} {
 		label, target := "first-setup", "/setup"
 		if configured {
@@ -520,9 +520,9 @@ func TestMinecraftServersAddTileUsesApplianceConfiguration(t *testing.T) {
 			client.instances = nil
 			client.runtimes = nil
 			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))
-			want := `class="panel minecraft-add-server-card" href="` + target + `"`
+			want := `href="` + target + `">Add Server</a>`
 			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), want) || client.configurationHit == 0 {
-				t.Fatalf("tile must use authoritative configuration: %d %s", response.Code, response.Body.String())
+				t.Fatalf("action must use authoritative configuration: %d %s", response.Code, response.Body.String())
 			}
 			if strings.Contains(response.Body.String(), "<!doctype") {
 				t.Fatal("Minecraft Servers must remain a dashboard workspace fragment")

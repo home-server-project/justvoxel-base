@@ -21,33 +21,43 @@
 {{define "minecraft_servers.html"}}
   {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
   {{if .Message}}<p class="notice success" role="status">{{.Message}}</p>{{end}}
-  <div class="minecraft-server-arrange-toolbar">
-    <button class="secondary" type="button" data-server-arrange hidden>Arrange</button>
+  <section class="minecraft-server-inventory" data-server-csrf="{{.CSRF}}">
+  <nav class="minecraft-server-arrange-toolbar" aria-label="Minecraft Servers actions">
+    <a href="{{if .Configured}}/minecraft/servers/add{{else}}/setup{{end}}">Add Server</a>
+    <button type="button" data-server-arrange hidden>Rearrange</button>
     <button type="button" data-server-arrange-done hidden>Done</button>
-  </div>
+    <a href="/?workspace=migration&amp;tab=import">Import</a>
+  </nav>
+  <p class="notice error" role="status" data-server-feedback hidden></p>
   <div class="minecraft-server-entries">
-    <a class="panel minecraft-add-server-card" href="{{if .Configured}}/minecraft/servers/add{{else}}/setup{{end}}" aria-label="Add Minecraft Server"><span class="minecraft-add-server-plus" aria-hidden="true">+</span><strong>Add Minecraft Server</strong></a>
     {{range .Servers}}
-    <article class="panel minecraft-server-card" data-minecraft-server-card data-server-id="{{.ContextID}}">
-      <h2>{{.Name}}</h2>
-      {{template "minecraft-server-summary" .}}
-      {{if .BootKnown}}<div class="minecraft-overview-card"><span>Start on Boot</span><strong>{{if .StartOnBoot}}Enabled{{else}}Disabled{{end}}</strong></div>{{end}}
-      <div class="minecraft-server-actions" data-server-normal-actions>
-        {{if .CanStart}}<form method="post" action="{{.URL}}/start"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">Start</button></form>{{end}}
-        {{if .CanStop}}<form method="post" action="{{.URL}}/stop"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary" type="submit">Stop</button></form>{{end}}
-        <a class="button-link" href="/?workspace=minecraft&amp;server={{.ContextID}}">Settings</a>
-        <details class="minecraft-server-more">
-          <summary aria-label="More for {{.Name}}">More</summary>
-          <div class="minecraft-server-more-items">
-            <a href="{{.URL}}">Open server</a>
-            {{if .CanRestart}}<form method="post" action="{{.URL}}/restart"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary" type="submit">Restart</button></form>{{end}}
+    <article class="panel minecraft-server-card" data-minecraft-server-card data-server-id="{{.ContextID}}" data-server-name="{{.Name}}">
+      <div class="minecraft-server-heading"><h2>{{.Name}}</h2><strong class="minecraft-server-state {{.StateClass}}">{{.State}}</strong></div>
+      <div class="minecraft-server-software-row"><p class="muted">{{.Software}} · {{.Version}}</p>
+        <details class="storage-action-menu minecraft-server-more" data-server-normal-actions>
+          <summary aria-label="Server actions for {{.Name}}">...</summary>
+          <div class="storage-action-menu-popover minecraft-server-more-items" popover="auto">
+            <a href="/?workspace=minecraft&amp;server={{.ContextID}}">Settings</a>
             <a href="/?workspace=backups&amp;server={{.ContextID}}">Backups</a>
             <a href="/?workspace=version&amp;server={{.ContextID}}">Version</a>
             <a href="/?workspace=plugins&amp;server={{.ContextID}}">Plugins</a>
-            <a href="/minecraft/how-to-connect?server={{.ContextID}}&amp;invite=1">Invite friends</a>
+            <button type="button" data-server-invite>Invite friends</button>
             <a href="/minecraft/how-to-connect?server={{.ContextID}}">How to connect</a>
+            {{if .CanRestart}}<button type="button" data-server-restart>Restart</button>{{end}}
+            <hr>
+            <button type="button" class="storage-action-danger" data-server-delete>Delete server</button>
           </div>
         </details>
+      </div>
+      {{if .ConfigurationError}}<p class="notice error">{{.ConfigurationError}}</p>{{end}}
+      <div class="minecraft-server-metrics">
+        <div><span>Java port</span><strong>{{if .JavaPort}}{{.JavaPort}}{{else}}Unavailable{{end}}</strong></div>
+        <div><span>Bedrock</span><strong>{{if .ConfigurationAvailable}}{{if .BedrockEnabled}}Enabled · {{.BedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable{{end}}</strong></div>
+        <div><span>Memory</span><strong>{{if .JavaMemory}}{{.JavaMemory}}{{else}}Unavailable{{end}} / {{if .ContainerMemory}}{{.ContainerMemory}}{{else}}Unavailable{{end}}</strong></div>
+      </div>
+      <div class="minecraft-server-switches" data-server-normal-actions>
+        <label><span>Server</span><input class="date-time-switch" type="checkbox" role="switch" data-server-running aria-label="Server running for {{.Name}}"{{if .Running}} checked{{end}}{{if not .CanSwitch}} disabled{{end}}></label>
+        <label><span>Start on Boot</span><input class="date-time-switch" type="checkbox" role="switch" data-server-boot aria-label="Start on Boot for {{.Name}}"{{if .StartOnBoot}} checked{{end}}{{if not .CanConfigureBoot}} disabled{{end}}></label>
       </div>
       <div class="minecraft-server-move-actions" data-server-arrange-actions hidden>
         <button class="secondary" type="button" data-server-move-earlier>Move earlier</button>
@@ -56,6 +66,7 @@
     </article>
     {{end}}
   </div>
+  </section>
 {{end}}
 {{define "minecraft-servers-page-end"}}</main>
 {{template "project-footer" .}}

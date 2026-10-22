@@ -306,7 +306,7 @@ func TestDashboardInstanceLifecycleAndConfirmation(t *testing.T) {
 func TestDashboardInstanceSelectionFailures(t *testing.T) {
 	for _, query := range []string{"?server=", "?server=family", "?server=jv-stale1", "?server=jv-family1&server=jv-kids001", "?server=jv-family1&server=jv-family1", ""} {
 		for _, path := range []string{"/", "/api/dashboard-status", "/minecraft/how-to-connect", "/minecraft/start", "/minecraft/stop", "/minecraft/restart"} {
-			if query == "" && (path == "/" || path == "/api/dashboard-status" || path == "/minecraft/how-to-connect") {
+			if path == "/" || (query == "" && (path == "/api/dashboard-status" || path == "/minecraft/how-to-connect")) {
 				continue
 			}
 			t.Run(path+query, func(t *testing.T) {
@@ -485,5 +485,90 @@ func TestDashboardBackupAuthenticationErrors(t *testing.T) {
 		if !errors.Is(err, want) || !reflect.DeepEqual(f.backupReads, []string{"jv-family1"}) {
 			t.Fatal(err, f.backupReads)
 		}
+	}
+}
+
+func TestDashboardBrowserSelectionRecovery(t *testing.T) {
+	for _, count := range []int{0, 1, 2} {
+		app, f := newDashboardInstanceApp(t)
+		f.instances = f.instances[:count]
+		page := dashboardInstanceRequest(app, "GET", "/?server=jv-stale1&workspace=version&tab=software&result=started", "")
+		if page.Code != http.StatusOK || !strings.HasPrefix(page.Header().Get("Content-Type"), "text/html") {
+			t.Fatal(page.Code, page.Body.String())
+		}
+		for _, want := range []string{`data-selected-minecraft-id=""`, `data-dashboard-url="/?result=started&amp;tab=switch&amp;workspace=version"`} {
+			if !strings.Contains(page.Body.String(), want) {
+				t.Fatalf("missing %s", want)
+			}
+		}
+		if len(f.reads) != 0 || len(f.backupReads) != 0 || len(f.actions) != 0 {
+			t.Fatal("stale selection resolved another server", f.reads, f.backupReads, f.actions)
+		}
+	}
+}
+
+func TestDashboardBrowserLegacyVersionTab(t *testing.T) {
+	app, _ := newDashboardInstanceApp(t)
+	page := dashboardInstanceRequest(app, "GET", "/?server=jv-family1&workspace=version&tab=software", "")
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `data-dashboard-url="/?server=jv-family1&amp;tab=switch&amp;workspace=version"`) || !strings.Contains(page.Body.String(), `data-selected-minecraft-id="jv-family1"`) {
+		t.Fatal(page.Code, page.Body.String())
+	}
+}
+
+func TestDashboardBrowserSelectionCheckErrors(t *testing.T) {
+	for _, selectionErr := range []error{api.ErrUnauthorized, api.ErrPasswordChangeRequired, errors.New("inventory unavailable")} {
+		app, f := newDashboardInstanceApp(t)
+		f.inventoryError = selectionErr
+		page := dashboardInstanceRequest(app, "GET", "/?server=jv-stale1&workspace=version&tab=software", "")
+		if strings.Contains(page.Header().Get("Content-Type"), "application/json") || strings.Contains(page.Body.String(), `"ok":false`) {
+			t.Fatal("dashboard emitted API error", page.Body.String())
+		}
+		switch selectionErr {
+		case api.ErrUnauthorized:
+			if page.Code != http.StatusSeeOther || page.Header().Get("Location") != "/login" {
+				t.Fatal(page.Code, page.Header())
+			}
+			cleared := false
+			for _, cookie := range page.Result().Cookies() {
+				if cookie.Name == sessionCookie && cookie.MaxAge < 0 {
+					cleared = true
+				}
+			}
+			if !cleared {
+				t.Fatal("unusable session not cleared")
+			}
+		case api.ErrPasswordChangeRequired:
+			if page.Code != http.StatusSeeOther || page.Header().Get("Location") != "/password" {
+				t.Fatal(page.Code, page.Header())
+			}
+		default:
+			if page.Code != http.StatusBadGateway || !strings.Contains(page.Body.String(), "management service unavailable") {
+				t.Fatal(page.Code, page.Body.String())
+			}
+		}
+	}
+	app, _ := newDashboardInstanceApp(t)
+	page := httptestResponse(app, httptest.NewRequest("GET", "http://example/?server=jv-stale1&workspace=version&tab=software", nil))
+	if page.Code != http.StatusSeeOther || page.Header().Get("Location") != "/login" {
+		t.Fatal(page.Code, page.Header())
+	}
+}
+
+func TestDashboardClearedSelectionDoesNotChooseSoleReplacement(t *testing.T) {
+	app, f := newDashboardInstanceApp(t)
+	f.instances = f.instances[:1]
+	for _, path := range []string{"/api/dashboard-status?selection=none", "/api/minecraft/workspace/selection?selection=none"} {
+		response := dashboardInstanceRequest(app, "GET", path, "")
+		if response.Code != http.StatusOK || len(f.reads) != 0 || len(f.backupReads) != 0 {
+			t.Fatal(response.Code, response.Body.String(), f.reads)
+		}
+		if path == "/api/minecraft/workspace/selection?selection=none" && !strings.Contains(response.Body.String(), `"selected":{"id":"","name":""}`) {
+			t.Fatal(response.Body.String())
+		}
+	}
+	// Existing API callers still resolve the sole server unless explicitly unselected.
+	response := dashboardInstanceRequest(app, "GET", "/api/minecraft/workspace/selection", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"selected":{"id":"jv-family1"`) {
+		t.Fatal(response.Code, response.Body.String())
 	}
 }

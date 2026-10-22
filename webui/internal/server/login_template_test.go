@@ -27,7 +27,7 @@ func TestLoginTemplateUsesLocalLogo(t *testing.T) {
 		`<h1 class="login-brand"><img src="/static/justvoxel-login-logo.png" alt="JustVoxel" width="2172" height="724"></h1>`,
 		`Minecraft Server Appliance`,
 		`<form method="post" action="/login">`,
-		`name="username" value="voxel" autocomplete="username" required`,
+		`name="username" autocomplete="username" required`,
 		`type="password" name="password" autocomplete="current-password" required autofocus`,
 		`<button type="submit">Sign in</button>`,
 		`<script src="/static/app.js" defer></script>`,
@@ -40,6 +40,7 @@ func TestLoginTemplateUsesLocalLogo(t *testing.T) {
 		}
 	}
 	for _, unwanted := range []string{
+		`value="voxel"`,
 		"Sign in as the JustVoxel administrator.",
 		"<h1>JustVoxel</h1>",
 		"justvoxel-iso",

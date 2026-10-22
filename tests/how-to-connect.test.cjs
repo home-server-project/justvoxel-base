@@ -194,7 +194,7 @@ test('approved page layout uses a full-width action lane and the same guide and 
   }
   assert.match(template, /class="connect-controls panel"/);
   assert.match(template, /class="connect-eyebrow eyebrow"/);
-  assert.match(template, /class="connect-title-row title-row"><h1 id="connect-title">How to connect<\/h1><select class="connect-server" aria-label="Server">/);
+  assert.match(template, /class="connect-title-row title-row"><h1 id="connect-title">How to connect<\/h1><div data-server-selector-slot><label>Server: <select class="connect-server" aria-label="Server">/);
   assert.ok(!template.includes('>Server<'));
   assert.match(template, /<label for="connect-domain">Custom domain<\/label>\s*<input id="connect-domain"[^>]+disabled>\s*<input id="connect-custom" type="checkbox" role="switch"/);
   assert.ok(template.includes('Hostname only — no https:// or port.'));
@@ -376,4 +376,12 @@ test('standalone server selector navigates by immutable ID and preserves only in
     select.listeners.change();
     assert.equal(location.href, expected);
   }
+});
+
+
+test('invitation keeps Close secondary before primary Copy; selector reuses workspace styling', () => {
+  const template = readFileSync(path.join(__dirname, '../webui/internal/server/templates/how_to_connect.html'), 'utf8');
+  assert.match(template, /class="secondary" data-connect-invitation-close>Close<\/button><button type="button" data-connect-copy>Copy invitation/);
+  assert.match(template, /data-server-selector-slot><label>Server: <select/);
+  assert.doesNotMatch(template, /data-workspace-window|data-workspace-refresh|data-workspace-close|Select server/);
 });
