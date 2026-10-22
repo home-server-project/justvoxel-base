@@ -309,7 +309,7 @@ func defaultConnectionInvitation(guide *connectionGuide) string {
 	if len(methods) == 0 {
 		return ""
 	}
-	return "Join " + guide.ServerName + " on Minecraft\n\n" + strings.Join(methods, "\n\n")
+	return "Join my Minecraft " + guide.ServerName + " on JustVoxel\n\n" + strings.Join(methods, "\n\n")
 }
 
 func (a *App) minecraftServersInvitation(w http.ResponseWriter, r *http.Request) {

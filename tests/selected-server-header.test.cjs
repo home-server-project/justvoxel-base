@@ -22,7 +22,7 @@ for (const inventory of [[], [{id:'jv-first01',name:'Family Survival'}], [{id:'j
   const events = [];
   const others = Array.from({length:5}, () => new Element("select"));
   const dashboard = {dataset:{}};
-  const location = {origin:"https://justvoxel.test",href:"https://justvoxel.test/?workspace=backups&created=yes",search:"?workspace=backups&created=yes"};
+  const location = {origin:"https://justvoxel.test",href:"https://justvoxel.test/?workspace=backups&created=yes&operation=stale",search:"?workspace=backups&created=yes&operation=stale"};
   const context = vm.createContext({URL, URLSearchParams,
    location,
    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
@@ -30,7 +30,11 @@ for (const inventory of [[], [{id:'jv-first01',name:'Family Survival'}], [{id:'j
    document: {createElement: tag => new Element(tag), querySelector: () => dashboard, querySelectorAll: () => others},
    fetch: async () => ({ok:true,json:async () => ({servers:inventory,selected:{id:selectedId}})}),
   });
-  await vm.runInContext(helper+'\njustVoxelServerSelection', context)(slot);
+  vm.runInContext(helper, context);
+  const selectServer = context.justVoxelSelectServer;
+  const selections = [];
+  context.justVoxelSelectServer = (...args) => { selections.push(args); return selectServer(...args); };
+  await context.justVoxelServerSelection(slot);
   const select = slot.children[0].children[0];
   assert.equal(slot.children[0].textContent, 'Server: ');
   assert.equal(select.disabled, inventory.length === 0);
@@ -50,6 +54,9 @@ for (const inventory of [[], [{id:'jv-first01',name:'Family Survival'}], [{id:'j
    assert.equal(replaced.searchParams.get('workspace'),'plugins');
    assert.equal(replaced.searchParams.get('tab'),'installed');
    assert.equal(replaced.searchParams.get('created'),'yes');
+   assert.equal(replaced.searchParams.has('operation'),false);
+   assert.deepEqual(selections, [[inventory.at(-1).id, 'plugins', 'installed']]);
+   assert.equal(context.justVoxelSelectionGeneration, 1);
    for (const control of others) assert.equal(control.value, inventory.at(-1).id);
    assert.equal(dashboard.dataset.selectedMinecraftId, inventory.at(-1).id);
    assert.equal(events.length, 1);
@@ -57,8 +64,17 @@ for (const inventory of [[], [{id:'jv-first01',name:'Family Survival'}], [{id:'j
    assert.equal(events[0].detail.serverId, inventory.at(-1).id);
    assert.equal(events[0].detail.workspace, 'plugins');
    assert.equal(context.justVoxelSelectedURL('/api/version/workspace/status'), '/api/version/workspace/status?server=' + inventory.at(-1).id);
+   select.events.change();
+   assert.equal(events.length, 1, 'same server does not dispatch a fabricated selection change');
+   assert.equal(context.justVoxelSelectionGeneration, 1);
+   for (const invalid of ['', 'family', 'jv-short', 'jv-ABCDEF', 'jv-abcdefghijklm']) {
+     assert.equal(selectServer(invalid, 'plugins'), false);
+     assert.equal(events.length, 1);
+     assert.equal(context.justVoxelSelectionGeneration, 1);
+   }
    select.value = 'jv-forged1'; select.events.change();
    assert.equal(events.length, 1, 'reject IDs outside the selector inventory');
+   assert.equal(selections.length, 2, 'invalid inventory selection never reaches shared mutation');
   }
   await context.justVoxelServerSelection(slot);
   assert.equal(slot.children.length,1);

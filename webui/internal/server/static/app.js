@@ -24,6 +24,27 @@ globalThis.justVoxelSelectedURL = (value) => {
   }
   return target.pathname + target.search;
 };
+globalThis.justVoxelSelectServer = (id, workspace, tabName) => {
+  if (typeof id !== "string" || !/^jv-[a-z0-9]{6,12}$/.test(id)) return false;
+  const target = new URL(window.location.href);
+  const dashboard = document.querySelector("#dashboard[data-dashboard-status]");
+  const previousId = dashboard?.dataset.selectedMinecraftId || target.searchParams.get("server");
+  target.searchParams.set("server", id);
+  target.searchParams.set("workspace", workspace);
+  if (tabName) target.searchParams.set("tab", tabName);
+  else target.searchParams.delete("tab");
+  target.searchParams.delete("operation");
+  window.history.replaceState(window.history.state, "", target);
+  document.querySelectorAll("[data-selected-server] select").forEach((control) => { control.value = id; });
+  if (dashboard) dashboard.dataset.selectedMinecraftId = id;
+  if (previousId !== id) {
+    ++globalThis.justVoxelSelectionGeneration;
+    window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", {
+      detail: { serverId: id, workspace },
+    }));
+  }
+  return true;
+};
 globalThis.justVoxelServerSelection = async (slot) => {
   if (!slot || slot.dataset.selectionLoading || slot.querySelector("[data-selected-server]")) return;
   slot.dataset.selectionLoading = "true";
@@ -57,23 +78,10 @@ globalThis.justVoxelServerSelection = async (slot) => {
     });
     select.addEventListener("change", () => {
       if (!data.servers.some((server) => server.id === select.value && /^jv-[a-z0-9]{6,12}$/.test(server.id))) return;
-      const target = new URL(window.location.href);
-      target.searchParams.set("server", select.value);
-      target.searchParams.set("workspace", slot.dataset.serverWorkspace);
       const dialog = slot.closest("[data-workspace-window]");
       const tab = dialog?.querySelector('[aria-selected="true"]');
       const tabName = tab?.getAttribute(`data-${slot.dataset.serverWorkspace}-tab`);
-      if (tabName) target.searchParams.set("tab", tabName);
-      else target.searchParams.delete("tab");
-      target.searchParams.delete("operation");
-      window.history.replaceState(window.history.state, "", target);
-      ++globalThis.justVoxelSelectionGeneration;
-      document.querySelectorAll("[data-selected-server] select").forEach((control) => { control.value = select.value; });
-      const dashboard = document.querySelector("#dashboard[data-dashboard-status]");
-      if (dashboard) dashboard.dataset.selectedMinecraftId = select.value;
-      window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", {
-        detail: { serverId: select.value, workspace: slot.dataset.serverWorkspace },
-      }));
+      globalThis.justVoxelSelectServer(select.value, slot.dataset.serverWorkspace, tabName);
     });
     label.append(select);
     slot.replaceChildren(label);
@@ -3506,24 +3514,59 @@ if (minecraftOpen && minecraftDialog) {
       if (!context || !payload || sequence !== loadSequence) return;
       const name = context.selected.name;
       const settings = payload.minecraft || {};
-      const boot = document.createElement("form");
-      boot.dataset.minecraftSettingsTab = "overview";
-      boot.innerHTML = '<label class="minecraft-overview-boot-card"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" name="start_on_boot"></label><div class="minecraft-native-actions"><button type="submit">Review changes</button></div>';
-      boot.querySelector("input").checked = Boolean(settings.start_on_boot);
-      boot.addEventListener("submit", async (event) => {
+      const lane = document.createElement("div");
+      lane.className = "minecraft-overview-lifecycle";
+      lane.innerHTML = '<label class="minecraft-overview-boot-card"><span>Server running</span><input class="date-time-switch" type="checkbox" role="switch" name="server_running"></label><label class="minecraft-overview-boot-card"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" role="switch" name="start_on_boot"></label>';
+      const running = lane.querySelector('[name="server_running"]');
+      const boot = lane.querySelector('[name="start_on_boot"]');
+      const runtimeState = String(minecraft.state || "").toLowerCase();
+      running.checked = runtimeState === "running";
+      running.disabled = !minecraft.configured || !["running", "stopped"].includes(runtimeState);
+      boot.checked = Boolean(settings.start_on_boot);
+      boot.disabled = !payload.configured || !["running", "stopped"].includes(runtimeState);
+      const selectedID = context.selected.id;
+      const selectedRequest = (path, body) => requestWorkspaceJSON(path + "?" + new URLSearchParams({server: selectedID}), {method: "POST", body});
+      const requiresCondition = plan => plan.compatibility_blocked || Object.entries(plan).some(([key, value]) => key.endsWith("_required") && value === true);
+      const refusalReason = plan => plan.error || plan.message || (plan.warnings || []).join(" ") || "This change requires review in Minecraft Settings before it can be applied.";
+      let pending = false;
+      const change = async (control, action) => {
+        const requested = control.checked;
+        control.checked = !requested;
+        if (pending || control.disabled || sequence !== loadSequence) return;
         const selection = globalThis.justVoxelSelectionGeneration;
-        event.preventDefault();
-        try {
-          const params = settingsParams(boot);
-          params.set("start_on_boot", String(boot.querySelector("input").checked));
-          const plan = await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan", {method: "POST", body: params});
-          if (plan && sequence === loadSequence) renderSettingsReview(root, plan, params);
-        } catch (error) {
+        pending = true;
+        running.disabled = boot.disabled = true;
+        if (state) state.textContent = "Applying…";
+        let failure;
+        try { await action(requested); }
+        catch (error) {
           if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
-          if (state) state.textContent = error.message;
+          failure = error;
+        } finally {
+          if (selection === globalThis.justVoxelSelectionGeneration && sequence === loadSequence) {
+            // Both success and refusal reload authoritative values; never claim an optimistic change.
+            const reload = loadCurrentTab();
+            const reloadSequence = loadSequence;
+            await reload;
+            if (failure && selection === globalThis.justVoxelSelectionGeneration && reloadSequence === loadSequence && state) state.textContent = failure.message;
+          }
         }
-      });
-      root.appendChild(boot);
+      };
+      running.addEventListener("change", () => change(running, async requested => {
+        const result = await selectedRequest("/api/minecraft/servers/lifecycle", new URLSearchParams({csrf, action: requested ? "start" : "stop"}));
+        if (result && !result.ok) throw new Error(result.error || "Server action was not completed.");
+      }));
+      boot.addEventListener("change", () => change(boot, async requested => {
+        const params = new URLSearchParams({csrf, tab: "overview", start_on_boot: String(requested)});
+        const plan = await selectedRequest("/api/minecraft/workspace/settings/plan", params);
+        if (!plan || sequence !== loadSequence) return;
+        if (requiresCondition(plan)) throw new Error(refusalReason(plan));
+        if (!plan.review) throw new Error("The settings review is unavailable. Refresh Minecraft Settings.");
+        params.set("review", plan.review);
+        const result = await selectedRequest("/api/minecraft/workspace/settings/apply", params);
+        if (result && !result.applied) throw new Error(refusalReason(result));
+      }));
+      root.appendChild(lane);
 
       const details = document.createElement("form");
       details.className = "panel details minecraft-workspace-section minecraft-overview-details";
@@ -4130,6 +4173,7 @@ if (minecraftOpen && minecraftDialog) {
     const payload = await requestWorkspaceJSON("/api/minecraft/workspace/logs");
     if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
+    root.className = "minecraft-recent-logs-view";
     if (message) root.appendChild(noticeNode(message));
     const section = document.createElement("section");
     section.className = "panel details minecraft-workspace-section";
@@ -7139,7 +7183,7 @@ if (pluginsDialog && pluginsOpen) {
     const cardHeight = parseFloat(style.getPropertyValue("--plugins-card-height"));
     const gap = parseFloat(style.rowGap) || 0;
     const rows = Math.max(1, Math.floor((results.clientHeight + gap) / (cardHeight + gap)));
-    return Math.max(1, Math.min(12, columns * rows));
+    return Math.max(1, Math.min(24, columns * rows));
   };
   const updateCapacity = (reload = true) => {
     if (!pluginsDialog.open || tab !== "discover") return;
@@ -7224,12 +7268,14 @@ const minecraftServersOpen = document.querySelector("[data-minecraft-servers-ope
 if (minecraftServersDialog && minecraftServersOpen) {
   const content = minecraftServersDialog.querySelector("[data-minecraft-servers-content]");
   const state = minecraftServersDialog.querySelector("[data-minecraft-servers-state]");
+  const actionsSlot = minecraftServersDialog.querySelector("[data-minecraft-servers-actions]");
   let sequence = 0;
   const load = async () => {
     const current = ++sequence;
     const query = new URLSearchParams();
     const destination = new URLSearchParams(window.location.search);
     for (const key of ["created", "deleted"]) if (destination.get(key) === "yes") query.set(key, "yes");
+    actionsSlot.replaceChildren();
     state.textContent = "Loading Minecraft Servers…";
     try {
       const response = await fetch("/workspace/minecraft-servers?" + query, {credentials:"same-origin", cache:"no-store"});
@@ -7242,6 +7288,8 @@ if (minecraftServersDialog && minecraftServersOpen) {
       content.replaceChildren(fragment);
       content.justVoxelRefreshServers = load;
       globalThis.justVoxelMinecraftServers(content);
+      const actions = content.querySelector(".minecraft-server-arrange-toolbar");
+      if (actions) actionsSlot.replaceChildren(actions);
       state.textContent = "";
     } catch (error) {
       if (current !== sequence) return;

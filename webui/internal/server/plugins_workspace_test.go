@@ -207,7 +207,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	style := string(css)
-	for _, want := range []string{`.plugins-workspace-body{container-type:inline-size;`, `grid-template-columns:minmax(0,1fr)`, `@container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}`, `@container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}`, `-webkit-line-clamp:2`, `.plugins-workspace-dialog [hidden]{display:none!important}`, `max-width:1080px`, `.plugins-result-card.is-selected`, `.plugins-icon-tile{display:grid;place-items:center;flex:none;width:40px;height:40px`, `.plugins-overlay-actions{display:flex;flex-wrap:wrap;`, `word-break:normal`, `.plugins-version-list{display:flex;flex-wrap:wrap;`, `.plugins-info-rows{display:flex;flex-wrap:wrap;gap:.12rem 1rem;`} {
+	for _, want := range []string{`.plugins-workspace-body{container-type:inline-size;`, `grid-template-columns:minmax(0,1fr)`, `@container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}`, `@container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}`, `@container(min-width:1140px){.plugins-results{grid-template-columns:repeat(4,minmax(0,1fr))}}`, `@container(min-width:1420px){.plugins-results{grid-template-columns:repeat(5,minmax(0,1fr))}}`, `-webkit-line-clamp:2`, `.plugins-workspace-dialog [hidden]{display:none!important}`, `max-width:1800px`, `.plugins-result-card.is-selected`, `.plugins-icon-tile{display:grid;place-items:center;flex:none;width:40px;height:40px`, `.plugins-overlay-actions{display:flex;flex-wrap:wrap;`, `word-break:normal`, `.plugins-version-list{display:flex;flex-wrap:wrap;`, `.plugins-info-rows{display:flex;flex-wrap:wrap;gap:.12rem 1rem;`} {
 		if !strings.Contains(style, want) {
 			t.Fatalf("compact workspace styling missing %s", want)
 		}
@@ -844,7 +844,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 			t.Fatal("visible toolbar text remains", forbidden)
 		}
 	}
-	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(12`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `resetCursors();`, `pageIndex = 0`, `const currentPage = pageIndex + 1`, `totalPages = Math.max(1, Math.ceil(payload.total / pageLimit))`, "pageLabel.textContent = `Page ${currentPage} of ${totalPages}`", `cursor = pageCursors[--pageIndex]`, `pageCursors[pageIndex + 1] = nextCursor`, `event.preventDefault()`} {
+	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(24`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `resetCursors();`, `pageIndex = 0`, `const currentPage = pageIndex + 1`, `totalPages = Math.max(1, Math.ceil(payload.total / pageLimit))`, "pageLabel.textContent = `Page ${currentPage} of ${totalPages}`", `cursor = pageCursors[--pageIndex]`, `pageCursors[pageIndex + 1] = nextCursor`, `event.preventDefault()`} {
 		if !strings.Contains(js, want) {
 			t.Fatal("dynamic catalog behavior missing", want)
 		}
@@ -871,7 +871,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 			t.Fatal("plugin lane missing", selector)
 		}
 		rule := css[start : start+strings.Index(css[start:], "}")+1]
-		for _, want := range []string{"width:100%;", "max-width:1080px;", "margin-inline:auto"} {
+		for _, want := range []string{"width:100%;", "max-width:1800px;", "margin-inline:auto"} {
 			if !strings.Contains(rule, want) {
 				t.Fatal("shared centered plugin lane rule missing", selector, want)
 			}

@@ -515,7 +515,7 @@ func TestDirectServerInvitationUsesOnlyGuideDefaults(t *testing.T) {
 	status.System.IPv4 = "192.0.2.10"
 	guide := newConnectionGuide(status, api.RemoteAccessStatus{}, "Family")
 	text := defaultConnectionInvitation(guide)
-	if !strings.Contains(text, "Join Family on Minecraft\n\nLocal connection IPv4\nJava: 192.0.2.10:25571") {
+	if strings.Contains(text, "Join Family on Minecraft") || !strings.HasPrefix(text, "Join my Minecraft Family on JustVoxel\n\nLocal connection IPv4\nJava: 192.0.2.10:25571") {
 		t.Fatal(text)
 	}
 	status.System.IPv4 = ""

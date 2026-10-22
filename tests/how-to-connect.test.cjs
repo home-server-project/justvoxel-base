@@ -260,7 +260,8 @@ test('invitation uses the current selected endpoints and friendly name only', ()
   assert.equal(f.invitation.open, false);
   f.invite.listeners.click();
   assert.equal(f.invitation.open, true);
-  assert.equal(f.invitationText.value, 'Join Family Survival on Minecraft\n\nlocal\nJava: 192.168.0.59:25571\nBedrock: 192.168.0.59:19139');
+  assert.equal(f.invitationText.value, 'Join my Minecraft Family Survival on JustVoxel\n\nlocal\nJava: 192.168.0.59:25571\nBedrock: 192.168.0.59:19139');
+  assert.ok(!f.invitationText.value.includes('Join Family Survival on Minecraft'));
   for (const absent of ['jv-', 'password', 'token', '/host/', 'https://', 'PS5', 'backup', 'tailscale', 'netbird', 'playit']) {
     assert.ok(!f.invitationText.value.includes(absent), absent);
   }
@@ -270,12 +271,12 @@ test('invitation uses the current selected endpoints and friendly name only', ()
   f.switches[2].checked = true;
   f.switches[4].checked = true;
   f.invite.listeners.click();
-  assert.equal(f.invitationText.value, 'Join Family Survival on Minecraft\n\nlocal\nJava: 192.168.0.59:25571\nBedrock: 192.168.0.59:19139\n\ntailscale\nJava: 100.80.0.8:25571\nBedrock: 100.80.0.8:19139\n\nplayit\nJava: example.gl.joinmc.link:12345');
+  assert.equal(f.invitationText.value, 'Join my Minecraft Family Survival on JustVoxel\n\nlocal\nJava: 192.168.0.59:25571\nBedrock: 192.168.0.59:19139\n\ntailscale\nJava: 100.80.0.8:25571\nBedrock: 100.80.0.8:19139\n\nplayit\nJava: example.gl.joinmc.link:12345');
   f.close.listeners.click();
   f.switches[1].checked = false;
   f.switches[2].disabled = true;
   f.invite.listeners.click();
-  assert.equal(f.invitationText.value, 'Join Family Survival on Minecraft\n\nplayit\nJava: example.gl.joinmc.link:12345');
+  assert.equal(f.invitationText.value, 'Join my Minecraft Family Survival on JustVoxel\n\nplayit\nJava: example.gl.joinmc.link:12345');
   f.close.listeners.click();
   f.switches[4].checked = false;
   f.invite.listeners.click();
@@ -292,7 +293,7 @@ test('custom invitation reuses validated hostname and configured Java and Bedroc
     f.domain.value = hostname;
     f.domain.listeners.input();
     f.invite.listeners.click();
-    assert.equal(f.invitationText.value, `Join Family Survival on Minecraft\n\ncustom\nJava: ${hostname.trim()}:25571\nBedrock: ${hostname.trim()}:19139`);
+    assert.equal(f.invitationText.value, `Join my Minecraft Family Survival on JustVoxel\n\ncustom\nJava: ${hostname.trim()}:25571\nBedrock: ${hostname.trim()}:19139`);
     f.close.listeners.click();
   }
 });

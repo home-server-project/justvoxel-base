@@ -117,7 +117,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 		}
 		previous = index
 	}
-	for _, want := range []string{`href="/minecraft/servers/add"`, "Paper · 1.21.8", "Purpur · 1.21.8", "25567", "Enabled · 19134", "Disabled", "Running", "Stopped", "2G / 3G"} {
+	for _, want := range []string{`href="/minecraft/servers/add"`, "Paper · 1.21.8", "Purpur · 1.21.8", "25567", ">19134</strong>", "Disabled", "Running", "Stopped", "2G / 3G"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
 		}
@@ -136,7 +136,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"repeat(2,minmax(0,1fr))", "box-shadow", ":focus-visible", "@media (max-width: 700px)", "@container (max-width: 600px)"} {
+	for _, want := range []string{"repeat(auto-fill,minmax(min(100%,380px),420px))", "box-shadow", ":focus-visible", "@media (max-width: 700px)", "@container (max-width: 600px)"} {
 		if !strings.Contains(string(cards), want) {
 			t.Errorf("missing card treatment %s", want)
 		}
@@ -153,7 +153,7 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 	}
 	for i, id := range []string{"jv-family1", "jv-kids001"} {
 		card := cards[i]
-		for _, want := range []string{`data-server-id="` + id + `"`, "data-server-running", "data-server-boot", "Start on Boot", "data-server-arrange-actions hidden", "data-server-move-earlier", "data-server-move-later"} {
+		for _, want := range []string{`data-server-id="` + id + `"`, "data-server-running", "data-server-boot", "Server running", "Start on Boot", "data-server-arrange-actions hidden", "data-server-move-earlier", "data-server-move-later"} {
 			if !strings.Contains(card, want) {
 				t.Errorf("%s missing %s", id, want)
 			}
@@ -163,7 +163,7 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 			t.Fatal("name and status must share row", heading)
 		}
 		row := regexp.MustCompile(`(?s)<div class="minecraft-server-software-row">.*?</details>`).FindString(card)
-		if !strings.Contains(row, "· 1.21.8") || !strings.Contains(row, `>...</summary>`) {
+		if !strings.Contains(row, "· 1.21.8") || !strings.Contains(row, `>⋯</summary>`) {
 			t.Fatal("software/menu row", row)
 		}
 		previous := -1
@@ -175,11 +175,11 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 			previous = index
 		}
 		for _, workspace := range []string{"minecraft", "backups", "version", "plugins"} {
-			if !strings.Contains(row, `href="/?workspace=`+workspace+`&amp;server=`+id+`"`) {
+			if !strings.Contains(row, `href="/?workspace=`+workspace+`&amp;server=`+id+`" data-server-workspace="`+workspace+`"`) {
 				t.Errorf("missing selected %s", workspace)
 			}
 		}
-		if !strings.Contains(row, `href="/minecraft/how-to-connect?server=`+id+`"`) {
+		if !strings.Contains(row, `href="/minecraft/how-to-connect?server=`+id+`" target="_blank" rel="noopener"`) {
 			t.Error("lost guide selection")
 		}
 		for _, forbidden := range []string{"Open server", ">More<", "invite=1", ">Start</button>", ">Stop</button>", "Kill", "Live RAM", "RAM usage"} {
@@ -288,7 +288,7 @@ func TestMinecraftSelectedServerIsolationAndReadOnly(t *testing.T) {
 	app, f := newServerInventoryApp(t)
 	response := inventoryRequest(app, "GET", "/view/jv-family1", "")
 	body := response.Body.String()
-	for _, want := range []string{"family Survival", "Welcome family", "Start on Boot", "Enabled", "minecraft-workspace-shell", "minecraft-overview-grid", "/view/jv-family1/restart", "/view/jv-family1/stop", `name="csrf" value="csrf-token"`} {
+	for _, want := range []string{"family Survival", "Welcome family", "Start on Boot", ">19134</strong>", "minecraft-workspace-shell", "minecraft-overview-grid", "/view/jv-family1/restart", "/view/jv-family1/stop", `name="csrf" value="csrf-token"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
 		}

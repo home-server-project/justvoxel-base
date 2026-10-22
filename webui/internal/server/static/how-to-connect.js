@@ -43,7 +43,7 @@
       });
       return lines.length > 1 ? lines.join('\n') : '';
     }).filter(Boolean);
-    return methods.length ? `Join ${page.dataset.connectServerName} on Minecraft\n\n${methods.join('\n\n')}` : '';
+    return methods.length ? `Join my Minecraft ${page.dataset.connectServerName} on JustVoxel\n\n${methods.join('\n\n')}` : '';
   };
   const update = () => {
     const custom = switches.find(input => input.dataset.connectMethod === 'custom');

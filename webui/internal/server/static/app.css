@@ -447,8 +447,8 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .minecraft-workspace-header h2{margin:.1rem 0 0;font-size:1.25rem}
 .minecraft-workspace-header-actions{display:flex;gap:.45rem}
 .minecraft-workspace-tabs{display:flex;gap:.35rem;padding:.65rem 1.1rem;border-bottom:1px solid #303942;background:#11171b;overflow-x:auto}
-.minecraft-workspace-tabs button{min-height:36px;padding:.5rem .8rem;border:1px solid transparent;border-radius:9px;background:transparent;color:#aeb8c0;font-weight:700;white-space:nowrap}
-.minecraft-workspace-tabs button:hover,.minecraft-workspace-tabs button:focus-visible{background:#232b31;color:#fff}
+.minecraft-workspace-tabs :is(button,a){min-height:36px;padding:.5rem .8rem;border:1px solid transparent;border-radius:9px;background:transparent;color:#aeb8c0;font-weight:700;white-space:nowrap}
+.minecraft-workspace-tabs :is(button,a):hover,.minecraft-workspace-tabs :is(button,a):focus-visible{background:#232b31;color:#fff}
 .minecraft-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}
 .minecraft-workspace-body{flex:1;min-height:0;overflow:auto;padding:1rem 1.1rem 1.1rem;overscroll-behavior:contain}
 .minecraft-workspace-state{margin:0 0 .75rem;color:#9ca7b0;font-size:.8rem}
@@ -476,7 +476,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .minecraft-workspace-content .settings-submit-row button{order:2}
 .minecraft-workspace-content .log-box{max-height:430px;overflow:auto}
 @media(max-width:700px){.minecraft-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.minecraft-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.minecraft-workspace-tabs{padding:.55rem .9rem}.minecraft-workspace-body{padding:.8rem .9rem}.minecraft-overview-grid{grid-template-columns:1fr}}
-@media(prefers-color-scheme:light){.minecraft-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.minecraft-workspace-header,.minecraft-workspace-tabs{border-color:#d9dfe3}.minecraft-workspace-tabs{background:#f7f9fa}.minecraft-workspace-tabs button{color:#56636c}.minecraft-workspace-tabs button:hover,.minecraft-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.minecraft-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}.minecraft-overview-card,.minecraft-overview-players{background:#f7f9fa;border-color:#d9dfe3}}
+@media(prefers-color-scheme:light){.minecraft-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.minecraft-workspace-header,.minecraft-workspace-tabs{border-color:#d9dfe3}.minecraft-workspace-tabs{background:#f7f9fa}.minecraft-workspace-tabs :is(button,a){color:#56636c}.minecraft-workspace-tabs :is(button,a):hover,.minecraft-workspace-tabs :is(button,a):focus-visible{background:#e9eef1;color:#1a2025}.minecraft-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}.minecraft-overview-card,.minecraft-overview-players{background:#f7f9fa;border-color:#d9dfe3}}
 
 
 
@@ -982,6 +982,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .workspace-window :is(.system-update-header-actions,.system-monitor-header-actions,.storage-workspace-header-actions,.backups-workspace-header-actions,.minecraft-workspace-header-actions,.system-workspace-header-actions,.migration-workspace-header-actions){display:flex;align-items:center;gap:var(--jv-space-xs);flex:none}
 .workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs){flex:none;gap:var(--jv-space-xs);padding:.42rem var(--jv-workspace-edge);border-color:var(--jv-border);background:var(--jv-surface-sunken)}
 .workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs,.plugins-workspace-tabs) button{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
+.workspace-window .minecraft-server-arrange-toolbar a{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
 .workspace-window :is(.system-update-dialog-body,.system-monitor-body,.storage-workspace-body,.backups-workspace-body,.minecraft-workspace-body,.system-workspace-body,.migration-workspace-body,.version-workspace-body){min-width:0;min-height:0;padding:var(--jv-workspace-edge);overscroll-behavior:contain}
 .workspace-window :is(.system-update-state,.system-monitor-state,.storage-workspace-state,.backups-workspace-state,.minecraft-workspace-state,.system-workspace-state,.migration-workspace-state,[data-version-state]){color:var(--jv-muted);font-size:.82rem;line-height:1.4}
 
@@ -1506,9 +1507,9 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-workspace-tabs button{border:1px solid transparent;background:transparent;color:var(--jv-muted,#aeb8c0)}
 .plugins-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}
 .plugins-workspace-body{container-type:inline-size;display:flex;flex-direction:column;gap:.55rem;flex:1;min-height:0;min-width:0;overflow:hidden;padding:var(--jv-workspace-edge,.8rem);overscroll-behavior:contain}
-.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:nowrap;gap:.5rem;margin:0;width:100%;max-width:1080px;margin-inline:auto}.plugins-search-field{flex:1 1 120px;min-width:120px;margin:0}.plugins-search-filters{display:flex;flex:none;align-items:center;gap:.5rem;margin-left:auto}.plugins-search-field input{width:100%;margin-bottom:0}.plugins-search button{flex:none;margin:0}.plugins-filter{white-space:nowrap;display:flex;flex:none;align-items:center;gap:.4rem;margin:0;font-size:.82rem}.plugins-filter input{appearance:none;position:relative;flex:none;width:28px;height:16px;border:1px solid var(--jv-border-strong);border-radius:12px;background:var(--jv-surface-sunken);margin:0;cursor:pointer}.plugins-filter input::before{content:"";position:absolute;width:10px;height:10px;top:2px;left:2px;border-radius:50%;background:var(--jv-muted)}.plugins-filter input:checked{background:var(--jv-success);border-color:var(--jv-success)}.plugins-filter input:checked::before{left:14px;background:var(--jv-text)}.plugins-filter input:focus-visible{outline:2px solid var(--jv-success);outline-offset:3px}.plugins-source-fixed input{cursor:default}.plugins-source-unavailable{opacity:.55}.plugins-source-unavailable input{cursor:not-allowed}
+.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:nowrap;gap:.5rem;margin:0;width:100%;max-width:1800px;margin-inline:auto}.plugins-search-field{flex:1 1 120px;min-width:120px;margin:0}.plugins-search-filters{display:flex;flex:none;align-items:center;gap:.5rem;margin-left:auto}.plugins-search-field input{width:100%;margin-bottom:0}.plugins-search button{flex:none;margin:0}.plugins-filter{white-space:nowrap;display:flex;flex:none;align-items:center;gap:.4rem;margin:0;font-size:.82rem}.plugins-filter input{appearance:none;position:relative;flex:none;width:28px;height:16px;border:1px solid var(--jv-border-strong);border-radius:12px;background:var(--jv-surface-sunken);margin:0;cursor:pointer}.plugins-filter input::before{content:"";position:absolute;width:10px;height:10px;top:2px;left:2px;border-radius:50%;background:var(--jv-muted)}.plugins-filter input:checked{background:var(--jv-success);border-color:var(--jv-success)}.plugins-filter input:checked::before{left:14px;background:var(--jv-text)}.plugins-filter input:focus-visible{outline:2px solid var(--jv-success);outline-offset:3px}.plugins-source-fixed input{cursor:default}.plugins-source-unavailable{opacity:.55}.plugins-source-unavailable input{cursor:not-allowed}
 .plugins-workspace-state{flex:none;min-height:20px;color:var(--jv-muted,#aeb8c0);font-size:.82rem;line-height:1.4;margin:0}.plugins-workspace-state:empty{visibility:hidden}
-.plugins-results{--plugins-card-height:144px;display:grid;flex:1;min-height:0;width:100%;grid-template-columns:minmax(0,1fr);grid-auto-rows:var(--plugins-card-height);align-content:start;gap:.55rem;min-width:0;max-width:1080px;margin-inline:auto;overflow:auto}
+.plugins-results{--plugins-card-height:144px;display:grid;flex:1;min-height:0;width:100%;grid-template-columns:minmax(0,1fr);grid-auto-rows:var(--plugins-card-height);align-content:start;gap:.55rem;min-width:0;max-width:1800px;margin-inline:auto;overflow:auto}
 .plugins-result-card{display:flex;flex-direction:column;height:var(--plugins-card-height);box-sizing:border-box;min-width:0;overflow:hidden;cursor:pointer;padding:.75rem;border:1px solid var(--jv-border,#303942);border-radius:var(--jv-radius,10px);background:var(--jv-surface-sunken,#11171b);overflow-wrap:anywhere}
 .plugins-result-card.is-selected{border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
 @media(hover:hover) and (pointer:fine){.plugins-result-card:hover{border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}}
@@ -1531,8 +1532,10 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-dependencies{margin:.35rem 0;padding-left:1.2rem;font-size:.75rem;color:var(--jv-muted,#aeb8c0)}
 @container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@container(min-width:1140px){.plugins-results{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@container(min-width:1420px){.plugins-results{grid-template-columns:repeat(5,minmax(0,1fr))}}
 .plugins-result-card>.plugins-card-badges{flex:none;flex-wrap:nowrap;height:24px;min-width:0;overflow:hidden;margin:.15rem 0}.plugins-result-card .plugins-badge{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.plugins-pagination{display:flex;flex:none;min-height:44px;align-items:center;justify-content:flex-end;gap:.6rem;margin-top:auto;font-size:.82rem;width:100%;max-width:1080px;margin-inline:auto}.plugins-pagination button{flex:none;margin:0}
+.plugins-pagination{display:flex;flex:none;min-height:44px;align-items:center;justify-content:flex-end;gap:.6rem;margin-top:auto;font-size:.82rem;width:100%;max-width:1800px;margin-inline:auto}.plugins-pagination button{flex:none;margin:0}
 @container(max-width:680px){.plugins-search{flex-wrap:wrap}.plugins-search-field{flex-basis:160px}}
 .plugins-workspace-dialog [hidden]{display:none!important}
 @media(max-width:700px){.plugins-workspace-dialog{position:fixed;inset:52px .25rem .25rem .25rem!important;width:auto!important;height:calc(100dvh - 52px - .25rem)!important;min-width:0;min-height:0;max-width:none;max-height:calc(100dvh - 52px - .25rem);resize:none}.plugins-workspace-header{cursor:default;touch-action:auto}}
@@ -1690,3 +1693,15 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .minecraft-crossplay-status{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;margin-top:.8rem;min-width:0}
 .minecraft-crossplay-status [data-crossplay-compatibility]{min-width:0;overflow-wrap:anywhere}
 .system-logs-list.system-support-report-files{margin-top:.8rem}
+
+/* Recent logs follows the System Health flex-height chain. */
+.minecraft-workspace-body:has(.minecraft-recent-logs-view){display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.minecraft-workspace-content:has(.minecraft-recent-logs-view){display:flex;flex-direction:column;flex:1;min-height:0}
+.minecraft-recent-logs-view{display:flex;flex-direction:column;flex:1;min-height:0;gap:.7rem;overflow:hidden}
+.minecraft-recent-logs-view>.notice{flex:none;margin:0}
+.minecraft-recent-logs-view>.panel{display:flex;flex:1;min-height:0;flex-direction:column;margin:0!important;overflow:hidden}
+.minecraft-workspace-content .minecraft-recent-logs-view .log-box{flex:1;min-height:0;max-height:none;overflow:auto}
+.minecraft-overview-lifecycle{display:flex;flex-wrap:wrap;gap:.7rem}
+.minecraft-overview-lifecycle>.minecraft-overview-boot-card{flex:0 1 260px}
+.minecraft-workspace-tabs a{display:inline-flex;align-items:center;box-sizing:border-box;text-decoration:none}
+.minecraft-server-arrange-toolbar [hidden]{display:none!important}

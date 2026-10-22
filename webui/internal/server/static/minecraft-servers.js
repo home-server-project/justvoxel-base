@@ -219,10 +219,27 @@
           catch (_) { status.textContent = 'Copy unavailable. Select the invitation text and copy it manually.'; }
         });
         actions.append(close, copy); dialog.append(title, name, label, status, actions);
+        dialog.addEventListener('click', event => {
+          if (event.target !== dialog) return;
+          const rect = dialog.getBoundingClientRect();
+          if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
+        });
         dialog.addEventListener('close', () => dialog.remove());
         document.body.appendChild(dialog); dialog.showModal();
       }, {connect: true});
     });
+    for (const link of card.querySelectorAll('a[data-server-workspace]')) {
+      link.addEventListener('click', event => {
+        if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || isArranging()) return;
+        const workspace = link.dataset.serverWorkspace;
+        const selector = {minecraft: '[data-minecraft-open]', backups: '[data-backups-open]', version: '[data-version-open]', plugins: '[data-plugins-open]'}[workspace];
+        const launcher = selector && document.querySelector(selector);
+        if (!launcher || typeof globalThis.justVoxelSelectServer !== 'function') return;
+        event.preventDefault();
+        closeMenu();
+        if (globalThis.justVoxelSelectServer(id, workspace)) launcher.click();
+      });
+    }
     const menu = card.querySelector('details');
     const choices = menu?.querySelector('[popover]');
     const trigger = menu?.querySelector('summary');
