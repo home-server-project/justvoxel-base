@@ -171,7 +171,7 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
-          cosign-release: 'v3.1.2'
+          cosign-release: 'v3.1.3'
 
       - name: Verify Home Server Base stable signature
         shell: bash
@@ -357,11 +357,29 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
-          cosign sign -y \
+          signing_log="$(mktemp "${RUNNER_TEMP}/cosign-sign.XXXXXX")"
+          trap 'rm -f "${signing_log}"' EXIT
+          if cosign sign -y \
             --new-bundle-format=false \
             --use-signing-config=false \
             --key env://COSIGN_PRIVATE_KEY \
-            "${IMAGE_REPOSITORY}@${DIGEST}"
+            "${IMAGE_REPOSITORY}@${DIGEST}" >"${signing_log}" 2>&1; then
+            cat "${signing_log}"
+          else
+            signing_status=$?
+            cat "${signing_log}"
+            if grep -Fq '[409]' "${signing_log}" && \
+               grep -Fq 'an equivalent entry already exists in the transparency log' "${signing_log}"; then
+              echo 'Rekor reports an equivalent entry already exists (409); verifying the exact pushed digest.'
+              cosign verify \
+                --new-bundle-format=false \
+                --key cosign.pub \
+                "${IMAGE_REPOSITORY}@${DIGEST}"
+              echo "Existing signature for the exact digest ${IMAGE_REPOSITORY}@${DIGEST} was verified."
+            else
+              exit "${signing_status}"
+            fi
+          fi
 
       - name: Verify testing Base signature
         shell: bash
