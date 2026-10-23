@@ -69,6 +69,7 @@ type setupRuntimeServer struct {
 
 type setupRuntimeMinecraft struct {
 	ServerType      string `json:"server_type"`
+	LoaderVersion   string `json:"loader_version,omitempty"`
 	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
@@ -136,13 +137,13 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 	if serverType == "" {
 		serverType = "paper"
 	}
-	if !validSetupServerType(serverType) || (serverType == "vanilla" && plan.Server.BedrockEnabled) {
+	if validateJavaServerSelection(serverType, plan.Minecraft.VersionPolicy, plan.Minecraft.Version, plan.Minecraft.LoaderVersion, plan.Minecraft.ImageTag, plan.Server.BedrockEnabled) != nil {
 		return setupRuntimeTransactionRequest{}, errors.New("invalid server capabilities")
 	}
 	return setupRuntimeTransactionRequest{
 		AddServer: plan.AddServer, StartOnBoot: plan.StartOnBoot, StartAfterSetup: plan.StartAfterSetup, InstanceOnly: true, SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
 		Server:    setupRuntimeServer{DisplayName: plan.Server.DisplayName, MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
-		Minecraft: setupRuntimeMinecraft{ServerType: serverType, GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
+		Minecraft: setupRuntimeMinecraft{ServerType: serverType, LoaderVersion: plan.Minecraft.LoaderVersion, GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
 		Storage:   setupRuntimeStorage{Type: plan.Storage.Type, Path: plan.Storage.Path, MountPoint: plan.Storage.MountPoint, ExpectedUUID: plan.Storage.ExpectedUUID, ExpectedSource: plan.Storage.ExpectedSource},
 		Backups:   setupRuntimeBackups{Type: plan.Backups.Type, Path: plan.Backups.Path, MountPoint: plan.Backups.MountPoint, ExpectedUUID: plan.Backups.ExpectedUUID, ExpectedSource: plan.Backups.ExpectedSource, Automatic: plan.Backups.Automatic, Schedule: plan.Backups.Schedule, Keep: plan.Backups.Keep},
 	}, nil

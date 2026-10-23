@@ -164,12 +164,22 @@ func TestVanillaPluginsUnsupportedWithoutCatalog(t *testing.T) {
 	runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
 		return []byte(`{"minecraft":{"server_type":"vanilla","version":"1.21.8"}}`), nil
 	}
+	oldClient := pluginCatalogClient
+	defer func() { pluginCatalogClient = oldClient }()
+	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("unsupported workspace requested an upstream catalog")
+		return nil, errors.New("unexpected catalog request")
+	})}
 	pluginTestDataFor(t, "vanilla", "1.21.8")
 	s := surfaceTestServer(t, roleAdministrator)
 	rr := httptest.NewRecorder()
 	s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover", ""))
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"supported":false`) || !strings.Contains(rr.Body.String(), "Vanilla does not support plugins") || !strings.Contains(rr.Body.String(), `"minecraft_version":"1.21.8"`) {
 		t.Fatalf("vanilla: %d %s", rr.Code, rr.Body.String())
+	}
+	var catalog pluginCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &catalog); err != nil || catalog.Modrinth || catalog.Hangar || len(catalog.Projects) != 0 {
+		t.Fatalf("unsupported sources: %+v %v", catalog, err)
 	}
 }
 
@@ -1813,5 +1823,21 @@ func TestPluginDiscoverResponseIncludesAuthoritativeOwnership(t *testing.T) {
 	p := out.Projects[0]
 	if !p.Installed || p.InstalledState != "attention" || p.InstallAvailable || p.Version == nil || p.Version.ID != "999" {
 		t.Fatalf("different catalog release exposed installation: %#v", p)
+	}
+}
+
+func TestPluginDiscoverBothSourcesOffNeverRequestsCatalog(t *testing.T) {
+	pluginTestData(t)
+	oldClient := pluginCatalogClient
+	defer func() { pluginCatalogClient = oldClient }()
+	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("both disabled sources requested an upstream catalog")
+		return nil, errors.New("unexpected catalog request")
+	})}
+	rr := httptest.NewRecorder()
+	surfaceTestServer(t, roleAdministrator).adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover?modrinth=false&hangar=false", ""))
+	var catalog pluginCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &catalog); err != nil || rr.Code != http.StatusOK || !catalog.Server.Supported || catalog.Modrinth || catalog.Hangar || len(catalog.Projects) != 0 {
+		t.Fatalf("disabled sources: %d %+v %v", rr.Code, catalog, err)
 	}
 }

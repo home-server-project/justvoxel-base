@@ -295,7 +295,7 @@ func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serverType := strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
-	if !validSetupServerType(serverType) {
+	if !validSetupServerType(serverType) || serverType == "spigot" {
 		http.Error(w, "selected Minecraft server type is not available yet", http.StatusBadRequest)
 		return
 	}
@@ -352,12 +352,12 @@ func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
 }
 
 func validSetupServerType(value string) bool {
-	return value == "paper" || value == "purpur" || value == "vanilla"
+	return value == "paper" || value == "purpur" || value == "vanilla" || value == "spigot"
 }
 
 func recommendedServerSupportsBedrock(serverType string) bool {
 	switch serverType {
-	case "paper", "purpur":
+	case "paper", "purpur", "spigot":
 		return true
 	default:
 		return false
@@ -836,7 +836,7 @@ func validateSetupConnections(minecraft setupMinecraftDraft) error {
 	if _, err := parseSetupPort(minecraft.JavaPort, "Minecraft Java TCP port"); err != nil {
 		return err
 	}
-	if _, err := parseSetupPort(minecraft.BedrockPort, "Bedrock UDP port"); err != nil {
+	if _, err := parseSetupPort(minecraft.BedrockPort, "Bedrock TCP/UDP port"); err != nil {
 		return err
 	}
 	return nil
@@ -864,6 +864,19 @@ func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSet
 }
 
 func validateSetupVersion(minecraft setupMinecraftDraft) error {
+	if minecraft.ServerType == "spigot" {
+		required := ""
+		if regexp.MustCompile(`^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$`).MatchString(minecraft.Version) {
+			required = "java21-jdk"
+		}
+		if regexp.MustCompile(`^26\.[1-9][0-9]*(\.(0|[1-9][0-9]*))?$`).MatchString(minecraft.Version) {
+			required = "java25-jdk"
+		}
+		if minecraft.VersionPolicy != "pinned" || required == "" || minecraft.ImageTag != required {
+			return errors.New("Spigot requires a Specific Minecraft release and the matching Custom server update tag: java21-jdk for 1.20.5–1.21.11, or java25-jdk for 26.x.")
+		}
+	}
+
 	if !setupImageTagPattern.MatchString(minecraft.ImageTag) {
 		return errors.New("Server update channel or tag is invalid.")
 	}
@@ -884,7 +897,7 @@ func validateSetupVersion(minecraft setupMinecraftDraft) error {
 
 func validateSetupConnectionDraft(draft setupDraft) error {
 	if draft.Server.BedrockEnabled && !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
-		return errors.New("Managed Bedrock cross-play requires Paper or Purpur.")
+		return errors.New("Managed Bedrock cross-play requires Paper, Purpur or Spigot.")
 	}
 	return validateSetupConnections(draft.Minecraft)
 }

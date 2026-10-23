@@ -460,7 +460,17 @@ func (b *instanceRuntimeBackend) storage(ctx context.Context, action string, rec
 	return nil
 }
 func (b *instanceRuntimeBackend) validateSoftware(ctx context.Context, c minecraftInstanceRuntimeConfig) error {
-	_, err := b.command(ctx, instanceRuntimeHelper, "version", c.Software, c.Version, c.PaperChannel)
+	args := []string{"version", c.Software, c.Version, c.PaperChannel}
+	if c.Software != "paper" && c.Software != "purpur" && c.Software != "vanilla" {
+		if err := validateJavaServerSelection(c.Software, c.VersionPolicy, c.Version, c.LoaderVersion, c.ImageTag, c.BedrockEnabled); err != nil {
+			return err
+		}
+		args = append(args, c.LoaderVersion)
+	}
+	_, err := b.command(ctx, instanceRuntimeHelper, args...)
+	if err == nil && c.BedrockEnabled && (c.Software == "fabric" || c.Software == "neoforge") {
+		_, err = b.command(ctx, instanceRuntimeHelper, "crossplay", c.Software, c.Version, c.LoaderVersion)
+	}
 	if err != nil {
 		return instanceRuntimeFailure("Selected Minecraft software/version could not be verified.")
 	}
@@ -689,21 +699,26 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			return instanceRuntimeFailure("Version changes on existing data require independent backup/migration support in Phase 4. No version was changed.")
 		}
 	}
+	if previous.EnvironmentSHA256 != "" && previous.Runtime.LoaderVersion != next.Runtime.LoaderVersion {
+		if err = b.storage(ctx, "version-empty", previous); err != nil {
+			return instanceRuntimeFailure("Loader changes on existing data require separate compatibility support. No loader was changed.")
+		}
+	}
 	if !bootOnly && !channelOnly && !whitelistOnly && next.Runtime.BedrockEnabled {
-		heldUDP, e := instanceHoldUDP(next.Runtime.BedrockPort)
+		heldUDP, e := instanceHoldCrossplayPort(next.Runtime.BedrockPort)
 		if e != nil {
 			return e
 		}
 		defer heldUDP.Close()
 	}
 	if !bootOnly && previous.Runtime.BedrockEnabled && (!next.Runtime.BedrockEnabled || previous.Runtime.BedrockPort != next.Runtime.BedrockPort) {
-		heldUDP, e := instanceHoldUDP(previous.Runtime.BedrockPort)
+		heldUDP, e := instanceHoldCrossplayPort(previous.Runtime.BedrockPort)
 		if e != nil {
 			return e
 		}
 		defer heldUDP.Close()
 	}
-	if previous.EnvironmentSHA256 != "" && previous.Runtime.Software != next.Runtime.Software && !(maintenance && previous.Runtime.Software != "vanilla" && next.Runtime.Software != "vanilla") {
+	if previous.EnvironmentSHA256 != "" && previous.Runtime.Software != next.Runtime.Software && !(maintenance && javaServerAllowsSwitch(previous.Runtime.Software, next.Runtime.Software)) {
 		return instanceRuntimeFailure("Changing software on an existing instance is outside Phase 3A.")
 	}
 	var held []net.Listener

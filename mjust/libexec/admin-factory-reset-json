@@ -214,6 +214,7 @@ fi
 if [[ ${configured} == true && -n ${JAVA_PORT:-} ]]; then
     jv_trace_run firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true
     if [[ ${BEDROCK_ENABLED:-no} == yes && -n ${BEDROCK_PORT:-} ]]; then
+        geyser_tcp_firewall_remove "${BEDROCK_PORT}" || factory_reset_fail "firewall_cleanup_failed" "Managed cross-play TCP firewall cleanup failed."
         jv_trace_run firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true
     fi
     jv_trace_run firewall-cmd --reload >/dev/null 2>&1 || true

@@ -35,6 +35,7 @@ type adminSetupPlanServerRequest struct {
 
 type adminSetupPlanMinecraftRequest struct {
 	ServerType      string `json:"server_type,omitempty"`
+	LoaderVersion   string `json:"loader_version,omitempty"`
 	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
@@ -92,6 +93,7 @@ type adminSetupPlanServer struct {
 
 type adminSetupPlanMinecraft struct {
 	ServerType             string `json:"server_type"`
+	LoaderVersion          string `json:"loader_version,omitempty"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
@@ -181,6 +183,7 @@ type adminSetupPlanResponse struct {
 
 type adminSetupFingerprintMinecraft struct {
 	ServerType             string `json:"server_type"`
+	LoaderVersion          string `json:"loader_version,omitempty"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
@@ -304,7 +307,7 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	if request.Minecraft.ServerType == "" {
 		request.Minecraft.ServerType = "paper"
 	}
-	if !validSetupServerType(request.Minecraft.ServerType) || (request.Minecraft.ServerType == "vanilla" && request.Server.BedrockEnabled) {
+	if validateJavaServerSelection(request.Minecraft.ServerType, request.Minecraft.VersionPolicy, request.Minecraft.Version, request.Minecraft.LoaderVersion, request.Minecraft.ImageTag, request.Server.BedrockEnabled) != nil {
 		return out, &adminSetupPlanningError{status: http.StatusBadRequest, message: "invalid server software or Bedrock choice"}
 	}
 	// Friendly names belong to the Go instance registry, not the shell planner.
@@ -355,15 +358,22 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	if out.Normalized != nil && out.Normalized.Minecraft.ServerType == "" {
 		out.Normalized.Minecraft.ServerType = "paper"
 	}
-	if out.Normalized == nil || !validSetupServerType(out.Normalized.Minecraft.ServerType) || (out.Normalized.Minecraft.ServerType == "vanilla" && out.Normalized.Server.BedrockEnabled) || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || !validSetupGameMode(out.Normalized.Minecraft.GameMode) || out.Normalized.Minecraft.MinecraftUID == 0 || out.Normalized.Minecraft.MinecraftGID == 0 || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
+	if out.Normalized == nil || !validSetupServerType(out.Normalized.Minecraft.ServerType) || validateJavaServerSelection(out.Normalized.Minecraft.ServerType, out.Normalized.Minecraft.VersionPolicy, out.Normalized.Minecraft.Version, out.Normalized.Minecraft.LoaderVersion, out.Normalized.Minecraft.ImageTag, out.Normalized.Server.BedrockEnabled) != nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || !validSetupGameMode(out.Normalized.Minecraft.GameMode) || out.Normalized.Minecraft.MinecraftUID == 0 || out.Normalized.Minecraft.MinecraftGID == 0 || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned incomplete data"}
+	}
+	if software := request.Minecraft.ServerType; software != "paper" && software != "purpur" && software != "vanilla" {
+		selected, resolved := request.Minecraft, out.Normalized.Minecraft
+		if resolved.ServerType != selected.ServerType || resolved.VersionPolicy != selected.VersionPolicy || resolved.Version != selected.Version || resolved.LoaderVersion != selected.LoaderVersion || resolved.ImageTag != selected.ImageTag {
+			return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "setup planner changed an explicit Java runtime selection"}
+		}
 	}
 	if request.Server.MOTDAutomatic {
 		version := out.Normalized.Minecraft.Version
 		if version == "" || version == "LATEST" || version == "recommended" || version == "latest" || version == "pinned" {
 			return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner did not resolve a Minecraft version"}
 		}
-		software := map[string]string{"paper": "Paper", "purpur": "Purpur", "vanilla": "Vanilla"}[out.Normalized.Minecraft.ServerType]
+		capabilities, _ := javaServerSoftware(out.Normalized.Minecraft.ServerType)
+		software := capabilities.Name
 		out.Normalized.Server.MOTD = "JustVoxel " + software + " Minecraft " + version + " Server"
 	}
 	out.Normalized.Server.DisplayName = displayName
@@ -418,7 +428,7 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 		Normalized: adminSetupFingerprintNormalized{
 			Server: normalized.Server,
 			Minecraft: adminSetupFingerprintMinecraft{
-				ServerType: serverType,
+				ServerType: serverType, LoaderVersion: normalized.Minecraft.LoaderVersion,
 				GameMode:   normalized.Minecraft.GameMode,
 				JavaMemory: normalized.Minecraft.JavaMemory, ContainerMemory: normalized.Minecraft.ContainerMemory,
 				JavaPort: normalized.Minecraft.JavaPort, BedrockPort: normalized.Minecraft.BedrockPort,
@@ -455,7 +465,8 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 }
 
 func validSetupServerType(value string) bool {
-	return value == "paper" || value == "purpur" || value == "vanilla"
+	_, ok := javaServerSoftware(value)
+	return ok
 }
 
 func validSetupGameMode(mode string) bool {

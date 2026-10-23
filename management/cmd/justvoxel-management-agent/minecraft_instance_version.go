@@ -58,6 +58,12 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 		if (len(args) != 7 && (len(args) != 9 || args[7] != "--migration")) || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !instanceRuntimeVersionPattern.MatchString(args[4]) || (!containerOnly && args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
 			return errInstanceID
 		}
+		if !javaServerAllowsSwitch(previous.Runtime.Software, args[2]) {
+			return instanceRuntimeFailure("Software conversion requires a separate supported operation.")
+		}
+		if !containerOnly && previous.Runtime.Software != "paper" && previous.Runtime.Software != "purpur" && previous.Runtime.Software != "vanilla" && (args[2] != previous.Runtime.Software || args[4] != previous.Runtime.Version || args[5] != previous.Runtime.VersionPolicy) {
+			return instanceRuntimeFailure("Version updates for this server software require separate compatibility support.")
+		}
 		snapshot, _, _, err := b.snapshot(ctx)
 		if err != nil {
 			return err

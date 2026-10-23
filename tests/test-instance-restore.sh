@@ -92,6 +92,21 @@ class IndependentRestore(unittest.TestCase):
         m['size']=path.stat().st_size;m['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
         self.private(folder/(self.archive+'.meta.json'),json.dumps(m))
 
+    def test_mod_loader_pin_required_for_restore(self):
+        config=self.configs/'jv-aaaaaa/config.json'
+        record=json.loads(config.read_text())
+        record['runtime']['software']='fabric'
+        record['runtime']['loader_version']='0.16.10'
+        self.private(config,json.dumps(record))
+        self.run_helper('create')
+        item=next(m for m in self.inventory() if m['software']=='fabric')
+        self.archive=item['archive']
+        self.assertEqual(self.plan()['metadata']['loader_version'],'0.16.10')
+        record['runtime']['loader_version']='0.16.11'
+        self.private(config,json.dumps(record))
+        self.restore('plan',ok=False)
+        self.assertEqual((self.data/'world/level.dat').read_bytes(),world_metadata())
+
     def test_same_instance_atomic_replacement_original_preserved_and_isolation(self):
         other=self.other.read_bytes();plan=self.prepare()
         self.assertEqual((self.data/'level.dat').read_bytes(),b'original at restore time')

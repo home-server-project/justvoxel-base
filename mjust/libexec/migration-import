@@ -251,7 +251,7 @@ echo "Minecraft data:    $(jq -r '.normalized.destination.data_path' <<< "${plan
 echo "Backup storage:    $(jq -r '.normalized.destination.backup_path' <<< "${plan}")"
 echo "Java port:         $(jq -r '.normalized.destination.java_port' <<< "${plan}")/tcp"
 if [[ $(jq -r '.normalized.source.bedrock_enabled' <<< "${plan}") == true ]]; then
-    echo "Bedrock port:      $(jq -r '.normalized.destination.bedrock_port' <<< "${plan}")/udp"
+    echo "Bedrock port:      $(jq -r '.normalized.destination.bedrock_port' <<< "${plan}")/tcp+udp"
 else
     echo 'Bedrock:           disabled'
 fi

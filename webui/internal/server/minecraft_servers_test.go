@@ -539,14 +539,14 @@ func TestMinecraftCardRestartJSON(t *testing.T) {
 
 func TestMinecraftServerSoftwareArtwork(t *testing.T) {
 	app, f := newServerInventoryApp(t)
-	for _, software := range []string{"vanilla", "paper", "purpur", "fabric", "forge", "neoforge", "", "../paper", "https://example.test/icon"} {
+	for _, software := range []string{"vanilla", "paper", "purpur", "fabric", "forge", "neoforge", "spigot", "quilt", "bedrock", "", "../paper", "https://example.test/icon"} {
 		t.Run(software, func(t *testing.T) {
 			c := f.runtimes["jv-family1"]
 			c.Software = software
 			f.runtimes["jv-family1"] = c
 			summary := app.independentServerSummary(context.Background(), "session", api.RegisteredMinecraftInstance{ID: "jv-family1", DisplayName: "Family"})
 			want := ""
-			if software == "vanilla" || software == "paper" || software == "purpur" {
+			if software == "vanilla" || software == "paper" || software == "purpur" || software == "spigot" || software == "bedrock" || software == "fabric" || software == "forge" || software == "neoforge" || software == "quilt" {
 				want = "/static/server-software/" + software + ".svg"
 				if _, err := os.Stat("static/server-software/" + software + ".svg"); err != nil {
 					t.Fatal(err)

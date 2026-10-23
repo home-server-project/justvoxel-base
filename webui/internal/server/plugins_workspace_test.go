@@ -1974,7 +1974,9 @@ func TestPluginsDiscoverRequestsEnabledSources(t *testing.T) {
 const assert=require("node:assert/strict");
 const requests=[];
 const elements={q:{value:"query"},compatible_only:{checked:true},release_only:{checked:true},modrinth:{checked:true},hangar:{checked:false}};
-const form={elements,querySelectorAll:()=>Object.values(elements)};
+const form={elements,querySelectorAll:()=>Object.values(elements),querySelector:selector=>{
+ assert.equal(selector,'input[name="hangar"]');return elements.hangar;
+}};
 const state={},context={},pagination={},previous={},next={};
 const pageLabel={};
 let pageCursors=[],totalPages=1,discoverServerKey=null;const resetCursors=()=>{throw new Error("unexpected context reset")};
@@ -1985,18 +1987,20 @@ let generation=0,controller=null,tab="discover",pageLimit=1,pageIndex=0,nextCurs
 let cursor={modrinth_offset:8,hangar_offset:3,hangar_first:true};
 const clearInventoryTimer=()=>{};
 const renderProject=()=>{throw new Error("unexpected card")};
-const server={supported:true,minecraft_version:"1.21.8",server_software:"Paper"};
+const server={supported:true,minecraft_version:"1.21.8",server_type:"paper",server_software:"Paper"};
 const window={location:{assign:()=>{throw new Error("unexpected navigation")}}};
 const fetch=async(url,options)=>{
  requests.push({url,options});
- return {ok:true,status:200,json:async()=>({server,modrinth:elements.modrinth.checked,hangar:elements.hangar.checked,projects:[],cursor,next_cursor:null,total})};
+ return {ok:true,status:200,json:async()=>({server,modrinth:elements.modrinth.checked,hangar:server.server_type!=="spigot"&&elements.hangar.checked,projects:[],cursor,next_cursor:null,total})};
 };
 ` + loader + `
 (async()=>{
  for(const [m,h] of [[true,false],[false,true],[true,true],[false,false]]){
   elements.modrinth.checked=m;elements.hangar.checked=h;
   const before=controller;
+  const requestCount=requests.length;
   await load();
+  assert.equal(requests.length,requestCount+1);
   if(before)assert(before.signal.aborted);
   const req=requests.at(-1);assert(req.url.startsWith("/api/plugins/workspace/discover?"));
   const q=new URL(req.url,"https://appliance.example").searchParams;
@@ -2005,6 +2009,9 @@ const fetch=async(url,options)=>{
   assert.equal(q.get("q"),"query");assert.equal(q.get("limit"),"1");assert.equal(req.options.credentials,"same-origin");
   assert(!elements.modrinth.disabled);assert(!elements.hangar.disabled);
  }
+ // The local workspace request is allowed; neither provider is enabled upstream.
+ assert.equal(new URL(requests.at(-1).url,"https://appliance.example").searchParams.get("modrinth"),"false");
+ assert.equal(new URL(requests.at(-1).url,"https://appliance.example").searchParams.get("hangar"),"false");
  assert.equal(state.textContent,"Enable Modrinth or Hangar to browse plugins.");
  assert.equal(pageLabel.textContent,"Page 1 of 1");
  assert(next.disabled);assert(previous.disabled);
@@ -2015,6 +2022,14 @@ const fetch=async(url,options)=>{
  await load();assert.equal(pageLabel.textContent,"Page 2 of 4");assert(!previous.disabled);
  total=0;pageIndex=0;
  await load();assert.equal(pageLabel.textContent,"Page 1 of 1");
+ // A new selected-server context starts with no cursor history.
+ discoverServerKey=null;
+ server.server_type="spigot";server.server_software="Spigot";
+ elements.modrinth.checked=true;elements.hangar.checked=true;
+ await load();assert(elements.hangar.disabled);assert(!elements.hangar.checked);assert(!elements.modrinth.disabled);
+ await load();
+ const spigotQuery=new URL(requests.at(-1).url,"https://appliance.example").searchParams;
+ assert.equal(spigotQuery.get("modrinth"),"true");assert.equal(spigotQuery.get("hangar"),"false");
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
 	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)

@@ -1,0 +1,148 @@
+#!/usr/bin/bash
+# Fixed official publishers only. All preparation stays outside live server data.
+set -euo pipefail
+[[ $# == 4 && ( $1 == fabric || $1 == neoforge ) && $2 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ && $3 =~ ^[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ && -d $4 && ! -L $4 ]] || exit 1
+exec timeout 150s python3 - "$@" <<'PY'
+import hashlib, json, os, re, sys, time, urllib.parse, urllib.request, zipfile
+import tomllib
+platform, game, loader, staging = sys.argv[1:]
+MAX_JAR = 64 * 1024 * 1024
+VERSION_URL = 'https://raw.githubusercontent.com/GeyserMC/GeyserWebsite/refs/heads/master/src/data/versions.json'
+BASE = 'https://download.geysermc.org/v2/projects/'
+FABRIC_API = 'P7dR8mSH'
+
+def fetch(url, limit):
+    request = urllib.request.Request(url, headers={'User-Agent': 'JustVoxel managed cross-play'})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        if urllib.parse.urlsplit(response.url).scheme != 'https':
+            raise ValueError('HTTPS required')
+        data = response.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError('Publisher response exceeds limit')
+    return data
+
+def metadata(url):
+    return json.loads(fetch(url, 2 * 1024 * 1024))
+
+def numeric(value):
+    match = re.fullmatch(r'([0-9]+(?:\.[0-9]+){0,3})(?:-(alpha|beta|rc)(?:[.-]([0-9]+))?)?', value)
+    if not match:
+        raise ValueError('Unrecognized dependency version')
+    parts = tuple(map(int, match[1].split('.')))
+    return parts + (0,) * (4 - len(parts)) + ({None:0, 'alpha':-3, 'beta':-2, 'rc':-1}[match[2]], int(match[3] or 0))
+
+def accepts(rule, value):
+    # Conservative subset of upstream dependency syntax; never guess unknown ranges.
+    if isinstance(rule, list):
+        return any(accepts(item, value) for item in rule)
+    if not isinstance(rule, str) or len(rule) > 128:
+        return False
+    if rule == value or rule == '=' + value:
+        return True
+    if rule == '~' + value:
+        return True
+    if re.fullmatch(r'\[[0-9.]+\]', rule):
+        return rule == '[' + value + ']'
+    match = re.fullmatch(r'\[([0-9.]+(?:-(?:alpha|beta|rc)(?:[.-][0-9]+)?)?),([0-9.]+(?:-(?:alpha|beta|rc)(?:[.-][0-9]+)?)?)?\)', rule)
+    if match:
+        return numeric(match[1]) <= numeric(value) and (not match[2] or numeric(value) < numeric(match[2]))
+    if re.fullmatch(r'(?:>=|>|<=|<|=)?[0-9.]+(?: (?:>=|>|<=|<|=)?[0-9.]+)*', rule):
+        for clause in rule.split():
+            match = re.fullmatch(r'(>=|>|<=|<|=)?([0-9.]+)', clause)
+            a, b = numeric(value), numeric(match[2])
+            if not {None:a == b, '=':a == b, '>=':a >= b, '>':a > b, '<=':a <= b, '<':a < b}[match[1]]:
+                return False
+        return True
+    return False
+
+def descriptor(path, name):
+    with zipfile.ZipFile(path) as jar:
+        entries = [entry for entry in jar.infolist() if entry.filename == name]
+        if len(entries) != 1 or entries[0].file_size > 65536:
+            raise ValueError('Missing or ambiguous platform descriptor')
+        return jar.read(entries[0]).decode('utf-8')
+
+def verify_mod(path, project):
+    if platform == 'fabric':
+        desc = json.loads(descriptor(path, 'fabric.mod.json'))
+        if desc.get('id') != ('geyser-fabric' if project == 'geyser' else project):
+            raise ValueError('Mod identity mismatch')
+        deps = desc.get('depends', {})
+        if not isinstance(deps, dict) or set(deps) - {'minecraft', 'fabricloader', 'fabric-api', 'java'}:
+            raise ValueError('Unrecognized required mod dependency')
+        if 'java' in deps and not accepts(deps['java'], '25.0' if game.startswith('26.') else '21.0'):
+            raise ValueError('Java compatibility not proven')
+        if project != 'fabric-api' and deps.get('fabric-api', '*') != '*':
+            raise ValueError('Fabric API dependency version not proven')
+        if not accepts(deps.get('minecraft'), game) or not accepts(deps.get('fabricloader'), loader):
+            raise ValueError('Game/loader compatibility not proven by publisher descriptor')
+    else:
+        desc = tomllib.loads(descriptor(path, 'META-INF/neoforge.mods.toml'))
+        identity = 'geyser_neoforge' if project == 'geyser' else project
+        if not any(mod.get('modId') == identity for mod in desc.get('mods', [])):
+            raise ValueError('Mod identity mismatch')
+        deps = desc.get('dependencies', {}).get(identity, [])
+        for identity, selected in [('minecraft', game), ('neoforge', loader)]:
+            matches = [dep for dep in deps if dep.get('modId') == identity]
+            if len(matches) != 1 or not accepts(matches[0].get('versionRange'), selected):
+                raise ValueError('Game/loader compatibility not proven by publisher descriptor')
+
+def prepare():
+    # The current platform artifact AND publisher's current game release must agree.
+    if metadata(VERSION_URL).get('java', {}).get('supported') != game:
+        raise ValueError('Current Geyser game version does not match selected release')
+    for project in ['geyser', 'floodgate']:
+        release = metadata(BASE + project + '/versions/latest/builds/latest')
+        version, build = release.get('version'), release.get('build')
+        if release.get('project_id') != project or release.get('channel') != 'default' or not isinstance(version, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*(?:-SNAPSHOT)?', version) or type(build) is not int or build <= 0:
+            raise ValueError('Invalid official build identity')
+        artifact = release.get('downloads', {}).get(platform, {})
+        digest = artifact.get('sha256', '')
+        if not re.fullmatch(r'[a-f0-9]{64}', digest):
+            raise ValueError('Missing official SHA-256')
+        data = fetch(BASE + project + '/versions/' + version + '/builds/' + str(build) + '/downloads/' + platform, MAX_JAR)
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError('Official artifact hash mismatch')
+        path = os.path.join(staging, project + '.jar')
+        with open(path, 'xb') as stream:
+            stream.write(data)
+        verify_mod(path, project)
+        with open(os.path.join(staging, project + '.json'), 'x') as stream:
+            json.dump({'project':project, 'version':version, 'build':build, 'sha256':digest, 'platform':platform, 'game':game, 'loader':loader}, stream)
+    if platform == 'fabric':
+        query = urllib.parse.urlencode({'loaders':json.dumps(['fabric']), 'game_versions':json.dumps([game])})
+        versions = metadata('https://api.modrinth.com/v2/project/' + FABRIC_API + '/version?' + query)
+        if not isinstance(versions, list) or len(versions) > 1000:
+            raise ValueError('Invalid Fabric API release metadata')
+        releases = [v for v in versions if v.get('project_id') == FABRIC_API and v.get('version_type') == 'release' and game in v.get('game_versions', []) and 'fabric' in v.get('loaders', []) and isinstance(v.get('date_published'), str)]
+        if not releases:
+            raise ValueError('No exact Fabric API release for selected game version')
+        release = sorted(releases, key=lambda v:(v['date_published'], v['id']), reverse=True)[0]
+        files = release.get('files', [])
+        primary = [f for f in files if f.get('primary') is True]
+        if len(primary) != 1:
+            raise ValueError('Ambiguous Fabric API primary artifact')
+        artifact = primary[0]
+        url = urllib.parse.urlsplit(artifact.get('url', ''))
+        prefix = '/data/' + FABRIC_API + '/versions/' + release['id'] + '/'
+        if url.scheme != 'https' or url.netloc != 'cdn.modrinth.com' or url.query or url.fragment or not url.path.startswith(prefix) or not re.fullmatch(r'[A-Za-z0-9._+%-]+\.jar', url.path[len(prefix):]):
+            raise ValueError('Fabric API artifact identity mismatch')
+        digest = artifact.get('hashes', {}).get('sha512', '')
+        if not re.fullmatch(r'[a-f0-9]{128}', digest):
+            raise ValueError('Missing Fabric API SHA-512')
+        data = fetch(artifact['url'], MAX_JAR)
+        if hashlib.sha512(data).hexdigest() != digest:
+            raise ValueError('Fabric API hash mismatch')
+        path = os.path.join(staging, 'fabric-api.jar')
+        with open(path, 'xb') as stream:
+            stream.write(data)
+        verify_mod(path, 'fabric-api')
+        with open(os.path.join(staging, 'fabric-api.json'), 'x') as stream:
+            json.dump({'project':'fabric-api', 'version':release['id'], 'sha256':hashlib.sha256(data).hexdigest(), 'sha512':digest, 'game':game, 'loader':loader}, stream)
+try:
+    prepare()
+except Exception:
+    # No URLs, caller data, or unbounded publisher error bodies in appliance output.
+    print('ERROR: Current platform cross-play compatibility or verified artifacts are unavailable.', file=sys.stderr)
+    sys.exit(1)
+PY

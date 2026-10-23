@@ -303,7 +303,7 @@ func TestMinecraftWorkspaceCrossplayUsesExistingCheckboxSwitch(t *testing.T) {
 	for _, want := range []string{
 		`<label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>`,
 		`section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);`,
-		`section.querySelector('[name="bedrock_enabled"]').disabled = minecraft.server_type === "vanilla";`,
+		`section.querySelector('[name="bedrock_enabled"]').disabled = !["paper", "purpur", "spigot"].includes(minecraft.server_type);`,
 		`Geyser/Floodgate compatible with ${status.geyser_supported_version}`,
 	} {
 		if !strings.Contains(source, want) {

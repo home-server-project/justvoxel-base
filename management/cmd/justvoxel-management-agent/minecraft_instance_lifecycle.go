@@ -295,7 +295,7 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 		return instanceRuntimeFailure("Instance cannot be started in its current state.")
 	}
 	if record.Runtime.BedrockEnabled {
-		heldUDP, e := instanceHoldUDP(record.Runtime.BedrockPort)
+		heldUDP, e := instanceHoldCrossplayPort(record.Runtime.BedrockPort)
 		if e != nil {
 			return e
 		}
@@ -346,7 +346,7 @@ func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next ins
 	for _, permanent := range []bool{true, false} {
 		desired = append(desired, instanceFirewallRule{Zone: zone, Port: next.Runtime.JavaPort, Permanent: permanent})
 		if next.Runtime.BedrockEnabled {
-			desired = append(desired, instanceFirewallRule{Zone: zone, Port: next.Runtime.BedrockPort, Permanent: permanent, Protocol: "udp"})
+			desired = append(desired, instanceFirewallRule{Zone: zone, Port: next.Runtime.BedrockPort, Permanent: permanent, Protocol: "tcp"}, instanceFirewallRule{Zone: zone, Port: next.Runtime.BedrockPort, Permanent: permanent, Protocol: "udp"})
 		}
 	}
 	for _, rule := range old.Firewall {

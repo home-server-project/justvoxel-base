@@ -186,7 +186,9 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 			x.MountPoint = x.StorageRoot
 			x.ExpectedUUID = "uuid%u"
 		}},
-		{"bad software", "software", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].Software = "forge" }},
+		{"bad software", "software", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
+			c[0].Software = "forge-unknown"
+		}},
 		{"bad version", "version", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
 			c[0].Version = "1.21\nTYPE=VANILLA"
 		}},
@@ -226,8 +228,8 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 
 func TestInstanceRuntimeProtocolsAndMountEvidence(t *testing.T) {
 	store, ctx, configs := instanceRuntimeFixture(t)
-	// Equal numeric ports on different protocols are not a collision.
-	configs[0].JavaPort = 19133
+	// Mount evidence uses distinct ports because Geyser reserves TCP and UDP.
+	configs[0].JavaPort = 19134
 	configs[1].Software = "purpur"
 	configs[1].BedrockEnabled = true
 	configs[1].BedrockPort = 19133

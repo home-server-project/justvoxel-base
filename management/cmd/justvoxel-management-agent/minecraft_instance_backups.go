@@ -467,6 +467,7 @@ type instanceBackupMetadata struct {
 	Name                string `json:"name"`
 	Software            string `json:"software"`
 	Version             string `json:"version"`
+	LoaderVersion       string `json:"loader_version,omitempty"`
 	Created             string `json:"created"`
 	Archive             string `json:"archive"`
 	Size                int64  `json:"size"`

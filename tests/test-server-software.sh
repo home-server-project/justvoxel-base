@@ -43,7 +43,7 @@ sed -i '/^MINECRAFT_SERVER_TYPE=/d' "${JV_CONFIG}"
 MINECRAFT_SERVER_TYPE=purpur
 require_config
 [[ ${MINECRAFT_SERVER_TYPE} == paper ]]
-for invalid in '' PAPER fabric purpur-invalid; do
+for invalid in '' PAPER fabric-unknown purpur-invalid; do
     MINECRAFT_SERVER_TYPE="${invalid}"
     if write_main_config; then echo 'Invalid server type persisted' >&2; exit 1; fi
     printf 'MINECRAFT_SERVER_TYPE=%q\n' "${invalid}" >> "${JV_CONFIG}"

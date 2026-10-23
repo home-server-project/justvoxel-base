@@ -94,7 +94,7 @@ jv_setup_diagnostic_event "${diagnostic_id}" 'server settings collected' "$(jq -
 java_memory="$(jui_input 'Minecraft Java heap' "$(jq -r '.java_memory' <<<"${defaults}")")" || exit 0
 container_memory="$(jui_input 'Maximum total Minecraft memory' "$(jq -r '.container_memory' <<<"${defaults}")")" || exit 0
 java_port="$(jui_input 'Minecraft Java port' "$(jq -r '.java_port' <<<"${defaults}")")" || exit 0
-bedrock_port="$(jui_input 'Bedrock host UDP port' "$(jq -r '.bedrock_port' <<<"${defaults}")")" || exit 0
+bedrock_port="$(jui_input 'Bedrock host TCP/UDP port' "$(jq -r '.bedrock_port' <<<"${defaults}")")" || exit 0
 [[ ${java_port} =~ ^[0-9]+$ && ${bedrock_port} =~ ^[0-9]+$ ]] || { echo 'ERROR: Minecraft ports must be numbers.' >&2; exit 1; }
 
 image_choice="$(jui_choose 'Minecraft container channel'     'Stable - recommended'     'Latest - newest upstream image'     'Exact/custom tag')" || exit 0
@@ -202,7 +202,7 @@ echo "  Game mode: $(jq -r '.normalized.minecraft.game_mode' <<<"${plan}")"
 echo "  Java heap / maximum memory: $(jq -r '.normalized.minecraft.java_memory + " / " + .normalized.minecraft.container_memory' <<<"${plan}")"
 echo "  Java port: $(jq -r '.normalized.minecraft.java_port' <<<"${plan}")/tcp"
 if [[ $(jq -r '.normalized.server.bedrock_enabled' <<<"${plan}") == true ]]; then
-    echo "  Bedrock port: $(jq -r '.normalized.minecraft.bedrock_port' <<<"${plan}")/udp"
+    echo "  Bedrock port: $(jq -r '.normalized.minecraft.bedrock_port' <<<"${plan}")/tcp+udp"
 else
     echo '  Bedrock: disabled'
 fi

@@ -14,7 +14,7 @@ func TestAdvancedCrossplayApprovedOrder(t *testing.T) {
 	_, step, _ := strings.Cut(markup, "{{else if eq .CurrentStep 2}}")
 	step, _, _ = strings.Cut(step, "{{else if eq .CurrentStep 3}}")
 	previous := -1
-	for _, want := range []string{"Minecraft Java TCP port", "Bedrock UDP port", "Server update channel", `id="version-policy"`, `id="setup-version-preview"`, "Enable Bedrock cross-play", `class="setup-step-actions"`} {
+	for _, want := range []string{"Minecraft Java TCP port", "Bedrock TCP/UDP port", "Server update channel", `id="version-policy"`, `id="setup-version-preview"`, "Enable Bedrock cross-play", `class="setup-step-actions"`} {
 		index := strings.Index(step, want)
 		if index <= previous {
 			t.Fatalf("approved Cross-play order broken at %q", want)

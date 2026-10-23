@@ -22,7 +22,7 @@ podman() {
             printf '%s' "$((count + 1))" > "${DATA_PATH}/probes"
             if (( count < ${TRANSIENT_COUNT:-1} )); then printf '%s' "${TRANSIENT_RESPONSE:-Checking version, please wait...}"; return 0; fi
         fi; printf '%s' "${VERSION_RESPONSE:-This server is running Paper version 26.2-19-main (Implementing API version 26.2-R0.1-SNAPSHOT)}" ;;
-        plugins) [[ ${MINECRAFT_SERVER_TYPE:-paper} != vanilla ]] || { echo 'Unexpected Vanilla plugins command' >&2; return 1; }; printf '%s' "${PLUGIN_RESPONSE:-Plugins (3): Geyser-Spigot, floodgate, ViaVersion}" ;;
+        plugins) case "${MINECRAFT_SERVER_TYPE:-paper}" in paper|purpur) ;; *) echo 'Unexpected plugins command' >&2; return 1 ;; esac; printf '%s' "${PLUGIN_RESPONSE:-Plugins (3): Geyser-Spigot, floodgate, ViaVersion}" ;;
         'geyser version') printf '%s' "${GEYSER_RESPONSE:-This server is running Geyser version fixture}" ;;
         *) return 1 ;;
     esac
@@ -127,5 +127,41 @@ for software in paper purpur; do
             echo 'Invalid LATEST fallback accepted' >&2; exit 1
         fi
     done
+done
+# New types verify native software and loader evidence without managed plugins.
+MINECRAFT_SERVER_TYPE=spigot BEDROCK_ENABLED=no \
+    VERSION_RESPONSE='This server is running CraftBukkit version fixture-Spigot-build (MC: 1.21.1)' \
+    bash "${fixture_dir}/verify" 1.21.1
+if MINECRAFT_SERVER_TYPE=spigot BEDROCK_ENABLED=no \
+    VERSION_RESPONSE='This server is running Paper (MC: 1.21.1)' bash "${fixture_dir}/verify" 1.21.1; then
+    echo 'Spigot accepted another implementation' >&2; exit 1
+fi
+mkdir -p "${DATA_PATH}/logs"
+for software in forge neoforge fabric quilt; do
+    loader=0.16.10
+    case "${software}" in
+        fabric) marker="Loading Minecraft 1.21.1 with Fabric Loader ${loader}" ;;
+        quilt) marker="Loading Minecraft 1.21.1 with Quilt Loader ${loader}" ;;
+        forge) marker="Forge mod loading, version ${loader}, for MC 1.21.1" ;;
+        neoforge) marker="NeoForge mod loading, version ${loader}, for MC 1.21.1" ;;
+    esac
+    printf '[main/INFO]: %s\n' "${marker}" > "${DATA_PATH}/logs/latest.log"
+    MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${loader}" BEDROCK_ENABLED=no \
+        MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' bash "${fixture_dir}/verify" 1.21.1
+    for bad_loader in '' 0.16.1 0.16.11; do
+        if MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${bad_loader}" BEDROCK_ENABLED=no \
+            MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' bash "${fixture_dir}/verify" 1.21.1; then
+            echo 'Unverified loader accepted' >&2; exit 1
+        fi
+    done
+    if MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${loader}" BEDROCK_ENABLED=no \
+        MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.10"}}}' bash "${fixture_dir}/verify" 1.21.1; then
+        echo 'Wrong game version accepted' >&2; exit 1
+    fi
+    printf 'Loading Minecraft 1.21.1 with Another Loader %s\n' "${loader}" > "${DATA_PATH}/logs/latest.log"
+    if MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${loader}" BEDROCK_ENABLED=no \
+        MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' bash "${fixture_dir}/verify" 1.21.1; then
+        echo 'Wrong loader implementation accepted' >&2; exit 1
+    fi
 done
 echo 'Minecraft stack readiness regression checks passed.'

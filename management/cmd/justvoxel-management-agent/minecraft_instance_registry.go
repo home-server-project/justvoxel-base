@@ -62,16 +62,10 @@ func validateInstanceName(name string) (string, error) {
 }
 
 func instanceDefaultName(software string) string {
-	switch software {
-	case "paper":
-		return "JV Paper"
-	case "purpur":
-		return "JV Purpur"
-	case "vanilla":
-		return "JV Vanilla"
-	default:
-		return "JV Minecraft"
+	if c, ok := javaServerSoftware(software); ok {
+		return "JV " + c.Name
 	}
+	return "JV Minecraft"
 }
 
 func validInstanceSoftware(software string) bool {

@@ -9,36 +9,52 @@ flock -w 5 9 || fail
 /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" || fail
 /usr/libexec/justvoxel/mjust/validate-instance-start-memory "${id}" || fail
 config="/etc/justvoxel/instances/${id}/config.json"
-readarray -t values < <(jq -er '[.storage.data_path, (.runtime.uid|tostring), (.runtime.gid|tostring), (.runtime.bedrock_enabled|tostring), .runtime.software] | .[]' "${config}")
-[[ ${#values[@]} == 5 ]] || fail
+readarray -t values < <(jq -er '[.storage.data_path, (.runtime.uid|tostring), (.runtime.gid|tostring), (.runtime.bedrock_enabled|tostring), .runtime.software, .runtime.version, (.runtime.loader_version // "")] | .[]' "${config}")
+[[ ${#values[@]} == 7 ]] || fail
 DATA_PATH=${values[0]} MINECRAFT_UID=${values[1]} MINECRAFT_GID=${values[2]}
 [[ ${DATA_PATH} == /*/minecraft-instances/"${id}"/data && -d ${DATA_PATH} && ! -L ${DATA_PATH} && $(realpath -e -- "${DATA_PATH}") == "${DATA_PATH}" ]] || fail
 [[ ${MINECRAFT_UID} =~ ^[1-9][0-9]*$ && ${MINECRAFT_GID} =~ ^[1-9][0-9]*$ && ! -L ${DATA_PATH}/plugins ]] || fail
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 # Preserve independent volumes' established Podman :Z labeling model.
 jv_crossplay_label() { :; }
+MINECRAFT_SERVER_TYPE=${values[4]} MINECRAFT_VERSION=${values[5]} MINECRAFT_LOADER_VERSION=${values[6]}
 JV_PAPER_USER_AGENT='JustVoxel managed cross-play'
 # Durable private staging lets the next start retry a failed rollback. It is
 # never placed in container-writable data, and never silently abandoned.
 staging="/etc/justvoxel/instances/${id}/crossplay-staging"
+mod_ownership="/etc/justvoxel/instances/${id}/crossplay-mods.json"
+recover_crossplay() {
+    if [[ -f ${staging}/mod-ownership.json && ! -L ${staging}/mod-ownership.json && -f ${mod_ownership} && ! -L ${mod_ownership} ]] && cmp -s -- "${staging}/mod-ownership.json" "${mod_ownership}"; then
+        return 0 # The atomic ownership publication committed the complete set.
+    fi
+    jv_crossplay_rollback "${staging}" || return 1
+    if [[ -f ${staging}/ownership-before.json ]]; then
+        install -m0600 "${staging}/ownership-before.json" "${mod_ownership}" || return 1
+    fi
+}
+publish_mod_ownership() {
+    chmod 0600 "${staging}/mod-ownership.json" || return 1
+    cp -- "${staging}/mod-ownership.json" "${staging}/ownership-publish.json" || return 1
+    mv -fT -- "${staging}/ownership-publish.json" "${mod_ownership}"
+}
 if [[ -e ${staging} || -L ${staging} ]]; then
     [[ -d ${staging} && ! -L ${staging} && $(stat -c '%u:%g:%a' -- "${staging}") == 0:0:700 ]] || fail
-    jv_crossplay_rollback "${staging}" || fail
+    recover_crossplay || fail
     rm -rf -- "${staging}"
 fi
-if [[ ${values[3]} == false ]]; then
+if [[ ${values[3]} == false && ${MINECRAFT_SERVER_TYPE} != fabric && ${MINECRAFT_SERVER_TYPE} != neoforge ]]; then
     # Remove only recognized managed binaries; retain configs/identity material.
     for project in geyser floodgate; do
         /usr/libexec/justvoxel/mjust/managed-plugin-files "${DATA_PATH}/plugins" "${project}" '' || fail
     done
     exit 0
 fi
-[[ ${values[3]} == true && ( ${values[4]} == paper || ${values[4]} == purpur ) ]] || fail
+[[ ( ${values[3]} == true || ${values[3]} == false ) && ( ${values[4]} == paper || ${values[4]} == purpur || ${values[4]} == spigot || ${values[4]} == fabric || ${values[4]} == neoforge ) ]] || fail
 mkdir -m0700 -- "${staging}"
 cleanup() {
     local status=$?
     if (( status != 0 )) && [[ -f ${staging}/replacement-started ]]; then
-        if ! jv_crossplay_rollback "${staging}"; then
+        if ! recover_crossplay; then
             echo 'ERROR: Instance plugin rollback failed; startup remains blocked. Recovery artifacts were preserved.' >&2
             return "${status}"
         fi
@@ -47,6 +63,39 @@ cleanup() {
     return "${status}"
 }
 trap cleanup EXIT
+if [[ ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge ]]; then
+    # A pre-existing mod server with cross-play off has no managed mod state.
+    # Preserve its normal startup and all manually installed mods unchanged.
+    if [[ ${values[3]} == false && ! -e ${mod_ownership} && ! -L ${mod_ownership} ]]; then exit 0; fi
+    /usr/libexec/justvoxel/mjust/managed-crossplay-mod-ownership verify "${MINECRAFT_SERVER_TYPE}" "${DATA_PATH}" "${mod_ownership}" "${staging}" || fail
+    if [[ -f ${mod_ownership} ]]; then
+        cp --no-dereference -- "${mod_ownership}" "${staging}/ownership-before.json" || fail
+    fi
+    if [[ ${values[3]} == false ]]; then
+        if [[ -f ${mod_ownership} ]]; then
+            jv_crossplay_preserve "${staging}" || fail
+            for project in geyser floodgate; do
+                rm -f -- "${DATA_PATH}/mods/$(jv_crossplay_jar_name "${project}")" || fail
+            done
+            # Fabric API may also be required by other installed mods.
+            # Retain that verified shared dependency when disabling cross-play.
+            jq -c '{schema,platform,artifacts:(.artifacts | with_entries(select(.key == "fabric-api.jar")))}' "${mod_ownership}" > "${staging}/mod-ownership.json" || fail
+            publish_mod_ownership || fail
+        fi
+        exit 0
+    fi
+    # A current platform build must prove the exact game/loader pair. Prepare
+    # all mod artifacts before touching any installed member of the set.
+    jv_crossplay_prepare "${staging}" || fail
+    jv_crossplay_install "${staging}" || fail
+    jv_crossplay_verify "${staging}" || fail
+    # Platform mod configuration lives under /data/config, never plugins.
+    config_root="${DATA_PATH}/config"
+    platform_name=Geyser-Fabric
+    [[ ${MINECRAFT_SERVER_TYPE} != neoforge ]] || platform_name=Geyser-NeoForge
+else
+    config_root="${DATA_PATH}/plugins"
+    platform_name=Geyser-Spigot
 # Existing working canonical binaries survive upstream outages unchanged.
 if [[ ! -s ${DATA_PATH}/plugins/Geyser-Spigot.jar || -L ${DATA_PATH}/plugins/Geyser-Spigot.jar ||
       ! -s ${DATA_PATH}/plugins/floodgate-spigot.jar || -L ${DATA_PATH}/plugins/floodgate-spigot.jar ]]; then
@@ -54,14 +103,18 @@ if [[ ! -s ${DATA_PATH}/plugins/Geyser-Spigot.jar || -L ${DATA_PATH}/plugins/Gey
     jv_crossplay_install "${staging}" || fail
     jv_crossplay_verify "${staging}" || fail
 fi
+fi
 # Internal ports are fixed per network namespace. Only the selected instance's
 # host Java/UDP ports are published by its Quadlet. Never use the legacy folder.
-python3 - "${DATA_PATH}/plugins" "${MINECRAFT_UID}" "${MINECRAFT_GID}" <<'PY'
+python3 - "${config_root}" "${MINECRAFT_UID}" "${MINECRAFT_GID}" "${platform_name}" <<'PY'
 import os, re, sys, tempfile
 root, uid, gid = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-folder = os.path.join(root, 'Geyser-Spigot')
+folder = os.path.join(root, sys.argv[4])
 if os.path.islink(root) or os.path.islink(folder):
     raise SystemExit(1)
+if sys.argv[4] != 'Geyser-Spigot':
+    os.makedirs(root, mode=0o755, exist_ok=True)
+    os.chown(root, uid, gid)
 os.makedirs(folder, mode=0o755, exist_ok=True)
 os.chown(folder, uid, gid)
 path = os.path.join(folder, 'config.yml')
@@ -73,8 +126,10 @@ if os.path.exists(path):
         text = stream.read(65537)
     if len(text) > 65536:
         raise SystemExit(1)
-settings = {'bedrock': {'address':'0.0.0.0', 'port':'19132', 'clone-remote-port':'false'},
+settings = {'bedrock': {'address':'0.0.0.0', 'port':'19132', 'clone-remote-port':'false', 'transport':'nethernet'},
             'remote': {'address':'127.0.0.1', 'port':'25565', 'auth-type':'floodgate'}}
+if sys.argv[4] != 'Geyser-Spigot':
+    settings['java'] = settings.pop('remote')
 for section, values in settings.items():
     pattern = re.compile(r'^' + section + r':[^\n]*\n(?:[ \t]+[^\n]*\n|\n)*', re.M)
     match = pattern.search(text)
@@ -97,3 +152,8 @@ finally:
     if os.path.exists(temporary):
         os.unlink(temporary)
 PY
+
+if [[ ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge ]]; then
+    /usr/libexec/justvoxel/mjust/managed-crossplay-mod-ownership record "${MINECRAFT_SERVER_TYPE}" "${DATA_PATH}" "${mod_ownership}" "${staging}" || fail
+    publish_mod_ownership || fail
+fi

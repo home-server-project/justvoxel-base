@@ -289,11 +289,14 @@ validate_legacy_first_run_runtime() {
         fail "firewall does not allow Java ${JAVA_PORT}/tcp"
     fi
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        if firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1; then
-            pass "firewall allows Bedrock ${BEDROCK_PORT}/udp"
-        else
-            fail "firewall does not allow Bedrock ${BEDROCK_PORT}/udp"
-        fi
+        local protocol
+        for protocol in tcp udp; do
+            if firewall-cmd --permanent --query-port="${BEDROCK_PORT}/${protocol}" >/dev/null 2>&1; then
+                pass "firewall allows Bedrock ${BEDROCK_PORT}/${protocol}"
+            else
+                fail "firewall does not allow Bedrock ${BEDROCK_PORT}/${protocol}"
+            fi
+        done
     fi
 
     if systemctl cat minecraft.service >/dev/null 2>&1; then

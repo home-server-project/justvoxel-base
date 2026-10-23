@@ -155,6 +155,7 @@ jv_reset_remove_active_configuration() {
 
     jv_trace_run firewall-cmd --permanent --remove-port="${java_port}/tcp" >/dev/null 2>&1 || true
     if [[ ${bedrock_enabled} == yes ]]; then
+        geyser_tcp_firewall_remove "${bedrock_port}" || return 1
         jv_trace_run firewall-cmd --permanent --remove-port="${bedrock_port}/udp" >/dev/null 2>&1 || true
     fi
     jv_trace_run firewall-cmd --reload >/dev/null 2>&1 || true

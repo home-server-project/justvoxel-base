@@ -290,3 +290,51 @@ start_case verify-restore-absent verify-failure absent old
 start_case preserve-recovery rollback-failure old empty
 start_case preserve-existing existing old old
 start_case bedrock-disabled disabled absent absent no
+
+# Platform identities are fixed; mod capabilities never become Bukkit plugins.
+for software in paper purpur spigot fabric neoforge; do
+    MINECRAFT_SERVER_TYPE=${software}
+    platform=spigot
+    [[ ${software} != fabric && ${software} != neoforge ]] || platform=${software}
+    [[ $(jv_crossplay_platform) == "${platform}" ]]
+    case "${platform}" in
+        spigot)
+            [[ $(jv_crossplay_jar_name geyser) == Geyser-Spigot.jar && $(jv_crossplay_jar_name floodgate) == floodgate-spigot.jar ]]
+            [[ $(jv_crossplay_directory) == plugins ]] ;;
+        fabric)
+            [[ $(jv_crossplay_jar_name geyser) == Geyser-Fabric.jar && $(jv_crossplay_jar_name floodgate) == floodgate-fabric.jar ]]
+            [[ $(jv_crossplay_directory) == mods && $(jv_crossplay_projects) == 'geyser floodgate fabric-api' ]] ;;
+        neoforge)
+            [[ $(jv_crossplay_jar_name geyser) == Geyser-NeoForge.jar && $(jv_crossplay_jar_name floodgate) == floodgate-neoforge.jar ]]
+            [[ $(jv_crossplay_directory) == mods && $(jv_crossplay_projects) == 'geyser floodgate' ]] ;;
+    esac
+done
+for software in vanilla forge quilt bedrock; do
+    MINECRAFT_SERVER_TYPE=${software}
+    if jv_crossplay_platform; then echo 'Unsupported platform accepted' >&2; exit 1; fi
+done
+MINECRAFT_SERVER_TYPE=paper
+
+# The same hash/rollback transaction operates on mods without invoking Bukkit
+# management or changing unrelated mods or configuration.
+MINECRAFT_SERVER_TYPE=neoforge
+DATA_PATH="${fixture_dir}/mod-transaction"
+mkdir -p "${DATA_PATH}/mods" "${fixture_dir}/mod-prepared"
+printf old-geyser > "${DATA_PATH}/mods/Geyser-NeoForge.jar"
+printf old-floodgate > "${DATA_PATH}/mods/floodgate-neoforge.jar"
+printf unrelated > "${DATA_PATH}/mods/keep.jar"
+for project in geyser floodgate; do
+    printf 'new-%s' "${project}" > "${fixture_dir}/mod-prepared/${project}.jar"
+    digest="$(sha256sum "${fixture_dir}/mod-prepared/${project}.jar" | cut -d ' ' -f1)"
+    jq -cn --arg sha256 "${digest}" '{sha256:$sha256}' > "${fixture_dir}/mod-prepared/${project}.json"
+done
+jv_crossplay_install "${fixture_dir}/mod-prepared"
+jv_crossplay_verify "${fixture_dir}/mod-prepared"
+jv_crossplay_rollback "${fixture_dir}/mod-prepared"
+[[ $(cat "${DATA_PATH}/mods/Geyser-NeoForge.jar") == old-geyser ]]
+[[ $(cat "${DATA_PATH}/mods/floodgate-neoforge.jar") == old-floodgate ]]
+[[ $(cat "${DATA_PATH}/mods/keep.jar") == unrelated ]]
+printf tampered > "${fixture_dir}/mod-prepared/geyser.jar"
+if jv_crossplay_install "${fixture_dir}/mod-prepared"; then echo 'Tampered mod accepted' >&2; exit 1; fi
+[[ $(cat "${DATA_PATH}/mods/Geyser-NeoForge.jar") == old-geyser ]]
+MINECRAFT_SERVER_TYPE=paper

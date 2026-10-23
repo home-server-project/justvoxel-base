@@ -85,7 +85,7 @@ echo "Source online-mode: true"
 echo "Destination data: ${DATA_PATH}"
 echo "Destination UID:GID: ${MINECRAFT_UID}:${MINECRAFT_GID}"
 echo "Java port: ${JAVA_PORT}/tcp"
-if [[ ${BEDROCK_ENABLED} == yes ]]; then echo "Bedrock port: ${BEDROCK_PORT}/udp"; else echo 'Bedrock host publishing: disabled'; fi
+if [[ ${BEDROCK_ENABLED} == yes ]]; then echo "Bedrock port: ${BEDROCK_PORT}/tcp+udp"; else echo 'Bedrock host publishing: disabled'; fi
 echo "Game mode / difficulty: ${GAME_MODE} / ${DIFFICULTY}"
 echo "Whitelist / enforce whitelist: ${WHITELIST_ENABLED} / ${ENFORCE_WHITELIST}"
 echo "Maximum players: ${MAX_PLAYERS}"

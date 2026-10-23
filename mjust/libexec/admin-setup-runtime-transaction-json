@@ -256,7 +256,7 @@ _a55_cleanup_failed_data() {
 }
 
 _a55_record_initial_state() {
-    local java_open=false bedrock_open=false data_identity=null first_entry
+    local java_open=false bedrock_open=false bedrock_tcp_open=false data_identity=null first_entry
     # A failed enumeration must never be mistaken for an empty directory.
     first_entry="$(find "${DATA_PATH}" -mindepth 1 -maxdepth 1 -print -quit)" || return 1
     if [[ -z ${first_entry} ]]; then
@@ -264,9 +264,10 @@ _a55_record_initial_state() {
     fi
     jv_trace_run firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && java_open=true
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        jv_trace_run firewall-cmd --permanent --query-port="${BEDROCK_PORT}/tcp" >/dev/null 2>&1 && bedrock_tcp_open=true
         jv_trace_run firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && bedrock_open=true
     fi
-    _a55_manifest_update ".runtime = {java_firewall_preexisting:${java_open},bedrock_firewall_preexisting:${bedrock_open},minecraft_started:false,timer_activated:false,marker:true,empty_data_identity:${data_identity}}" || return 1
+    _a55_manifest_update ".runtime = {java_firewall_preexisting:${java_open},bedrock_firewall_preexisting:${bedrock_open},bedrock_tcp_firewall_preexisting:${bedrock_tcp_open},minecraft_started:false,timer_activated:false,marker:true,empty_data_identity:${data_identity}}" || return 1
 }
 
 _a55_apply_action() {
@@ -292,6 +293,7 @@ _a55_apply_action() {
     jv_trace_run firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null || return 1
     _a55_evidence_set java_firewall_rule present || return 1
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        geyser_tcp_firewall_add "${BEDROCK_PORT}" || return 1
         jv_trace_run firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null || return 1
         _a55_evidence_set bedrock_firewall_rule present || return 1
     fi
@@ -458,6 +460,16 @@ _a55_rollback_action() {
     if [[ ${java_pre} != true ]]; then
         jv_trace_run firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true
         jv_trace_run firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && failure=1
+    fi
+    if [[ ${BEDROCK_ENABLED} == yes ]] && jq -e '.runtime.bedrock_tcp_firewall_preexisting == false' "${A53_MANIFEST}" >/dev/null; then
+        # Prefer zone-specific ownership. The manifest remains the compatibility
+        # evidence for a transaction written before ownership markers existed.
+        if [[ -d ${JV_CONFIG_DIR}/geyser-tcp-firewall/${BEDROCK_PORT} ]]; then
+            geyser_tcp_firewall_remove "${BEDROCK_PORT}" || failure=1
+        else
+            jv_trace_run firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/tcp" >/dev/null 2>&1 || true
+            jv_trace_run firewall-cmd --permanent --query-port="${BEDROCK_PORT}/tcp" >/dev/null 2>&1 && failure=1
+        fi
     fi
     if [[ ${BEDROCK_ENABLED} == yes && ${bedrock_pre} != true ]]; then
         jv_trace_run firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true

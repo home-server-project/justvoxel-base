@@ -32,6 +32,8 @@ JV_BACKUP_ENV="${fixture}/backup.env"
 JV_BACKUP_SERVICE="${fixture}/backup.service"
 JV_BACKUP_TIMER="${fixture}/backup.timer"
 JV_CONFIG="${fixture}/config"
+JV_CONFIG_DIR="${fixture}"
+source <(sed -n '/^geyser_tcp_firewall_add() {/,/^configure_firewall_initial() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d')
 JAVA_PORT=25565 BEDROCK_PORT=19132 BEDROCK_ENABLED=no
 JV_MAINTENANCE_LOCK="${fixture}/minecraft-maintenance.lock"
 _a55_load_values() { :; }

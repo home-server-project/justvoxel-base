@@ -281,7 +281,7 @@ func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *test
 			return []byte("sha256:localimage\n"), nil
 		case "firewall-cmd --permanent --query-port=25565/tcp":
 			return []byte("yes\n"), nil
-		case "firewall-cmd --permanent --query-port=19132/udp":
+		case "firewall-cmd --permanent --query-port=19132/udp", "firewall-cmd --permanent --query-port=19132/tcp":
 			return []byte("yes\n"), nil
 		case "ls -Zd -- " + record.Storage.DataPath:
 			return []byte("system_u:object_r:container_file_t:s0 " + record.Storage.DataPath + "\n"), nil
@@ -383,6 +383,7 @@ func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *test
 		"network_connectivity=\"full\"",
 		"java_firewall_open=\"present\"",
 		"bedrock_firewall_open=\"present\"",
+		"bedrock_tcp_firewall_open=\"present\"",
 		"backup_timer_enabled=\"enabled\"",
 		"backup_timer_active=\"inactive\"",
 		"podman failed to connect network",

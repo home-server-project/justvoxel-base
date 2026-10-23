@@ -11,35 +11,36 @@ import (
 )
 
 type AdminVersionStatus struct {
-	InstanceID             string `json:"instance_id,omitempty"`
-	ServerType             string `json:"server_type"`
-	ServerSupported        bool   `json:"server_supported"`
-	StackState             string `json:"stack_state"`
-	MinecraftState         string `json:"minecraft_state"`
-	GeyserState            string `json:"geyser_state"`
-	FloodgateState         string `json:"floodgate_state"`
-	ViaVersionState        string `json:"viaversion_state"`
-	ImageState             string `json:"image_state"`
-	PlanFingerprint        string `json:"plan_fingerprint"`
-	ServerSoftware         string `json:"server_software"`
-	Installed              string `json:"installed"`
-	Available              string `json:"available"`
-	AvailableChannel       string `json:"available_channel"`
-	Recommended            string `json:"recommended"`
-	SelectedCandidate      string `json:"selected_candidate"`
-	CandidateChannel       string `json:"candidate_channel"`
-	ImageTag               string `json:"image_tag"`
-	ConfiguredImageTag     string `json:"configured_image_tag"`
-	ConfiguredServerType   string `json:"configured_server_type"`
-	RuntimeUpdateRequired  bool   `json:"runtime_update_required"`
-	Policy                 string `json:"policy"`
-	ConfiguredVersion      string `json:"configured_version"`
-	UpdateAvailable        bool   `json:"update_available"`
-	PaperSupported         bool   `json:"paper_supported"`
-	CrossplayEnabled       bool   `json:"crossplay_enabled"`
-	GeyserSupportedVersion string `json:"geyser_supported_version"`
-	CrossplayCompatible    bool   `json:"crossplay_compatible"`
-	Reason                 string `json:"reason"`
+	InstanceID                string `json:"instance_id,omitempty"`
+	ServerType                string `json:"server_type"`
+	ServerSupported           bool   `json:"server_supported"`
+	StackState                string `json:"stack_state"`
+	MinecraftState            string `json:"minecraft_state"`
+	GeyserState               string `json:"geyser_state"`
+	FloodgateState            string `json:"floodgate_state"`
+	ViaVersionState           string `json:"viaversion_state"`
+	ImageState                string `json:"image_state"`
+	PlanFingerprint           string `json:"plan_fingerprint"`
+	ServerSoftware            string `json:"server_software"`
+	Installed                 string `json:"installed"`
+	Available                 string `json:"available"`
+	AvailableChannel          string `json:"available_channel"`
+	Recommended               string `json:"recommended"`
+	SelectedCandidate         string `json:"selected_candidate"`
+	CandidateChannel          string `json:"candidate_channel"`
+	ImageTag                  string `json:"image_tag"`
+	ConfiguredImageTag        string `json:"configured_image_tag"`
+	ConfiguredServerType      string `json:"configured_server_type"`
+	RuntimeUpdateRequired     bool   `json:"runtime_update_required"`
+	Policy                    string `json:"policy"`
+	ConfiguredVersion         string `json:"configured_version"`
+	UpdateAvailable           bool   `json:"update_available"`
+	PaperSupported            bool   `json:"paper_supported"`
+	ManagedCrossplayAvailable bool   `json:"managed_crossplay_available"`
+	CrossplayEnabled          bool   `json:"crossplay_enabled"`
+	GeyserSupportedVersion    string `json:"geyser_supported_version"`
+	CrossplayCompatible       bool   `json:"crossplay_compatible"`
+	Reason                    string `json:"reason"`
 }
 
 func (c *Client) AdminSetupVersionPreview(ctx context.Context, session, policy, version string, bedrock bool, serverType string) (AdminVersionStatus, error) {

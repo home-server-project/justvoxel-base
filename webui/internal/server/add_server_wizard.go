@@ -348,10 +348,18 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 	draft.StartBootUnavailable = draft.StartBootUnavailable || !valid || defaults.SystemMemoryMiB <= 0 || draft.BootMemoryMiB+candidate+1024 > defaults.SystemMemoryMiB
 	draft.StartAfterSetup, draft.StartOnBoot = !draft.StartAfterUnavailable, !draft.StartBootUnavailable
 
+	// Geyser reserves TCP as well as UDP; defaults must respect both.
+	for port := range bedrockUsed {
+		javaUsed[port] = true
+	}
+	for port := range javaUsed {
+		bedrockUsed[port] = true
+	}
 	javaPort, err := availableInstancePort(defaults.JavaPort, javaUsed)
 	if err != nil {
 		return setupDraft{}, err
 	}
+	bedrockUsed[javaPort] = true
 	bedrockPort, err := availableInstancePort(defaults.BedrockPort, bedrockUsed)
 	if err != nil {
 		return setupDraft{}, err
@@ -412,7 +420,7 @@ func (a *App) addServerWizardStart(w http.ResponseWriter, r *http.Request) {
 		draft.Storage.Complete, draft.Backups.Complete = true, true
 		draft.DisplayName = r.FormValue("display_name")
 		draft.Minecraft.ServerType = strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
-		if !validSetupServerType(draft.Minecraft.ServerType) {
+		if !validSetupServerType(draft.Minecraft.ServerType) || draft.Minecraft.ServerType == "spigot" {
 			http.Error(w, "Choose Paper, Purpur or Vanilla.", http.StatusBadRequest)
 			return
 		}

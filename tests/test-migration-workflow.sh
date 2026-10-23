@@ -208,6 +208,9 @@ esac
 EOF
 cat > "${port_fixture}/ss" <<'EOF'
 #!/usr/bin/bash
+if [[ ${FAKE_TCP_LISTENER:-no} == yes && $2 == -ltn ]]; then
+    printf '%s\n' 'LISTEN 0 0 0.0.0.0:19132 0.0.0.0:*'
+fi
 if [[ ${FAKE_UDP_LISTENER:-no} == yes && $2 == -lun ]]; then
     printf '%s\n' 'UNCONN 0 0 0.0.0.0:19132 0.0.0.0:*'
 fi
@@ -228,6 +231,10 @@ if jv_migration_running_minecraft_owns_port udp 19132; then fail 'different host
 FAKE_MINECRAFT_MAPPING=0.0.0.0:19132
 jv_migration_check_import_bedrock_port 19132 yes 19132 || fail 'enabled current Bedrock port was rejected'
 jv_migration_check_import_bedrock_port 19132 no 19133 || fail 'running managed Bedrock port was rejected after cross-play disable'
+# A legacy UDP mapping never grants ownership of an unrelated TCP listener.
+export FAKE_TCP_LISTENER=yes
+if jv_migration_check_import_bedrock_port 19132 yes 19132 2>/dev/null; then fail 'legacy enabled cross-play hid a TCP conflict'; fi
+FAKE_TCP_LISTENER=no
 FAKE_MINECRAFT_MAPPING=0.0.0.0:19133
 if jv_migration_check_import_bedrock_port 19132 no 19132 2>/dev/null; then fail 'unrelated Bedrock listener was allowed'; fi
 grep -Fq 'jv_migration_check_import_bedrock_port "$bedrock_port" "$BEDROCK_ENABLED" "$BEDROCK_PORT"' "${repo_root}/mjust/libexec/admin-migration-import-plan-json" || fail 'API Import planner does not use shared Bedrock check'

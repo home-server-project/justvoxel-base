@@ -23,6 +23,7 @@ jv_load_instance() {
     DATA_PATH="$(jq -er '.storage.data_path' "${record}")" || return 1
     [[ ${DATA_PATH} == "$(jq -er '.storage.root' "${record}")/minecraft-instances/${id}/data" ]] || return 1
     MINECRAFT_SERVER_TYPE="$(jq -er '.runtime.software' "${record}")" || return 1
+    MINECRAFT_LOADER_VERSION="$(jq -r '.runtime.loader_version // ""' "${record}")" || return 1
     MINECRAFT_IMAGE_TAG="$(jq -er '.runtime.image_tag' "${record}")" || return 1
     JV_INSTANCE_IMAGE_DIGEST="$(jq -r '.runtime.image_digest // ""' "${record}")" || return 1
     JV_INSTANCE_IMAGE_REF="docker.io/itzg/minecraft-server:${MINECRAFT_IMAGE_TAG}"

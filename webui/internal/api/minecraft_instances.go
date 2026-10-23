@@ -19,6 +19,7 @@ type InstanceRuntimeSettings struct {
 	JavaMemory       string `json:"java_memory"`
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
+	LoaderVersion    string `json:"loader_version,omitempty"`
 	VersionPolicy    string `json:"version_policy,omitempty"`
 	Version          string `json:"version"`
 	PaperChannel     string `json:"paper_channel"`

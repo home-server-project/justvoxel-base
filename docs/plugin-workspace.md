@@ -1,5 +1,10 @@
 # Plugin Workspace
 
+The workspace supports Paper, Purpur and Spigot. Spigot uses only explicit
+Spigot/Bukkit-compatible Modrinth releases for the exact Minecraft version;
+Hangar remains unavailable for Spigot. Mod-loader and native Bedrock servers
+do not expose the Bukkit Plugins workspace. See [server software](server-software.md).
+
 ## Cycle 1 — read-only discovery and inventory
 
 Administrators can open **Control Center → Minecraft → Plugins**. The movable,

@@ -427,6 +427,13 @@ bedrock_crossplay_supports_version() {
     [[ -n ${minecraft_version} && -n ${geyser_java_version} && ${minecraft_version} == "${geyser_java_version}" ]]
 }
 
+server_crossplay_version_compatible() {
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} != spigot ]]; then bedrock_crossplay_supports_version "$1" "$2"; return; fi
+    [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ && $2 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+    [[ $(printf '%s\n' "$1" "$2" | sort -V | tail -n1) == "$2" ]] &&
+        [[ $(printf '%s\n' 1.20.5 "$1" | sort -V | tail -n1) == "$1" ]]
+}
+
 paper_version_has_stable_build() {
     local version="$1" builds
     builds="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
@@ -478,25 +485,117 @@ resolve_latest_stable_paper_version() {
     return 1
 }
 
-# Three fixed implementations, with Paper compatibility for pre-existing configs.
+# Fixed Java implementations, with Paper compatibility for pre-existing configs.
 validate_server_type() {
-    case "$1" in paper|purpur|vanilla) return 0 ;; *) return 1 ;; esac
+    case "$1" in paper|purpur|vanilla|spigot|forge|neoforge|fabric|quilt) return 0 ;; *) return 1 ;; esac
 }
+# Preserve the deployed legacy migration/export integration boundary.
 server_supports_plugins() { [[ ${1:-${MINECRAFT_SERVER_TYPE-paper}} == paper || ${1:-${MINECRAFT_SERVER_TYPE-paper}} == purpur ]]; }
+server_supports_viaversion() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|spigot) return 0 ;; *) return 1 ;; esac
+}
+server_supports_managed_crossplay() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|spigot|fabric|neoforge) return 0 ;; *) return 1 ;; esac
+}
+server_supports_bukkit_plugins() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|spigot) return 0 ;; *) return 1 ;; esac
+}
+server_is_mod_loader() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in forge|neoforge|fabric|quilt) return 0 ;; *) return 1 ;; esac
+}
 server_allows_in_place_switch() {
     validate_server_type "$1" && validate_server_type "$2" || return 1
-    [[ $1 == "$2" ]] || { server_supports_plugins "$1" && server_supports_plugins "$2"; }
+    [[ $1 == "$2" ]] || { [[ $1 == paper || $1 == purpur ]] && [[ $2 == paper || $2 == purpur ]]; }
 }
 server_software_display_name() {
-    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper) printf Paper ;; purpur) printf Purpur ;; vanilla) printf Vanilla ;; *) return 1 ;; esac
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper) printf Paper ;; purpur) printf Purpur ;; vanilla) printf Vanilla ;; spigot) printf Spigot ;; forge) printf Forge ;; neoforge) printf NeoForge ;; fabric) printf Fabric ;; quilt) printf Quilt ;; *) return 1 ;; esac
 }
 validate_server_capabilities() {
     validate_server_type "${MINECRAFT_SERVER_TYPE-paper}" || { echo 'ERROR: invalid Minecraft server type.' >&2; return 1; }
-    if [[ ${BEDROCK_ENABLED:-no} == yes ]] && ! server_supports_plugins; then
-        echo 'ERROR: managed Bedrock cross-play requires Paper or Purpur.' >&2
+    if [[ ${BEDROCK_ENABLED:-no} == yes ]] && ! server_supports_managed_crossplay; then
+        echo 'ERROR: managed Bedrock cross-play requires Paper, Purpur or Spigot.' >&2
         return 1
     fi
 }
+# Explicit pins use the Java generation for the game release. Availability of
+# the exact game/loader pair must still be verified against upstream metadata.
+validate_java_server_selection() {
+    local software="$1" policy="$2" version="$3" loader="$4" image="$5" required_image
+    validate_server_type "${software}" || return 1
+    case "${software}" in
+        paper|purpur|vanilla) [[ -z ${loader} ]]; return ;;
+    esac
+    [[ ${policy} == pinned ]] || return 1
+    if [[ ${version} =~ ^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$ ]]; then
+        required_image=java21
+    elif [[ ${version} =~ ^26\.[1-9][0-9]*(\.(0|[1-9][0-9]*))?$ ]]; then
+        required_image=java25
+    else
+        return 1
+    fi
+    if [[ ${software} == spigot ]]; then
+        [[ -z ${loader} && ${image} == "${required_image}-jdk" ]]
+    else
+        [[ ${image} == "${required_image}" && ${#loader} -le 64 && ${loader} =~ ^[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ ]]
+    fi
+}
+
+# Verify an exact pair with the selected project's own metadata/artifact
+# repository. No release synthesis, third-party jars, or alternate loader.
+java_server_version_available() {
+    local software="$1" version="$2" loader="${3:-}" url coordinate prefix patch digest java_class=65
+    [[ ${version} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+    # Loader metadata can describe profiles independently of Mojang releases.
+    # Require the exact game release as well as the exact implementation pair.
+    curl --connect-timeout 3 --max-time 8 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e --arg version "${version}" '
+        any(.versions[]; .id == $version and .type == "release")' >/dev/null || return 1
+    if [[ ${software} == spigot ]]; then
+        [[ -z ${loader} ]] || return 1
+        [[ ${version} != 26.* ]] || java_class=69
+        curl --connect-timeout 3 --max-time 12 -fsSL "https://hub.spigotmc.org/versions/${version}.json" | jq -e --argjson java_class "${java_class}" '
+            (.javaVersions | type == "array" and index($java_class) != null) and
+            ([.refs.BuildData,.refs.Bukkit,.refs.CraftBukkit,.refs.Spigot] | all(.[]; type == "string" and test("^[a-f0-9]{40}$")))' >/dev/null
+        return
+    fi
+    [[ ${#loader} -le 64 && ${loader} =~ ^[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ ]] || return 1
+    case "${software}" in
+        forge)
+            url="https://maven.minecraftforge.net/net/minecraftforge/forge/${version}-${loader}/forge-${version}-${loader}-installer.jar.sha1"
+            ;;
+        neoforge)
+            # 26.x includes the full game version, with an omitted patch
+            # represented by zero. Older releases omit Minecraft's leading 1.
+            if [[ ${version} =~ ^26\.([1-9][0-9]*)(\.([0-9]+))?$ ]]; then
+                prefix="26.${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
+            elif [[ ${version} =~ ^1\.(20|21)(\.([0-9]+))?$ ]]; then
+                patch=${BASH_REMATCH[3]:-0}
+                prefix="${BASH_REMATCH[1]}.${patch}."
+            else
+                return 1
+            fi
+            [[ ${loader} == "${prefix}"* ]] || return 1
+            url="https://maven.neoforged.net/releases/net/neoforged/neoforge/${loader}/neoforge-${loader}-installer.jar.sha1"
+            ;;
+        fabric|quilt)
+            if [[ ${software} == fabric ]]; then
+                url="https://meta.fabricmc.net/v2/versions/loader/${version}/${loader}/server/json"
+                coordinate="net.fabricmc:fabric-loader:${loader}"
+            else
+                url="https://meta.quiltmc.org/v3/versions/loader/${version}/${loader}/server/json"
+                coordinate="org.quiltmc:quilt-loader:${loader}"
+            fi
+            curl --connect-timeout 3 --max-time 12 -fsSL "${url}" | jq -e --arg version "${version}" --arg loader "${coordinate}" '
+                .inheritsFrom == $version and
+                (.mainClass | type == "string" and endswith(".KnotServer")) and
+                any(.libraries[]; .name == $loader)' >/dev/null
+            return
+            ;;
+        *) return 1 ;;
+    esac
+    digest="$(curl --connect-timeout 3 --max-time 12 -fsSL "${url}")" || return 1
+    [[ ${digest} =~ ^[a-fA-F0-9]{40}$ ]]
+}
+
 purpur_metadata() {
     curl --connect-timeout 5 --max-time 20 -fsSL https://api.purpurmc.org/v2/purpur | jq -e '
         select(.metadata.current | type == "string" and test("^[0-9]+([.][0-9]+){1,2}$"))
@@ -516,6 +615,7 @@ server_version_available() {
         paper) paper_version_build_channel "${version}" >/dev/null ;;
         purpur) purpur_metadata | jq -e --arg v "${version}" '.versions | index($v) != null' >/dev/null ;;
         vanilla) vanilla_metadata | jq -e --arg v "${version}" 'any(.versions[]; .id == $v and .type == "release")' >/dev/null ;;
+        spigot|forge|neoforge|fabric|quilt) java_server_version_available "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION:-}" ;;
         *) return 1 ;;
     esac
 }
@@ -544,6 +644,10 @@ server_version_channel() {
 
 render_runtime_files() {
     require_config
+    case "${MINECRAFT_SERVER_TYPE-paper}" in paper|purpur|vanilla) ;; *)
+        echo 'ERROR: this server software requires the per-instance runtime.' >&2
+        return 1 ;;
+    esac
     if declare -F jv_trace_run >/dev/null; then jv_trace_run install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"; else install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"; fi
     if declare -F jv_trace_run >/dev/null; then jv_trace_run install -d -m0755 -o root -g root /etc/containers/systemd; else install -d -m0755 -o root -g root /etc/containers/systemd; fi
 
@@ -593,14 +697,14 @@ render_runtime_files() {
     # JustVoxel verifies these binaries; the container only owns ViaVersion.
     replace_token "${env_tmp}" PLUGINS_LINE '# Cross-play binaries are managed by JustVoxel.'
     if [[ ${MINECRAFT_SERVER_TYPE} != paper ]]; then sed -i '/^PAPER_CHANNEL=/d' "${env_tmp}"; fi
-    if ! server_supports_plugins; then sed -i '/^MODRINTH_PROJECTS=/d' "${env_tmp}"; fi
+    if ! server_supports_viaversion; then sed -i '/^MODRINTH_PROJECTS=/d' "${env_tmp}"; fi
     if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"; else install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"; fi
     rm -f "${env_tmp}"
 
     image_ref="$(minecraft_image_ref)"
     quadlet_tmp="$(mktemp /etc/containers/systemd/.minecraft.container.XXXXXX)"
     cp "${JV_TEMPLATE_ROOT}/quadlets/minecraft.container.in" "${quadlet_tmp}"
-    if server_supports_plugins; then
+    if server_supports_managed_crossplay; then
         sed -i '/^ExecStartPre=.*validate-data-mount$/a ExecStartPre=/usr/libexec/justvoxel/mjust/managed-crossplay-start' "${quadlet_tmp}"
     fi
     replace_token "${quadlet_tmp}" MINECRAFT_IMAGE "${image_ref}"
@@ -608,7 +712,8 @@ render_runtime_files() {
     replace_token "${quadlet_tmp}" JAVA_PORT "${JAVA_PORT}"
     replace_token "${quadlet_tmp}" CONTAINER_MEMORY "${CONTAINER_MEMORY^^}"
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        replace_token "${quadlet_tmp}" BEDROCK_PUBLISH_PORT "PublishPort=${BEDROCK_PORT}:19132/udp"
+        replace_token "${quadlet_tmp}" BEDROCK_PUBLISH_PORT "PublishPort=${BEDROCK_PORT}:19132/tcp"
+        sed -i "/^PublishPort=${BEDROCK_PORT}:19132\/tcp$/a PublishPort=${BEDROCK_PORT}:19132/udp" "${quadlet_tmp}"
     else
         replace_token "${quadlet_tmp}" BEDROCK_PUBLISH_PORT '# Bedrock port disabled.'
     fi
@@ -660,9 +765,51 @@ render_runtime() {
     activate_backup_timer
 }
 
+# Legacy fixed-runtime callers have no instance firewall journal. Record only
+# newly added Geyser TCP rules, including their zone, before changing firewalld.
+# Missing evidence from older deployments never authorizes TCP removal.
+geyser_tcp_firewall_add() {
+    local port="$1" zone marker status
+    validate_port "${port}" || return 1
+    zone="$(firewall-cmd --get-default-zone)" || return 1
+    [[ ${zone} =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+    marker="${JV_CONFIG_DIR}/geyser-tcp-firewall/${port}/${zone}"
+    if firewall-cmd --zone="${zone}" --permanent --query-port="${port}/tcp" >/dev/null; then
+        return 0
+    else
+        status=$?
+        [[ ${status} == 1 ]] || return 1
+    fi
+    install -d -m0700 -o root -g root "$(dirname -- "${marker}")" || return 1
+    [[ ! -L ${marker} ]] || return 1
+    (umask 077; : > "${marker}") || return 1
+    firewall-cmd --zone="${zone}" --permanent --add-port="${port}/tcp" >/dev/null || return 1
+    firewall-cmd --zone="${zone}" --permanent --query-port="${port}/tcp" >/dev/null
+}
+
+geyser_tcp_firewall_remove() {
+    local port="$1" marker zone status
+    validate_port "${port}" || return 1
+    for marker in "${JV_CONFIG_DIR}/geyser-tcp-firewall/${port}/"*; do
+        [[ -e ${marker} ]] || continue
+        [[ -f ${marker} && ! -L ${marker} && $(stat -c '%u:%g:%a' "${marker}") == 0:0:600 ]] || return 1
+        zone="${marker##*/}"
+        [[ ${zone} =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+        firewall-cmd --zone="${zone}" --permanent --remove-port="${port}/tcp" >/dev/null || return 1
+        if firewall-cmd --zone="${zone}" --permanent --query-port="${port}/tcp" >/dev/null; then
+            return 1
+        else
+            status=$?
+            [[ ${status} == 1 ]] || return 1
+        fi
+        rm -f -- "${marker}" || return 1
+    done
+}
+
 configure_firewall_initial() {
     firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        geyser_tcp_firewall_add "${BEDROCK_PORT}" || return 1
         firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null
     fi
     firewall-cmd --reload >/dev/null
@@ -674,10 +821,12 @@ update_firewall_ports() {
         firewall-cmd --permanent --remove-port="${old_java}/tcp" >/dev/null 2>&1 || true
     fi
     if [[ ${old_bedrock_enabled} == yes && ( ${BEDROCK_ENABLED} != yes || ${old_bedrock} != ${BEDROCK_PORT} ) ]]; then
+        geyser_tcp_firewall_remove "${old_bedrock}" || return 1
         firewall-cmd --permanent --remove-port="${old_bedrock}/udp" >/dev/null 2>&1 || true
     fi
     firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        geyser_tcp_firewall_add "${BEDROCK_PORT}" || return 1
         firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null
     fi
     firewall-cmd --reload >/dev/null

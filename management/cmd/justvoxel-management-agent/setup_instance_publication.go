@@ -184,7 +184,7 @@ func (b *instanceRuntimeBackend) prepareSetupInstance(ctx context.Context, c min
 		}
 	}()
 	if c.BedrockEnabled {
-		udp, err := instanceHoldUDP(c.BedrockPort)
+		udp, err := instanceHoldCrossplayPort(c.BedrockPort)
 		if err != nil {
 			return err
 		}

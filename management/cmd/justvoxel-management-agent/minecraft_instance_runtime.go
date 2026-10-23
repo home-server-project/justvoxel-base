@@ -33,6 +33,7 @@ type minecraftInstanceRuntimeConfig struct {
 	JavaMemory       string `json:"java_memory"`
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
+	LoaderVersion    string `json:"loader_version,omitempty"`
 	VersionPolicy    string `json:"version_policy,omitempty"`
 	Version          string `json:"version"` // resolved pin or LATEST, as in the legacy environment
 	PaperChannel     string `json:"paper_channel"`
@@ -331,10 +332,13 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if err := reserve(c.JavaPort, tcp); err != nil {
 			return nil, err
 		}
-		if c.BedrockEnabled && c.Software != "paper" && c.Software != "purpur" {
+		if c.BedrockEnabled && !javaServerCrossplay(c.Software) {
 			return nil, errors.New("unsupported cross-play software")
 		}
 		if c.BedrockEnabled {
+			if err := reserve(c.BedrockPort, tcp); err != nil {
+				return nil, err
+			}
 			if err := reserve(c.BedrockPort, udp); err != nil {
 				return nil, err
 			}
@@ -357,6 +361,9 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		}
 		if (c.ImageDigest != "" && !operationFingerprintPattern.MatchString(c.ImageDigest)) || (c.VersionPolicy != "" && c.VersionPolicy != "pinned" && c.VersionPolicy != "recommended" && c.VersionPolicy != "latest") || !validSetupServerType(c.Software) || !instanceRuntimeVersionPattern.MatchString(c.Version) || !imageTagInputPattern.MatchString(c.ImageTag) {
 			return nil, errors.New("invalid Minecraft software, version, or image tag")
+		}
+		if err := validateJavaServerSelection(c.Software, c.VersionPolicy, c.Version, c.LoaderVersion, c.ImageTag, c.BedrockEnabled); err != nil {
+			return nil, err
 		}
 		if c.PaperChannel != "default" && c.PaperChannel != "experimental" {
 			return nil, errors.New("invalid Paper channel")
@@ -394,8 +401,9 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		ctx := ctx.forInstance(c.ID)
 		name := "minecraft-" + c.ID
 		f := minecraftInstanceRuntimeFiles{ID: c.ID, UnitName: name + ".service", ContainerName: name, QuadletPath: "/etc/containers/systemd/" + name + ".container", EnvironmentPath: "/etc/justvoxel/instances/" + c.ID + "/minecraft.env", DataPath: filepath.Join(ctx.StorageRoot, "minecraft-instances", c.ID, "data")}
+		capabilities, _ := javaServerSoftware(c.Software)
 		values := map[string]string{
-			"EULA": "TRUE", "MINECRAFT_SERVER_TYPE": strings.ToUpper(c.Software), "MINECRAFT_VERSION": c.Version, "PAPER_CHANNEL": c.PaperChannel,
+			"EULA": "TRUE", "MINECRAFT_SERVER_TYPE": capabilities.Type, "MINECRAFT_VERSION": c.Version, "PAPER_CHANNEL": c.PaperChannel,
 			"MINECRAFT_UID": strconv.FormatUint(uint64(c.UID), 10), "MINECRAFT_GID": strconv.FormatUint(uint64(c.GID), 10), "TIMEZONE": instanceRuntimeEnvEscape(c.Timezone),
 			"JAVA_MEMORY": strings.ToUpper(c.JavaMemory), "GAME_MODE": c.GameMode, "DIFFICULTY": c.Difficulty, "MAX_PLAYERS": strconv.Itoa(c.MaxPlayers),
 			"WHITELIST_ENABLED": instanceRuntimeBool(c.Whitelist), "ENFORCE_WHITELIST": instanceRuntimeBool(c.EnforceWhitelist),
@@ -405,12 +413,17 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if c.Software != "paper" {
 			source = regexp.MustCompile(`(?m)^PAPER_CHANNEL=.*\n`).ReplaceAllString(source, "")
 		}
-		if c.Software == "vanilla" {
+		if !javaServerManagedViaVersion(c.Software) {
 			source = regexp.MustCompile(`(?m)^MODRINTH_PROJECTS=.*\n`).ReplaceAllString(source, "")
 		}
 		f.Environment, err = instanceRuntimeTemplate([]byte(source), values)
 		if err != nil {
 			return nil, err
+		}
+		if c.Software == "spigot" {
+			f.Environment = append(f.Environment, []byte("BUILD_FROM_SOURCE=TRUE\n")...)
+		} else if capabilities.ModLoader {
+			f.Environment = append(f.Environment, []byte(capabilities.LoaderEnvironment+"="+c.LoaderVersion+"\n")...)
 		}
 		install := "# Start on Boot disabled; service remains manually startable."
 		if c.StartOnBoot {
@@ -418,7 +431,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		}
 		bedrockPublish := ""
 		if c.BedrockEnabled {
-			bedrockPublish = "PublishPort=" + strconv.Itoa(c.BedrockPort) + ":19132/udp"
+			bedrockPublish = "PublishPort=" + strconv.Itoa(c.BedrockPort) + ":19132/tcp\nPublishPort=" + strconv.Itoa(c.BedrockPort) + ":19132/udp"
 		}
 		f.Quadlet, err = instanceRuntimeTemplate(quadletTemplate, map[string]string{
 			"BEDROCK_PUBLISH": bedrockPublish,
@@ -428,6 +441,9 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		})
 		if err != nil {
 			return nil, err
+		}
+		if c.Software != "vanilla" && !capabilities.ManagedCrossplay {
+			f.Quadlet = bytes.Replace(f.Quadlet, []byte("/instance-crossplay-start "), []byte("/validate-instance-start-memory "), 1)
 		}
 		files = append(files, f)
 	}

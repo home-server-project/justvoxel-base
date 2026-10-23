@@ -3874,7 +3874,7 @@ if (minecraftOpen && minecraftDialog) {
         <div class="section-heading"><div><p class="eyebrow">Network</p><h2>Java & Bedrock</h2></div></div>
         <div class="minecraft-native-grid">
           <label>Minecraft Java port<input name="java_port" type="number" min="1" max="65535" required></label>
-          <label>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" required></label>
+          <label>Bedrock TCP/UDP port<input name="bedrock_port" type="number" min="1" max="65535" required></label>
         </div>
         <label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>
         <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Minecraft is not restarted automatically for these non-memory changes.</p>
@@ -3882,18 +3882,20 @@ if (minecraftOpen && minecraftDialog) {
       section.querySelector('[name="java_port"]').value = String(minecraft.java_port || 25565);
       section.querySelector('[name="bedrock_port"]').value = String(minecraft.bedrock_port || 19132);
       section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
-      section.querySelector('[name="bedrock_enabled"]').disabled = minecraft.server_type === "vanilla";
-      if (minecraft.server_type === "vanilla") section.querySelector('[data-crossplay-compatibility]').textContent = "Managed Bedrock cross-play currently requires Paper or Purpur.";
+      section.querySelector('[name="bedrock_enabled"]').disabled = !["paper", "purpur", "spigot"].includes(minecraft.server_type);
+      if (!["paper", "purpur", "spigot"].includes(minecraft.server_type)) section.querySelector('[data-crossplay-compatibility]').textContent = "Managed Bedrock cross-play requires supported server software and verified version compatibility.";
       section.querySelector('[data-open-version]')?.addEventListener("click", () => document.querySelector("[data-version-open]")?.click());
       requestWorkspaceJSON("/api/version/workspace/status").then((status) => {
         const node = section.querySelector("[data-crossplay-compatibility]");
         if (!node || !status) return;
         const installed = status.installed || "Unknown";
-        if (minecraft.server_type === "vanilla") { node.textContent = "Managed Bedrock cross-play currently requires Paper or Purpur."; return; }
+        const toggle = section.querySelector('[name="bedrock_enabled"]');
+        toggle.disabled = !status.managed_crossplay_available;
+        if (!status.managed_crossplay_available) { node.textContent = "Managed Bedrock cross-play requires supported server software and verified version compatibility."; return; }
         if (!status.crossplay_enabled) node.textContent = `Cross-play disabled · Minecraft ${installed}.`;
         else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}`;
         else node.textContent = status.reason || "Geyser/Floodgate compatibility is unavailable.";
-      }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node && minecraft.server_type !== "vanilla") node.textContent = "Geyser/Floodgate compatibility is unavailable."; });
+      }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node && ["paper", "purpur", "spigot"].includes(minecraft.server_type)) node.textContent = "Geyser/Floodgate compatibility is unavailable."; });
       form.appendChild(section);
     }
 
@@ -7225,6 +7227,8 @@ if (pluginsDialog && pluginsOpen) {
       if (tab === "discover" && !acceptDiscoverContext(server)) { load(); return; }
       form.querySelectorAll("input,button").forEach((control) => { control.disabled = !server.supported; });
       if (!server.supported) { state.textContent = server.message; return; }
+      const hangarChoice = form.querySelector('input[name="hangar"]');
+      if (hangarChoice && server.server_type === "spigot") { hangarChoice.checked = false; hangarChoice.disabled = true; }
       if (tab === "addons") {
         payload.sections.forEach((section) => results.append(renderAddonSection(section)));
         state.textContent = "Select a local file. Host plugins perform runtime loading; updates and removal are not available yet.";

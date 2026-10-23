@@ -96,7 +96,7 @@ func assertSetupRuntimeProbeScope(t *testing.T, calls []string, selected string)
 
 func assertSetupApplianceEvidence(t *testing.T, values map[string]string) {
 	t.Helper()
-	for _, key := range []string{"setup_marker_present", "config_present", "network_online_target", "network_connectivity", "podman_network_backend", "podman_default_network", "podman_network_summary", "dns_docker_io", "dns_papermc_io", "dns_geysermc_org", "java_firewall_open", "bedrock_firewall_open", "minecraft_image_digest", "minecraft_image_local_id", "data_selinux_type"} {
+	for _, key := range []string{"setup_marker_present", "config_present", "network_online_target", "network_connectivity", "podman_network_backend", "podman_default_network", "podman_network_summary", "dns_docker_io", "dns_papermc_io", "dns_geysermc_org", "java_firewall_open", "bedrock_firewall_open", "bedrock_tcp_firewall_open", "minecraft_image_digest", "minecraft_image_local_id", "data_selinux_type"} {
 		if values[key] == "" || values[key] == "<unavailable>" {
 			t.Errorf("missing appliance/plan evidence %s: %q", key, values[key])
 		}

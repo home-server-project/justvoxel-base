@@ -71,10 +71,15 @@ def validate_meta(fd, filename):
     if not archive_pattern.fullmatch(filename) or len(filename) > 160:
         raise ValueError('name')
     m = json.loads(read_at(fd, filename + '.meta.json'))
-    if set(m) != metadata_keys or type(m['schema']) != int or m['schema'] != 1 or m['id'] != identity or m['archive'] != filename:
+    if not isinstance(m,dict):
+        raise ValueError('metadata')
+    expected_keys = metadata_keys | ({'loader_version'} if m.get('software') in ('forge','neoforge','fabric','quilt') else set())
+    if set(m) != expected_keys or type(m['schema']) != int or m['schema'] != 1 or m['id'] != identity or m['archive'] != filename:
         raise ValueError('identity')
-    if m['software'] not in ('paper','purpur','vanilla') or not isinstance(m['version'],str) or len(m['version']) > 64:
+    if m['software'] not in ('paper','purpur','vanilla','spigot','forge','neoforge','fabric','quilt') or not isinstance(m['version'],str) or len(m['version']) > 64:
         raise ValueError('software')
+    if 'loader_version' in expected_keys and (not isinstance(m['loader_version'],str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?',m['loader_version']) or len(m['loader_version']) > 64):
+        raise ValueError('loader')
     if not isinstance(m['name'],str) or len(m['name']) > 64 or any(ord(c)<32 for c in m['name']):
         raise ValueError('description')
     if not isinstance(m['created'],str) or len(m['created']) != 20:
@@ -200,7 +205,7 @@ try:
                 owned = set()
                 try:
                     software = record['runtime']['software']
-                    if software not in ('paper','purpur','vanilla'):
+                    if software not in ('paper','purpur','vanilla','spigot','forge','neoforge','fabric','quilt'):
                         raise ValueError('software')
                     now = datetime.datetime.now(datetime.timezone.utc)
                     base = 'instance-backup-' + software + '-' + now.strftime('%Y-%m-%d-%H%M')
@@ -249,6 +254,8 @@ try:
                     m = dict(schema=1,id=identity,name=name,software=software,version=record['runtime']['version'],
                              created=now.strftime('%Y-%m-%dT%H:%M:%SZ'),archive=filename,size=os.stat(tmp).st_size,
                              configuration_sha256=hashlib.sha256(record_raw).hexdigest(),sha256=digest.hexdigest())
+                    if software in ('forge','neoforge','fabric','quilt'):
+                        m['loader_version'] = record['runtime']['loader_version']
                     encoded = json.dumps(m,separators=(',',':')).encode()
                     if len(encoded)>16384:
                         raise ValueError('metadata bound')

@@ -89,14 +89,15 @@ validate_request_shape() {
       (.storage|type == "object") and
       (.backups|type == "object") and
       ((.server|keys) - ["motd","max_players","bedrock_enabled","timezone"] | length == 0) and
-      ((.minecraft|keys) - ["server_type","java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode"] | length == 0) and
+      ((.minecraft|keys) - ["server_type","loader_version","java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode"] | length == 0) and
       ((.storage|keys) - ["type","path","device","mount_point"] | length == 0) and
       ((.backups|keys) - ["automatic","daily_time","keep","type","path","device","mount_point","source","username","domain"] | length == 0) and
       (.server.motd|type == "string") and
       (.server.max_players|type == "number") and
       (.server.bedrock_enabled|type == "boolean") and
       (.server.timezone|type == "string") and
-      (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla"))) and
+      (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla" or . == "spigot" or . == "forge" or . == "neoforge" or . == "fabric" or . == "quilt"))) and
+      ((.minecraft.loader_version // "")|type == "string") and
       (.minecraft.java_memory|type == "string") and
       (.minecraft.container_memory|type == "string") and
       (.minecraft.java_port|type == "number") and
@@ -130,7 +131,7 @@ port_in_use() {
     if [[ ${protocol} == tcp ]]; then
         ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:|\\])${port}$"
     else
-        ss -H -lun 2>/dev/null | awk '{print $5}' | grep -Eq "(^|:|\\])${port}$"
+        ss -H -lun 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:|\\])${port}$"
     fi
 }
 
@@ -270,6 +271,7 @@ fi
 # Planning is shared by first setup and additional instances. Apply owns admission.
 
 MINECRAFT_SERVER_TYPE="$(jq -r '.minecraft.server_type // "paper"' <<< "${request}")"
+MINECRAFT_LOADER_VERSION="$(jq -r '.minecraft.loader_version // ""' <<< "${request}")"
 motd="$(jq -r '.server.motd' <<< "${request}")"
 max_players="$(jq -r '.server.max_players' <<< "${request}")"
 bedrock_enabled="$(jq -r '.server.bedrock_enabled' <<< "${request}")"
@@ -297,8 +299,12 @@ backup_source="$(jq -r '.backups.source // ""' <<< "${request}")"
 backup_username="$(jq -r '.backups.username // ""' <<< "${request}")"
 backup_domain="$(jq -r '.backups.domain // ""' <<< "${request}")"
 
-if [[ ${MINECRAFT_SERVER_TYPE} == vanilla && ${bedrock_enabled} == true ]]; then
-    json_error 'Managed Bedrock cross-play requires Paper or Purpur.' invalid_minecraft
+if ! validate_java_server_selection "${MINECRAFT_SERVER_TYPE}" "${version_policy}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${image_tag}"; then
+    json_error 'Unsupported server/version/loader/image combination. New types require a pinned Minecraft 1.20.5–1.21.11 release with java21 or 26.x with java25, an exact loader version for mod loaders, and the matching -jdk image for Spigot.' invalid_minecraft
+    exit 0
+fi
+if [[ ${bedrock_enabled} == true ]] && ! server_supports_managed_crossplay; then
+    json_error 'Managed Bedrock cross-play requires Paper, Purpur or Spigot, or verified current Fabric/NeoForge platform compatibility.' invalid_minecraft
     exit 0
 fi
 warnings='[]'
@@ -329,7 +335,7 @@ if (( total_mib > 0 && remaining_mib < SETUP_RECOMMENDED_SYSTEM_RESERVE_MIB )); 
 fi
 
 validate_port "${java_port}" || { json_error 'Minecraft Java port must be between 1 and 65535.' invalid_minecraft; exit 0; }
-validate_port "${bedrock_port}" || { json_error 'Bedrock UDP port must be between 1 and 65535.' invalid_minecraft; exit 0; }
+validate_port "${bedrock_port}" || { json_error 'Bedrock TCP/UDP port must be between 1 and 65535.' invalid_minecraft; exit 0; }
 if port_in_use tcp "${java_port}"; then
     json_error "Minecraft Java TCP port ${java_port} is already in use on this appliance." port_conflict
     exit 0
@@ -397,18 +403,26 @@ case "${version_policy}" in
         ;;
 esac
 
+if [[ ${requested_bedrock_enabled} == true && ( ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge ) ]]; then
+    source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
+    if ! jv_crossplay_mod_compatible "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION}"; then
+        json_error 'Current platform cross-play compatibility could not be proven for the exact Minecraft and loader versions.' bedrock_version_unsupported
+        exit 0
+    fi
+fi
+
 if [[ ${requested_bedrock_enabled} == true ]]; then
     if [[ -z ${geyser_supported_version} || -z ${bedrock_compatibility_version} ]]; then
         json_error 'Bedrock compatibility could not be confirmed. Try again, or turn off Bedrock to continue.' upstream_unavailable
         exit 0
-    elif ! bedrock_crossplay_supports_version "${bedrock_compatibility_version}" "${geyser_supported_version}"; then
+    elif ! server_crossplay_version_compatible "${bedrock_compatibility_version}" "${geyser_supported_version}"; then
         json_error "Minecraft ${bedrock_compatibility_version} is not currently compatible with Bedrock cross-play. Bedrock supports ${geyser_supported_version}. Choose Recommended, choose a compatible Specific version, or turn off Bedrock to continue." bedrock_version_unsupported
         exit 0
     fi
 fi
 
-if [[ ${bedrock_enabled} == true ]] && port_in_use udp "${bedrock_port}"; then
-    json_error "Bedrock UDP port ${bedrock_port} is already in use on this appliance." port_conflict
+if [[ ${bedrock_enabled} == true ]] && { [[ ${java_port} == "${bedrock_port}" ]] || port_in_use tcp "${bedrock_port}" || port_in_use udp "${bedrock_port}"; }; then
+    json_error "Bedrock TCP/UDP port ${bedrock_port} is already in use on this appliance." port_conflict
     exit 0
 fi
 
@@ -534,6 +548,7 @@ server_json="$(jq -n \
 
 minecraft_json="$(jq -n \
     --arg server_type "${MINECRAFT_SERVER_TYPE}" \
+    --arg loader_version "${MINECRAFT_LOADER_VERSION}" \
     --arg java_memory "${java_memory}" \
     --arg container_memory "${container_memory}" \
     --argjson java_port "${java_port}" \
@@ -547,7 +562,7 @@ minecraft_json="$(jq -n \
     --argjson system_reserve_mib "${remaining_mib}" \
     --argjson minecraft_uid "${minecraft_uid}" \
     --argjson minecraft_gid "${minecraft_gid}" \
-    '{server_type:$server_type,java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,game_mode:$game_mode,requested_version_policy:$requested_version_policy,version_policy:$version_policy,version:$version,system_memory_mib:$system_memory_mib,system_reserve_mib:$system_reserve_mib,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid}')"
+    '{server_type:$server_type,java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,game_mode:$game_mode,requested_version_policy:$requested_version_policy,version_policy:$version_policy,version:$version,system_memory_mib:$system_memory_mib,system_reserve_mib:$system_reserve_mib,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid} + (if $loader_version == "" then {} else {loader_version:$loader_version} end)')"
 
 backup_json="$(jq -c \
     --argjson automatic "${backup_automatic}" \

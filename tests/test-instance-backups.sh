@@ -90,6 +90,28 @@ else:
         r['backups']=dict(type='nfs' if source else 'system',root=str(root),path=str(root/identity),mount_point=str(root) if source else '',uuid='',source=source)
         self.private(path,json.dumps(r))
 
+    def test_java_server_backup_identity_and_loader_pin(self):
+        path=self.configs/'jv-aaaaaa/config.json'
+        original=json.loads(path.read_text())
+        for software in ('spigot','forge','neoforge','fabric','quilt'):
+            with self.subTest(software=software):
+                record=json.loads(json.dumps(original))
+                record['runtime']['software']=software
+                if software != 'spigot': record['runtime']['loader_version']='0.16.10'
+                self.private(path,json.dumps(record))
+                self.run_helper('create')
+                items=[m for m in self.inventory() if m['software']==software]
+                self.assertEqual(len(items),1)
+                if software == 'spigot': self.assertNotIn('loader_version',items[0])
+                else: self.assertEqual(items[0]['loader_version'],'0.16.10')
+                # A sibling instance still has an independent archive namespace.
+                self.assertEqual(self.inventory('jv-bbbbbb'),[])
+                if software != 'spigot':
+                    meta=self.backups/'jv-aaaaaa'/(items[0]['archive']+'.meta.json')
+                    damaged=dict(items[0]);del damaged['loader_version']
+                    self.private(meta,json.dumps(damaged))
+                    self.assertFalse(any(m['archive']==items[0]['archive'] for m in self.inventory()))
+
     def test_persisted_backup_destinations_ignore_global_defaults(self):
         selected=self.root/'selected-backups'
         self.pin_backup('jv-aaaaaa',selected)

@@ -144,7 +144,7 @@ echo "Source type: ${source_class}"
 echo "Minecraft version: ${source_version}"
 echo "Minecraft data: ${DATA_PATH}"
 echo "Java: ${JAVA_PORT}/tcp"
-if [[ ${BEDROCK_ENABLED} == yes ]]; then echo "Bedrock: ${BEDROCK_PORT}/udp"; fi
+if [[ ${BEDROCK_ENABLED} == yes ]]; then echo "Bedrock: ${BEDROCK_PORT}/tcp+udp"; fi
 if [[ ${removable_owned} == yes ]]; then
     echo 'Device unmounted.'
     echo 'It is safe to remove the USB device.'

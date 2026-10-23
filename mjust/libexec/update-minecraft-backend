@@ -24,6 +24,10 @@ old_image_tag="${MINECRAFT_IMAGE_TAG}"
 target_image_tag="${old_image_tag}"
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 old_server_type="${MINECRAFT_SERVER_TYPE-paper}"
+case "${old_server_type}" in paper|purpur|vanilla|spigot) ;; *)
+    echo 'ERROR: server updates for this software require separate compatibility support.' >&2
+    exit 1 ;;
+esac
 target_server_type="${old_server_type}"
 target_policy="${MINECRAFT_VERSION_MODE}"
 target_version="${MINECRAFT_VERSION}"
@@ -89,7 +93,7 @@ fi
 printf 'Minecraft: %s -> %s\n' "$(jq -r '.installed' <<< "${stack_plan}")" "${latest_mc}"
 printf 'Geyser: %s\nFloodgate: %s\n' \
     "$(jq -r '.geyser_state' <<< "${stack_plan}")" "$(jq -r '.floodgate_state' <<< "${stack_plan}")"
-server_supports_plugins && echo 'ViaVersion: Managed automatically'
+server_supports_viaversion && echo 'ViaVersion: Managed automatically'
 
 echo
 if [[ ${MINECRAFT_IMAGE_TAG} != stable && ${MINECRAFT_IMAGE_TAG} != latest ]]; then

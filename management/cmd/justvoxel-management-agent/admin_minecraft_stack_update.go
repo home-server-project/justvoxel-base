@@ -71,6 +71,15 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	record, err := instanceRuntimes.readRecord(id)
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	if software := record.Runtime.Software; software != "paper" && software != "purpur" && software != "vanilla" && software != "spigot" {
+		writeError(w, http.StatusConflict, "Server updates for this software require separate compatibility support")
+		return
+	}
 	r = r.WithContext(context.WithValue(r.Context(), instanceVersionKey{}, id))
 	var request minecraftStackUpdateRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))

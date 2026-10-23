@@ -155,7 +155,7 @@ func TestInstanceCrossplayRenderingAndReservations(t *testing.T) {
 				t.Fatal(err)
 			}
 			q := string(files[0].Quadlet)
-			for _, want := range []string{"PublishPort=19133:19132/udp", "instance-crossplay-start " + configs[0].ID, "Before=justvoxel-minecraft-shutdown-guard.service", "Volume=" + files[0].DataPath + ":/data:Z"} {
+			for _, want := range []string{"PublishPort=19133:19132/tcp", "PublishPort=19133:19132/udp", "instance-crossplay-start " + configs[0].ID, "Before=justvoxel-minecraft-shutdown-guard.service", "Volume=" + files[0].DataPath + ":/data:Z"} {
 				if !strings.Contains(q, want) {
 					t.Fatal("missing", want)
 				}
@@ -572,7 +572,7 @@ func TestInstanceUDPActivationFailureAndRecovery(t *testing.T) {
 	if err != nil || !committed.Runtime.BedrockEnabled {
 		t.Fatal("UDP activation did not commit", err)
 	}
-	if len(committed.Firewall) != 4 {
+	if len(committed.Firewall) != 6 {
 		t.Fatal("expected TCP/UDP runtime and permanent ownership", committed.Firewall)
 	}
 }

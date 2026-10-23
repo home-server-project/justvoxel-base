@@ -133,10 +133,10 @@ jv_migration_check_candidate_port() {
 }
 
 jv_migration_running_minecraft_owns_port() {
-    local proto="$1" port="$2" container_port running mappings mapping
+    local proto="$1" port="$2" container_port="${3:-}" running mappings mapping
     case "${proto}" in
-        tcp) container_port=25565 ;;
-        udp) container_port=19132 ;;
+        tcp) container_port="${container_port:-25565}" ;;
+        udp) container_port="${container_port:-19132}" ;;
         *) return 1 ;;
     esac
     [[ ${port} =~ ^[0-9]+$ ]] || return 1
@@ -150,14 +150,16 @@ jv_migration_running_minecraft_owns_port() {
 }
 
 jv_migration_check_import_bedrock_port() {
-    local port="$1" old_enabled="$2" old_port="$3"
-    if [[ ${old_enabled} == yes && ${port} == "${old_port}" ]]; then
-        return 0
-    fi
-    if [[ ${old_enabled} == no ]] && jv_migration_running_minecraft_owns_port udp "${port}"; then
-        return 0
-    fi
-    jv_migration_check_candidate_port udp "${port}"
+    local port="$1" old_enabled="$2" old_port="$3" proto
+    for proto in tcp udp; do
+        # Existing Geyser mappings may still be running after disabling cross-play.
+        # Prove each protocol's actual 19132 mapping; an enabled config alone
+        # does not prove the newly required TCP port belongs to Geyser.
+        if jv_migration_running_minecraft_owns_port "${proto}" "${port}" 19132; then
+            continue
+        fi
+        jv_migration_check_candidate_port "${proto}" "${port}" || return 1
+    done
 }
 
 jv_migration_write_state() {

@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-const vanillaBedrockHelp = "Select Paper or Purpur on Step 1 to enable Bedrock cross-play."
+const vanillaBedrockHelp = "Select Paper, Purpur or Spigot on Step 1 to enable Bedrock cross-play."
 
 func assertSetupApplicationLogo(t *testing.T, body string) {
 	t.Helper()
@@ -703,7 +703,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"<h2>Cross-play</h2>", "Cross-play", "Enable Bedrock cross-play", "Minecraft Java TCP port", "Bedrock UDP port", "25565", "19132", "Server update channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`} {
+	for _, want := range []string{"<h2>Cross-play</h2>", "Cross-play", "Enable Bedrock cross-play", "Minecraft Java TCP port", "Bedrock TCP/UDP port", "25565", "19132", "Server update channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Resources step missing %q: %s", want, body)
 		}

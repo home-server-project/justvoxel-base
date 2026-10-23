@@ -44,7 +44,7 @@ show_configuration() {
     echo "Minecraft version policy: $(jq -r '.runtime.version_policy' <<<"${configuration}") ($(jq -r '.runtime.version' <<<"${configuration}"))"
     echo "Java heap / maximum total Minecraft memory: $(jq -r '.runtime.java_memory // "Unknown"' <<<"${configuration}") / $(jq -r '.runtime.container_memory // "Unknown"' <<<"${configuration}")"
     echo "Java port: $(jq -r '.runtime.java_port // 0' <<<"${configuration}")/tcp"
-    echo "Bedrock: $(jq -r 'if .runtime.bedrock_enabled then "yes" else "no" end' <<<"${configuration}") ($(jq -r '.runtime.bedrock_port // 0' <<<"${configuration}")/udp)"
+    echo "Bedrock: $(jq -r 'if .runtime.bedrock_enabled then "yes" else "no" end' <<<"${configuration}") ($(jq -r '.runtime.bedrock_port // 0' <<<"${configuration}")/tcp+udp)"
     local backup
     backup="$(jv_config_backup_get "${instance_id}")" || return 1
     echo "Backup daily time: $(jq -r '.time' <<<"${backup}")"
@@ -72,7 +72,7 @@ configure_ports() {
     [[ ${new_java} =~ ^[0-9]+$ ]] || { echo 'ERROR: Java port must be a number.' >&2; return 1; }
     new_bedrock="${bedrock_port}"
     if [[ ${bedrock_enabled} == true ]]; then
-        new_bedrock="$(jui_input 'Bedrock host UDP port' "${bedrock_port}")" || return 0
+        new_bedrock="$(jui_input 'Bedrock host TCP/UDP port' "${bedrock_port}")" || return 0
         [[ ${new_bedrock} =~ ^[0-9]+$ ]] || { echo 'ERROR: Bedrock port must be a number.' >&2; return 1; }
     fi
     payload="$(base_payload | jq -c --argjson java "${new_java}" --argjson bedrock "${new_bedrock}" '.runtime.java_port=$java | .runtime.bedrock_port=$bedrock')"
@@ -90,7 +90,7 @@ configure_bedrock() {
     if [[ ${enabled} == true ]]; then
         payload="$(base_payload | jq -c '.runtime.bedrock_enabled=false')"
     else
-        new_port="$(jui_input 'Bedrock host UDP port' "${port}")" || return 0
+        new_port="$(jui_input 'Bedrock host TCP/UDP port' "${port}")" || return 0
         [[ ${new_port} =~ ^[0-9]+$ ]] || { echo 'ERROR: Bedrock port must be a number.' >&2; return 1; }
         payload="$(base_payload | jq -c --argjson port "${new_port}" '.runtime.bedrock_enabled=true | .runtime.bedrock_port=$port')"
     fi

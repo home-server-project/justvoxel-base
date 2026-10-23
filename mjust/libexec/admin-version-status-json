@@ -98,7 +98,7 @@ fi
 if [[ ${bedrock} == yes ]]; then
     if [[ -z ${geyser_version} ]]; then
         reason='Geyser/Floodgate compatibility could not be confirmed.'
-    elif [[ -n ${candidate} ]] && bedrock_crossplay_supports_version "${candidate}" "${geyser_version}"; then
+    elif [[ -n ${candidate} ]] && server_crossplay_version_compatible "${candidate}" "${geyser_version}"; then
         crossplay_compatible=true
         if [[ -n ${available} && ${available} != "${recommended}" ]]; then
             reason="Minecraft ${available} is available, but released cross-play support is not ready yet. No action is needed."
@@ -107,6 +107,17 @@ if [[ ${bedrock} == yes ]]; then
         reason="Released cross-play supports Minecraft ${geyser_version}. The selected Minecraft ${candidate} is not compatible."
     fi
 fi
+managed_crossplay_available=false
+case "${target_type}" in
+    paper|purpur|spigot) managed_crossplay_available=true ;;
+    fabric|neoforge)
+        if [[ -n ${candidate} && -n ${MINECRAFT_LOADER_VERSION:-} ]] && jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${MINECRAFT_LOADER_VERSION}"; then
+            managed_crossplay_available=true
+        else
+            crossplay_compatible=false
+            reason='Current platform cross-play compatibility could not be proven for the exact Minecraft and loader versions.'
+        fi ;;
+esac
 geyser_state=disabled
 floodgate_state=disabled
 geyser_metadata='{}'
@@ -115,7 +126,7 @@ if [[ ${bedrock} == yes ]]; then
     geyser_state=unavailable
     floodgate_state=unavailable
 fi
-if [[ ${bedrock} == yes && $# -ne 3 ]]; then
+if [[ ${bedrock} == yes && $# -ne 3 && ( ${target_type} == paper || ${target_type} == purpur || ${target_type} == spigot ) ]]; then
     geyser_metadata="$(jv_crossplay_metadata geyser || printf '{}')"
     floodgate_metadata="$(jv_crossplay_metadata floodgate || printf '{}')"
     geyser_state="$(jv_crossplay_artifact_state geyser "${geyser_metadata}")"
@@ -205,7 +216,7 @@ if (( $# != 3 )); then
         '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate,$configured_tag,$proposed_tag,$current_image,$local_digest,$local_id,$running_id,$service_state,$config_identity]' | sha256sum | cut -d ' ' -f1)"
 fi
 jq -n --arg server_type "${target_type}" --arg server_software "$(server_software_display_name)" \
-    --arg viaversion_state "$(server_supports_plugins && printf managed_automatically || printf not_applicable)" \
+    --arg viaversion_state "$(server_supports_viaversion && printf managed_automatically || printf not_applicable)" \
     --arg installed "${installed}" --arg available "${available}" \
     --arg recommended "${recommended}" --arg candidate "${candidate}" \
     --arg available_channel "${available_channel}" --arg candidate_channel "${candidate_channel}" \
@@ -214,6 +225,7 @@ jq -n --arg server_type "${target_type}" --arg server_software "$(server_softwar
     --arg image_tag "${MINECRAFT_IMAGE_TAG:-stable}" --arg policy "${policy}" \
     --arg configured_version "${MINECRAFT_VERSION:-}" --arg geyser_version "${geyser_version}" \
     --arg reason "${reason}" --argjson server_supported "${server_supported}" \
+    --argjson managed_crossplay_available "${managed_crossplay_available}" \
     --argjson crossplay_compatible "${crossplay_compatible}" \
     --arg stack_state "${stack_state}" --arg minecraft_state "${minecraft_state}" \
     --arg geyser_state "${geyser_state}" --arg floodgate_state "${floodgate_state}" \
@@ -223,4 +235,4 @@ jq -n --arg server_type "${target_type}" --arg server_software "$(server_softwar
     '{configured_server_type:$configured_server_type,configured_image_tag:$configured_image_tag,runtime_update_required:$runtime_update_required,server_type:$server_type,server_software:$server_software,installed:$installed,available:$available,available_channel:$available_channel,recommended:$recommended,selected_candidate:$candidate,candidate_channel:$candidate_channel,image_tag:$image_tag,policy:$policy,configured_version:$configured_version,
       managed_image_digest:$managed_image_digest,managed_artifacts:{geyser:$geyser_artifact,floodgate:$floodgate_artifact},update_available:($stack_state == "updates_available"),stack_state:$stack_state,minecraft_state:$minecraft_state,
       geyser_state:$geyser_state,floodgate_state:$floodgate_state,viaversion_state:$viaversion_state,image_state:$image_state,plan_fingerprint:$fingerprint,server_supported:$server_supported,paper_supported:($server_supported and $server_type == "paper"),
-      crossplay_enabled:$crossplay_enabled,geyser_supported_version:$geyser_version,crossplay_compatible:$crossplay_compatible,reason:$reason}'
+      managed_crossplay_available:$managed_crossplay_available,crossplay_enabled:$crossplay_enabled,geyser_supported_version:$geyser_version,crossplay_compatible:$crossplay_compatible,reason:$reason}'

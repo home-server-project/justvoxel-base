@@ -145,8 +145,10 @@ func collectSetupRuntimeEvidence(plan *adminSetupNormalizedPlan, instanceID ...s
 		values["minecraft_image_tag"] = plan.Minecraft.ImageTag
 		values["java_firewall_open"] = setupDiagnosticCommandPresence(4*time.Second, "firewall-cmd", "--permanent", "--query-port="+strconv.Itoa(plan.Minecraft.JavaPort)+"/tcp")
 		if plan.Server.BedrockEnabled {
+			values["bedrock_tcp_firewall_open"] = setupDiagnosticCommandPresence(4*time.Second, "firewall-cmd", "--permanent", "--query-port="+strconv.Itoa(plan.Minecraft.BedrockPort)+"/tcp")
 			values["bedrock_firewall_open"] = setupDiagnosticCommandPresence(4*time.Second, "firewall-cmd", "--permanent", "--query-port="+strconv.Itoa(plan.Minecraft.BedrockPort)+"/udp")
 		} else {
+			values["bedrock_tcp_firewall_open"] = "not_enabled"
 			values["bedrock_firewall_open"] = "not_enabled"
 		}
 		if dataPath == "" {

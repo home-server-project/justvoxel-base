@@ -195,7 +195,7 @@ case "$1" in
 esac
 STUB
 chmod +x "${fixture_dir}/agent"
-sed -n '/^# Three fixed implementations/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
+sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/update-policy.sh$|d' \
     -e "s|^source /usr/libexec/justvoxel/mjust/instance-context.sh$|source ${fixture_dir}/context.sh|" \

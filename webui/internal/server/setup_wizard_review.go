@@ -156,7 +156,7 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
 	b.WriteString("Java port: " + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
 	if plan.Normalized.Server.BedrockEnabled {
-		b.WriteString("Bedrock port: " + strconv.Itoa(plan.Normalized.Minecraft.BedrockPort) + "/UDP\n")
+		b.WriteString("Bedrock port: " + strconv.Itoa(plan.Normalized.Minecraft.BedrockPort) + "/TCP/UDP\n")
 	}
 	b.WriteString("Container tag: " + plan.Normalized.Minecraft.ImageTag + "\n")
 	b.WriteString("Minecraft version: " + plan.Normalized.Minecraft.Version + "\n\n")
@@ -360,7 +360,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 	}
 	bedrockPort, err := strconv.Atoi(draft.Minecraft.BedrockPort)
 	if err != nil {
-		return api.AdminSetupPlanRequest{}, errors.New("Bedrock UDP port is invalid.")
+		return api.AdminSetupPlanRequest{}, errors.New("Bedrock TCP/UDP port is invalid.")
 	}
 	backupKeep, err := strconv.Atoi(draft.Backups.Keep)
 	if err != nil || backupKeep < 1 {
@@ -456,6 +456,8 @@ func setupServerTypeLabel(value string) string {
 		return "Paper"
 	case "purpur":
 		return "Purpur"
+	case "spigot":
+		return "Spigot"
 	case "vanilla":
 		return "Vanilla"
 	default:

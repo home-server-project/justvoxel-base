@@ -160,17 +160,22 @@ func (s *server) pluginContext(w http.ResponseWriter, r *http.Request) (pluginSe
 		return pluginServerContext{}, "", false
 	}
 	c := record.Runtime
-	out := pluginServerContext{InstanceID: id, Configured: true, ServerType: c.Software, MinecraftVersion: c.Version, Supported: c.Software == "paper" || c.Software == "purpur"}
+	out := pluginServerContext{InstanceID: id, Configured: true, ServerType: c.Software, MinecraftVersion: c.Version, Supported: javaServerPluginsWorkspace(c.Software)}
 	switch c.Software {
 	case "paper":
 		out.ServerSoftware = "Paper"
 	case "purpur":
 		out.ServerSoftware = "Purpur"
+	case "spigot":
+		out.ServerSoftware = "Spigot"
 	case "vanilla":
 		out.ServerSoftware = "Vanilla"
 	}
 	if !out.Supported {
-		out.Message = "Plugins are available for Paper and Purpur. Vanilla does not support plugins."
+		out.Message = "Plugins are available for Paper, Purpur and Spigot. This server software does not support the Plugins workspace."
+		if c.Software == "vanilla" {
+			out.Message = "Plugins are available for Paper, Purpur and Spigot. Vanilla does not support plugins."
+		}
 	}
 	return out, record.Storage.DataPath, true
 }
@@ -519,6 +524,9 @@ func modrinthPluginJSON(ctx context.Context, path string, query url.Values, out 
 var modrinthPluginID = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
 
 func pluginLoaders(serverType string) []string {
+	if serverType == "spigot" {
+		return []string{"spigot", "bukkit"}
+	}
 	if serverType == "purpur" {
 		return []string{"purpur", "paper", "spigot", "bukkit"}
 	}
@@ -599,6 +607,11 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 	server, dataPath, ok := s.pluginContext(w, r)
 	if !ok {
 		return
+	}
+	if !server.Supported {
+		query.Modrinth, query.Hangar = false, false
+	} else if _, err := hangarPluginPlatform(server.ServerType); err != nil {
+		query.Hangar = false
 	}
 	out := pluginCatalog{Server: server, Modrinth: query.Modrinth, Hangar: query.Hangar, Cursor: query.Cursor, Projects: []pluginCatalogProject{}}
 	if !server.Supported || (query.Compatible && server.MinecraftVersion == "") || (!query.Modrinth && !query.Hangar) {

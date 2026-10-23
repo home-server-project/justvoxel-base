@@ -73,12 +73,18 @@ case "${1:-}" in
             if [[ ${channel} == STABLE ]]; then printf 'default'; else printf 'experimental'; fi
         fi
         ;;
-    version)
+    crossplay)
         [[ $# == 4 ]] || fail
+        source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
+        jv_crossplay_mod_compatible "$2" "$3" "$4" || fail
+        ;;
+    version)
+        [[ $# == 4 || $# == 5 ]] || fail
         MINECRAFT_SERVER_TYPE=$2
         version=$3
         channel=$4
-        [[ ${MINECRAFT_SERVER_TYPE} == paper || ${MINECRAFT_SERVER_TYPE} == purpur || ${MINECRAFT_SERVER_TYPE} == vanilla ]] || fail
+        MINECRAFT_LOADER_VERSION=${5:-}
+        validate_server_type "${MINECRAFT_SERVER_TYPE}" || fail
         [[ ${channel} == default || ${channel} == experimental ]] || fail
         if [[ ${version} == LATEST ]]; then
             [[ ${MINECRAFT_SERVER_TYPE} != paper || ${channel} == experimental ]] || fail

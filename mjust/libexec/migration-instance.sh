@@ -3,6 +3,10 @@
 source /usr/libexec/justvoxel/mjust/instance-context.sh
 jv_migration_load_instance() {
     jv_load_instance "$1" "${2:-}" || { echo 'ERROR: selected Minecraft instance is unavailable.' >&2; return 1; }
+    case "${MINECRAFT_SERVER_TYPE-paper}" in paper|purpur|vanilla) ;; *)
+        echo 'ERROR: migration for this server software requires separate compatibility support.' >&2
+        return 1 ;;
+    esac
     JV_MIGRATION_INSTANCE_CONFIG="/etc/justvoxel/instances/${JV_INSTANCE_ID}/config.json"
     JV_MIGRATION_INSTANCE_QUADLET="/etc/containers/systemd/${JV_INSTANCE_CONTAINER}.container"
     local record="${JV_MIGRATION_INSTANCE_CONFIG}"

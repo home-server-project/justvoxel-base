@@ -27,7 +27,9 @@ jv_crossplay_metadata() {
 }
 jv_crossplay_artifact_state() { printf '%s' "${COMPONENT_STATE:-up_to_date}"; }
 STUB
-sed -n '/^# Three fixed implementations/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
+# Copy the real compatibility wrapper; its Paper metadata dependency is stubbed above.
+sed -n '/^server_crossplay_version_compatible() {/,/^}/p' "${repo_root}/mjust/libexec/common.sh" >> "${fixture_dir}/common.sh"
+sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
     -e '\|^source /usr/libexec/justvoxel/mjust/update-policy.sh$|d' \

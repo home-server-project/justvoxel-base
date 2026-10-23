@@ -154,14 +154,18 @@ func TestSetupRecommendedPaperCardWording(t *testing.T) {
 	}
 	for sectionIndex, section := range sections {
 		cards := cardPattern.FindAllStringSubmatch(section, -1)
-		if len(cards) != 3 {
+		if len(cards) != 3+sectionIndex {
 			t.Fatalf("setup section %d must contain three software cards", sectionIndex)
 		}
-		for index, software := range []struct{ value, name, description string }{
+		softwareCards := []struct{ value, name, description string }{
 			{"paper", "Paper", "Recommended · Plugins and managed Bedrock cross-play."},
 			{"purpur", "Purpur", "Plugins and managed Bedrock cross-play."},
-			{"vanilla", "Vanilla", "Original Minecraft · Java only · no plugins."},
-		} {
+			{"vanilla", "Vanilla", "Original Minecraft · Java only · no plugins or mods."},
+		}
+		if sectionIndex == 1 {
+			softwareCards = append(softwareCards[:2], append([]struct{ value, name, description string }{{"spigot", "Spigot", "Plugins and managed Bedrock cross-play."}}, softwareCards[2:]...)...)
+		}
+		for index, software := range softwareCards {
 			card := cards[index][1]
 			for _, want := range []string{
 				`name="server_type" value="` + software.value + `"`,

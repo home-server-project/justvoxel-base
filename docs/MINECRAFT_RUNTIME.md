@@ -18,7 +18,7 @@ The image tag is administrator-configurable: JustVoxel offers upstream `stable`,
 
 Changing or restarting a service does not itself refresh a moving container tag from the registry. `mjust update-minecraft` explicitly checks and pulls the configured tag when its remote digest changes. If the game version uses `VERSION=LATEST`, however, the container can download a newer Minecraft release during startup; mjust warns about that behavior when the policy is selected.
 
-Java uses TCP 25565 by default and Bedrock uses UDP 19132 by default, but setup can render administrator-selected host ports. RCON is enabled inside the container for local administration and is never published as a host port.
+Java uses TCP 25565 by default and managed Bedrock cross-play uses TCP and UDP 19132 by default, but setup can render administrator-selected host ports. RCON is enabled inside the container for local administration and is never published as a host port.
 
 The template preserves the proven graceful-stop behavior: the itzg shutdown announcement delay is 60 seconds, Podman has 180 seconds to stop, and systemd allows 240 seconds around the stop operation. If an administrator chooses to continue maintenance while players are online, that normal shutdown warning remains the mechanism that gives players time to finish.
 
@@ -78,7 +78,7 @@ The default appliance storage root `/var/lib/justvoxel` yields `/var/lib/justvox
 
 `minecraftInstanceRuntimeConfig` holds per-instance ports, Java and container memory, software, selected version, Paper channel, image tag, startup settings, explicit EULA acceptance, non-root container UID/GID, private RCON password, and Start on Boot. RCON passwords follow the existing generated hexadecimal convention (32–128 hex characters). The renderer reuses `templates/config/minecraft.env.in` and the established Paper/Purpur/Vanilla capability rules. The new Quadlet template uses `docker.io/itzg/minecraft-server:<selected tag>` with the existing moving or pinned tag convention; rendering does not resolve tags, fetch metadata, or resolve digests. Version inputs are a selected pin or `LATEST`; upstream availability checks remain a caller responsibility. Latest Paper requires its existing experimental channel convention.
 
-The trusted internal caller must supply **every configured instance, including stopped instances**, plus a fresh appliance physical RAM/configured-storage snapshot. There is no fixed-server port or memory reservation. This phase does not yet provide the authoritative persistent multi-instance configuration store or activation lock. Validation reserves Java TCP and enabled Bedrock UDP ports separately, rejects duplicates within each protocol across instances, and checks the 1–65535 range. Equal numeric TCP and UDP ports are allowed. Disabled Bedrock requires a zero port. Phase 2 originally rejected enabled instance Bedrock after validation. Phase 3B adds the independent startup helper described below; the legacy global `managed-crossplay-start` is never attached to independent units.
+The trusted internal caller must supply **every configured instance, including stopped instances**, plus a fresh appliance physical RAM/configured-storage snapshot. There is no fixed-server port or memory reservation. This phase does not yet provide the authoritative persistent multi-instance configuration store or activation lock. Validation reserves Java TCP and managed Geyser TCP/UDP ports, rejects collisions across all configured instances, and checks the 1–65535 range. A managed Geyser reservation cannot share its numeric port with Java or another Geyser instance. Unrelated TCP and UDP listeners may share a numeric port when neither conflicts with managed Geyser. Disabled Bedrock requires a zero port. Phase 2 originally rejected enabled instance Bedrock after validation. Phase 3B adds the independent startup helper described below; the legacy global `managed-crossplay-start` is never attached to independent units.
 
 Memory uses positive `M`/`G` values (case insensitive), between 512 MiB and 1 TiB per quantity. Each container must allow at least 512 MiB above its Java allocation. Combined configured container limits, including stopped instances, must leave at least 1 GiB of physical RAM for the appliance. Free memory, listening sockets, swap, and zram do not determine reservations. Startup values and immutable IDs are validated before any output is returned; malformed JSON and unknown fields are rejected by the internal decoder. There are no arbitrary environment, image repository, unit, or data-path overrides.
 
@@ -217,8 +217,8 @@ remove only recorded instance-owned rules after confirming the previous port
 is not occupied. Apply and rollback use explicit port actions and queries;
 they never reload firewalld or change unrelated services/rules. Failed applies
 reverse only the planned instance-owned changes. Phase 3B extends the same
-ownership model to enabled Bedrock UDP ports. Omitted ownership protocols in
-Phase 3A records continue to mean TCP.
+ownership model to enabled managed Geyser TCP/UDP ports. Omitted ownership protocols in
+Phase 3A records continue to mean TCP. Legacy fixed-runtime helpers record newly created Geyser TCP rules under `/etc/justvoxel/geyser-tcp-firewall/`, with the exact port and zone. Disable, port changes and reset remove only TCP rules with that evidence; pre-existing TCP rules and older deployments without TCP ownership evidence are preserved.
 
 Before any provisioning or live mutation, the Agent durably publishes
 `pending.json` beside `config.json`. It contains the previous record, target
@@ -296,12 +296,12 @@ container stop delay, protecting players who join after the check. Operators
 retain Phase 3A's empty-server restriction, shared allowance, cooldown and
 audit accounting. Other instances are never stopped or restarted.
 
-Paper/Purpur cross-play is configured through the stopped-only runtime settings
+Paper/Purpur/Spigot cross-play is configured through the stopped-only runtime settings
 apply, with `bedrock_enabled` and `bedrock_port`. Vanilla is rejected. Every
 configured instance, including stopped instances, reserves its Java TCP and
-enabled Bedrock UDP ports. Quadlets publish the
+enabled managed Geyser TCP/UDP ports. Quadlets publish the
 selected host ports to container-local Java 25565 and Bedrock 19132. Only owned
-runtime/permanent UDP firewall rules are removed or rolled back; already-open
+runtime/permanent TCP/UDP firewall rules are removed or rolled back; already-open
 rules remain unowned. Recovery accepts old TCP ownership records and validates
 both protocols against the previous/target runtime evidence.
 

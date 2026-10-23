@@ -309,8 +309,8 @@ func (s *server) adminPluginInstallCurrent(w http.ResponseWriter, r *http.Reques
 
 func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerContext, dataPath, projectID, versionID string) (pluginInstallPlan, error) {
 	plan := pluginInstallPlan{Source: "Modrinth", ProjectID: projectID, VersionID: versionID, Server: serverContext, DataPath: dataPath, Location: filepath.Join(dataPath, "plugins"), RestartRequired: true, Compatibility: "Compatible according to publisher metadata", Artifacts: []pluginInstallArtifact{}, DisplayDependencies: []pluginDependency{}}
-	if !serverContext.Supported || (serverContext.ServerType != "paper" && serverContext.ServerType != "purpur") || serverContext.MinecraftVersion == "" || !filepath.IsAbs(dataPath) || !modrinthPluginID.MatchString(projectID) || !modrinthPluginID.MatchString(versionID) {
-		return plan, errors.New("A known Paper or Purpur Minecraft version and configured data path are required")
+	if !serverContext.Supported || !javaServerPluginsWorkspace(serverContext.ServerType) || serverContext.MinecraftVersion == "" || !filepath.IsAbs(dataPath) || !modrinthPluginID.MatchString(projectID) || !modrinthPluginID.MatchString(versionID) {
+		return plan, errors.New("A known Paper, Purpur or Spigot Minecraft version and configured data path are required")
 	}
 	manifest, _, err := readPluginManifest(dataPath)
 	if err != nil {
@@ -385,9 +385,12 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 				if name == "" {
 					name = project
 				}
-				loader := "Paper"
-				if serverContext.ServerType == "purpur" {
-					loader = "Purpur"
+				loader := "Bukkit"
+				if capability, ok := javaServerSoftware(serverContext.ServerType); ok {
+					loader = capability.Name
+				}
+				if serverContext.ServerType == "spigot" {
+					loader = "Spigot/Bukkit"
 				}
 				return fmt.Errorf("Required dependency %s has no compatible %s release for Minecraft %s", name, loader, serverContext.MinecraftVersion)
 			}
@@ -563,7 +566,7 @@ func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error
 		if err != nil {
 			return errors.New("Plugin review artifact unavailable")
 		}
-		identity, inspectErr := inspectStagedPlugin(file, artifact.Filename)
+		identity, inspectErr := inspectServerPlugin(file, artifact.Filename, plan.Server.ServerType)
 		closeErr := file.Close()
 		if errors.Is(inspectErr, errPluginLoaderArtifact) {
 			return errors.New(pluginLoaderReviewRejection)
@@ -1475,7 +1478,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		if err != nil {
 			return failUntouched(errors.New("Staged JAR unavailable"))
 		}
-		identity, err := inspectStagedPlugin(f, a.Filename)
+		identity, err := inspectServerPlugin(f, a.Filename, plan.Server.ServerType)
 		f.Close()
 		if err != nil {
 			return failUntouched(err)
@@ -2198,7 +2201,7 @@ func (s *server) acknowledgePluginPreflight(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	serverContext, dataPath, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r)
-	if !ok || !serverContext.Supported || (serverContext.ServerType != "paper" && serverContext.ServerType != "purpur") || dataPath != evidence.DataPath || serverContext.MinecraftVersion != evidence.MinecraftVersion {
+	if !ok || !serverContext.Supported || !javaServerPluginsWorkspace(serverContext.ServerType) || dataPath != evidence.DataPath || serverContext.MinecraftVersion != evidence.MinecraftVersion {
 		writeError(w, 409, "Pre-mutation server context could not be verified")
 		return
 	}
@@ -2392,4 +2395,47 @@ func validatePluginManifest(m pluginManifest) error {
 		projects[pluginIdentity(e.Source, e.ProjectID)], filenames[strings.ToLower(e.Filename)] = true, true
 	}
 	return nil
+}
+
+func inspectServerPlugin(file *os.File, filename, serverType string) (installedPlugin, error) {
+	identity, err := inspectStagedPlugin(file, filename)
+	if err != nil || serverType != "spigot" {
+		return identity, err
+	}
+	stat, err := file.Stat()
+	if err != nil {
+		return installedPlugin{}, err
+	}
+	archive, err := zip.NewReader(file, stat.Size())
+	if err != nil {
+		return installedPlugin{}, err
+	}
+	count := 0
+	for _, entry := range archive.File {
+		if entry.Name == "plugin.yml" {
+			count++
+			stream, err := entry.Open()
+			if err != nil {
+				return installedPlugin{}, err
+			}
+			data, readErr := io.ReadAll(io.LimitReader(stream, pluginMetadataLimit+1))
+			closeErr := stream.Close()
+			if readErr != nil || closeErr != nil || len(data) > pluginMetadataLimit {
+				return installedPlugin{}, errors.New("Unreadable Bukkit descriptor")
+			}
+			mains := 0
+			for _, line := range strings.Split(string(data), "\n") {
+				if managedPluginMain.MatchString(line) {
+					mains++
+				}
+			}
+			if mains != 1 {
+				return installedPlugin{}, errors.New("Spigot requires a usable Bukkit main class")
+			}
+		}
+	}
+	if count != 1 {
+		return installedPlugin{}, errors.New("Spigot requires a direct Bukkit plugin.yml descriptor")
+	}
+	return identity, nil
 }

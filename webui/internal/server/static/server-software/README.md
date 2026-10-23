@@ -16,3 +16,8 @@ the Version workspace. Render artwork proportionally on transparent backgrounds.
   this selector. No Minecraft, Mojang or third-party artwork was copied.
 
 These names identify their respective projects; they do not imply endorsement.
+
+- `spigot.svg`, `bedrock.svg`, `forge.svg`, `neoforge.svg`, `fabric.svg`,
+  `quilt.svg`: original neutral JustVoxel illustrations (tap, stone block,
+  anvil, abstract animal, woven cloth and patchwork). Created for this selector;
+  no upstream logos or third-party artwork were copied.
