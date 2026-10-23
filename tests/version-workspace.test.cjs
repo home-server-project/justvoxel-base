@@ -63,6 +63,7 @@ function review(candidate, { changes = [policyChange], online = 0, refreshed = c
   const context = vm.createContext({
     location: {origin: 'https://example.test', search: '?server=jv-family1'},
     Boolean, Number, URLSearchParams, csrf: 'csrf', state: {}, updateOperation: '',
+    justVoxelSelectionGeneration: { version: 0 },
     document: { createElement: (tag) => new Element(tag) },
     card: (title) => Object.assign(new Element('section'), { textContent: title }),
     line: (label, value) => Object.assign(new Element('div'), { textContent: `${label}: ${value}` }),
@@ -148,6 +149,7 @@ test('persistent polling updates the frame, keeps journal messages once, and ren
   const content = new Element('div');
   const context = vm.createContext({
     URLSearchParams, updateOperation: '', completedOperation: null, state: {}, content, operationKinds: new Map(),
+    justVoxelSelectionGeneration: { version: 0 },
     document: { createElement: tag => new Element(tag) },
     card: title => { const panel = new Element('section'); const heading = new Element('h2'); heading.textContent = title; panel.append(heading); return panel; },
     request: async (url) => { assert.equal(url, '/api/version/workspace/update-operation?id=operation-1'); return result; },
@@ -195,7 +197,7 @@ function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, over
   const context = vm.createContext({
     location: {origin: 'https://example.test', search: '?server=jv-family1'},
     Boolean, String, Number, URLSearchParams, csrf: 'csrf', state: {}, root, ticket: 1, sequence: 1,
-    selection: 0, justVoxelSelectionGeneration: 0,
+    selection: 0, justVoxelSelectionGeneration: {version: 0},
     pending: { operation }, updateOperation: '', operationKinds: new Map(),
     minecraft: { id: 'jv-family1', server_type: current, image_tag: tag },
     status: { server_software: current[0].toUpperCase() + current.slice(1), image_state: 'up_to_date', ...overrides },
@@ -389,7 +391,7 @@ test('selection generation detaches scheduled update watching without cancelling
   const requests = [];
   let nextPoll;
   const context = vm.createContext({
-    justVoxelSelectionGeneration:0, URLSearchParams, updateOperation:'', completedOperation:null,
+    justVoxelSelectionGeneration: {version: 0}, URLSearchParams, updateOperation:'', completedOperation:null,
     state:{}, content:{querySelector:()=>null},
     request:async url => {
       requests.push(url);
@@ -402,7 +404,7 @@ test('selection generation detaches scheduled update watching without cancelling
   vm.runInContext(source.slice(start,end) + '\nglobalThis.watch = watchUpdate;', context);
   await context.watch('old-operation');
   assert.equal(requests.length,1);
-  context.justVoxelSelectionGeneration++;
+  context.justVoxelSelectionGeneration.version++;
   context.state.textContent = 'New server';
   await nextPoll();
   assert.equal(requests.length,1, 'old watcher must not request the operation through the new selection');
@@ -462,7 +464,7 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
   const content = new ContainerElement('div');
   const context = vm.createContext({
     URLSearchParams, encodeURIComponent, Number, Boolean, String,
-    justVoxelSelectionGeneration: 0, currentTab: 'container', sequence: 1,
+    justVoxelSelectionGeneration: {version: 0}, currentTab: 'container', sequence: 1,
     csrf: 'csrf', content, state: {}, operationKinds: new Map(),
     versionDialog: {querySelector: () => ({selectedOptions:[{textContent:'22222'}]})},
     document: {createElement: tag => new ContainerElement(tag)},
@@ -485,7 +487,7 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
   const start=source.indexOf('  let containerCompleted =');
   const end=source.indexOf('  const render = async',start);
   vm.runInContext(source.slice(start,end)+'\nglobalThis.mount = renderContainer;',context);
-  return {context,content,calls,timers,renders,mount:()=>context.mount(context.sequence,context.justVoxelSelectionGeneration,''),
+  return {context,content,calls,timers,renders,mount:()=>context.mount(context.sequence,context.justVoxelSelectionGeneration.version,''),
     toggles:()=>content.all().filter(node=>node.tag==='input'),
     update:()=>content.all().find(node=>node.tag==='button'&&node.textContent==='Update now'),
     terminal:()=>content.all().find(node=>'containerTerminal' in node.dataset)};
@@ -533,14 +535,14 @@ test('Container stale status and stale trace cannot replace a new selection',asy
   let resolveStatus;
   const page=containerWorkspace({statusReply:()=>new Promise(resolve=>{resolveStatus=resolve;})});
   const old=page.mount();
-  page.context.justVoxelSelectionGeneration++;page.context.sequence++;
+  page.context.justVoxelSelectionGeneration.version++;page.context.sequence++;
   const replacement=new ContainerElement('div');replacement.textContent='Server B';page.content.replaceChildren(replacement);
   resolveStatus({state:'update_available',server_name:'Server A',image:'old-image'});await old;
   assert.equal(page.content.textContent,'Server B');
   let resolveTrace;
   const active=containerWorkspace({pending:{operation_id:'old-op',state:'running'},traceReply:()=>new Promise(resolve=>{resolveTrace=resolve;})});
   const oldTrace=active.mount();await new Promise(resolve=>setImmediate(resolve));
-  active.context.justVoxelSelectionGeneration++;active.context.sequence++;
+  active.context.justVoxelSelectionGeneration.version++;active.context.sequence++;
   active.content.replaceChildren(Object.assign(new ContainerElement('div'),{textContent:'New server terminal'}));
   resolveTrace('Old server trace');await oldTrace;
   assert.equal(active.content.textContent,'New server terminal');assert.equal(active.timers.length,0);

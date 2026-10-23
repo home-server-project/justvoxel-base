@@ -276,7 +276,7 @@ function cardHarness({responses = [], bootChecked = false, runningChecked = fals
   const feedback = new Element('feedback');
   const calls = [], deletes = [], dialogs = [], selections = [], launches = [], copied = [];
   const dashboard = {dataset: {selectedMinecraftId: ids[0]}};
-  const dropdowns = [{value: ids[0]}, {value: ids[0]}];
+  const dropdowns = ['minecraft','version','plugins','backups','migration'].map(workspace => ({workspace,value:ids[0]}));
   const selectionEvents = [];
   const location = {href: `https://justvoxel.test/?workspace=minecraft-servers&server=${ids[0]}&operation=stale`, origin: 'https://justvoxel.test', search: `?workspace=minecraft-servers&server=${ids[0]}&operation=stale`};
   let refreshes = 0;
@@ -306,7 +306,7 @@ function cardHarness({responses = [], bootChecked = false, runningChecked = fals
     window: {location, history: {state: {}, replaceState(_, __, target) { location.href = target.href; location.search = target.search; }}, dispatchEvent: event => selectionEvents.push(event)},
     navigator: {clipboard: {writeText: async text => { copied.push(text); }}},
     document: {createElement: create, body: create('body'),
-      querySelectorAll: () => dropdowns,
+      querySelectorAll: selector => dropdowns.filter(control => selector.includes(`data-server-workspace="${control.workspace}"`)),
       querySelector: selector => selector === '#dashboard[data-dashboard-status]' ? dashboard :
         launcherAvailable ? {click() { assert.equal(menu.open, false); launches.push(selector); }} : null},
     justVoxelOpenDeleteServer: options => deletes.push(options),
@@ -319,9 +319,9 @@ function cardHarness({responses = [], bootChecked = false, runningChecked = fals
     },
   });
   const app = readFileSync(`${root}static/app.js`, 'utf8');
-  const sharedStart = app.indexOf('globalThis.justVoxelSelectServer =');
+  const sharedStart = app.indexOf('const workspaceUsername =');
   const sharedEnd = app.indexOf('globalThis.justVoxelServerSelection =', sharedStart);
-  vm.runInContext('globalThis.justVoxelSelectionGeneration = 0;\n' + app.slice(sharedStart, sharedEnd), context);
+  vm.runInContext('const selectionDashboard = document.querySelector("#dashboard[data-dashboard-status]"); const dashboardURL = null;\n' + app.slice(sharedStart, sharedEnd).replace('if (selectionDashboard && workspaceRestoreAllowed())', 'if (false)'), context);
   const selectServer = context.justVoxelSelectServer;
   context.justVoxelSelectServer = helperAvailable ? (...args) => {
     assert.equal(menu.open, false);
@@ -559,17 +559,19 @@ for (const workspace of ['minecraft', 'backups', 'version', 'plugins']) {
     assert.equal(f.menu.open, false);
     assert.deepEqual(f.selections, [[ids[1], workspace]]);
     assert.deepEqual(f.launches, [`[data-${workspace}-open]`]);
-    assert.equal(f.dashboard.dataset.selectedMinecraftId, ids[1]);
+    assert.equal(f.dashboard.dataset.selectedMinecraftId, workspace === 'minecraft' ? ids[1] : ids[0]);
     assert.equal(new URL(f.location.href).searchParams.get('workspace'), workspace);
     assert.equal(new URL(f.location.href).searchParams.has('operation'), false);
-    for (const dropdown of f.dropdowns) assert.equal(dropdown.value, ids[1]);
-    assert.equal(f.context.justVoxelSelectionGeneration, 1);
+    for (const dropdown of f.dropdowns) assert.equal(dropdown.value, dropdown.workspace === workspace ? ids[1] : ids[0]);
+    assert.equal(f.context.justVoxelSelectionGeneration[workspace], 1);
     assert.equal(f.selectionEvents.length, 1);
+    assert.equal(f.selectionEvents[0].detail.workspace, workspace);
     f.menu.open = true;
     f.fire(link, 'click');
     assert.equal(f.launches.length, 2);
-    assert.equal(f.context.justVoxelSelectionGeneration, 1, 'same selection must not fabricate a server change');
+    assert.equal(f.context.justVoxelSelectionGeneration[workspace], 1, 'same selection must not fabricate a server change');
     assert.equal(f.selectionEvents.length, 1);
+    assert.equal(f.selectionEvents[0].detail.workspace, workspace);
     assert.equal(link.href, `/?workspace=${workspace}&server=${ids[1]}`);
     for (const fields of [{ctrlKey:true}, {metaKey:true}, {shiftKey:true}, {altKey:true}, {button:1}, {button:2}]) {
       f.menu.open = true;

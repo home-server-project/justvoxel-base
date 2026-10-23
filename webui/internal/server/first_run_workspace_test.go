@@ -33,13 +33,13 @@ func TestWorkspaceWindowStateIsScopedToAuthenticatedUser(t *testing.T) {
 	}
 	script := string(source)
 	start := strings.Index(script, "const workspaceUsername =")
-	end := strings.Index(script, "const workspaceTopInset =")
+	end := strings.Index(script, "// Browser presentation state only;")
 	if start < 0 || end <= start {
 		t.Fatal("shared workspace persistence missing")
 	}
 	persistence := script[start:end]
 	for _, want := range []string{
-		`const workspaceUsername = dashboard?.dataset.workspaceUsername || "";`,
+		`const workspaceUsername = selectionDashboard?.dataset.workspaceUsername || "";`,
 		"const workspaceWindowStateKey = (id) => workspaceUsername\n  ? `justvoxel-workspace-window-${id === \"system-monitor\" ? \"v2\" : \"v1\"}:${encodeURIComponent(workspaceUsername)}:${id}`\n  : null;",
 		"const readWorkspaceWindowState = (id) => {\n  const key = workspaceWindowStateKey(id);\n  if (!key) return {};",
 		"const writeWorkspaceWindowState = (id, patch) => {\n  const key = workspaceWindowStateKey(id);\n  if (!key) return;",

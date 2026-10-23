@@ -492,6 +492,8 @@ test('Add-ons plan and apply send the same selected File with a reviewed fingerp
   class FormData { constructor() { this.fields = []; } append(...field) { this.fields.push(field); } }
   const context = vm.createContext({
     FormData, installController: { signal: 'signal' },
+    justVoxelSelectionGeneration: { plugins: 0 },
+    justVoxelStaleSelection: () => Object.assign(new Error('Server selection changed.'), { staleSelection: true }),
     justVoxelSelectedURL: route => route,
     document: { querySelector: () => ({ value: 'csrf-token' }) },
     fetch: async (route, options) => { requests.push({ route, options }); return { status: 200, ok: true, json: async () => ({}) }; },

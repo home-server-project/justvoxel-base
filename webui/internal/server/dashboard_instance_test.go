@@ -247,16 +247,16 @@ func TestDashboardInstanceReadsAndPolling(t *testing.T) {
 		}
 		body := js[start : start+end]
 		for _, want := range []string{
-			`const selection = globalThis.justVoxelSelectionGeneration;`,
-			`fetch(globalThis.justVoxelSelectedURL(statusURL)`,
-			`if (selection !== globalThis.justVoxelSelectionGeneration) return;`,
+			`const selection = globalThis.justVoxelSelectionGeneration.minecraft;`,
+			`fetch(globalThis.justVoxelSelectedURL(statusURL, "minecraft")`,
+			`if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;`,
 			poll.render,
 		} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("selected-server polling missing %q", want)
 			}
 		}
-		if strings.Index(body, `if (selection !== globalThis.justVoxelSelectionGeneration) return;`) > strings.Index(body, poll.render) {
+		if strings.Index(body, `if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;`) > strings.Index(body, poll.render) {
 			t.Fatal("old-server polling response must be rejected before rendering")
 		}
 	}
@@ -265,9 +265,9 @@ func TestDashboardInstanceReadsAndPolling(t *testing.T) {
 		`target.searchParams.set("server", dashboard.dataset.selectedMinecraftId);`,
 		`window.history.replaceState(window.history.state, "", target);`,
 		`window.addEventListener("justvoxel:server-selection-changed",`,
-		`void refreshDashboard();`, `lastMonitorData = null; void refreshQuickLook();`,
+		`void refreshDashboard();`, `lastMonitorData = null;`, `void refreshQuickLook();`,
 		// An absent explicit selection stays absent; inventory order supplies no fallback.
-		`selected.getAll("server").forEach((id) => target.searchParams.append("server", id))`,
+		`initialServerDestination.getAll("server").forEach(id => target.searchParams.append("server", id))`,
 	} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("missing in-page polling plumbing: %s", want)

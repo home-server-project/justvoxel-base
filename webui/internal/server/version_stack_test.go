@@ -101,8 +101,8 @@ func TestVersionStackUIUsesSafeStackStateAndSingleReview(t *testing.T) {
 		t.Fatal("Version operation watcher missing")
 	}
 	for _, want := range []string{
-		`selection = globalThis.justVoxelSelectionGeneration`,
-		`if (selection !== globalThis.justVoxelSelectionGeneration) return;`,
+		`selection = globalThis.justVoxelSelectionGeneration.version`,
+		`if (selection !== globalThis.justVoxelSelectionGeneration.version) return;`,
 		`new URLSearchParams({ id })`,
 		`progress.replaceChildren(...refreshed.children);`,
 		`if (failure.staleSelection) return;`,
@@ -117,7 +117,7 @@ func TestVersionStackUIUsesSafeStackStateAndSingleReview(t *testing.T) {
 		t.Fatal("Version request helper missing")
 	}
 	request := text[requestStart:requestEnd]
-	if !strings.Contains(request, `if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();`) || strings.Contains(request, "signal:") {
+	if !strings.Contains(request, `if (selection !== globalThis.justVoxelSelectionGeneration.version) throw globalThis.justVoxelStaleSelection();`) || strings.Contains(request, "signal:") {
 		t.Fatal("Version requests must reject stale responses without aborting submitted operations")
 	}
 	for _, forbidden := range []string{"Review updates", "Apply update", `status.update_available ? "Available"`, "Update Geyser", "Update Floodgate", "Update ViaVersion", "sha256", "A stopped server will start for verification.", "BEDROCK_MANAGED_PLUGINS", "MODRINTH_PROJECTS", "PLUGINS="} {

@@ -64,7 +64,9 @@ test('card, continuation and in-page success preserve existing workflow architec
   assert.match(progress,/operation\.instance_id \? "Retry Reset Minecraft" : "Continue removal"/);
   assert.match(progress,/Minecraft removal stopped before completion/);
   assert.match(progress,/target\.searchParams\.delete\("server"\)/);
-  assert.match(progress,/justVoxelSelectionGeneration/);
+  assert.match(progress,/justVoxelSelectionGeneration\[workspace\]/);
+  assert.match(progress,/writeWorkspaceWindowState\(workspace, \{selectedServer: ""\}\)/);
+  assert.match(progress,/detail: \{ serverId: "", workspace, inventoryEmpty: true \}/);
   assert.match(progress,/justVoxelServerSelection\(slot\)/);
   assert.match(progress,/justvoxel:server-selection-changed/);
   assert.doesNotMatch(progress,/location\.(reload|assign)|wallpaper/i);

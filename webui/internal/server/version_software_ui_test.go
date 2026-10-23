@@ -82,6 +82,7 @@ async function open(currentSoftware, imageState = "up_to_date") {
   vm.runInNewContext(source, {
     location: {origin: "http://example", search: "?server=jv-family1"},
     justVoxelServerSelection: async () => {},
+    justVoxelSelectionGeneration: {version:0},
     justVoxelSelectedURL: value => {const u=new URL(value,"http://example");u.searchParams.set("server","jv-family1");return u.pathname+u.search;},
     window: new EventTarget(),
     document, fetch, URLSearchParams, setTimeout,

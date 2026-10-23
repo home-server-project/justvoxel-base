@@ -1,44 +1,115 @@
-// Discard stale browser selection and normalize retired dashboard tab URLs.
-const dashboardURL = typeof document !== "undefined" && typeof document.querySelector === "function"
-  ? document.querySelector("#dashboard[data-dashboard-url]")?.dataset?.dashboardUrl : undefined;
+// Normalize retired dashboard tab URLs before reading explicit workspace links.
+const selectionDashboard = typeof document !== "undefined" && typeof document.querySelector === "function"
+  ? document.querySelector("#dashboard[data-dashboard-status]") : null;
+const dashboardURL = selectionDashboard?.dataset?.dashboardUrl;
 if (dashboardURL) window.history.replaceState(window.history.state, "", dashboardURL + window.location.hash);
 
-// Selection is explicit in each server-specific request. Workspaces detach old
-// presentation on selection changes; submitted operations keep their original target.
-globalThis.justVoxelSelectionGeneration = 0;
+const workspaceUsername = selectionDashboard?.dataset.workspaceUsername || "";
+const workspaceWindowStateKey = (id) => workspaceUsername
+  ? `justvoxel-workspace-window-${id === "system-monitor" ? "v2" : "v1"}:${encodeURIComponent(workspaceUsername)}:${id}`
+  : null;
+
+const workspaceRestoreAllowed = () => !["/login", "/password"].includes(window.location.pathname) && !document.querySelector("[data-credential-boundary]");
+
+const readWorkspaceWindowState = (id) => {
+  const key = workspaceWindowStateKey(id);
+  if (!key) return {};
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(key) || "{}");
+    return workspaceRestoreAllowed() ? saved : { ...saved, open: false };
+  } catch (_) {
+    return {};
+  }
+};
+
+const writeWorkspaceWindowState = (id, patch) => {
+  const key = workspaceWindowStateKey(id);
+  if (!key) return;
+  try {
+    const current = readWorkspaceWindowState(id);
+    window.localStorage.setItem(key, JSON.stringify({ ...current, ...patch }));
+  } catch (_) {
+    // Layout persistence is optional. The window still works without browser storage.
+  }
+};
+
+// Browser presentation state only; operation URLs retain their explicit targets.
+const serverWorkspaces = ["minecraft", "version", "plugins", "backups", "migration"];
+const workspaceServerSelections = Object.create(null);
+globalThis.justVoxelSelectionGeneration = Object.fromEntries(serverWorkspaces.map(workspace => [workspace, 0]));
 globalThis.justVoxelStaleSelection = () => Object.assign(new Error("Server selection changed."), { staleSelection: true });
-globalThis.justVoxelSelectedURL = (value) => {
+const initialServerDestination = new URLSearchParams(globalThis.location?.search || "");
+const initialServerWorkspace = initialServerDestination.get("workspace") || "minecraft";
+const validServerID = (id) => typeof id === "string" && /^jv-[a-z0-9]{6,12}$/.test(id);
+
+let serverSelectionInventoryLoading = false;
+globalThis.justVoxelLoadServerSelections = (refresh = false) => {
+  if (globalThis.justVoxelSelectionReady && (!refresh || serverSelectionInventoryLoading)) return globalThis.justVoxelSelectionReady;
+  serverSelectionInventoryLoading = true;
+  const inventoryTickets = {...globalThis.justVoxelSelectionGeneration};
+  globalThis.justVoxelSelectionReady = (async () => {
+    // Never send a saved or URL server ID to the inventory endpoint.
+    const response = await fetch("/api/minecraft/workspace/selection?selection=none", {credentials:"same-origin",cache:"no-store"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Server selection is unavailable.");
+    for (const workspace of serverWorkspaces) {
+      if (inventoryTickets[workspace] !== globalThis.justVoxelSelectionGeneration[workspace]) continue;
+      const previous = workspaceServerSelections[workspace];
+      const saved = workspaceRestoreAllowed() ? readWorkspaceWindowState(workspace).selectedServer : "";
+      const exists = (id) => validServerID(id) && data.servers.some(server => server.id === id);
+      const explicit = initialServerWorkspace === workspace && initialServerDestination.getAll("server").length === 1 && exists(initialServerDestination.get("server"));
+      const candidate = previous !== undefined ? previous : explicit ? initialServerDestination.get("server") : saved;
+      if (saved && !exists(saved)) writeWorkspaceWindowState(workspace, {selectedServer: ""});
+      const selectedServer = exists(candidate) ? candidate : data.servers.length === 1 ? data.servers[0].id : "";
+      workspaceServerSelections[workspace] = selectedServer;
+      if (selectedServer && workspaceRestoreAllowed()) writeWorkspaceWindowState(workspace, {selectedServer});
+      if (workspace === "minecraft" && selectionDashboard) selectionDashboard.dataset.selectedMinecraftId = selectedServer;
+      if (previous !== undefined && previous !== selectedServer) {
+        ++globalThis.justVoxelSelectionGeneration[workspace];
+        window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", {detail: {serverId: selectedServer, workspace, inventoryEmpty: data.servers.length === 0}}));
+      }
+    }
+    return data;
+  })().finally(() => { serverSelectionInventoryLoading = false; });
+  return globalThis.justVoxelSelectionReady;
+};
+if (selectionDashboard && workspaceRestoreAllowed()) {
+  // Consumers await the same inventory validation before their first request.
+  globalThis.justVoxelLoadServerSelections().catch(() => { globalThis.justVoxelSelectionReady = null; });
+}
+globalThis.justVoxelSelectedURL = (value, workspace = "minecraft") => {
   const location = globalThis.location;
   if (!location?.origin) return value;
   const target = new URL(value, location.origin);
-  const selected = new URLSearchParams(location.search || "");
-  if (!target.searchParams.has("server")) selected.getAll("server").forEach((id) => target.searchParams.append("server", id));
-  if (dashboardURL && !document.querySelector("#dashboard")?.dataset?.selectedMinecraftId &&
-      !target.searchParams.has("server")) {
-    if (["/api/dashboard-status", "/api/minecraft/workspace/selection"].includes(target.pathname)) {
-      target.searchParams.set("selection", "none");
-    } else {
-      // Keep server-specific controls from falling back to a different sole server.
-      target.searchParams.set("server", "");
+  if (!target.searchParams.has("server")) {
+    const selected = workspaceServerSelections[workspace];
+    if (selected) target.searchParams.set("server", selected);
+    else if (selectionDashboard) {
+      if (target.pathname === "/api/dashboard-status") target.searchParams.set("selection", "none");
+      else target.searchParams.set("server", "");
+    } else if (initialServerWorkspace === workspace) {
+      // Standalone selected-server pages retain their native explicit context.
+      initialServerDestination.getAll("server").forEach(id => target.searchParams.append("server", id));
     }
   }
   return target.pathname + target.search;
 };
 globalThis.justVoxelSelectServer = (id, workspace, tabName) => {
-  if (typeof id !== "string" || !/^jv-[a-z0-9]{6,12}$/.test(id)) return false;
+  if (!validServerID(id) || !serverWorkspaces.includes(workspace)) return false;
   const target = new URL(window.location.href);
-  const dashboard = document.querySelector("#dashboard[data-dashboard-status]");
-  const previousId = dashboard?.dataset.selectedMinecraftId || target.searchParams.get("server");
+  const previousId = workspaceServerSelections[workspace];
   target.searchParams.set("server", id);
   target.searchParams.set("workspace", workspace);
   if (tabName) target.searchParams.set("tab", tabName);
   else target.searchParams.delete("tab");
   target.searchParams.delete("operation");
   window.history.replaceState(window.history.state, "", target);
-  document.querySelectorAll("[data-selected-server] select").forEach((control) => { control.value = id; });
-  if (dashboard) dashboard.dataset.selectedMinecraftId = id;
+  document.querySelectorAll(`[data-server-workspace="${workspace}"] [data-selected-server] select`).forEach((control) => { control.value = id; });
+  workspaceServerSelections[workspace] = id;
+  if (workspaceRestoreAllowed()) writeWorkspaceWindowState(workspace, {selectedServer: id});
+  if (workspace === "minecraft" && selectionDashboard) selectionDashboard.dataset.selectedMinecraftId = id;
   if (previousId !== id) {
-    ++globalThis.justVoxelSelectionGeneration;
+    ++globalThis.justVoxelSelectionGeneration[workspace];
     window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", {
       detail: { serverId: id, workspace },
     }));
@@ -50,11 +121,9 @@ globalThis.justVoxelServerSelection = async (slot) => {
   slot.dataset.selectionLoading = "true";
   const inventoryGeneration = slot.dataset.inventoryGeneration;
   try {
-    const response = await fetch(globalThis.justVoxelSelectedURL("/api/minecraft/workspace/selection"), {credentials:"same-origin",cache:"no-store"});
-    const data = await response.json();
+    const data = await globalThis.justVoxelLoadServerSelections(true);
     if (inventoryGeneration !== slot.dataset.inventoryGeneration) return;
-    if (!response.ok) throw new Error(data.error || "Server selection is unavailable.");
-    const selectedId = new URLSearchParams(window.location.search).get("server") || data.selected.id;
+    const selectedId = workspaceServerSelections[slot.dataset.serverWorkspace] || "";
     const label = document.createElement("label");
     label.dataset.selectedServer = "";
     label.textContent = "Server: ";
@@ -248,7 +317,7 @@ document.addEventListener("submit", (event) => {
   const form = event.target.closest(".action-form");
   if (!form) return;
 
-  if (form.dataset.minecraftAction) form.action = globalThis.justVoxelSelectedURL(form.action);
+  if (form.dataset.minecraftAction) form.action = globalThis.justVoxelSelectedURL(form.action, "minecraft");
   const submitted = form.querySelector('button[type="submit"]');
   document.querySelectorAll(".action-form button").forEach((button) => {
     button.disabled = true;
@@ -319,12 +388,6 @@ if (navigationGroups.length > 0) {
 }
 
 const dashboard = document.querySelector("#dashboard[data-dashboard-status]");
-// Pin the resolver's sole-instance selection for polling, links and reloads.
-if (dashboard?.dataset.selectedMinecraftId && !new URLSearchParams(window.location.search).has("server")) {
-  const target = new URL(window.location.href);
-  target.searchParams.set("server", dashboard.dataset.selectedMinecraftId);
-  window.history.replaceState(window.history.state, "", target);
-}
 if (dashboard) {
   const statusURL = "/api/dashboard-status";
   const sessionURL = dashboard.dataset.sessionInfo;
@@ -455,9 +518,10 @@ if (dashboard) {
   };
 
   const refreshDashboard = async () => {
-    const selection = globalThis.justVoxelSelectionGeneration;
     try {
-      const response = await fetch(globalThis.justVoxelSelectedURL(statusURL), {
+      if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+      const selection = globalThis.justVoxelSelectionGeneration.minecraft;
+      const response = await fetch(globalThis.justVoxelSelectedURL(statusURL, "minecraft"), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -473,7 +537,7 @@ if (dashboard) {
       }
       if (!response.ok) return;
       const snapshot = await response.json();
-      if (selection !== globalThis.justVoxelSelectionGeneration) return;
+      if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
       renderDashboard(snapshot);
     } catch (_) {
       // Keep the last known dashboard state and try again on the next poll.
@@ -489,7 +553,8 @@ if (dashboard) {
     });
   }
 
-  window.addEventListener("justvoxel:server-selection-changed", () => {
+  window.addEventListener("justvoxel:server-selection-changed", (event) => {
+    if (event.detail?.workspace !== "minecraft") return;
     pendingAction = "";
     restartSawTransition = false;
     document.querySelectorAll("[data-minecraft-action]").forEach((form) => {
@@ -504,6 +569,18 @@ if (dashboard) {
     });
     void refreshDashboard();
   });
+  globalThis.justVoxelSelectionReady?.then(() => {
+    document.querySelectorAll("[data-minecraft-action]").forEach((form) => {
+      const target = new URL(form.action, window.location.href);
+      target.searchParams.set("server", dashboard.dataset.selectedMinecraftId);
+      form.action = target.pathname + target.search;
+    });
+    document.querySelectorAll('a[href^="/minecraft/how-to-connect"]').forEach((link) => {
+      const target = new URL(link.href, window.location.href);
+      target.searchParams.set("server", dashboard.dataset.selectedMinecraftId);
+      link.href = target.pathname + target.search;
+    });
+  }).catch(() => {});
   loadRole();
   refreshDashboard();
   window.setInterval(refreshDashboard, 5000);
@@ -514,7 +591,7 @@ if (dashboard) {
 
 
 document.querySelectorAll('a[href^="/minecraft/how-to-connect"]').forEach((link) => {
-  link.href = globalThis.justVoxelSelectedURL(link.getAttribute("href"));
+  link.href = globalThis.justVoxelSelectedURL(link.getAttribute("href"), "minecraft");
 });
 
 const quickLook = document.querySelector("[data-quick-look]");
@@ -575,11 +652,11 @@ if (quickLook && quickLookToggle) {
   const backupCSRF = quickLook.querySelector("[data-quick-look-backup-csrf]");
   backupCreate?.addEventListener("click", async () => {
     if (backupCreate.disabled) return;
-    const selection = globalThis.justVoxelSelectionGeneration;
+    const selection = globalThis.justVoxelSelectionGeneration.minecraft;
     backupCreate.disabled = true;
     backupCreate.textContent = "Starting…";
     try {
-      const response = await fetch(globalThis.justVoxelSelectedURL("/api/backups/manual"), {
+      const response = await fetch(globalThis.justVoxelSelectedURL("/api/backups/manual", "minecraft"), {
         method: "POST",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -590,12 +667,12 @@ if (quickLook && quickLookToggle) {
         return;
       }
       const result = await response.json();
-      if (selection !== globalThis.justVoxelSelectionGeneration) return;
+      if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
       setValue("[data-quick-look-backup]", response.ok && result.ok
         ? result.message
         : result.error || "Manual backup could not be started.");
     } catch (_) {
-      if (selection !== globalThis.justVoxelSelectionGeneration) return;
+      if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
       setValue("[data-quick-look-backup]", "Manual backup could not be started.");
     } finally {
       backupCreate.disabled = false;
@@ -654,11 +731,16 @@ if (quickLook && quickLookToggle) {
     setActionAvailability(status);
   };
 
-  window.addEventListener("justvoxel:server-selection-changed", () => { lastMonitorData = null; void refreshQuickLook(); });
+  window.addEventListener("justvoxel:server-selection-changed", (event) => {
+    if (event.detail?.workspace !== "minecraft") return;
+    lastMonitorData = null;
+    void refreshQuickLook();
+  });
   async function refreshQuickLook() {
-    const selection = globalThis.justVoxelSelectionGeneration;
     try {
-      const response = await fetch(globalThis.justVoxelSelectedURL(statusURL), {
+      if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+      const selection = globalThis.justVoxelSelectionGeneration.minecraft;
+      const response = await fetch(globalThis.justVoxelSelectedURL(statusURL, "minecraft"), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -683,7 +765,7 @@ if (quickLook && quickLookToggle) {
       } catch (_) {
         // Missing provider evidence is presented conservatively.
       }
-      if (selection !== globalThis.justVoxelSelectionGeneration) return;
+      if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
       renderQuickLook(snapshot, providers);
     } catch (_) {
       // Keep the last values and retry on the next refresh.
@@ -1137,7 +1219,7 @@ const initSystemUpdateWorkspace = () => {
     minecraftConfigured = false;
     syncActionAvailability();
     try {
-      const response = await fetch(globalThis.justVoxelSelectedURL("/api/dashboard-status"), {
+      const response = await fetch(globalThis.justVoxelSelectedURL("/api/dashboard-status", "minecraft"), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -1657,35 +1739,6 @@ let workspaceWindowZ = 120;
 // Keep workspace windows below the Control Center's reserved topbar layer (1000).
 const workspaceWindowZMax = 900;
 const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
-
-const workspaceUsername = dashboard?.dataset.workspaceUsername || "";
-const workspaceWindowStateKey = (id) => workspaceUsername
-  ? `justvoxel-workspace-window-${id === "system-monitor" ? "v2" : "v1"}:${encodeURIComponent(workspaceUsername)}:${id}`
-  : null;
-
-const workspaceRestoreAllowed = () => !["/login", "/password"].includes(window.location.pathname) && !document.querySelector("[data-credential-boundary]");
-
-const readWorkspaceWindowState = (id) => {
-  const key = workspaceWindowStateKey(id);
-  if (!key) return {};
-  try {
-    const saved = JSON.parse(window.localStorage.getItem(key) || "{}");
-    return workspaceRestoreAllowed() ? saved : { ...saved, open: false };
-  } catch (_) {
-    return {};
-  }
-};
-
-const writeWorkspaceWindowState = (id, patch) => {
-  const key = workspaceWindowStateKey(id);
-  if (!key) return;
-  try {
-    const current = readWorkspaceWindowState(id);
-    window.localStorage.setItem(key, JSON.stringify({ ...current, ...patch }));
-  } catch (_) {
-    // Layout persistence is optional. The window still works without browser storage.
-  }
-};
 
 const workspaceTopInset = () => {
   const topbar = document.querySelector(".topbar");
@@ -2213,6 +2266,7 @@ if (backupsOpen && backupsDialog) {
       if (action.origin !== window.location.origin || !action.pathname.startsWith("/workspace/backups")) return;
 
       event.preventDefault();
+      const selection = globalThis.justVoxelSelectionGeneration.backups;
       const sequence = ++loadSequence;
       const reviewDialog = form.closest("[data-backup-review-dialog]");
       const reviewClose = reviewDialog?.querySelector("[data-backup-workflow-review-close]");
@@ -2225,7 +2279,7 @@ if (backupsOpen && backupsDialog) {
       try {
         const body = new URLSearchParams();
         new FormData(form).forEach((value, key) => body.append(key, String(value)));
-        const response = await fetch(globalThis.justVoxelSelectedURL(action.pathname + action.search), {
+        const response = await fetch(globalThis.justVoxelSelectedURL(action.pathname + action.search, "backups"), {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
           headers: {
@@ -2237,7 +2291,7 @@ if (backupsOpen && backupsDialog) {
           redirect: "follow",
         });
 
-        if (sequence !== loadSequence) return;
+        if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.backups) return;
         if (response.redirected) {
           const target = new URL(response.url);
           if (target.pathname === "/login" || target.pathname === "/password") {
@@ -2267,11 +2321,11 @@ if (backupsOpen && backupsDialog) {
         }
 
         const responseMarkup = await response.text();
-        if (sequence !== loadSequence) return;
+        if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.backups) return;
         renderBackupsMarkup(responseMarkup);
         if (state) state.textContent = "";
       } catch (error) {
-        if (sequence !== loadSequence) return;
+        if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.backups) return;
         if (reviewDialog) reviewDialog.dataset.busy = "false";
         if (reviewClose) reviewClose.disabled = false;
         if (submitter) submitter.disabled = false;
@@ -2302,12 +2356,14 @@ if (backupsOpen && backupsDialog) {
   };
 
   const loadBackups = async (url = currentURL) => {
+    if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+    const selection = globalThis.justVoxelSelectionGeneration.backups;
     const sequence = ++loadSequence;
     if (state) state.textContent = "Loading backups…";
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureBackupsAssets();
-      const response = await fetch(globalThis.justVoxelSelectedURL(url), {
+      const response = await fetch(globalThis.justVoxelSelectedURL(url, "backups"), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "text/html" },
@@ -2337,7 +2393,7 @@ if (backupsOpen && backupsDialog) {
       if (!response.ok) throw new Error("Backups are unavailable.");
 
       const markup = await response.text();
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.backups) return;
       const responseURL = new URL(response.url);
       if (responseURL.origin === window.location.origin && responseURL.pathname === "/workspace/backups") {
         currentURL = responseURL.pathname + responseURL.search;
@@ -2347,15 +2403,16 @@ if (backupsOpen && backupsDialog) {
       renderBackupsMarkup(markup);
       if (state) state.textContent = "";
     } catch (error) {
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.backups) return;
       if (content) content.replaceChildren();
       if (state) state.textContent = error?.message || "Backups are unavailable.";
     } finally {
-      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+      if ((sequence === loadSequence && selection === globalThis.justVoxelSelectionGeneration.backups) && refreshButton) refreshButton.disabled = false;
     }
   };
 
-  window.addEventListener("justvoxel:server-selection-changed", () => {
+  window.addEventListener("justvoxel:server-selection-changed", (event) => {
+    if (event.detail?.workspace !== "backups") return;
     ++loadSequence;
     currentURL = "/workspace/backups";
     content?.replaceChildren();
@@ -2441,7 +2498,7 @@ if (migrationOpen && migrationDialog) {
   let migrationSubmitController = null;
 
   const updateMigrationLocation = (tab = "", operation = "") => {
-    const destination = new URL(globalThis.justVoxelSelectedURL("/?workspace=migration"), window.location.href);
+    const destination = new URL(globalThis.justVoxelSelectedURL("/?workspace=migration", "migration"), window.location.href);
     if (operation) destination.searchParams.set("operation", operation);
     else if (Object.hasOwn(tabURLs, tab)) destination.searchParams.set("tab", tab);
     const nextURL = destination.pathname + destination.search;
@@ -2508,7 +2565,7 @@ if (migrationOpen && migrationDialog) {
       dialog.remove();
       resolve(value);
     };
-    const detach = () => finish(null);
+    const detach = (event) => { if (event.detail?.workspace === "migration") finish(null); };
     window.addEventListener("justvoxel:server-selection-changed", detach);
     cancel.addEventListener("click", () => finish(null), { once: true });
     dialog.addEventListener("cancel", (event) => {
@@ -2617,7 +2674,7 @@ if (migrationOpen && migrationDialog) {
   };
 
   const renderMigrationMarkup = (markup, responseURL, preserveLocation = false) => {
-    const selection = globalThis.justVoxelSelectionGeneration;
+    const selection = globalThis.justVoxelSelectionGeneration.migration;
     if (!content) throw new Error("Migration workspace is unavailable.");
     const root = extractMigrationRoot(markup);
     if (!root) throw new Error("Migration response could not be rendered.");
@@ -2629,6 +2686,7 @@ if (migrationOpen && migrationDialog) {
       : null;
     if (root.dataset.serverId && !new URLSearchParams(window.location.search).has("server")) {
       const selectedURL = new URL(window.location.href);
+      selectedURL.searchParams.set("workspace", "migration");
       selectedURL.searchParams.set("server", root.dataset.serverId);
       window.history.replaceState(window.history.state, "", selectedURL.pathname + selectedURL.search);
     }
@@ -2661,7 +2719,7 @@ if (migrationOpen && migrationDialog) {
         });
         if (await handleMigrationAuth(statusResponse) || !statusResponse.ok) return;
         const status = await statusResponse.json();
-        if (selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
         const operation = status?.operation;
         if (!operation || operation.operation_type !== "factory_reset" || operation.state !== "needs_attention") return;
 
@@ -2703,11 +2761,11 @@ if (migrationOpen && migrationDialog) {
             if (await handleMigrationAuth(response)) return;
             const result = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(result.error || "Failed Factory Reset could not be resolved.");
-            if (selection !== globalThis.justVoxelSelectionGeneration) return;
+            if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
             setMigrationBusy("Previous failed Factory Reset resolved. Reloading migration…", "info");
             await loadMigration(tabURLs[currentTab]);
           } catch (error) {
-            if (selection !== globalThis.justVoxelSelectionGeneration) return;
+            if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
             button.disabled = false;
             setMigrationBusy(error?.message || "Failed Factory Reset could not be resolved.", "error");
           }
@@ -2741,7 +2799,7 @@ if (migrationOpen && migrationDialog) {
         if (sourceKind === "smb") {
           if (!migrationSourceSMBPassword) {
             const password = await requestMigrationSMBPassword("import");
-            if (selection !== globalThis.justVoxelSelectionGeneration) return;
+            if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
             if (password === null) {
               if (submitter) submitter.disabled = false;
               setMigrationBusy("");
@@ -2758,7 +2816,7 @@ if (migrationOpen && migrationDialog) {
         if (exportKind === "smb" && action.pathname.endsWith("/export/apply")) {
           if (!migrationExportSMBPassword) {
             const password = await requestMigrationSMBPassword("export");
-            if (selection !== globalThis.justVoxelSelectionGeneration) return;
+            if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
             if (password === null) {
               if (submitter) submitter.disabled = false;
               setMigrationBusy("");
@@ -2769,8 +2827,9 @@ if (migrationOpen && migrationDialog) {
           body.set("smb_password", migrationExportSMBPassword);
         }
         form.querySelectorAll('input[name="source_smb_password"],input[name="smb_password"]').forEach((input) => { input.value = ""; });
-        if (selection !== globalThis.justVoxelSelectionGeneration) return;
-        const sendMigration = () => fetch(globalThis.justVoxelSelectedURL(action.pathname + action.search), {
+        if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+        const migrationActionURL = globalThis.justVoxelSelectedURL(action.pathname + action.search, "migration");
+        const sendMigration = () => fetch(migrationActionURL, {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
           headers: {
@@ -2784,12 +2843,12 @@ if (migrationOpen && migrationDialog) {
           signal: submitController.signal,
         });
         const response = await sendMigration();
-        if (selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
         if (await handleMigrationAuth(response)) return;
         if (response.status === 403) throw new Error("Administrator access required.");
 
         const responseMarkup = await response.text();
-        if (selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
         if (!response.ok && !responseMarkup.includes("data-migration-workspace-root")) {
           const detail = responseMarkup.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
           throw new Error(detail || `Migration request failed (HTTP ${response.status}).`);
@@ -2808,7 +2867,7 @@ if (migrationOpen && migrationDialog) {
         }
         setMigrationBusy("");
       } catch (error) {
-        if (error?.name === "AbortError" || selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (error?.name === "AbortError" || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
         if (submitter && submitter.isConnected) submitter.disabled = false;
         setMigrationBusy(error?.message || "Migration operation could not be completed.", "error");
       } finally {
@@ -2858,6 +2917,8 @@ if (migrationOpen && migrationDialog) {
   };
 
   const loadMigration = async (url = currentURL, preserveLocation = false) => {
+    if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+    const selection = globalThis.justVoxelSelectionGeneration.migration;
     const sequence = ++loadSequence;
     migrationLoadController?.abort();
     const loadController = new AbortController();
@@ -2866,7 +2927,7 @@ if (migrationOpen && migrationDialog) {
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
-      const response = await fetch(globalThis.justVoxelSelectedURL(url), {
+      const response = await fetch(globalThis.justVoxelSelectedURL(url, "migration"), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "text/html", "X-JustVoxel-Migration-Fragment": "1" },
@@ -2874,7 +2935,7 @@ if (migrationOpen && migrationDialog) {
         redirect: "follow",
         signal: loadController.signal,
       });
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       if (await handleMigrationAuth(response)) return;
       if (response.status === 403) throw new Error("Administrator access required.");
       if (!response.ok) throw new Error("Migration is unavailable.");
@@ -2885,23 +2946,25 @@ if (migrationOpen && migrationDialog) {
         return;
       }
       const markup = await response.text();
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       renderMigrationMarkup(markup, finalURL.href, preserveLocation);
       setMigrationBusy("");
     } catch (error) {
-      if (error?.name === "AbortError" || sequence !== loadSequence) return;
+      if (error?.name === "AbortError" || sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       if (content) content.replaceChildren();
       setMigrationBusy(error?.message || "Migration is unavailable.");
       state?.classList.remove("is-busy");
       migrationDialog.classList.remove("is-busy");
     } finally {
       if (migrationLoadController === loadController) migrationLoadController = null;
-      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+      if ((sequence === loadSequence && selection === globalThis.justVoxelSelectionGeneration.migration) && refreshButton) refreshButton.disabled = false;
     }
   };
 
   const loadMigrationEntry = async () => {
+    if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
     syncMigrationTabs();
+    const selection = globalThis.justVoxelSelectionGeneration.migration;
     const sequence = ++loadSequence;
     migrationLoadController?.abort();
     const loadController = new AbortController();
@@ -2910,7 +2973,7 @@ if (migrationOpen && migrationDialog) {
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
-      const response = await fetch(globalThis.justVoxelSelectedURL("/workspace/migration"), {
+      const response = await fetch(globalThis.justVoxelSelectedURL("/workspace/migration", "migration"), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "text/html", "X-JustVoxel-Migration-Fragment": "1" },
@@ -2918,45 +2981,47 @@ if (migrationOpen && migrationDialog) {
         redirect: "follow",
         signal: loadController.signal,
       });
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       if (await handleMigrationAuth(response)) return;
       if (response.status === 403) throw new Error("Administrator access required.");
       if (!response.ok) throw new Error("Migration is unavailable.");
       const finalURL = new URL(response.url, window.location.href);
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
 
       if (finalURL.pathname !== "/workspace/migration") {
         const markup = await response.text();
-        if (sequence !== loadSequence) return;
+        if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
         renderMigrationMarkup(markup, finalURL.href);
         setMigrationBusy("");
         return;
       }
       const entryMarkup = await response.text();
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       const entryRoot = extractMigrationRoot(entryMarkup);
       if (entryRoot) {
         syncMigrationRecoveryAvailability(entryRoot);
         if (entryRoot.dataset.serverId && !new URLSearchParams(window.location.search).has("server")) {
           const selectedURL = new URL(window.location.href);
+          selectedURL.searchParams.set("workspace", "migration");
           selectedURL.searchParams.set("server", entryRoot.dataset.serverId);
           window.history.replaceState(window.history.state, "", selectedURL.pathname + selectedURL.search);
         }
       }
       await loadMigration(tabURLs[currentTab]);
     } catch (error) {
-      if (error?.name === "AbortError" || sequence !== loadSequence) return;
+      if (error?.name === "AbortError" || sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       if (content) content.replaceChildren();
       setMigrationBusy(error?.message || "Migration is unavailable.");
       state?.classList.remove("is-busy");
       migrationDialog.classList.remove("is-busy");
     } finally {
       if (migrationLoadController === loadController) migrationLoadController = null;
-      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+      if ((sequence === loadSequence && selection === globalThis.justVoxelSelectionGeneration.migration) && refreshButton) refreshButton.disabled = false;
     }
   };
 
-  window.addEventListener("justvoxel:server-selection-changed", () => {
+  window.addEventListener("justvoxel:server-selection-changed", (event) => {
+    if (event.detail?.workspace !== "migration") return;
     ++loadSequence;
     migrationLoadController?.abort();
     // Do not abort an already submitted operation; only detach its presentation.
@@ -3314,7 +3379,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
 
 const minecraftOpen = document.querySelector("[data-minecraft-open]");
 globalThis.justVoxelOpenDeleteServer = ({name, description, csrf, request, isCurrent, dismissOnDeleted = false, onError = () => {}, onDeleted = result => window.location.assign(result.redirect)}) => {
-    const selection = globalThis.justVoxelSelectionGeneration;
+    const selection = globalThis.justVoxelSelectionGeneration.minecraft;
     const dialog = document.createElement("dialog");
     dialog.className = "minecraft-delete-dialog";
     dialog.setAttribute("aria-labelledby", "minecraft-delete-title");
@@ -3345,7 +3410,7 @@ globalThis.justVoxelOpenDeleteServer = ({name, description, csrf, request, isCur
     const feedback = dialog.querySelector("[data-delete-error]");
     let submitting = false;
     const cancel = () => { if (!submitting) dialog.close(); };
-    const detach = () => dialog.close();
+    const detach = (event) => { if (event.detail?.workspace === "minecraft") dialog.close(); };
     dialog.querySelector("[data-delete-close]").addEventListener("click", cancel);
     dialog.querySelector("[data-delete-cancel]").addEventListener("click", cancel);
     dialog.addEventListener("cancel", (event) => { event.preventDefault(); cancel(); });
@@ -3357,7 +3422,7 @@ globalThis.justVoxelOpenDeleteServer = ({name, description, csrf, request, isCur
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (submitting || Number(slider.value) < 100 || !toggle.checked) return;
-      if (selection !== globalThis.justVoxelSelectionGeneration || !isCurrent()) { dialog.close(); return; }
+      if (selection !== globalThis.justVoxelSelectionGeneration.minecraft || !isCurrent()) { dialog.close(); return; }
       submitting = true;
       apply.disabled = true;
       slider.disabled = true;
@@ -3371,7 +3436,7 @@ globalThis.justVoxelOpenDeleteServer = ({name, description, csrf, request, isCur
           if (dismissOnDeleted) dialog.close();
         }
       } catch (error) {
-        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
         feedback.textContent = error.message;
         feedback.hidden = false;
         onError(error);
@@ -3416,8 +3481,11 @@ if (minecraftOpen && minecraftDialog) {
 
   const requestWorkspaceJSON = async (url, options = {}) => {
     if (url === "/api/dashboard-status") url = "/api/minecraft/workspace/snapshot";
-    const selection = globalThis.justVoxelSelectionGeneration;
-    const response = await fetch(globalThis.justVoxelSelectedURL(url), {
+    const selection = globalThis.justVoxelSelectionGeneration.minecraft;
+    const boundURL = options.method && options.method !== "GET" ? globalThis.justVoxelSelectedURL(url, "minecraft") : null;
+    if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+    if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) throw globalThis.justVoxelStaleSelection();
+    const response = await fetch(boundURL || globalThis.justVoxelSelectedURL(url, "minecraft"), {
       credentials: "same-origin",
       cache: "no-store",
       ...options,
@@ -3432,7 +3500,7 @@ if (minecraftOpen && minecraftDialog) {
     } catch (_) {
       payload = {};
     }
-    if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+    if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) throw globalThis.justVoxelStaleSelection();
     if (response.status === 401) {
       window.location.assign("/login");
       return null;
@@ -3533,22 +3601,22 @@ if (minecraftOpen && minecraftDialog) {
         const requested = control.checked;
         control.checked = !requested;
         if (pending || control.disabled || sequence !== loadSequence) return;
-        const selection = globalThis.justVoxelSelectionGeneration;
+        const selection = globalThis.justVoxelSelectionGeneration.minecraft;
         pending = true;
         running.disabled = boot.disabled = true;
         if (state) state.textContent = "Applying…";
         let failure;
         try { await action(requested); }
         catch (error) {
-          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
           failure = error;
         } finally {
-          if (selection === globalThis.justVoxelSelectionGeneration && sequence === loadSequence) {
+          if (selection === globalThis.justVoxelSelectionGeneration.minecraft && sequence === loadSequence) {
             // Both success and refusal reload authoritative values; never claim an optimistic change.
             const reload = loadCurrentTab();
             const reloadSequence = loadSequence;
             await reload;
-            if (failure && selection === globalThis.justVoxelSelectionGeneration && reloadSequence === loadSequence && state) state.textContent = failure.message;
+            if (failure && selection === globalThis.justVoxelSelectionGeneration.minecraft && reloadSequence === loadSequence && state) state.textContent = failure.message;
           }
         }
       };
@@ -3574,7 +3642,7 @@ if (minecraftOpen && minecraftDialog) {
       details.elements.display_name.value = name;
       details.elements.motd.value = settings.motd || "";
       details.addEventListener("submit", async (event) => {
-        const selection = globalThis.justVoxelSelectionGeneration;
+        const selection = globalThis.justVoxelSelectionGeneration.minecraft;
         event.preventDefault();
         const save = details.querySelector("button");
         const proposedName = details.elements.display_name.value;
@@ -3582,7 +3650,7 @@ if (minecraftOpen && minecraftDialog) {
         if (!motd) { if (state) state.textContent = "Server welcome message is required."; return; }
         save.disabled = true;
         const reloadAfterError = async (error) => {
-          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
           // Either operation may already have succeeded. Always show authoritative state.
           let remainingError = error.message;
           try {
@@ -3592,14 +3660,14 @@ if (minecraftOpen && minecraftDialog) {
               if (server) option.textContent = server.name;
             });
           } catch (refreshError) {
-            if (refreshError.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+            if (refreshError.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
             remainingError += " " + refreshError.message;
           }
           await loadCurrentTab();
-          if (selection === globalThis.justVoxelSelectionGeneration && state) state.textContent = remainingError;
+          if (selection === globalThis.justVoxelSelectionGeneration.minecraft && state) state.textContent = remainingError;
         };
         const finishSave = async () => {
-          if (selection !== globalThis.justVoxelSelectionGeneration || sequence !== loadSequence) throw globalThis.justVoxelStaleSelection();
+          if (selection !== globalThis.justVoxelSelectionGeneration.minecraft || sequence !== loadSequence) throw globalThis.justVoxelStaleSelection();
           if (proposedName !== name) {
             await requestWorkspaceJSON("/api/minecraft/workspace/rename", {
               method: "POST", body: new URLSearchParams({csrf, display_name: proposedName}),
@@ -3959,7 +4027,7 @@ if (minecraftOpen && minecraftDialog) {
     root.prepend(review);
 
     apply.addEventListener("click", async () => {
-      const selection = globalThis.justVoxelSelectionGeneration;
+      const selection = globalThis.justVoxelSelectionGeneration.minecraft;
       apply.disabled = true;
       cancel.disabled = true;
       if (state) state.textContent = plan.memory_restart_required ? "Applying and restarting Minecraft…" : "Applying…";
@@ -3985,7 +4053,7 @@ if (minecraftOpen && minecraftDialog) {
         else if (result.restart_deferred) savedMessage = "Minecraft settings saved. Restart remains pending.";
         await loadCurrentTab(savedMessage);
       } catch (error) {
-        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
         if (options.onError) { await options.onError(error); return; }
         if (state) state.textContent = error?.message || "Minecraft settings could not be applied.";
         apply.disabled = false;
@@ -4001,7 +4069,7 @@ if (minecraftOpen && minecraftDialog) {
     content.replaceChildren(root);
     const form = root.querySelector("[data-minecraft-settings-tab]");
     form?.addEventListener("submit", async (event) => {
-      const selection = globalThis.justVoxelSelectionGeneration;
+      const selection = globalThis.justVoxelSelectionGeneration.minecraft;
       event.preventDefault();
       const submitter = event.submitter;
       if (submitter) submitter.disabled = true;
@@ -4017,7 +4085,7 @@ if (minecraftOpen && minecraftDialog) {
         renderSettingsReview(root, plan, params);
         if (state) state.textContent = "";
       } catch (error) {
-        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
         if (state) state.textContent = error?.message || "Minecraft settings could not be reviewed.";
       } finally {
         if (submitter) submitter.disabled = false;
@@ -4071,7 +4139,7 @@ if (minecraftOpen && minecraftDialog) {
       toggle.setAttribute("aria-label", "Whitelist");
       toggle.setAttribute("aria-checked", String(enabled));
       toggle.addEventListener("click", async () => {
-        const selection = globalThis.justVoxelSelectionGeneration;
+        const selection = globalThis.justVoxelSelectionGeneration.minecraft;
         if (enabled && !window.confirm("Disable whitelist?\n\nPlayers not on the whitelist will be allowed to join.")) return;
         toggle.disabled = true;
         try {
@@ -4082,7 +4150,7 @@ if (minecraftOpen && minecraftDialog) {
           });
           if (result) await loadCurrentTab(result.message || "Whitelist updated.");
         } catch (error) {
-          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
           const message = error?.message || "Whitelist change failed.";
           // Reload authoritative state after recovery; never optimistically flip.
           try { await loadCurrentTab(); } catch (_) { /* Keep the last authoritative state visible. */ }
@@ -4095,7 +4163,7 @@ if (minecraftOpen && minecraftDialog) {
     }
 
     const changeWhitelist = async (params, submitter) => {
-      const selection = globalThis.justVoxelSelectionGeneration;
+      const selection = globalThis.justVoxelSelectionGeneration.minecraft;
       if (submitter) submitter.disabled = true;
       if (state) state.textContent = "Updating whitelist…";
       try {
@@ -4108,7 +4176,7 @@ if (minecraftOpen && minecraftDialog) {
         if (!result) return;
         await loadCurrentTab(result.message || "Whitelist updated.");
       } catch (error) {
-        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
         if (state) state.textContent = error?.message || "Whitelist change could not be completed.";
       } finally {
         if (submitter) submitter.disabled = false;
@@ -4196,7 +4264,8 @@ if (minecraftOpen && minecraftDialog) {
   };
 
   async function loadCurrentTab(message = "") {
-    const selection = globalThis.justVoxelSelectionGeneration;
+    if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+    const selection = globalThis.justVoxelSelectionGeneration.minecraft;
     const sequence = ++loadSequence;
     if (state) state.textContent = "Loading…";
     if (refreshButton) refreshButton.disabled = true;
@@ -4208,7 +4277,7 @@ if (minecraftOpen && minecraftDialog) {
       else await renderOverview(sequence, message);
       if (sequence === loadSequence && state?.textContent === "Loading…") state.textContent = "";
     } catch (error) {
-      if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
+      if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
       if (sequence !== loadSequence) return;
       if (content) content.replaceChildren();
       if (state) state.textContent = error?.message || "Minecraft workspace is unavailable.";
@@ -4223,10 +4292,11 @@ if (minecraftOpen && minecraftDialog) {
     loadCurrentTab();
   };
 
-  window.addEventListener("justvoxel:server-selection-changed", () => {
+  window.addEventListener("justvoxel:server-selection-changed", (event) => {
+    if (event.detail?.workspace !== "minecraft") return;
     ++loadSequence;
     content?.replaceChildren();
-    if (globalThis.document?.querySelector("#dashboard[data-dashboard-status]")?.dataset.selectedMinecraftId === "" &&
+    if (event.detail.inventoryEmpty && globalThis.document?.querySelector("#dashboard[data-dashboard-status]")?.dataset.selectedMinecraftId === "" &&
         !new URLSearchParams(globalThis.location?.search || "").has("server")) {
       currentTab = "overview";
       tabs.forEach((button) => button.setAttribute("aria-selected", button.dataset.minecraftTab === currentTab ? "true" : "false"));
@@ -5221,16 +5291,23 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         const target = new URL(window.location.href);
         target.searchParams.delete("server");
         window.history.replaceState(window.history.state, "", target);
-        ++globalThis.justVoxelSelectionGeneration;
+        globalThis.justVoxelSelectionReady = null;
+        for (const workspace of serverWorkspaces) {
+          delete workspaceServerSelections[workspace];
+          writeWorkspaceWindowState(workspace, {selectedServer: ""});
+          ++globalThis.justVoxelSelectionGeneration[workspace];
+        }
         const dashboard = document.querySelector("#dashboard[data-dashboard-status]");
         if (dashboard) dashboard.dataset.selectedMinecraftId = "";
         document.querySelectorAll("[data-server-selector-slot]").forEach((slot) => {
           slot.replaceChildren();
-          slot.dataset.inventoryGeneration = String(globalThis.justVoxelSelectionGeneration);
+          slot.dataset.inventoryGeneration = String(globalThis.justVoxelSelectionGeneration[slot.dataset.serverWorkspace]);
           delete slot.dataset.selectionLoading;
           void globalThis.justVoxelServerSelection(slot);
         });
-        window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", { detail: { serverId: "" } }));
+        for (const workspace of serverWorkspaces) {
+          window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", { detail: { serverId: "", workspace, inventoryEmpty: true } }));
+        }
       }
       window.dispatchEvent(new Event("justvoxel:minecraft-reset-complete"));
       return;
@@ -6734,22 +6811,25 @@ if (pluginsDialog && pluginsOpen) {
     } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
   };
   const pluginRequest = async (route, body, signal) => {
-    const selection = globalThis.justVoxelSelectionGeneration;
+    const selection = globalThis.justVoxelSelectionGeneration.plugins;
+    const boundURL = body ? globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${route}`, "plugins") : null;
     try {
+      if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+      if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
       const options = { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal };
       if (body) {
         options.method = "POST";
         options.body = new URLSearchParams({ csrf: document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "", ...body });
       }
-      const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${route}`), options);
+      const response = await fetch(boundURL || globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${route}`, "plugins"), options);
       const payload = await response.json();
-      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
       if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
       if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error("Change your password first."); }
       if (!response.ok) throw new Error(payload.error || payload.message || "Plugin installation is unavailable; review again.");
       return payload;
     } catch (error) {
-      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
       throw error;
     }
   };
@@ -7013,7 +7093,7 @@ if (pluginsDialog && pluginsOpen) {
     return !changed;
   };
   const addonRequest = async (route, kind, file, plan = null, confirmPlayers = false) => {
-    const selection = globalThis.justVoxelSelectionGeneration;
+    const selection = globalThis.justVoxelSelectionGeneration.plugins;
     try {
       const body = new FormData();
       body.append("type", kind);
@@ -7022,18 +7102,18 @@ if (pluginsDialog && pluginsOpen) {
         body.append("plan_fingerprint", plan.plan_fingerprint);
         body.append("confirm_players", String(confirmPlayers));
       }
-      const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/addons/${route}`), {
+      const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/addons/${route}`, "plugins"), {
         method: "POST", credentials: "same-origin", cache: "no-store", body,
         signal: installController?.signal,
         headers: { Accept: "application/json", "X-CSRF-Token": document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "" },
       });
       const payload = await response.json();
-      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
       if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
       if (!response.ok) throw new Error(payload.error || "Add-ons upload could not continue; review again.");
       return payload;
     } catch (error) {
-      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
       throw error;
     }
   };
@@ -7111,6 +7191,7 @@ if (pluginsDialog && pluginsOpen) {
     return card;
   };
   const load = async () => {
+    if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
     if (!document.body.classList.contains("role-administrator")) return;
     clearInventoryTimer();
     const current = ++generation;
@@ -7134,7 +7215,7 @@ if (pluginsDialog && pluginsOpen) {
           return;
         }
       }
-      const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${tab}${tab === "discover" ? "?" + query : ""}`), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
+      const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${tab}${tab === "discover" ? "?" + query : ""}`, "plugins"), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
       const payload = await response.json();
       if (current !== generation) return;
       if (response.status === 401) { window.location.assign("/login"); return; }
@@ -7200,7 +7281,8 @@ if (pluginsDialog && pluginsOpen) {
     capacityTimer = setTimeout(() => updateCapacity(), 200);
   });
   capacityObserver.observe(results);
-  window.addEventListener("justvoxel:server-selection-changed", () => {
+  window.addEventListener("justvoxel:server-selection-changed", (event) => {
+    if (event.detail?.workspace !== "plugins") return;
     clearTimeout(capacityTimer);
     clearTimeout(searchTimer);
     clearInventoryTimer();

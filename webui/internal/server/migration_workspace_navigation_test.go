@@ -191,7 +191,7 @@ func TestMigrationWorkspaceApplyRedirectRendersCanonicalProgress(t *testing.T) {
 	submission := js[submit : submit+click]
 	responseText := strings.Index(submission, `const responseMarkup = await response.text();`)
 	renderResponse := strings.Index(submission, `renderMigrationMarkup(responseMarkup, response.url || action.pathname);`)
-	if responseText < 0 || renderResponse <= responseText || !strings.Contains(submission[responseText:renderResponse], `if (selection !== globalThis.justVoxelSelectionGeneration) return;`) {
+	if responseText < 0 || renderResponse <= responseText || !strings.Contains(submission[responseText:renderResponse], `if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;`) {
 		t.Fatal("Migration submission must reject old-server responses before rendering canonical progress")
 	}
 	locationStart := strings.Index(js, "const updateMigrationLocation =")
@@ -250,7 +250,7 @@ func TestMigrationWorkspaceExplicitURLStateContract(t *testing.T) {
 	js := string(script)
 	for _, want := range []string{
 		`const migrationRequested = migrationDestination.get("workspace") === "migration"`,
-		`const destination = new URL(globalThis.justVoxelSelectedURL("/?workspace=migration"), window.location.href);`,
+		`const destination = new URL(globalThis.justVoxelSelectedURL("/?workspace=migration", "migration"), window.location.href);`,
 		`if (operation) destination.searchParams.set("operation", operation);`,
 		`else if (Object.hasOwn(tabURLs, tab)) destination.searchParams.set("tab", tab);`,
 		`if (window.location.pathname + window.location.search !== nextURL) {`,

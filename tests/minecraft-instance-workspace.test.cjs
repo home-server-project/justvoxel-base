@@ -100,13 +100,13 @@ test('Overview contains no identity display, form, automatic registration or sto
   assert.doesNotMatch(readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8'), /minecraft-instance-identity/);
 });
 
-test('selected URLs preserve explicit immutable IDs and leave missing selection for authoritative resolution', () => {
-  const context = vm.createContext({URL, URLSearchParams});
+test('selected URLs preserve explicit targets and keep standalone legacy selection in Minecraft only', () => {
+  const context = vm.createContext({URL, URLSearchParams, location:{origin:'https://example.test',search:'?server=jv-family1'}});
   vm.runInContext(block, context);
+  assert.equal(context.justVoxelSelectedURL('/api/minecraft/workspace/settings', 'minecraft'), '/api/minecraft/workspace/settings?server=jv-family1');
+  assert.equal(context.justVoxelSelectedURL('/workspace/backups/backup', 'backups'), '/workspace/backups/backup');
+  assert.equal(context.justVoxelSelectedURL('/workspace/backups/backup?server=jv-kids001', 'backups'), '/workspace/backups/backup?server=jv-kids001');
+  assert.equal(context.justVoxelSelectedURL('/workspace/backups?server=jv-family1&server=jv-kids001', 'backups'), '/workspace/backups?server=jv-family1&server=jv-kids001');
+  delete context.location;
   assert.equal(context.justVoxelSelectedURL('/api/minecraft/workspace/settings'), '/api/minecraft/workspace/settings');
-  context.location = {origin: 'https://example.test', search: '?server=jv-family1'};
-  assert.equal(context.justVoxelSelectedURL('/workspace/backups/backup'), '/workspace/backups/backup?server=jv-family1');
-  assert.equal(context.justVoxelSelectedURL('/workspace/backups/backup?server=jv-kids001'), '/workspace/backups/backup?server=jv-kids001');
-  context.location.search = '?server=jv-family1&server=jv-kids001';
-  assert.equal(context.justVoxelSelectedURL('/workspace/backups'), '/workspace/backups?server=jv-family1&server=jv-kids001');
 });

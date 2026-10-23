@@ -120,7 +120,7 @@ function harness({motd = 'Old welcome', plan = {review: 'real-fingerprint', warn
   let reloads = 0, refreshes = 0;
   const context = vm.createContext({
     URLSearchParams, document: {body, createElement: tag => new Element(tag), querySelectorAll: () => []}, content, state,
-    csrf: 'csrf-token', loadSequence: 1, justVoxelSelectionGeneration: 0,
+    csrf: 'csrf-token', loadSequence: 1, justVoxelSelectionGeneration: {minecraft: 0},
     justVoxelStaleSelection: () => Object.assign(new Error('Selection changed'), {staleSelection: true}),
     window: {location: {reload() { reloads++; }, assign(url) { redirects.push(url); }}, addEventListener() {}, removeEventListener() {}},
     messageNode: text => Object.assign(new Element('p'), {textContent: text}), noticeNode: text => Object.assign(new Element('p'), {textContent: text}),
@@ -230,7 +230,7 @@ test('Cancel and X dismiss without requests; stale selection cannot delete', asy
   const dialog = r.body.children[0];
   dialog.querySelector('[data-destructive-slider]').value = '100';
   dialog.querySelector('[data-destructive-toggle]').checked = true;
-  r.context.justVoxelSelectionGeneration++;
+  r.context.justVoxelSelectionGeneration.minecraft++;
   await dialog.querySelector('form').events.submit(submit);
   assert.equal(r.calls.length, 0);
 });
@@ -382,7 +382,7 @@ test('Selection changes during planning cannot apply the previous server plan', 
   const boot = r.content.querySelector('[name="start_on_boot"]');
   boot.checked = false;
   const request = boot.events.change();
-  r.context.justVoxelSelectionGeneration++;
+  r.context.justVoxelSelectionGeneration.minecraft++;
   r.context.loadSequence++;
   resolve({review: 'previous-server'}); await request;
   assert.equal(r.calls.some(call => call.url.includes('/apply')), false);

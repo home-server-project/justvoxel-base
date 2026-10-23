@@ -13,74 +13,146 @@ class Element {
   closest() { return {querySelector: () => ({getAttribute: () => 'installed'})}; }
   addEventListener(event, handler) { this.events[event] = handler; }
 }
-for (const inventory of [[], [{id:'jv-first01',name:'Family Survival'}], [{id:'jv-first01',name:'Family Survival'},{id:'jv-second1',name:'Creative'}]]) {
- for (const explicit of inventory.length > 1 ? [false,true] : [false]) {
- const selectedId = inventory.length === 1 || explicit ? inventory.at(-1).id : '';
- test(`${inventory.length} servers, explicit=${explicit}: honest labels and selection`, async () => {
-  const slot = new Element('span'); slot.dataset.serverWorkspace = 'plugins';
-  let replaced;
-  const events = [];
-  const others = Array.from({length:5}, () => new Element("select"));
-  const dashboard = {dataset:{}};
-  const location = {origin:"https://justvoxel.test",href:"https://justvoxel.test/?workspace=backups&created=yes&operation=stale",search:"?workspace=backups&created=yes&operation=stale"};
-  const context = vm.createContext({URL, URLSearchParams,
-   location,
-   CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
-   window: {location, history:{state:{desktop:true}, replaceState(state, _, target) { replaced = new URL(target, location.href); location.search = replaced.search; location.href = replaced.href; }}, dispatchEvent: event => events.push(event)},
-   document: {createElement: tag => new Element(tag), querySelector: () => dashboard, querySelectorAll: () => others},
-   fetch: async () => ({ok:true,json:async () => ({servers:inventory,selected:{id:selectedId}})}),
+const workspaces = ['minecraft', 'version', 'plugins', 'backups', 'migration'];
+const inventory = [{id:'jv-family1',name:'Family'}, {id:'jv-kids001',name:'Kids'}, {id:'jv-third01',name:'Third'}];
+const key = (username, workspace) => `justvoxel-workspace-window-v1:${encodeURIComponent(username)}:${workspace}`;
+function page({username = 'admin', storage = new Map(), servers = inventory, search = '', unavailable = false, pathname = '/', boundary = false} = {}) {
+  const slots = Object.fromEntries(workspaces.map(workspace => {
+    const slot = new Element('span'); slot.dataset.serverWorkspace = workspace; return [workspace, slot];
+  }));
+  const events = [], requests = [];
+  const dashboard = {dataset:{workspaceUsername:username, selectedMinecraftId:''}};
+  const location = {origin:'https://justvoxel.test', href:`https://justvoxel.test/${search}`, search, pathname};
+  const context = vm.createContext({URL, URLSearchParams, location,
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    window:{location, localStorage:{
+      getItem(k) { if (unavailable) throw Error('storage denied'); return storage.get(k); },
+      setItem(k,v) { if (unavailable) throw Error('storage denied'); storage.set(k,v); },
+    }, history:{state:{desktop:true},replaceState(state,_,target) { const u = new URL(target,location.href); location.search=u.search; location.href=u.href; }},dispatchEvent:event=>events.push(event)},
+    document:{createElement:tag=>new Element(tag),
+      querySelector:selector=>selector.startsWith('#dashboard') ? dashboard : boundary ? {} : null,
+      querySelectorAll:selector=>{
+        const workspace = selector.match(/data-server-workspace="([^"]+)"/)?.[1];
+        return workspace && slots[workspace].children.length ? [slots[workspace].children[0].children[0]] : [];
+      }},
+    fetch:async url=>{ requests.push(url); return {ok:true,json:async()=>({servers,selected:{id:''}})}; },
   });
-  vm.runInContext(helper, context);
-  const selectServer = context.justVoxelSelectServer;
-  const selections = [];
-  context.justVoxelSelectServer = (...args) => { selections.push(args); return selectServer(...args); };
-  await context.justVoxelServerSelection(slot);
-  const select = slot.children[0].children[0];
-  assert.equal(slot.children[0].textContent, 'Server: ');
-  assert.equal(select.disabled, inventory.length === 0);
-  if (!selectedId) {
-   assert.equal(select.children[0].textContent, inventory.length ? 'Choose server' : 'No servers');
-   assert.equal(select.children[0].selected,true);
-   assert.equal(select.children[0].value,'');
-  }
-  for (const server of inventory) {
-   const option = select.children.find(option => option.value === server.id);
-   assert.equal(option.textContent, server.name);
-   assert.equal(option.selected,server.id === selectedId);
-  }
-  if (inventory.length) {
-   select.value = inventory.at(-1).id; select.events.change();
-   assert.equal(replaced.searchParams.get('server'),inventory.at(-1).id);
-   assert.equal(replaced.searchParams.get('workspace'),'plugins');
-   assert.equal(replaced.searchParams.get('tab'),'installed');
-   assert.equal(replaced.searchParams.get('created'),'yes');
-   assert.equal(replaced.searchParams.has('operation'),false);
-   assert.deepEqual(selections, [[inventory.at(-1).id, 'plugins', 'installed']]);
-   assert.equal(context.justVoxelSelectionGeneration, 1);
-   for (const control of others) assert.equal(control.value, inventory.at(-1).id);
-   assert.equal(dashboard.dataset.selectedMinecraftId, inventory.at(-1).id);
-   assert.equal(events.length, 1);
-   assert.equal(events[0].type, 'justvoxel:server-selection-changed');
-   assert.equal(events[0].detail.serverId, inventory.at(-1).id);
-   assert.equal(events[0].detail.workspace, 'plugins');
-   assert.equal(context.justVoxelSelectedURL('/api/version/workspace/status'), '/api/version/workspace/status?server=' + inventory.at(-1).id);
-   select.events.change();
-   assert.equal(events.length, 1, 'same server does not dispatch a fabricated selection change');
-   assert.equal(context.justVoxelSelectionGeneration, 1);
-   for (const invalid of ['', 'family', 'jv-short', 'jv-ABCDEF', 'jv-abcdefghijklm']) {
-     assert.equal(selectServer(invalid, 'plugins'), false);
-     assert.equal(events.length, 1);
-     assert.equal(context.justVoxelSelectionGeneration, 1);
-   }
-   select.value = 'jv-forged1'; select.events.change();
-   assert.equal(events.length, 1, 'reject IDs outside the selector inventory');
-   assert.equal(selections.length, 2, 'invalid inventory selection never reaches shared mutation');
-  }
-  await context.justVoxelServerSelection(slot);
-  assert.equal(slot.children.length,1);
- });
- }
+  vm.runInContext(helper,context);
+  return {context,slots,storage,events,requests,dashboard,location,
+    async init() { for (const workspace of workspaces) await context.justVoxelServerSelection(slots[workspace]); },
+    select(workspace) { return slots[workspace].children[0].children[0]; },
+    saved(workspace) { return JSON.parse(storage.get(key(username,workspace)) || '{}'); },
+    change(workspace,id) { const control=this.select(workspace); control.value=id; control.events.change(); },
+  };
 }
+for (const count of [0,1,2]) {
+  test(`${count} servers: authoritative choices without first-server guessing`, async () => {
+    const p=page({servers:inventory.slice(0,count)}); await p.init();
+    for (const workspace of workspaces) {
+      const select=p.select(workspace);
+      assert.equal(select.disabled,count===0);
+      if (count!==1) {
+        assert.equal(select.children[0].textContent,count?'Choose server':'No servers');
+        assert.equal(select.children[0].value,''); assert.equal(select.children[0].selected,true);
+      } else assert.equal(select.children.find(option=>option.selected).value,inventory[0].id);
+      for (const server of inventory.slice(0,count)) assert.equal(select.children.find(option=>option.value===server.id).textContent,server.name);
+    }
+    assert.ok(p.requests.length > 0);
+    assert.ok(p.requests.every(url=>url === '/api/minecraft/workspace/selection?selection=none'));
+  });
+}
+test('five independent selections persist by username and workspace across login/pages',async()=>{
+  const p=page(); await p.init();
+  const choices=['jv-family1','jv-family1','jv-kids001','jv-family1','jv-kids001'];
+  workspaces.forEach((workspace,i)=>p.change(workspace,choices[i]));
+  for (const [i,workspace] of workspaces.entries()) {
+    assert.equal(p.saved(workspace).selectedServer,choices[i]);
+    assert.equal(p.select(workspace).value,choices[i]);
+  }
+  assert.equal(p.dashboard.dataset.selectedMinecraftId,'jv-family1');
+  const before=p.events.length;
+  p.change('plugins','jv-third01');
+  assert.equal(p.events.length,before+1);
+  assert.equal(p.events.at(-1).detail.workspace,'plugins');
+  assert.equal(p.events.at(-1).detail.serverId,'jv-third01');
+  assert.equal(p.context.justVoxelSelectionGeneration.plugins,2);
+  assert.equal(p.context.justVoxelSelectionGeneration.minecraft,1);
+  assert.equal(p.dashboard.dataset.selectedMinecraftId,'jv-family1');
+  for (const workspace of workspaces.filter(w=>w!=='plugins')) assert.equal(p.saved(workspace).selectedServer,choices[workspaces.indexOf(workspace)]);
+  assert.equal(new URL(p.location.href).searchParams.get('workspace'),'plugins');
+  assert.equal(new URL(p.location.href).searchParams.get('tab'),'installed');
+  p.change('plugins','jv-third01'); assert.equal(p.events.length,before+1);
+  p.change('minecraft','jv-third01');
+  assert.equal(p.dashboard.dataset.selectedMinecraftId,'jv-third01');
+  assert.equal(p.saved('version').selectedServer,'jv-family1');
+  assert.equal(p.saved('backups').selectedServer,'jv-family1');
+  assert.equal(p.saved('migration').selectedServer,'jv-kids001');
+  const next=page({storage:p.storage}); await next.init();
+  for (const workspace of workspaces) assert.equal(next.select(workspace).children.find(option=>option.selected).value,p.saved(workspace).selectedServer);
+  for (const username of ['operator','viewer']) {
+    const other=page({username,storage:p.storage}); await other.init();
+    for (const workspace of workspaces) assert.equal(other.select(workspace).children[0].textContent,'Choose server');
+  }
+});
+test('all five workspaces can hold five different immutable targets', async()=>{
+  const servers = [...inventory,{id:'jv-fourth1',name:'Fourth'},{id:'jv-fifth01',name:'Fifth'}];
+  const p=page({servers}); await p.init();
+  workspaces.forEach((workspace,i)=>p.change(workspace,servers[i].id));
+  for (const [i,workspace] of workspaces.entries()) {
+    assert.equal(p.saved(workspace).selectedServer,servers[i].id);
+    assert.equal(p.select(workspace).value,servers[i].id);
+    assert.equal(new URL(p.context.justVoxelSelectedURL('/api/read',workspace),p.location.origin).searchParams.get('server'),servers[i].id);
+  }
+});
+test('explicit workspace links override and save only their workspace; legacy links apply only to Minecraft',async()=>{
+  for (const search of ['?workspace=plugins&server=jv-kids001&operation=stale&created=yes','?server=jv-kids001']) {
+    const storage=new Map(workspaces.map(w=>[key('admin',w),JSON.stringify({selectedServer:'jv-family1',open:true,width:500})]));
+    const p=page({search,storage}); await p.init();
+    const destination=search.includes('workspace')?'plugins':'minecraft';
+    for (const workspace of workspaces) {
+      assert.equal(p.saved(workspace).selectedServer,workspace===destination?'jv-kids001':'jv-family1');
+      assert.equal(p.saved(workspace).width,500); assert.equal(p.saved(workspace).open,true);
+    }
+    p.change('plugins','jv-third01');
+    assert.equal(new URL(p.location.href).searchParams.has('operation'),false);
+    if (search.includes('created')) assert.equal(new URL(p.location.href).searchParams.get('created'),'yes');
+  }
+});
+test('deleted saved IDs clear only their workspace, with sole-server automatic fallback',async()=>{
+  for (const servers of [inventory,inventory.slice(0,1)]) {
+    const storage=new Map([[key('admin','plugins'),JSON.stringify({selectedServer:'jv-deleted',open:true})],[key('admin','minecraft'),JSON.stringify({selectedServer:'jv-family1'})]]);
+    const p=page({storage,servers}); await p.init();
+    assert.equal(p.saved('plugins').selectedServer,servers.length===1?'jv-family1':'');
+    assert.equal(p.saved('plugins').open,true);
+    assert.equal(p.saved('minecraft').selectedServer,'jv-family1');
+    if (servers.length>1) assert.equal(p.select('plugins').children[0].textContent,'Choose server');
+    assert.equal(p.requests[0],'/api/minecraft/workspace/selection?selection=none');
+  }
+});
+test('storage failure leaves current-session selection and workspace request targeting usable',async()=>{
+  const p=page({unavailable:true}); await p.init();
+  workspaces.forEach((workspace,i)=>p.change(workspace,inventory[i%inventory.length].id));
+  for (const [i,workspace] of workspaces.entries()) {
+    const url=new URL(p.context.justVoxelSelectedURL('/api/read',workspace),p.location.origin);
+    assert.equal(url.searchParams.get('server'),inventory[i%inventory.length].id);
+  }
+  assert.equal(p.context.justVoxelSelectedURL('/api/read?server=jv-bound01','plugins'),'/api/read?server=jv-bound01');
+  assert.equal(new URL(p.context.justVoxelSelectedURL('/api/dashboard-status'),p.location.origin).searchParams.get('server'),'jv-family1');
+});
+test('credential boundaries never persist server selections',async()=>{
+  for (const options of [{pathname:'/login'},{pathname:'/password'},{boundary:true}]) {
+    const p=page(options); await p.init(); p.change('plugins','jv-kids001');
+    assert.equal(p.storage.size,0);
+  }
+});
+test('selector rejects malformed and out-of-inventory IDs without events or persistence',async()=>{
+  const p=page(); await p.init();
+  for (const id of ['','family','jv-short','jv-ABCDEF','jv-abcdefghijklm','jv-forged1']) p.change('plugins',id);
+  assert.equal(p.events.length,0); assert.equal(p.storage.size,0);
+  for (const id of ['','family','jv-short','jv-ABCDEF','jv-abcdefghijklm']) assert.equal(p.context.justVoxelSelectServer(id,'plugins'),false);
+  assert.equal(p.context.justVoxelSelectServer('jv-family1','unknown'),false);
+  await p.context.justVoxelServerSelection(p.slots.plugins); assert.equal(p.slots.plugins.children.length,1);
+});
 test('all five workspaces target explicit slots and inventory opens through normal windows', () => {
  const header = readFileSync(`${__dirname}/../webui/internal/server/templates/header.html`, 'utf8');
  for (const name of ['minecraft','version','plugins','backups','migration']) assert.ok(header.includes(`data-server-selector-slot data-server-workspace="${name}"`));
@@ -99,7 +171,7 @@ test('selection helper never navigates the document or touches wallpaper', () =>
 
 const versionSource = readFileSync(`${__dirname}/../webui/internal/server/static/version-workspace.js`, 'utf8');
 function selectionHandler(script, anchor) {
-  const start = script.indexOf('  window.addEventListener("justvoxel:server-selection-changed", () => {', script.indexOf(anchor));
+  const start = script.indexOf('  window.addEventListener("justvoxel:server-selection-changed", (event) => {', script.indexOf(anchor));
   assert.ok(start >= 0);
   return script.slice(start, script.indexOf('\n  });', start) + 6);
 }
@@ -133,18 +205,22 @@ for (const [workspace, refresh, ticket] of [
       [refresh]: () => { calls.push('refresh'); },
     });
     vm.runInContext(handler, context);
-    context.change();
+    calls.length = 0;
+    context.change({detail:{workspace:workspace === 'minecraft' ? 'plugins' : 'minecraft'}});
+    assert.deepEqual(calls, [], 'unrelated workspace must not detach or refresh');
+    context.change({detail:{workspace}});
     assert.ok(calls.includes('clear'));
     assert.ok(calls.includes('refresh'));
     assert.ok(context[ticket] > 0);
     assert.doesNotMatch(handler, /location\.(?:assign|reload)|cancel|rollback/);
-    calls.length = 0; dialog.open = false; context.change();
+    calls.length = 0; dialog.open = false; context.change({detail:{workspace}});
     assert.ok(!calls.includes('refresh'), 'closed workspace loads when opened later');
   });
 }
 
 for (const workspace of ['minecraft', 'version', 'plugins']) {
-  test(`${workspace} ignores old async responses without aborting submitted requests`, async () => {
+ for (const changedWorkspace of [workspace, workspace === 'minecraft' ? 'plugins' : 'minecraft']) {
+  test(`${workspace} pending response after ${changedWorkspace} change preserves workspace stale protection`, async () => {
     const script = workspace === 'version' ? versionSource : source;
     const startText = workspace === 'minecraft' ? '  const requestWorkspaceJSON = async' : workspace === 'version' ? '  const request = async' : '  const pluginRequest = async';
     const start = script.indexOf(startText);
@@ -155,20 +231,23 @@ for (const workspace of ['minecraft', 'version', 'plugins']) {
     const context = vm.createContext({
       URLSearchParams,
       document:{querySelector:()=>null},
-      justVoxelSelectionGeneration:0,
+      justVoxelSelectionGeneration:Object.fromEntries(workspaces.map(w=>[w,0])),
       justVoxelSelectedURL:url => url + '?server=jv-first01',
       justVoxelStaleSelection:()=>Object.assign(new Error('stale'),{staleSelection:true}),
       fetch:(url, options) => { calls.push({url,options}); return new Promise(resolve => { complete = resolve; }); },
     });
     vm.runInContext(requestSource + `\nglobalThis.requestUnderTest = ${name};`, context);
     const pending = workspace === 'plugins' ? context.requestUnderTest('install', {plan_fingerprint:'old'}) : context.requestUnderTest('/api/action', {method:'POST'});
-    context.justVoxelSelectionGeneration++;
+    await new Promise(resolve=>setImmediate(resolve));
+    context.justVoxelSelectionGeneration[changedWorkspace]++;
     complete({ok:true,json:async()=>({operation:{operation_id:'old'}})});
-    await assert.rejects(pending, error => error.staleSelection === true);
+    if (changedWorkspace === workspace) await assert.rejects(pending, error => error.staleSelection === true);
+    else assert.equal((await pending).operation.operation_id,'old', 'another workspace must not invalidate this request');
     assert.match(calls[0].url, /server=jv-first01/);
     assert.equal(calls[0].options.method, 'POST');
     assert.equal(calls[0].options.signal, undefined);
   });
+ }
 }
 
 for (const workspace of ['backups', 'migration']) {
@@ -182,6 +261,7 @@ for (const workspace of ['backups', 'migration']) {
     const location = {href:'https://justvoxel.test/?server=jv-first01',origin:'https://justvoxel.test',search:'?server=jv-first01'};
     let changeSelection;
     const context = vm.createContext({
+      justVoxelSelectionGeneration:Object.fromEntries(workspaces.map(w=>[w,0])),
       URL, URLSearchParams, AbortController, currentURL:`/workspace/${workspace}/export`, loadSequence:0,
       location, window:{location,addEventListener:(_, callback)=>{changeSelection=callback;}},
       [`${workspace}Dialog`]:dialog,
@@ -208,9 +288,13 @@ for (const workspace of ['backups', 'migration']) {
     assert.equal(typeof oldRequest.resolve, 'function');
     assert.match(oldRequest.url, /server=jv-first01/);
 
+    context.justVoxelSelectionGeneration[workspace === 'backups' ? 'migration' : 'backups']++;
+    changeSelection({detail:{workspace:workspace === 'backups' ? 'migration' : 'backups'}});
+    assert.equal(pendingRequests.length,1,'another workspace does not refetch this view');
+    context.justVoxelSelectionGeneration[workspace]++;
     location.search = '?server=jv-second1';
     location.href = location.origin + '/' + location.search;
-    changeSelection();
+    changeSelection({detail:{workspace}});
     await new Promise(resolve=>setImmediate(resolve));
     assert.equal(pendingRequests.length, 2, 'selection handler must refetch the open workspace');
     const newRequest = pendingRequests[1];

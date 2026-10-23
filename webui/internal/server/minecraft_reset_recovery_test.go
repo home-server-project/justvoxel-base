@@ -120,12 +120,14 @@ const assert = require("node:assert/strict");
 const canonical = "/?result=started&tab=switch&workspace=version";
 const location = new URL("http://example/?server=jv-stale1&workspace=version&tab=software&result=started#saved");
 const dashboard = {dataset:{dashboardUrl:canonical,selectedMinecraftId:""}};
-const document = {querySelector:() => dashboard};
-const window = {location,history:{state:{saved:true},replaceState(state,title,target){assert.equal(state.saved,true); location.href = new URL(target,location).href;}}};
+const document = {querySelector:selector => selector.startsWith("#dashboard") ? dashboard : null, querySelectorAll:() => []};
+const window = {location,dispatchEvent(){},history:{state:{saved:true},replaceState(state,title,target){assert.equal(state.saved,true); location.href = new URL(target,location).href;}}};
 globalThis.location = location;
+globalThis.CustomEvent = class { constructor(type, options) { this.type=type; this.detail=options.detail; } };
+const fetch = async () => ({ok:true,json:async()=>({servers:[]})});
 ` + source[:end] + `
 assert.equal(location.pathname + location.search + location.hash,canonical + "#saved");
-for (const path of ["/api/dashboard-status","/api/minecraft/workspace/selection"]) {
+for (const path of ["/api/dashboard-status"]) {
  const target = new URL(justVoxelSelectedURL(path),location);
  assert.equal(target.searchParams.get("selection"),"none");
  assert.equal(target.searchParams.has("server"),false);
@@ -133,8 +135,7 @@ for (const path of ["/api/dashboard-status","/api/minecraft/workspace/selection"
 const blocked = new URL(justVoxelSelectedURL("/api/version/workspace/status"),location);
 assert.equal(blocked.searchParams.has("server"),true);
 assert.equal(blocked.searchParams.get("server"),"");
-location.searchParams.set("server","jv-family1");
-dashboard.dataset.selectedMinecraftId = "jv-family1";
+justVoxelSelectServer("jv-family1", "minecraft");
 const selected = new URL(justVoxelSelectedURL("/api/dashboard-status"),location);
 assert.equal(selected.searchParams.get("server"),"jv-family1");
 assert.equal(selected.searchParams.has("selection"),false);

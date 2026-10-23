@@ -11,15 +11,18 @@ if (versionLauncher && versionDialog) {
   const operationKinds = new Map();
   let completedOperation = null;
   const request = async (url, options = {}) => {
-    const selection = globalThis.justVoxelSelectionGeneration;
+    const selection = globalThis.justVoxelSelectionGeneration.version;
+    const boundURL = options.method && options.method !== "GET" ? (globalThis.justVoxelSelectedURL?.(url, "version") ?? url) : null;
     try {
-      const response = await fetch((globalThis.justVoxelSelectedURL?.(url) ?? url), { credentials: "same-origin", cache: "no-store", ...options });
+      if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+      if (selection !== globalThis.justVoxelSelectionGeneration.version) throw globalThis.justVoxelStaleSelection();
+      const response = await fetch(boundURL || (globalThis.justVoxelSelectedURL?.(url, "version") ?? url), { credentials: "same-origin", cache: "no-store", ...options });
       const payload = await response.json();
-      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (selection !== globalThis.justVoxelSelectionGeneration.version) throw globalThis.justVoxelStaleSelection();
       if (!response.ok) throw new Error(payload.error || "Version information is unavailable.");
       return payload;
     } catch (failure) {
-      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (selection !== globalThis.justVoxelSelectionGeneration.version) throw globalThis.justVoxelStaleSelection();
       throw failure;
     }
   };
@@ -63,8 +66,8 @@ if (versionLauncher && versionDialog) {
     progress.appendChild(notice);
     return progress;
   };
-  const watchUpdate = async (id, selection = globalThis.justVoxelSelectionGeneration) => {
-    if (selection !== globalThis.justVoxelSelectionGeneration) return;
+  const watchUpdate = async (id, selection = globalThis.justVoxelSelectionGeneration.version) => {
+    if (selection !== globalThis.justVoxelSelectionGeneration.version) return;
     updateOperation = id;
     try {
       const result = await request("/api/version/workspace/update-operation?" + new URLSearchParams({ id }));
@@ -93,7 +96,7 @@ if (versionLauncher && versionDialog) {
     (!plan.changes?.length && status.update_available && status.stack_state === "updates_available")
   ));
   const showReview = (root, form, plan, params, status, players) => {
-    const selection = globalThis.justVoxelSelectionGeneration;
+    const selection = globalThis.justVoxelSelectionGeneration.version;
     const versionReview = Boolean(form.elements.policy);
     const channelChange = !versionReview && Boolean(plan.changes?.length);
     const needsUpdate = versionReview ? requiresRuntimeUpdate(plan, status) : status?.image_state === "updates_available";
@@ -249,7 +252,7 @@ if (versionLauncher && versionDialog) {
   let containerCompleted = null;
   const containerLabel = (value) => ({ up_to_date: "Up to date", update_available: "Update available", image_missing: "Download required", restart_needed: "Restart required", unavailable: "Unable to check" })[value] || "Unable to check";
   const renderContainer = async (ticket, selection, message) => {
-    const current = () => ticket === sequence && selection === globalThis.justVoxelSelectionGeneration && currentTab === "container";
+    const current = () => ticket === sequence && selection === globalThis.justVoxelSelectionGeneration.version && currentTab === "container";
     const root = document.createElement("div");
     const panel = card("Minecraft container");
     panel.className += " version-container-panel";
@@ -298,7 +301,7 @@ if (versionLauncher && versionDialog) {
     backup.addEventListener("change", () => { if (backup.checked) restart.checked = true; sync(); });
     restart.addEventListener("change", () => { if (!restart.checked) backup.checked = false; sync(); });
     const trace = async (id) => {
-      const response = await fetch(globalThis.justVoxelSelectedURL?.(`/api/operations/${encodeURIComponent(id)}/trace`) ?? `/api/operations/${encodeURIComponent(id)}/trace`, { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch(globalThis.justVoxelSelectedURL?.(`/api/operations/${encodeURIComponent(id)}/trace`, "version") ?? `/api/operations/${encodeURIComponent(id)}/trace`, { credentials: "same-origin", cache: "no-store" });
       const text = await response.text();
       if (!current()) return;
       if (!response.ok) throw new Error("Container operation output is unavailable.");
@@ -395,7 +398,7 @@ if (versionLauncher && versionDialog) {
 
   const render = async (message = "", confirmedOperation = completedOperation) => {
     const ticket = ++sequence;
-    const selection = globalThis.justVoxelSelectionGeneration;
+    const selection = globalThis.justVoxelSelectionGeneration.version;
     await settleSelectChange();
     if (ticket !== sequence) return;
     if (currentTab === "container") return renderContainer(ticket, selection, message);
@@ -687,7 +690,8 @@ if (versionLauncher && versionDialog) {
       state.textContent = operation && message === operation.status ? "" : message;
     } catch (failure) { if (failure.staleSelection) return; if (ticket === sequence) state.textContent = failure.message; }
   };
-  window.addEventListener("justvoxel:server-selection-changed", () => {
+  window.addEventListener("justvoxel:server-selection-changed", (event) => {
+    if (event.detail?.workspace !== "version") return;
     ++sequence;
     updateOperation = "";
     completedOperation = null;

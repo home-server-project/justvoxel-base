@@ -229,7 +229,7 @@ func TestQuickLookManualBackupUsesWorkspaceNativeAPI(t *testing.T) {
 	}
 	block := source[start : start+end]
 	for _, want := range []string{
-		`fetch(globalThis.justVoxelSelectedURL("/api/backups/manual")`, `method: "POST"`, `credentials: "same-origin"`,
+		`fetch(globalThis.justVoxelSelectedURL("/api/backups/manual", "minecraft")`, `method: "POST"`, `credentials: "same-origin"`,
 		`[data-quick-look-backup-csrf]`, `new URLSearchParams({ csrf: backupCSRF?.value || "" })`,
 		`if (backupCreate.disabled) return`, `backupCreate.disabled = true`,
 		`backupCreate.textContent = "Starting…"`, `response.ok && result.ok`,
