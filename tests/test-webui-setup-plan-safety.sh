@@ -90,7 +90,7 @@ if grep -Fq 'bedrock_enabled=false' "${helper}"; then
     echo 'Setup planner must not silently turn off Bedrock.' >&2
     exit 1
 fi
-grep -Fq 'bedrock_crossplay_supports_version "${bedrock_compatibility_version}" "${geyser_supported_version}"' "${helper}"
+grep -Fq 'server_crossplay_version_compatible "${bedrock_compatibility_version}" "${geyser_supported_version}"' "${helper}"
 grep -Fq 'json_error "Minecraft ${bedrock_compatibility_version} is not currently compatible' "${helper}"
 grep -Fq 'bedrock_version_unsupported' "${helper}"
 

@@ -25,7 +25,7 @@ for state in unacceptable acceptable strong; do grep -Fq "password-strength.is-$
 ! grep -Fq 'fetch(' <<< "$(sed -n '/const enhancePasswordFields/,/^};/p' "$app")"
 grep -Fq 'class="setup-review-header"' "$review"
 grep -Fq 'class="setup-review-summary' "$review"
-for label in 'Maximum players' Timezone 'Bedrock cross-play' 'Minecraft version' 'Version policy' 'Minecraft game memory' 'Backup destination' 'Automatic backups' Retention; do
+for label in 'Maximum players' Timezone 'Bedrock cross-play' 'Minecraft version' 'Version policy' 'Minecraft game memory' 'Backup location' 'Automatic backups' Retention; do
     grep -Fq "<dt>${label}</dt>" "$review"
 done
 grep -Fq 'Download configuration' "$review"
