@@ -21,7 +21,7 @@ def world_metadata(version='1.21.4', data_version=4189):
     raw+=b'\x03'+name('DataVersion')+struct.pack('>i',data_version)
     raw+=b'\x0a'+name('Version')+b'\x03'+name('Id')+struct.pack('>i',data_version)
     raw+=b'\x08'+name('Name')+name(version)+b'\x01'+name('Snapshot')+b'\x00'
-    return gzip.compress(raw+b'\x00\x00\x00')
+    return gzip.compress(raw+b'\x00\x00\x00', mtime=0)
 
 class IndependentRestore(unittest.TestCase):
     private = Base.private
