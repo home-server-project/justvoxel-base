@@ -231,7 +231,7 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 			t.Fatalf("private or legacy controls exposed: %s", forbidden)
 		}
 	}
-	for _, want := range []string{"Family Survival", "Create Server", "JustVoxel system storage", "Start on Boot", "setup-review-summary",
+	for _, want := range []string{"Family Survival", "Create Server", "<dt>Data location</dt><dd>System storage · ", "<dt>Backup location</dt><dd>System storage · ", "Start on Boot", "setup-review-summary",
 		`<form method="post" action="/minecraft/servers/add/review/cancel" data-add-server-review-cancel><input type="hidden" name="csrf" value="csrf-token">`,
 		`data-add-server-cancel-error hidden`,
 	} {

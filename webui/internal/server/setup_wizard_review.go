@@ -415,8 +415,8 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,
 		EULAAccepted: state.EULAAccepted, EULAURL: minecraftEULAURL,
-		StorageLabel:       setupStorageTypeLabel(plan.Normalized.Storage.Type),
-		BackupLabel:        setupBackupTypeLabel(plan.Normalized.Backups.Type),
+		StorageLabel:       setupStorageTypeLabel(plan.Normalized.Storage.Type, plan.Normalized.Storage.Transport),
+		BackupLabel:        setupBackupTypeLabel(plan.Normalized.Backups.Type, plan.Normalized.Backups.Transport),
 		VersionLabel:       setupVersionPolicyLabel(plan.Normalized.Minecraft.RequestedVersionPolicy),
 		VersionPolicyLabel: strings.TrimPrefix(setupVersionPolicyLabel(plan.Normalized.Minecraft.RequestedVersionPolicy), "· "),
 		ImageChannelLabel:  setupImageChannelLabel(plan.Normalized.Minecraft.ImageTag),
@@ -463,23 +463,29 @@ func setupServerTypeLabel(value string) string {
 	}
 }
 
-func setupStorageTypeLabel(value string) string {
+func setupStorageTypeLabel(value, transport string) string {
 	switch value {
 	case "system":
-		return "JustVoxel system storage"
+		return "System storage"
 	case "partition":
-		return "Existing local filesystem"
+		if strings.EqualFold(strings.TrimSpace(transport), "usb") {
+			return "External storage"
+		}
+		return "Local storage"
 	default:
 		return value
 	}
 }
 
-func setupBackupTypeLabel(value string) string {
+func setupBackupTypeLabel(value, transport string) string {
 	switch value {
 	case "system":
-		return "JustVoxel system storage"
+		return "System storage"
 	case "partition":
-		return "Existing local filesystem"
+		if strings.EqualFold(strings.TrimSpace(transport), "usb") {
+			return "External storage"
+		}
+		return "Local storage"
 	case "nfs":
 		return "NFS share"
 	case "smb":

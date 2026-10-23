@@ -63,8 +63,8 @@
         <div><dt>Server update channel</dt><dd>{{.ImageChannelLabel}}</dd></div>
       </dl></section>
       <section class="setup-review-storage"><h3>Storage &amp; backups</h3><dl>
-        <div><dt>Minecraft data location</dt><dd>{{.StorageLabel}}</dd></div>
-        <div><dt>Backup destination</dt><dd>{{.BackupLabel}}</dd></div>
+        <div><dt>Data location</dt><dd>{{.StorageLabel}}</dd></div>
+        <div><dt>Backup location</dt><dd>{{.BackupLabel}}</dd></div>
         <div><dt>Automatic backups</dt><dd>{{if .Plan.Normalized.Backups.Automatic}}Enabled{{else}}Disabled{{end}}</dd></div>
         {{if .Plan.Normalized.Backups.Automatic}}<div><dt>Schedule</dt><dd>Daily at {{.Plan.Normalized.Backups.DailyTime}}</dd></div>{{end}}
         <div><dt>Retention</dt><dd>Keep {{.Plan.Normalized.Backups.Keep}} backups</dd></div>

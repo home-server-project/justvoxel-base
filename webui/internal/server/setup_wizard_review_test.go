@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -134,7 +135,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 		t.Fatal("review summary and warnings are out of order")
 	}
 	summary := body[summaryStart:warningsStart]
-	for _, want := range []string{"Server software</dt><dd>Paper", "Welcome message</dt><dd>Normalized Family Server", "Game mode</dt><dd>Survival", "Java</dt><dd>Enabled, port 25565", "Bedrock cross-play</dt><dd>Enabled, port 19132", "Minecraft version</dt><dd>1.21.8", "Version policy</dt><dd>Recommended", "Minecraft game memory</dt><dd>4G", "Automatic backups</dt><dd>Enabled", "Daily at 04:30", "JustVoxel system storage"} {
+	for _, want := range []string{"Server software</dt><dd>Paper", "Welcome message</dt><dd>Normalized Family Server", "Game mode</dt><dd>Survival", "Java</dt><dd>Enabled, port 25565", "Bedrock cross-play</dt><dd>Enabled, port 19132", "Minecraft version</dt><dd>1.21.8", "Version policy</dt><dd>Recommended", "Minecraft game memory</dt><dd>4G", "Automatic backups</dt><dd>Enabled", "Daily at 04:30", "Data location</dt><dd>System storage</dd>", "Backup location</dt><dd>System storage</dd>"} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("human summary missing %q", want)
 		}
@@ -165,6 +166,70 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	for _, forbidden := range []string{"setup-eula-card", "Validated plan: <code>", "Management Agent"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("review exposed %q", forbidden)
+		}
+	}
+}
+
+func TestSetupReviewCompactStorageWording(t *testing.T) {
+	for _, flow := range []struct {
+		name      string
+		addServer bool
+	}{
+		{name: "Setup"},
+		{name: "AddServer", addServer: true},
+	} {
+		for _, storage := range []struct {
+			name            string
+			dataType        string
+			backupType      string
+			dataTransport   string
+			backupTransport string
+			dataLabel       string
+			backupLabel     string
+		}{
+			{name: "System", dataType: "system", backupType: "system", dataLabel: "System storage", backupLabel: "System storage"},
+			{name: "Local", dataType: "partition", backupType: "partition", dataTransport: "sata", backupTransport: "virtio", dataLabel: "Local storage", backupLabel: "Local storage"},
+			{name: "EmptyTransport", dataType: "partition", backupType: "partition", dataLabel: "Local storage", backupLabel: "Local storage"},
+			{name: "UnknownTransport", dataType: "partition", backupType: "partition", dataTransport: "unknown", backupTransport: "unknown", dataLabel: "Local storage", backupLabel: "Local storage"},
+			{name: "USBData", dataType: "partition", backupType: "partition", dataTransport: "usb", backupTransport: "sata", dataLabel: "External storage", backupLabel: "Local storage"},
+			{name: "USBBackup", dataType: "partition", backupType: "partition", dataTransport: "virtio", backupTransport: "usb", dataLabel: "Local storage", backupLabel: "External storage"},
+			{name: "TrimmedUSB", dataType: "partition", backupType: "partition", dataTransport: " USB ", backupTransport: " USB ", dataLabel: "External storage", backupLabel: "External storage"},
+			{name: "NFS", dataType: "partition", backupType: "nfs", dataLabel: "Local storage", backupLabel: "NFS share"},
+			{name: "SMB", dataType: "partition", backupType: "smb", dataLabel: "Local storage", backupLabel: "SMB / CIFS share"},
+		} {
+			t.Run(flow.name+"/"+storage.name, func(t *testing.T) {
+				client := setupReviewClient()
+				plan := client.plan
+				plan.Normalized.Storage.Type = storage.dataType
+				plan.Normalized.Backups.Type = storage.backupType
+				plan.Normalized.Storage.Transport = storage.dataTransport
+				plan.Normalized.Backups.Transport = storage.backupTransport
+				plan.Normalized.Storage.SystemDisk = false
+				plan.Normalized.Backups.SystemDisk = false
+				plan.Warnings = nil
+				app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rr := httptest.NewRecorder()
+				app.renderSetupReview(rr, api.SessionInfo{}, setupReviewState{
+					AddServer: flow.addServer, SetupMode: "recommended", Plan: plan,
+				}, "csrf-token", "")
+				body := rr.Body.String()
+				for _, want := range []string{
+					"<dt>Data location</dt><dd>" + storage.dataLabel + " · " + plan.Normalized.Storage.Path + "</dd>",
+					"<dt>Backup location</dt><dd>" + storage.backupLabel + " · " + plan.Normalized.Backups.Path + "</dd>",
+				} {
+					if !strings.Contains(body, want) {
+						t.Fatalf("review missing %q: %s", want, body)
+					}
+				}
+				for _, old := range []string{"Minecraft data location", "Backup destination", "JustVoxel system storage", "Existing local filesystem", "Local filesystem"} {
+					if strings.Contains(body, old) {
+						t.Fatalf("review retains %q", old)
+					}
+				}
+			})
 		}
 	}
 }
