@@ -102,7 +102,7 @@ function page({ saved = null, readFails = false, accessFails = false, writeFails
   const context = { document, window: { get localStorage() {
     if (accessFails) throw new Error('storage access denied');
     return localStorage;
-  } } };
+  } }, setInterval: () => 1, clearInterval: () => {} };
   vm.runInNewContext(source, context);
   return {
     initialize: () => context.justVoxelMinecraftServers(document),
@@ -756,4 +756,136 @@ test('Import preserves modified, middle and prevented clicks and missing-launche
   const f = importHarness(false);
   assert.equal(f.click().defaultPrevented, false);
   assert.equal(f.replacements.length, 0); assert.equal(f.launches.length, 0);
+});
+
+// Deterministic clock/network fixture; no real polling timers or browser storage.
+function liveMemoryHarness(states = ['Running', 'Running', 'Stopped', 'Starting']) {
+  const list = {isConnected: true};
+  const cards = states.map((state, index) => {
+    const card = new Element('card', {serverId: ids[index] || 'jv-start01'});
+    const tile = card.appendChild(new Element('[data-server-ram]', {serverState: state}));
+    tile.appendChild(new Element('[data-server-ram-value]'));
+    const graph = tile.appendChild(new Element('[data-server-ram-graph]'));
+    graph.replaceChildren = () => { graph.children = []; };
+    return card;
+  });
+  const calls = [], intervals = [], cleared = [], responses = [];
+  let now = 0;
+  const context = vm.createContext({
+    Date: {now: () => now},
+    document: {createElementNS(namespace, tag) {
+      assert.equal(namespace, 'http://www.w3.org/2000/svg');
+      assert.equal(tag, 'polyline');
+      const node = new Element(tag); node.attributes = {};
+      node.setAttribute = (name, value) => { node.attributes[name] = value; };
+      return node;
+    }},
+    fetch: async (url, options) => {
+      calls.push({url, options});
+      const next = responses.shift() ?? [];
+      if (next instanceof Error) throw next;
+      if (typeof next === 'function') return next();
+      return {ok: true, redirected: false, json: async () => next};
+    },
+    setInterval(callback, delay) { intervals.push({callback, delay}); return intervals.length; },
+    clearInterval: id => cleared.push(id),
+    list, cards: () => cards,
+  });
+  const start = source.indexOf('  function initializeLiveMemory(');
+  const end = source.indexOf('  function initializeCard(', start);
+  vm.runInContext(source.slice(start, end) + '\nglobalThis.initialize = () => initializeLiveMemory(list, cards);', context);
+  const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+  return {
+    list, cards, calls, intervals, cleared, responses, settle,
+    start: () => context.initialize(),
+    async tick() { now += 2000; await intervals[0].callback(); await settle(); },
+    value: index => cards[index].querySelector('[data-server-ram-value]').textContent,
+    points: index => cards[index].querySelector('[data-server-ram-graph]').children[0]?.attributes.points,
+  };
+}
+
+const memoryRow = (id, usage, limit = 1024 ** 3) => ({id, usage_bytes: usage, limit_bytes: limit});
+
+test('one immediate authenticated RAM read serves all cards, then one 2000 ms timer', async () => {
+  const f = liveMemoryHarness();
+  const rows = [memoryRow(ids[0], 768 * 1024 ** 2), memoryRow(ids[1], 2.34 * 1024 ** 3), memoryRow(ids[2], 123), memoryRow('jv-start01', 256 * 1024 ** 2)];
+  f.responses.push(rows); f.start();
+  assert.equal(f.calls.length, 1, 'first read is immediate');
+  await f.settle();
+  assert.equal(f.intervals.length, 1);
+  assert.equal(f.intervals[0].delay, 2000);
+  assert.equal(f.calls[0].url, '/api/minecraft/servers/live-memory');
+  assert.equal(f.calls[0].options.credentials, 'same-origin');
+  assert.equal(f.calls[0].options.cache, 'no-store');
+  assert.deepEqual(f.cards.map((_, index) => f.value(index)), ['768 MB', '2.34 GB', '---', '256 MB']);
+  assert.equal(f.points(0), undefined, 'one point cannot draw a trend');
+  f.responses.push(rows); await f.tick();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.points(2), undefined, 'stopped rows never add even a zero sample');
+  assert.ok(f.points(3), 'transitional state may have live RAM');
+  assert.equal(f.points(0), '112,3 116,3');
+  assert.equal(f.points(1), '112,0 116,0', 'geometry clamps; displayed usage is measured');
+  f.cards[2].querySelector('[data-server-ram]').dataset.serverState = 'Running';
+  f.responses.push(rows); await f.tick();
+  assert.equal(f.points(2), undefined, 'stopped history must be empty when a new live run begins');
+});
+
+test('RAM history caps at 30 samples and scales against the container limit', async () => {
+  const f = liveMemoryHarness(['Running']);
+  const row = usage => [memoryRow(ids[0], usage, 100)];
+  f.responses.push(row(50)); f.start(); await f.settle();
+  for (let i = 0; i < 34; i++) { f.responses.push(row(25)); await f.tick(); }
+  const points = f.points(0).split(' ');
+  assert.equal(points.length, 30);
+  assert.equal(points[0], '0,9');
+  assert.equal(points.at(-1), '116,9');
+  assert.equal(f.intervals.length, 1);
+  assert.equal(f.calls.length, 35);
+});
+
+test('missing, invalid or failed RAM reads clear stale graphs without inventing zero', async () => {
+  const f = liveMemoryHarness(['Running', 'Stopped', 'Stopping', 'Failed', 'Recovery required']);
+  const rows = f.cards.map(card => memoryRow(card.dataset.serverId, 1024 ** 3));
+  f.responses.push(rows); f.start(); await f.settle();
+  f.responses.push(rows); await f.tick();
+  assert.ok(f.points(0));
+  for (const response of [[], new Error('offline'), [memoryRow(ids[0], -1)], [memoryRow(ids[0], NaN)], [memoryRow(ids[0], Infinity)], [memoryRow(ids[0], '12')]]) {
+    f.responses.push(response); await f.tick();
+    assert.deepEqual(f.cards.map((_, index) => f.value(index)), ['Unavailable', '---', 'Unavailable', 'Unavailable', 'Unavailable']);
+    for (let i = 0; i < f.cards.length; i++) assert.equal(f.points(i), undefined);
+  }
+  f.responses.push(rows); await f.tick();
+  assert.equal(f.points(0), undefined, 'no fabricated points survived a missing sample');
+  assert.equal(f.points(1), undefined);
+});
+
+test('valid usage without a valid limit has no invented graph scale', async () => {
+  const f = liveMemoryHarness(['Running']);
+  f.start(); await f.settle();
+  for (const limit of [undefined, null, 0, -1, NaN, Infinity, '1024']) {
+    for (let i = 0; i < 2; i++) {
+      f.responses.push([{id: ids[0], usage_bytes: 1024 ** 3, limit_bytes: limit}]); await f.tick();
+      assert.equal(f.value(0), '1.00 GB');
+      assert.equal(f.points(0), undefined);
+    }
+  }
+});
+
+test('disconnection stops the shared timer and outstanding reads never update removed cards', async () => {
+  const f = liveMemoryHarness(['Running']);
+  let resolve;
+  f.responses.push(() => new Promise(done => { resolve = done; }));
+  f.start(); await f.tick();
+  assert.equal(f.calls.length, 1, 'pending read does not overlap');
+  f.list.isConnected = false; await f.tick();
+  assert.ok(f.cleared.includes(1));
+  resolve({ok: true, json: async () => [memoryRow(ids[0], 100)]});
+  await f.settle();
+  assert.equal(f.value(0), undefined);
+  assert.equal(f.points(0), undefined);
+  assert.equal(f.calls.length, 1);
+  const replacement = liveMemoryHarness(['Running']);
+  replacement.start(); await replacement.settle();
+  assert.equal(replacement.calls.length, 1);
+  assert.equal(replacement.intervals.length, 1);
 });

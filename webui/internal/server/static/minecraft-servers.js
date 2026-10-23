@@ -97,6 +97,7 @@
     initializeCard(card, root, () => arranging);
   }
   updateBounds();
+  initializeLiveMemory(list, cards);
   const importLink = root.querySelector('[data-server-import]');
   importLink?.addEventListener('click', event => {
     if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -111,6 +112,72 @@
     launcher.click();
   });
   };
+  function initializeLiveMemory(list, cards) {
+    const history = new Map();
+    const validBytes = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+    const format = bytes => bytes >= 1024 ** 3
+      ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
+      : `${Math.round(bytes / 1024 ** 2)} MB`;
+    const update = rows => {
+      const byID = new Map(rows.filter(row => row && /^jv-[a-z0-9]{6,12}$/.test(row.id)).map(row => [row.id, row]));
+      const now = Date.now();
+      for (const card of cards()) {
+        const tile = card.querySelector('[data-server-ram]');
+        if (!tile) continue;
+        const value = tile.querySelector('[data-server-ram-value]');
+        const graph = tile.querySelector('[data-server-ram-graph]');
+        const id = card.dataset.serverId;
+        const row = byID.get(id);
+        graph.replaceChildren();
+        // Only the server-rendered authoritative state can declare a stop.
+        if (tile.dataset.serverState === 'Stopped') {
+          value.textContent = '---';
+          history.delete(id);
+          continue;
+        }
+        if (!row || !validBytes(row.usage_bytes)) {
+          value.textContent = 'Unavailable';
+          history.delete(id);
+          continue;
+        }
+        value.textContent = format(row.usage_bytes);
+        const samples = (history.get(id) || []).filter(sample => now - sample.at < 60000);
+        samples.push({usage: row.usage_bytes, at: now});
+        if (samples.length > 30) samples.splice(0, samples.length - 30);
+        history.set(id, samples);
+        if (!validBytes(row.limit_bytes) || row.limit_bytes <= 0 || samples.length < 2) continue;
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        line.setAttribute('points', samples.map((sample, index) => {
+          const x = (30 - samples.length + index) * 4;
+          const y = 12 * (1 - Math.min(sample.usage, row.limit_bytes) / row.limit_bytes);
+          return `${x},${y}`;
+        }).join(' '));
+        graph.appendChild(line);
+      }
+    };
+    let pending = false;
+    const poll = async () => {
+      if (!list.isConnected) { clearInterval(timer); return; }
+      if (pending) return;
+      pending = true;
+      try {
+        const response = await fetch('/api/minecraft/servers/live-memory', {
+          credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'},
+        });
+        if (!response.ok || response.redirected) throw new Error('Live RAM unavailable');
+        const rows = await response.json();
+        if (!Array.isArray(rows)) throw new Error('Invalid live RAM response');
+        if (list.isConnected) update(rows);
+      } catch (_) {
+        if (list.isConnected) update([]);
+      } finally {
+        pending = false;
+        if (!list.isConnected) clearInterval(timer);
+      }
+    };
+    const timer = setInterval(poll, 2000);
+    poll();
+  }
   function initializeCard(card, root, isArranging) {
     const id = card.dataset.serverId;
     const inventory = root.querySelector('[data-server-csrf]');

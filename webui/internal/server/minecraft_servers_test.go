@@ -117,7 +117,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 		}
 		previous = index
 	}
-	for _, want := range []string{`href="/minecraft/servers/add"`, "Paper · 1.21.8", "Purpur · 1.21.8", "25567", ">19134</strong>", "Disabled", "Running", "Stopped", "2G / 3G"} {
+	for _, want := range []string{`href="/minecraft/servers/add"`, "Paper · 1.21.8", "Purpur · 1.21.8", "25567", ">19134</strong>", "Disabled", "Running", "Stopped", "<span>RAM</span>", "<span>Java port</span>", "<span>Bedrock port</span>"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
 		}
@@ -142,6 +142,30 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 		}
 	}
 
+}
+
+func TestMinecraftServerCardsLiveRAMInitialValues(t *testing.T) {
+	app, _ := newServerInventoryApp(t)
+	body := inventoryRequest(app, "GET", "", "").Body.String()
+	cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card".*?</article>`).FindAllString(body, -1)
+	if len(cards) != 2 {
+		t.Fatal("incorrect inventory")
+	}
+	for i, want := range []string{"Unavailable", "---"} {
+		if !strings.Contains(cards[i], `<strong data-server-ram-value>`+want+`</strong>`) {
+			t.Errorf("card %d initial RAM must be %q", i, want)
+		}
+		for _, hook := range []string{`data-server-ram `, `data-server-ram-graph`, `aria-hidden="true"></svg>`} {
+			if !strings.Contains(cards[i], hook) {
+				t.Errorf("missing live RAM hook %s", hook)
+			}
+		}
+		for _, old := range []string{"2G", "3G", "<span>Memory</span>"} {
+			if strings.Contains(cards[i], old) {
+				t.Errorf("static configured memory remains on card: %s", old)
+			}
+		}
+	}
 }
 
 func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {

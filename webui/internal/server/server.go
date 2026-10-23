@@ -44,6 +44,8 @@ type Config struct {
 }
 
 type App struct {
+	minecraftContainersURL string // Package tests may replace only the narrow Glances source.
+
 	api       API
 	config    Config
 	templates *template.Template
@@ -158,6 +160,7 @@ func (a *App) Handler() http.Handler {
 	a.registerSystemWorkspaceRoutes(mux)
 	mux.HandleFunc("GET /minecraft/how-to-connect", a.howToConnect)
 	mux.HandleFunc("GET /api/minecraft/servers/invitation", a.minecraftServersInvitation)
+	mux.HandleFunc("GET /api/minecraft/servers/live-memory", a.minecraftServersLiveMemory)
 	mux.HandleFunc("POST /api/minecraft/servers/lifecycle", a.minecraftServersLifecycle)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))

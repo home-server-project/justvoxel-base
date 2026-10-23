@@ -54,7 +54,7 @@
       <div class="minecraft-server-metrics">
         <div><span>Java port</span><strong>{{if .JavaPort}}{{.JavaPort}}{{else}}Unavailable{{end}}</strong></div>
         <div><span>Bedrock port</span><strong>{{if .ConfigurationAvailable}}{{if .BedrockEnabled}}{{.BedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable{{end}}</strong></div>
-        <div><span>Memory</span><strong>{{if .JavaMemory}}{{.JavaMemory}}{{else}}Unavailable{{end}} / {{if .ContainerMemory}}{{.ContainerMemory}}{{else}}Unavailable{{end}}</strong></div>
+        <div data-server-ram data-server-state="{{.State}}"><span>RAM</span><strong data-server-ram-value>{{if eq .State "Stopped"}}---{{else}}Unavailable{{end}}</strong><svg data-server-ram-graph viewBox="0 0 116 12" preserveAspectRatio="none" aria-hidden="true"></svg></div>
       </div>
       <div class="minecraft-server-switches" data-server-normal-actions>
         <label><span>Server running</span><input class="date-time-switch" type="checkbox" role="switch" data-server-running aria-label="Server running for {{.Name}}"{{if .Running}} checked{{end}}{{if not .CanSwitch}} disabled{{end}}></label>
