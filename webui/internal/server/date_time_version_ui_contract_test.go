@@ -200,7 +200,7 @@ func TestApprovedSystemAndNetworkRepairContracts(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{`Choose whether WebUI uses the voxel system password or its own password.`, `month: "short"`, `refreshClockDisplay`, `/api/session-info`} {
+	for _, want := range []string{`Choose the password WebUI uses to sign in.`, `month: "short"`, `refreshClockDisplay`, `/api/session-info`} {
 		if !strings.Contains(app, want) {
 			t.Fatalf("System repair missing %s", want)
 		}
@@ -210,7 +210,7 @@ func TestApprovedSystemAndNetworkRepairContracts(t *testing.T) {
 			t.Fatalf("shared format form missing %s", want)
 		}
 	}
-	for _, want := range []string{`.system-users-table th:last-child,.system-users-table td:last-child{text-align:center}`, `.system-user-menu{display:inline-block;width:max-content`, `.system-security-heading{display:flex;align-items:baseline;gap:.4rem}`, `margin-inline:auto`, `max-width:380px`, `font-size:.84rem!important`} {
+	for _, want := range []string{`.system-users-table th:last-child,.system-users-table td:last-child{text-align:center}`, `.system-user-menu{display:inline-block;width:max-content`, `.system-security-heading{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem}`, `margin-inline:auto`, `max-width:380px`, `font-size:.84rem!important`} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("layout repair missing %s", want)
 		}

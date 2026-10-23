@@ -174,7 +174,7 @@ func TestSystemCorrectionsPreserveMenusAndMetadata(t *testing.T) {
 		`"restart-allowance/reset"`, `"backup-allowance/reset"`, `"role", "Save role"`,
 		`"enabled", user.enabled`, `"password", "Change password"`, `"delete", "Delete account", true`,
 		`choices.showPopover()`, `button.disabled = disabled`, `minimum_password_len`,
-		`root.append(securityHeading, switcher)`, `authHeading.append(authLabel, authTitle, authDescription)`,
+		`securityHeading.append(securityLabel, securityTitle, switcher)`, `root.appendChild(securityHeading)`, `authHeading.append(authLabel, authTitle, authDescription)`,
 		`passwordHeading.append(passwordLabel, passwordTitle, passwordDescription)`,
 		`String(payload.variant || "")`, `variantName ? ` + "`JustVoxel ${variantName}`",
 		`payload.justvoxel`, `payload.webui`, `payload.management_api`, `payload.commit`, `payload.username`,
@@ -344,5 +344,78 @@ const flatten = n => [n.textContent || "", ...(n.children || []).flatMap(flatten
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("About metadata presentation: %v\n%s", err, output)
+	}
+}
+
+func TestApprovedSecurityVisualCleanupContract(t *testing.T) {
+	app := correctionSource(t, "static/app.js")
+	start := strings.Index(app, "  const renderSecurity =")
+	if start < 0 {
+		t.Fatal("Security renderer missing")
+	}
+	end := strings.Index(app[start:], "  const clearResetPoll =")
+	if end < 0 {
+		t.Fatal("Security renderer boundary missing")
+	}
+	security := app[start : start+end]
+	for _, want := range []string{
+		`securityHeading.append(securityLabel, securityTitle, switcher);`,
+		`root.appendChild(securityHeading);`,
+		`authDescription.textContent = "Choose the password WebUI uses to sign in.";`,
+		`passwordDescription.textContent = "Change the password for the current sign-in mode.";`,
+		`switcher.setAttribute("role", "tablist");`,
+		`const button = document.createElement("button");`, `button.type = "button";`,
+		`["authentication", "password"].forEach((kind) =>`,
+		`button.setAttribute("aria-selected", securityPane === kind ? "true" : "false");`,
+		`button.setAttribute("aria-selected", button.dataset.systemSecurityChoice === kind ? "true" : "false");`,
+		`pane.hidden = pane.dataset.systemSecurityPane !== kind;`,
+		`button.addEventListener("click", () => showPane(button.dataset.systemSecurityChoice));`,
+		`authPane.className = "system-security-pane";`, `passwordPane.className = "system-security-pane";`,
+		`if (payload.mode === "system")`,
+		`<input type="hidden" name="mode" value="separate">`,
+		`<input type="hidden" name="mode" value="system">`,
+		`<label>Current system password<input type="password" name="system_password" autocomplete="current-password" required></label>`,
+		`<label>System password<input type="password" name="system_password" autocomplete="current-password" required></label>`,
+		`<label>New WebUI password<input type="password" name="new_web_password" autocomplete="new-password" required></label>`,
+		`<label>Confirm WebUI password<input type="password" name="confirm_web_password" autocomplete="new-password" required></label>`,
+		`<label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>`,
+		`<label>New password<input type="password" name="new_password" autocomplete="new-password" required></label>`,
+		`<label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" required></label>`,
+		`input.minLength = Number(payload.minimum_password_len || 8);`,
+		`systemFetchJSON("/api/system/workspace/security")`,
+		`systemPostForm("/api/system/workspace/security/authentication", data)`,
+		`systemPostForm("/api/system/workspace/security/password", data)`,
+	} {
+		if !strings.Contains(security, want) {
+			t.Fatalf("Security presentation or preserved form contract missing %q", want)
+		}
+	}
+	for _, stale := range []string{
+		`root.append(securityHeading, switcher)`,
+		`Choose whether WebUI uses the voxel system password or its own password.`,
+		`Change the password used by the current WebUI authentication mode.`,
+	} {
+		if strings.Contains(security, stale) {
+			t.Fatalf("Security retains old presentation %q", stale)
+		}
+	}
+	if strings.Count(security, `switcher.appendChild(button)`) != 1 || strings.Count(security, `<input `) != 9 {
+		t.Fatal("Security must preserve its existing controls and form fields")
+	}
+	css := correctionSource(t, "static/app.css")
+	for _, want := range []string{
+		`.system-security-view{gap:.5rem;width:min(520px,100%);margin-inline:auto}`,
+		`.system-security-heading{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem}`,
+		`.system-security-heading .system-security-switcher{flex-wrap:wrap;max-width:100%;margin-left:auto}`,
+		`.system-security-switcher button[aria-selected="true"]{background:#25382e;color:#c8f2d7}`,
+		`.system-workspace-content .system-security-pane{width:100%;max-width:520px;min-height:31rem;display:flex;flex-direction:column;`,
+		`.system-security-pane[hidden]{display:none!important}`,
+		`.system-security-form{display:flex;flex-direction:column;flex:1;align-items:stretch;width:100%;max-width:380px;gap:.65rem}`,
+		`.system-security-form button[type=submit]{align-self:flex-end;justify-self:end;max-width:100%;margin-top:auto;`,
+		`@media(max-width:600px){.system-workspace-content .system-security-pane{min-height:0}.system-security-heading .system-security-switcher{margin-left:0}.system-security-form{flex:none}.system-security-form button[type=submit]{margin-top:.2rem}}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("Security desktop/mobile layout contract missing %q", want)
+		}
 	}
 }

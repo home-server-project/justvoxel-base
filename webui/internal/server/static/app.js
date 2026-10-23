@@ -5107,8 +5107,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     securityLabel.textContent = "Account security";
     const securityTitle = document.createElement("h2");
     securityTitle.textContent = "Security";
-    securityHeading.append(securityLabel, securityTitle);
-    root.append(securityHeading, switcher);
+    securityHeading.append(securityLabel, securityTitle, switcher);
+    root.appendChild(securityHeading);
 
     const authPane = document.createElement("section");
     authPane.className = "system-security-pane";
@@ -5119,7 +5119,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     authTitle.textContent = "Authentication";
     const authDescription = document.createElement("p");
     authDescription.className = "muted compact";
-    authDescription.textContent = "Choose whether WebUI uses the voxel system password or its own password.";
+    authDescription.textContent = "Choose the password WebUI uses to sign in.";
     const authLabel = document.createElement("p");
     authLabel.className = "eyebrow";
     authLabel.textContent = "Sign-in method";
@@ -5185,7 +5185,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     passwordTitle.textContent = "Password";
     const passwordDescription = document.createElement("p");
     passwordDescription.className = "muted compact";
-    passwordDescription.textContent = "Change the password used by the current WebUI authentication mode.";
+    passwordDescription.textContent = "Change the password for the current sign-in mode.";
     const passwordLabel = document.createElement("p");
     passwordLabel.className = "eyebrow";
     passwordLabel.textContent = "Account password";
