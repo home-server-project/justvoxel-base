@@ -1,27 +1,65 @@
-<section class="panel control-panel">
+<div class="minecraft-network">
+<section class="panel control-panel minecraft-network-panel">
   {{if .Error}}<p class="notice error" role="status">{{.Error}}</p>{{end}}
   {{if .Message}}<p class="notice success" role="status">{{.Message}}</p>{{end}}
-  <p class="muted">Optionally connect selected servers through one shared entrance and lobby. Servers stay standalone unless you select them here and enable Minecraft Network.</p>
+  <p class="muted minecraft-network-help">Optionally connect selected servers through one shared entrance and lobby. Servers stay standalone unless you select them here and enable Minecraft Network.</p>
   {{if .Network.RecoveryRequired}}<div class="notice warning"><p>Minecraft Network needs recovery before servers can start.</p><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="recover" type="submit">Retry recovery</button></form></div>{{end}}
   <form method="post" action="/workspace/minecraft-network">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <h2>Network</h2>
-    <label><span>Enabled</span><input class="date-time-switch" role="switch" type="checkbox" name="enabled"{{if .Network.Config.Enabled}} checked{{end}}></label>
-    <h2>Connection</h2>
-    <div class="grid"><label>Java port<input name="java_port" type="number" min="1024" max="65535" value="{{.Network.Config.JavaPort}}" required></label><label>Bedrock port<input name="bedrock_port" type="number" min="1024" max="65535" value="{{.Network.Config.BedrockPort}}" required></label></div>
-    <p>Lobby: PicoLobby · Network whitelist: Enforced</p>
-    <h2>Servers</h2>
-    <p class="muted">Stop selected servers before applying network changes. Their standalone ports and individual whitelists are kept. Start them again when the change is complete.</p>
-    {{range .Servers}}<label><input type="checkbox" name="members" value="{{.ID}}"{{if .Selected}} checked{{end}}{{if not .Eligible}} disabled{{end}}> {{.Name}} · {{.Software}} · {{.State}}{{if not .Eligible}} · Standalone — unavailable for Minecraft Network{{end}}</label>{{end}}
-    <h2>Lobby</h2>
-    <p>Server selector: Enabled · NPCs: Enabled</p>
-    <label>Welcome message<input name="welcome_message" maxlength="512" value="{{.Network.Config.WelcomeMessage}}"></label>
-    <div class="action-row"><button type="submit" name="action" value="configure"{{if .Network.RecoveryRequired}} disabled{{end}}>Apply</button></div>
+    <div class="minecraft-network-lane">
+      <div class="minecraft-network-ports">
+        <label>Java port<input name="java_port" type="number" min="1024" max="65535" value="{{.Network.Config.JavaPort}}" required></label>
+        <label>Bedrock port<input name="bedrock_port" type="number" min="1024" max="65535" value="{{.Network.Config.BedrockPort}}" required></label>
+      </div>
+      <label class="minecraft-network-toggle">
+        <span class="minecraft-network-status minecraft-network-status-disabled">Disabled</span>
+        <span class="minecraft-network-status minecraft-network-status-enabled">Enabled</span>
+        <input class="date-time-switch" role="switch" type="checkbox" name="enabled"{{if .Network.Config.Enabled}} checked{{end}}>
+      </label>
+    </div>
+    <p class="muted minecraft-network-summary">Lobby: PicoLobby · Network whitelist: Enforced</p>
+    <section class="minecraft-network-section">
+      <h2>Servers</h2>
+      <p class="muted minecraft-network-help">Stop selected servers before applying network changes. Their standalone ports and individual whitelists are kept. Start them again when the change is complete.</p>
+      <div class="minecraft-network-servers">
+        {{range .Servers}}<label class="minecraft-network-server">
+          <input type="checkbox" name="members" value="{{.ID}}"{{if .Selected}} checked{{end}}{{if not .Eligible}} disabled{{end}}>
+          {{if .SoftwareIcon}}<img class="minecraft-network-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}
+          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} · {{.State}}</span>{{if not .Eligible}}<span class="muted minecraft-network-unavailable">Standalone — unavailable for Minecraft Network</span>{{end}}</span>
+        </label>{{end}}
+      </div>
+    </section>
+    <section class="minecraft-network-section">
+      <h2>Lobby</h2>
+      <p class="muted minecraft-network-summary">Server selector: Enabled · NPCs: Enabled</p>
+      <div class="minecraft-network-welcome-lane">
+        <label for="minecraft-network-welcome">Welcome message</label>
+        <input id="minecraft-network-welcome" name="welcome_message" maxlength="512" value="{{.Network.Config.WelcomeMessage}}">
+        <button type="submit" name="action" value="configure"{{if .Network.RecoveryRequired}} disabled{{end}}>Apply</button>
+      </div>
+    </section>
   </form>
 </section>
-<section class="panel control-panel">
+<section class="panel control-panel minecraft-network-panel minecraft-whitelist-section">
   <h2>Network Whitelist</h2>
-  <p class="muted">The network whitelist controls entry to the lobby. Each backend server keeps its own whitelist. Adding a player here does not add them to a server whitelist.</p>
-  <form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{.CSRF}}"><div class="grid"><label>Platform<select name="platform"><option value="java">Java Edition</option><option value="bedrock">Bedrock</option></select></label><label>Player<input name="name" maxlength="16" required></label></div><button type="submit" name="action" value="add">Add</button></form>
-  {{range .Network.Whitelist}}<form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="platform" value="{{.Platform}}"><div class="action-row"><span>{{.Name}} · {{if eq .Platform "java"}}Java Edition{{else}}Bedrock{{end}}</span><button class="secondary" type="submit" name="action" value="remove">Remove</button></div></form>{{else}}<p class="muted">No players on the network whitelist.</p>{{end}}
+  <div class="minecraft-player-controls">
+    <p class="muted minecraft-network-help">The network whitelist controls entry to the lobby. Each backend server keeps its own whitelist. Adding a player here does not add them to a server whitelist.</p>
+    <form class="minecraft-player-add" method="post" action="/workspace/minecraft-network">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label class="minecraft-player-platform">Platform<select name="platform"><option value="java">Java Edition</option><option value="bedrock">Bedrock</option></select></label>
+      <label class="minecraft-player-input">Player<input name="name" maxlength="16" required></label>
+      <button type="submit" name="action" value="add">Add player</button>
+    </form>
+  </div>
+  <div class="minecraft-whitelist-list">
+    {{if .Network.Whitelist}}<table class="minecraft-whitelist-table">
+      <thead><tr><th>Player</th><th>Platform</th><th></th></tr></thead>
+      <tbody>{{range .Network.Whitelist}}<tr>
+        <td>{{.Name}}</td><td>{{if eq .Platform "java"}}Java Edition{{else}}Bedrock{{end}}</td>
+        <td><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="platform" value="{{.Platform}}"><button class="secondary" type="submit" name="action" value="remove">Remove</button></form></td>
+      </tr>{{end}}</tbody>
+    </table>{{else}}<p class="muted">No players on the network whitelist.</p>{{end}}
+  </div>
 </section>
+</div>

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -69,6 +70,153 @@ func TestMinecraftNetworkWorkspaceAndCSRF(t *testing.T) {
 	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/minecraft-network", "csrf=wrong&action=configure"))
 	if rr.Code != 403 || f.writes != 0 {
 		t.Fatal("CSRF bypass")
+	}
+}
+
+func TestMinecraftNetworkCompactPresentation(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		app, f := newNetworkTestApp(t)
+		f.network.Config.Enabled = enabled
+		f.network.Config.Members = []string{"jv-family1"}
+		f.network.RecoveryRequired = enabled
+		f.network.Servers = append(f.network.Servers, api.MinecraftNetworkServer{ID: "unknown", Software: "https://example.invalid/icon.svg", State: "stopped"})
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-network", ""))
+		if rr.Code != http.StatusOK {
+			t.Fatal(rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		for _, want := range []string{
+			`class="minecraft-network"`, `minecraft-network-panel`,
+			`minecraft-network-status-disabled">Disabled</span>`,
+			`minecraft-network-status-enabled">Enabled</span>`,
+			`class="minecraft-player-controls"`, `class="minecraft-player-add"`,
+			`class="minecraft-player-platform"`, `class="minecraft-player-input"`,
+			`class="minecraft-whitelist-list"`, `No players on the network whitelist.`,
+			`name="action" value="add">Add player</button>`,
+			`name="members" value="jv-family1" checked>`,
+			`name="members" value="jv-kids001" disabled>`,
+			`src="/static/server-software/paper.svg" alt="">`,
+			`src="/static/server-software/vanilla.svg" alt="">`,
+			`minecraft-network-unavailable">Standalone — unavailable for Minecraft Network</span>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("missing compact network presentation %q", want)
+			}
+		}
+		for _, server := range f.network.Servers {
+			row := regexp.MustCompile(`(?s)name="members" value="` + regexp.QuoteMeta(server.ID) + `".*?</label>`).FindString(body)
+			icon := serverSoftwareIcon(server.Software)
+			if icon == "" {
+				if strings.Contains(row, "<img") {
+					t.Error("unknown software must not render an icon")
+				}
+				continue
+			}
+			if !strings.HasPrefix(icon, "/static/server-software/") || !strings.Contains(row, `src="`+icon+`" alt="">`) || !strings.Contains(row, " · "+serverSoftware(server.Software)+" · "+server.State) {
+				t.Errorf("server %s must render its own shared icon and text", server.ID)
+			}
+			if _, err := assets.ReadFile(strings.TrimPrefix(icon, "/")); err != nil {
+				t.Errorf("shared icon is missing: %s: %v", icon, err)
+			}
+		}
+		lane := regexp.MustCompile(`(?s)class="minecraft-network-lane">(.*?)<p class="muted minecraft-network-summary"`).FindString(body)
+		for _, want := range []string{`class="minecraft-network-ports"`, `name="java_port"`, `value="25565"`, `name="bedrock_port"`, `value="19132"`, `class="minecraft-network-toggle"`} {
+			if !strings.Contains(lane, want) {
+				t.Errorf("missing port/toggle lane contract %q", want)
+			}
+		}
+		switchTag := `<input class="date-time-switch" role="switch" type="checkbox" name="enabled"`
+		applyTag := `<button type="submit" name="action" value="configure"`
+		if enabled {
+			switchTag += ` checked`
+			applyTag += ` disabled`
+			if !strings.Contains(body, `value="recover"`) {
+				t.Error("recovery action missing")
+			}
+		}
+		if !strings.Contains(lane, switchTag+`>`) {
+			t.Error("enabled switch contract changed")
+		}
+		welcome := regexp.MustCompile(`(?s)class="minecraft-network-welcome-lane">(.*?)</div>`).FindString(body)
+		if !strings.Contains(welcome, `name="welcome_message" maxlength="512" value="Welcome"`) || !strings.Contains(welcome, applyTag+`>Apply</button>`) {
+			t.Error("welcome message and Apply must share a lane and preserve recovery disabling")
+		}
+		add := regexp.MustCompile(`(?s)<form class="minecraft-player-add".*?</form>`).FindString(body)
+		for _, want := range []string{`method="post" action="/workspace/minecraft-network"`, `name="csrf" value="csrf-token"`, `name="platform"`, `value="java">Java Edition`, `value="bedrock">Bedrock`, `name="name" maxlength="16" required`, `value="add">Add player</button>`} {
+			if !strings.Contains(add, want) {
+				t.Errorf("whitelist add contract changed: %q", want)
+			}
+		}
+		if strings.Contains(body, `>Add<`) || strings.Contains(body, `<h2>Connection</h2>`) {
+			t.Error("old oversized presentation remains")
+		}
+	}
+}
+
+func TestMinecraftNetworkWhitelistRemovalPresentation(t *testing.T) {
+	app, f := newNetworkTestApp(t)
+	f.network.Whitelist = []api.MinecraftNetworkPlayer{{Name: "Alex", Platform: "java"}, {Name: "Steve", Platform: "bedrock"}}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-network", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `class="minecraft-whitelist-table"`) || strings.Contains(body, "No players on the network whitelist.") {
+		t.Fatal("populated whitelist must use the shared bounded list/table")
+	}
+	forms := regexp.MustCompile(`(?s)<form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf".*?</form>`).FindAllString(body, -1)
+	if len(forms) != 2 {
+		t.Fatal("expected one removal form per player", len(forms))
+	}
+	for i, player := range f.network.Whitelist {
+		for _, want := range []string{`name="csrf" value="csrf-token"`, `name="name" value="` + player.Name + `"`, `name="platform" value="` + player.Platform + `"`, `name="action" value="remove">Remove</button>`} {
+			if !strings.Contains(forms[i], want) {
+				t.Errorf("removal contract changed: %q", want)
+			}
+		}
+	}
+}
+
+func TestMinecraftNetworkCompactStylesAreScoped(t *testing.T) {
+	source, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(source)
+	for selector, properties := range map[string][]string{
+		".minecraft-network .minecraft-network-lane":                                                         {"display:flex", "flex-wrap:wrap", "align-items:center"},
+		".minecraft-network .minecraft-network-ports":                                                        {"display:flex", "flex-wrap:wrap"},
+		".minecraft-network .minecraft-network-ports input":                                                  {"width:6.5rem"},
+		".minecraft-network .minecraft-network-toggle":                                                       {"gap:.65rem", "margin:0 0 0 auto", "align-items:center"},
+		".minecraft-network .minecraft-network-status-disabled":                                              {"color:#ffc1b8"},
+		".minecraft-network .minecraft-network-status-enabled":                                               {"color:#8ad4a9", "display:none"},
+		".minecraft-network .minecraft-network-toggle:has(input:checked) .minecraft-network-status-disabled": {"display:none"},
+		".minecraft-network .minecraft-network-toggle:has(input:checked) .minecraft-network-status-enabled":  {"display:inline"},
+		".minecraft-network .minecraft-network-welcome-lane":                                                 {"display:flex", "align-items:center", "flex-wrap:wrap"},
+	} {
+		rule := regexp.MustCompile(regexp.QuoteMeta(selector) + `\{([^}]+)\}`).FindString(css)
+		for _, property := range properties {
+			if !strings.Contains(rule, property) {
+				t.Errorf("%s missing %s", selector, property)
+			}
+		}
+	}
+	_, compact, ok := strings.Cut(css, "/* Compact Minecraft Network presentation; shared Players rules stay unchanged. */")
+	if !ok || !strings.Contains(compact, "@media(max-width:540px)") {
+		t.Fatal("missing scoped responsive styles")
+	}
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{`).FindAllStringSubmatch(compact, -1) {
+		selector := strings.TrimSpace(rule[1])
+		if strings.HasPrefix(selector, "@media") {
+			continue
+		}
+		for _, part := range strings.Split(selector, ",") {
+			if !strings.HasPrefix(strings.TrimSpace(part), ".minecraft-network ") && strings.TrimSpace(part) != ".minecraft-network" {
+				t.Errorf("network style escapes workspace: %q", part)
+			}
+		}
 	}
 }
 func TestMinecraftNetworkConnectionPresentation(t *testing.T) {
