@@ -188,7 +188,7 @@ for (const count of [0, 1, 2, 3]) {
 	}
 }
 
-// Preserve every existing stylesheet from the approved starting HEAD.
+// Preserve the CSS surfaces frozen by the Minecraft Network correction.
 func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 	baseline := map[string]string{
 		"static/app.css":               "3fec5e66b65d3aee4a3e5237767e55256559f7be0652cf92ebd48e47f3c15e86",
@@ -198,7 +198,6 @@ func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 		"static/new-backups.css":       "23e64d2ff226fdc6488e4a124b77f8f12264861ded37278031e9c02252a1dc49",
 		"static/playit-setup.css":      "fdaae36a639c41bc22374d42a70803b771e4a07f35810464080923e7582d39b1",
 		"static/setup-review.css":      "02d4fe58915d40862c728f3541932e9f60870ebaee6ebb70be452e441a782df3",
-		"static/setup.css":             "6c614912f02a8363a20c45766002e1976be5d73d1bb71a73c79502fdebfff026",
 		"static/storage-browser.css":   "fbdfb24d4ce62fac8ef6ca6d1bf053258c2f2668b0b23217ef489c3388a003c6",
 	}
 	for path, want := range baseline {

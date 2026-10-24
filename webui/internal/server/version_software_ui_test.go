@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -136,54 +135,23 @@ async function review(page) {
 	}
 }
 
-func TestSetupRecommendedPaperCardWording(t *testing.T) {
+func TestSetupSimpleSoftwareCardWording(t *testing.T) {
 	data, err := assets.ReadFile("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if strings.Contains(text, "Recommended · plugins · Bedrock cross-play enabled by default when supported.") {
-		t.Fatal("old Recommended setup Paper wording remains")
+	for _, old := range []string{"Recommended · plugins · Bedrock cross-play enabled by default when supported.", "Use recommended setup"} {
+		if strings.Contains(text, old) {
+			t.Fatalf("old First Setup presentation remains: %s", old)
+		}
 	}
-	// Recommended and Advanced setup each contain the same three cards. Check
-	// each card's text and icon/copy wrappers without requiring adjacent elements.
-	cardPattern := regexp.MustCompile(`(?s)<label class="setup-server-type server-software-card is-available">(.*?)</label>`)
-	sections := strings.SplitN(text, "{{else}}\n  <div class=\"setup-stage-header\">", 2)
-	if len(sections) != 2 {
-		t.Fatal("Recommended and Advanced setup sections must be present")
+	for _, want := range []string{`{{template "setup-simple-card" .}}`, `{{range .SimpleSoftware}}`, `src="/static/server-software/{{.ID}}.svg"`, `class="server-software-copy"`, `<strong>{{.Name}}</strong><small>{{.Description}}</small>`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("shared software card missing %s", want)
+		}
 	}
-	for sectionIndex, section := range sections[:1] {
-		cards := cardPattern.FindAllStringSubmatch(section, -1)
-		if len(cards) != 3+sectionIndex {
-			t.Fatalf("setup section %d must contain three software cards", sectionIndex)
-		}
-		softwareCards := []struct{ value, name, description string }{
-			{"paper", "Paper", "Recommended · Plugins and managed Bedrock cross-play."},
-			{"purpur", "Purpur", "Plugins and managed Bedrock cross-play."},
-			{"vanilla", "Vanilla", "Original Minecraft · Java only · no plugins or mods."},
-		}
-		if sectionIndex == 1 {
-			softwareCards = append(softwareCards[:2], append([]struct{ value, name, description string }{{"spigot", "Spigot", "Plugins and managed Bedrock cross-play."}}, softwareCards[2:]...)...)
-		}
-		for index, software := range softwareCards {
-			card := cards[index][1]
-			for _, want := range []string{
-				`name="server_type" value="` + software.value + `"`,
-				`<span class="server-software-icon" aria-hidden="true">`,
-				`<span class="server-software-copy">`,
-				`<strong>` + software.name + `</strong>`,
-				`<span class="software-availability">Available</span>`,
-				`<small>` + software.description + `</small>`,
-			} {
-				if strings.Count(card, want) != 1 {
-					t.Fatalf("setup section %d %s card must contain %q once", sectionIndex, software.name, want)
-				}
-			}
-			// The official Paper asset is still pending; preserve the shared local
-			// SVG references for the two bundled icons.
-			if software.value != "paper" && !strings.Contains(card, `<img src="/static/server-software/`+software.value+`.svg" alt="" width="48" height="48">`) {
-				t.Fatalf("setup %s card must use its shared local SVG icon", software.name)
-			}
-		}
+	if simpleSoftware("plugins")[0].Description != "Plugins · Cross-play" {
+		t.Fatal("Paper Simple description changed")
 	}
 }

@@ -155,8 +155,8 @@ func TestReviewedSetupIdentityRequiredResponsePreservesSubmission(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	acceptSetupEULA(t, app)

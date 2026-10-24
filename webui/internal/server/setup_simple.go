@@ -135,17 +135,20 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 	return nil
 }
 
-func (a *App) addServerSimple(w http.ResponseWriter, r *http.Request) {
+func (a *App) setupWizardSimple(w http.ResponseWriter, r *http.Request) {
 	session, client, identity, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
 		return
 	}
-	draft, exists := addServerDrafts.get(a, session)
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || draft.Mode != "recommended" {
-		draft = setupDraft{AddServer: true, Mode: "recommended", SimpleState: 1}
+		draft = setupDraft{AddServer: isAddServerRequest(r), Mode: "recommended", SimpleState: 1}
 	}
 	fail := func(message string) {
-		addServerDrafts.save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), message)
 	}
@@ -190,7 +193,7 @@ func (a *App) addServerSimple(w http.ResponseWriter, r *http.Request) {
 				fail("Choose a valid game mode.")
 				return
 			}
-			resolved, err := a.newAddServerDraft(r.Context(), session, client)
+			resolved, err := a.newSetupDraft(r.Context(), session, client, draft.AddServer)
 			if err != nil {
 				fail("Server defaults are unavailable. Check existing server configuration and storage, then try again.")
 				return
@@ -214,14 +217,15 @@ func (a *App) addServerSimple(w http.ResponseWriter, r *http.Request) {
 			resolved.Minecraft.ConnectionsComplete, resolved.Minecraft.VersionComplete, resolved.Minecraft.ResourcesComplete, resolved.Minecraft.Complete = true, true, true, true
 			resolved.CurrentStep = setupReviewStep
 			draft = resolved
+			a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "simple WebUI setup defaults accepted", draft)
 		default:
 			fail("Restart Simple setup.")
 			return
 		}
 	}
-	addServerReviews.delete(a, session)
-	addServerDrafts.save(a, session, draft)
-	http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 }
 
 type setupSoftwareGroup struct {
@@ -230,17 +234,6 @@ type setupSoftwareGroup struct {
 }
 
 func setupSoftwareGroups() []setupSoftwareGroup {
-	mods := simpleSoftware("mods")
-	return []setupSoftwareGroup{
-		{Name: "Plugins + managed cross-play", Software: simpleSoftware("plugins")},
-		{Name: "Mod loaders + managed cross-play", Description: "Managed cross-play requires proven compatibility for the exact Minecraft and loader versions.", Software: mods[:2]},
-		{Name: "Java / mod loaders without managed cross-play", Software: append(simpleSoftware("vanilla"), mods[2:]...)},
-		{Name: "Native Bedrock server", Software: simpleSoftware("bedrock")},
-	}
-}
-
-// Keep the first-run software presentation unchanged.
-func addServerSoftwareGroups() []setupSoftwareGroup {
 	return []setupSoftwareGroup{
 		{Name: "Plugins + managed cross-play", Software: simpleSoftware("plugins")},
 		{Name: "Mod loaders · Cross-play: Fabric · NeoForge", Software: simpleSoftware("mods")},

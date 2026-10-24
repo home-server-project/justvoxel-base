@@ -13,15 +13,15 @@ func TestConfiguredApplianceCannotReuseFirstRunReviewState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 
 	advanceSetupToReview(t, app)
 	validated := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	if validated.Code != http.StatusOK {
 		t.Fatalf("initial review returned %d: %s", validated.Code, validated.Body.String())
 	}
-	if _, ok := firstRunSetupReviews.get(app, "session-token"); !ok {
+	if _, ok := setupReviews.get(app, "session-token"); !ok {
 		t.Fatal("validated review state was not cached")
 	}
 
@@ -30,10 +30,10 @@ func TestConfiguredApplianceCannotReuseFirstRunReviewState(t *testing.T) {
 	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/" {
 		t.Fatalf("configured appliance review returned %d %q", rr.Code, rr.Header().Get("Location"))
 	}
-	if _, ok := firstRunSetupDrafts.get(app, "session-token"); ok {
+	if _, ok := setupDrafts.get(app, "session-token"); ok {
 		t.Fatal("configured appliance retained first-run draft state")
 	}
-	if _, ok := firstRunSetupReviews.get(app, "session-token"); ok {
+	if _, ok := setupReviews.get(app, "session-token"); ok {
 		t.Fatal("configured appliance retained reviewed plan/EULA state")
 	}
 	if client.planHit != 1 {
@@ -47,8 +47,8 @@ func TestSetupReviewMutationsRequireCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -64,10 +64,10 @@ func TestSetupReviewMutationsRequireCSRF(t *testing.T) {
 		}
 	}
 
-	if _, ok := firstRunSetupDrafts.get(app, "session-token"); !ok {
+	if _, ok := setupDrafts.get(app, "session-token"); !ok {
 		t.Fatal("CSRF rejection unexpectedly discarded setup draft")
 	}
-	if state, ok := firstRunSetupReviews.get(app, "session-token"); !ok || state.EULAAccepted {
+	if state, ok := setupReviews.get(app, "session-token"); !ok || state.EULAAccepted {
 		t.Fatalf("CSRF rejection changed reviewed plan state: %#v", state)
 	}
 }
@@ -79,8 +79,8 @@ func TestSetupReviewExecutionSurfaceKeepsSMBSecretTransientAndManagementAPIPriva
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 
 	advanceSetupToReview(t, app)
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))

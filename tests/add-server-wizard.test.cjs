@@ -9,7 +9,7 @@ test('Add Server reuses the maintained wizard, software controls and six-step pr
   const wizard = read('templates/setup_wizard.html');
   const review = read('templates/setup_review.html');
   for (const control of ['server-software-card', 'data-memory-settings', 'setup-backup-topline', 'data-setup-connections']) assert.ok(wizard.includes(control));
-  assert.ok(wizard.includes('{{$wizard.BasePath}}/recommended'));
+  assert.ok(wizard.includes('action="{{.BasePath}}/simple"'));
   assert.ok(wizard.includes('{{template "setup-instance-name" .}}'));
   assert.ok(wizard.includes('name="display_name"'));
   assert.ok(wizard.includes('name="motd"'));
@@ -115,37 +115,83 @@ test('missing, closed or cross-origin opener and browser policy leave closing sa
 
 test('desktop Simple sizing is reserved without scroll and released at the paired-card breakpoint', () => {
   const css = read('static/setup.css');
-  assert.ok(css.includes('.setup-entry-add-server .setup-simple-content{min-height:21rem}'));
-  assert.ok(css.includes('@media(max-width:760px){\n  .setup-entry-add-server .setup-simple-content{min-height:0}'));
-  assert.ok(css.includes('.setup-entry-add-server .setup-simple-actions,.setup-entry-add-server [data-simple-setup]>button{margin-top:auto}'));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-content{min-height:21rem}'));
+  assert.ok(css.includes('@media(max-width:760px){\n  .setup-entry-wizard .setup-simple-content{min-height:0}'));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-actions,.setup-entry-wizard [data-simple-setup]>button{margin-top:auto}'));
   const simpleRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /setup-simple|data-simple-setup/.test(selector));
   for (const [, , declarations] of simpleRules) assert.doesNotMatch(declarations, /overflow\s*:\s*(auto|scroll|hidden)/);
 });
 
 test('Advanced Add Server uses full-width lanes with four, two, then one column', () => {
   const css = read('static/setup.css');
-  assert.ok(css.includes('.setup-add-server-software-lanes{grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}'));
-  assert.ok(css.includes('.setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr))'));
-  assert.ok(css.includes('@media(max-width:1000px){\n  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}'));
-  assert.ok(css.includes('@media(max-width:430px){\n  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:1fr}'));
-  assert.ok(css.includes('.setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;align-content:start;min-width:0;margin:0}'));
+  assert.ok(css.includes('.setup-software-lanes{grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}'));
+  assert.ok(css.includes('.setup-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr))'));
+  assert.ok(css.includes('@media(max-width:1000px){\n  .setup-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}'));
+  assert.ok(css.includes('@media(max-width:430px){\n  .setup-software-lanes .setup-server-types{grid-template-columns:1fr}'));
+  assert.ok(css.includes('.setup-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;align-content:start;min-width:0;margin:0}'));
   assert.ok(css.includes('.setup-server-types{grid-auto-rows:1fr}'));
-  assert.ok(css.includes('.setup-wizard-panel .setup-add-server-software-lanes .setup-server-types legend{font-size:.9rem}'));
+  assert.ok(css.includes('.setup-wizard-panel .setup-software-lanes .setup-server-types legend{font-size:.9rem}'));
 });
 
 test('Add Server Simple software and Advanced share card proportions and typography', () => {
   const css = read('static/setup.css');
-  const shared = ':is(.setup-entry-add-server .setup-simple-choices:not(.setup-simple-families),.setup-add-server-software-lanes)';
+  const shared = ':is(.setup-entry-wizard .setup-simple-choices:not(.setup-simple-families),.setup-software-lanes)';
   assert.ok(css.includes(`${shared} .server-software-card{grid-template-columns:40px minmax(0,1fr);gap:.7rem;min-height:104px;padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start}`));
   assert.ok(css.includes(`${shared} .server-software-icon,${shared} .server-software-icon img{width:40px;min-width:40px;height:40px}`));
   assert.ok(css.includes(`${shared} .server-software-copy strong{font-size:1rem}`));
   assert.ok(css.includes(`${shared} .server-software-copy small{font-size:.82rem}`));
 });
 
+test('shared setup normalizes only Paper and Purpur artwork while preserving icon slots', () => {
+  const css = read('static/setup.css');
+  const shared = ':is(.setup-entry-wizard .setup-simple-choices:not(.setup-simple-families),.setup-software-lanes)';
+  assert.ok(css.includes(`${shared} .server-software-icon,${shared} .server-software-icon img{width:40px;min-width:40px;height:40px}`));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-families .setup-family-items img{width:24px;height:24px}'));
+  const scaledIconRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selector, declarations]) => /server-software-icon|setup-family-items/.test(selector) && /\bscale\s*\(/.test(declarations))
+    .map(([, selector, declarations]) => [selector.replace(/\/\*[\s\S]*?\*\//g, '').trim(), declarations.trim()]);
+  assert.deepEqual(scaledIconRules, [
+    [':is(.server-software-icon img,.setup-family-items img)[src$="/paper.svg"]', 'transform:scale(.82);transform-origin:center'],
+    [':is(.server-software-icon img,.setup-family-items img)[src$="/purpur.svg"]', 'transform:scale(.90);transform-origin:center'],
+  ]);
+});
+
 test('Add Server family readability is scoped without changing the family layout', () => {
   const css = read('static/setup.css');
-  assert.ok(css.includes('.setup-entry-add-server .setup-simple-families{grid-template-columns:1fr}'));
-  assert.ok(css.includes('.setup-entry-add-server .setup-simple-families .server-software-copy strong{font-size:1rem}'));
-  assert.ok(css.includes('.setup-entry-add-server .setup-simple-families .server-software-copy small,.setup-entry-add-server .setup-simple-families .setup-family-items{font-size:.82rem}'));
-  assert.ok(css.includes('.setup-entry-add-server .setup-simple-families .setup-family-items img{width:24px;height:24px}'));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-families{grid-template-columns:1fr}'));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-families .server-software-copy strong{font-size:1rem}'));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-families .server-software-copy small,.setup-entry-wizard .setup-simple-families .setup-family-items{font-size:.82rem}'));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-families .setup-family-items img{width:24px;height:24px}'));
+});
+
+test('one wizard owns both contexts, stores and software layout', () => {
+  const production = readdirSync(root).filter(name => name.endsWith('.go') && !name.endsWith('_test.go')).map(read).join('\n');
+  for (const old of ['firstRunSetupDrafts', 'addServerDrafts', 'firstRunSetupReviews', 'addServerReviews', 'setupDraftsFor', 'setupReviewsFor', 'setupReviewStoreForDraft', 'addServerWizardPage', 'addServerWizardStart', 'addServerSimple', 'addServerWizardReview', 'addServerWizardReviewBack', 'setupWizardRecommended', 'addServerSoftwareGroups']) {
+    assert.ok(!production.includes(old), `duplicate implementation: ${old}`);
+  }
+  assert.equal((production.match(/var setupDrafts = setupDraftStore/g) || []).length, 1);
+  assert.equal((production.match(/var setupReviews = setupReviewStore/g) || []).length, 1);
+  const first = read('setup_wizard.go');
+  const add = read('add_server_wizard.go');
+  for (const handler of ['setupWizardPage', 'setupWizardStart', 'setupWizardSimple']) {
+    assert.ok(first.includes(`a.${handler}`));
+    assert.ok(add.includes(`a.${handler}`));
+    assert.equal((production.match(new RegExp(`func \\(a \\*App\\) ${handler}\\(`, 'g')) || []).length, 1);
+  }
+  assert.match(first, /POST \/setup\/simple", a.setupWizardSimple/);
+  assert.match(first, /POST \/setup\/recommended", a.setupWizardSimple/);
+  assert.match(add, /"POST \/simple":\s+a.setupWizardSimple/);
+  assert.match(add, /"POST \/recommended":\s+a.setupWizardSimple/);
+  assert.match(add, /"GET \/review":\s+a.setupWizardReviewPage/);
+  assert.match(add, /"POST \/review\/back":\s+a.setupWizardReviewBack/);
+  const wizard = read('templates/setup_wizard.html');
+  assert.equal((wizard.match(/template "setup-simple-card"/g) || []).length, 1);
+  assert.ok(wizard.includes('class="setup-software-groups setup-software-lanes"'));
+  assert.ok(wizard.includes('class="panel setup-welcome setup-entry setup-entry-wizard"'));
+  assert.ok(!wizard.includes('Recommended setup'));
+  assert.ok(!wizard.includes('/recommended'));
+  const css = read('static/setup.css');
+  assert.ok(!css.includes('setup-entry-add-server'));
+  assert.ok(!css.includes('setup-add-server-software-lanes'));
+  assert.ok(css.includes('.setup-software-lanes{grid-template-columns:1fr'));
 });

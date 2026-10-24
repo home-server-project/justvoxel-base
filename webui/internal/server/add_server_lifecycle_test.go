@@ -80,30 +80,30 @@ func TestAddServerFreshLaunchAndRefresh(t *testing.T) {
 				marker = `name="display_name"`
 			} else if state == "advanced-3" {
 				requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
-				draft, _ = addServerDrafts.get(app, "session-token")
+				draft, _ = setupDrafts.get(app, "session-token")
 				draft.CurrentStep = setupMemoryStep
 				marker = `name="java_memory"`
 			}
-			addServerDrafts.save(app, "session-token", draft)
-			before, _ := addServerDrafts.get(app, "session-token")
+			setupDrafts.save(app, "session-token", draft)
+			before, _ := setupDrafts.get(app, "session-token")
 			for refresh := 0; refresh < 2; refresh++ {
 				response := addWizardRequest(app, http.MethodGet, "", nil)
 				if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), marker) {
 					t.Fatalf("refresh lost %s: %d %s", state, response.Code, response.Body.String())
 				}
-				if after, ok := addServerDrafts.get(app, "session-token"); !ok || !reflect.DeepEqual(before, after) {
+				if after, ok := setupDrafts.get(app, "session-token"); !ok || !reflect.DeepEqual(before, after) {
 					t.Fatal("ordinary clean GET changed active draft")
 				}
 			}
-			addServerReviews.save(app, "session-token", setupReviewState{DraftUpdatedAt: before.UpdatedAt})
+			setupReviews.save(app, "session-token", setupReviewState{DraftUpdatedAt: before.UpdatedAt})
 			response := addWizardRequest(app, http.MethodGet, "?new=1", nil)
 			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != addServerBasePath {
 				t.Fatalf("fresh launch must redirect to clean URL: %d %q", response.Code, response.Header().Get("Location"))
 			}
-			if _, ok := addServerDrafts.get(app, "session-token"); ok {
+			if _, ok := setupDrafts.get(app, "session-token"); ok {
 				t.Fatal("fresh launch retained draft")
 			}
-			if _, ok := addServerReviews.get(app, "session-token"); ok {
+			if _, ok := setupReviews.get(app, "session-token"); ok {
 				t.Fatal("fresh launch retained review")
 			}
 			body := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
@@ -118,17 +118,17 @@ func TestAddServerFreshLaunchPreservesCreationSafety(t *testing.T) {
 	for _, coreCreated := range []bool{false, true} {
 		app, _ := newAddServerTestApp(t)
 		draft := setupDraft{AddServer: true, CreationAttempted: true, CoreCreated: coreCreated, CurrentStep: setupReviewStep}
-		addServerDrafts.save(app, "session-token", draft)
-		before, _ := addServerDrafts.get(app, "session-token")
-		addServerReviews.save(app, "session-token", setupReviewState{DraftUpdatedAt: before.UpdatedAt})
+		setupDrafts.save(app, "session-token", draft)
+		before, _ := setupDrafts.get(app, "session-token")
+		setupReviews.save(app, "session-token", setupReviewState{DraftUpdatedAt: before.UpdatedAt})
 		response := addWizardRequest(app, http.MethodGet, "?new=1", nil)
 		if response.Code != http.StatusSeeOther || response.Header().Get("Location") != addServerBasePath+"/review" {
 			t.Fatal("fresh launch bypassed creation safety")
 		}
-		if after, ok := addServerDrafts.get(app, "session-token"); !ok || !reflect.DeepEqual(before, after) {
+		if after, ok := setupDrafts.get(app, "session-token"); !ok || !reflect.DeepEqual(before, after) {
 			t.Fatal("fresh launch discarded creation evidence")
 		}
-		if _, ok := addServerReviews.get(app, "session-token"); !ok {
+		if _, ok := setupReviews.get(app, "session-token"); !ok {
 			t.Fatal("fresh launch discarded creation review")
 		}
 		if response := addWizardRequest(app, http.MethodPost, "/start", nil); response.Code != http.StatusConflict {
@@ -142,7 +142,7 @@ func TestAddServerAdvancedThreeLanesAndLaunchTarget(t *testing.T) {
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
 	body := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
 	lanes := regexp.MustCompile(`(?s)<fieldset class="setup-server-types setup-server-types-compact">.*?</fieldset>`).FindAllString(body, -1)
-	if len(lanes) != 3 || !strings.Contains(body, "setup-add-server-software-lanes") {
+	if len(lanes) != 3 || !strings.Contains(body, "setup-software-lanes") {
 		t.Fatal("Advanced must use three full-width lanes")
 	}
 	for i, expected := range []struct {
@@ -166,7 +166,7 @@ func TestAddServerAdvancedThreeLanesAndLaunchTarget(t *testing.T) {
 			t.Fatalf("lane %d software: got %v; want %v", i, software, expected.software)
 		}
 	}
-	if strings.Contains(body, "<legend>Mods</legend>") || addServerSoftwareGroups()[1].Description != "" {
+	if strings.Contains(body, "<legend>Mods</legend>") || setupSoftwareGroups()[1].Description != "" {
 		t.Fatal("Advanced Mods must have one heading without a separate description")
 	}
 	if !strings.Contains(lanes[1], "Cross-play: Fabric · NeoForge") || !strings.Contains(lanes[2], "Original Minecraft · no plugins or mods") || !strings.Contains(lanes[2], "Native Bedrock server · no plugins or mods") {
@@ -184,14 +184,14 @@ func TestAddServerAdvancedThreeLanesAndLaunchTarget(t *testing.T) {
 func TestAddServerFreshLaunchRequiresCurrentAuthorization(t *testing.T) {
 	for _, role := range []string{"viewer", "operator"} {
 		app, client := newAddServerTestApp(t)
-		addServerDrafts.save(app, "session-token", setupDraft{AddServer: true, SimpleState: 2})
-		before, _ := addServerDrafts.get(app, "session-token")
+		setupDrafts.save(app, "session-token", setupDraft{AddServer: true, SimpleState: 2})
+		before, _ := setupDrafts.get(app, "session-token")
 		client.role = role
 		response := addWizardRequest(app, http.MethodGet, "?new=1", nil)
 		if response.Code != http.StatusForbidden {
 			t.Fatal("unauthorized fresh launch accepted")
 		}
-		if after, ok := addServerDrafts.get(app, "session-token"); !ok || !reflect.DeepEqual(before, after) {
+		if after, ok := setupDrafts.get(app, "session-token"); !ok || !reflect.DeepEqual(before, after) {
 			t.Fatal("unauthorized launch cleared draft")
 		}
 	}

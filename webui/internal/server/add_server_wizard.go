@@ -19,9 +19,6 @@ import (
 const minecraftServersPath = "/minecraft/servers"
 const addServerBasePath = minecraftServersPath + "/add"
 
-var addServerDrafts = setupDraftStore{drafts: make(map[setupDraftKey]setupDraft)}
-var addServerReviews = setupReviewStore{reviews: make(map[setupDraftKey]setupReviewState)}
-
 // Serialize wizard requests, including double submissions, until create returns.
 // Only the Add Server context is affected; legacy setup never takes this lock.
 var addServerWizardMu sync.Mutex
@@ -46,29 +43,16 @@ func setupBasePath(r *http.Request) string {
 	}
 	return "/setup"
 }
-func setupDraftsFor(r *http.Request) *setupDraftStore {
-	if isAddServerRequest(r) {
-		return &addServerDrafts
-	}
-	return &firstRunSetupDrafts
-}
-func setupReviewsFor(r *http.Request) *setupReviewStore {
-	if isAddServerRequest(r) {
-		return &addServerReviews
-	}
-	return &firstRunSetupReviews
-}
-
 func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+minecraftServersPath, a.minecraftServersPage)
 	mux.HandleFunc("GET /workspace/minecraft-servers", a.minecraftServersWorkspace)
 	mux.HandleFunc("GET "+minecraftServersPath+"/view/{id}", a.minecraftSelectedServer)
 	mux.HandleFunc("POST "+minecraftServersPath+"/view/{id}/{action}", a.minecraftSelectedServerAction)
 	routes := map[string]http.HandlerFunc{
-		"GET ":                 a.addServerWizardPage,
-		"POST /start":          a.addServerWizardStart,
-		"POST /recommended":    a.addServerSimple,
-		"POST /simple":         a.addServerSimple,
+		"GET ":                 a.setupWizardPage,
+		"POST /start":          a.setupWizardStart,
+		"POST /recommended":    a.setupWizardSimple,
+		"POST /simple":         a.setupWizardSimple,
 		"POST /server":         a.setupWizardSaveServer,
 		"POST /connections":    a.setupWizardSaveConnections,
 		"POST /resources":      a.setupWizardSaveResources,
@@ -77,8 +61,8 @@ func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
 		"POST /backups":        a.setupWizardSaveBackups,
 		"POST /navigate":       a.setupWizardNavigate,
 		"POST /cancel":         a.setupWizardCancel,
-		"GET /review":          a.addServerWizardReview,
-		"POST /review/back":    a.addServerWizardReviewBack,
+		"GET /review":          a.setupWizardReviewPage,
+		"POST /review/back":    a.setupWizardReviewBack,
 		"POST /review/cancel":  a.setupWizardCancel,
 		"POST /review/apply":   a.setupWizardReviewApply,
 	}
@@ -90,9 +74,9 @@ func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
 			// After an uncertain/partial result the draft must never become another
 			// creation request through Back, a stale tab, or a repeated Start POST.
 			if session, ok := sessionFromRequest(r); ok {
-				draft, exists := addServerDrafts.get(a, session)
+				draft, exists := setupDrafts.get(a, session)
 				backupEdit := draft.CoreCreated && (suffix == "/review/back" || suffix == "/backups")
-				if exists && draft.CreationAttempted && r.Method == http.MethodPost && !backupEdit && suffix != "/review/apply" && suffix != "/cancel" && suffix != "/review/cancel" {
+				if exists && draft.AddServer && draft.CreationAttempted && r.Method == http.MethodPost && !backupEdit && suffix != "/review/apply" && suffix != "/cancel" && suffix != "/review/cancel" {
 					http.Error(w, "Creation has already been submitted. Return to Review to check the result.", http.StatusConflict)
 					return
 				}
@@ -156,45 +140,6 @@ func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) 
 	data := minecraftServersPageData{Title: "Minecraft Servers", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message, Configured: configuration.Configured}
 	data.Servers, data.Error = a.minecraftServerInventory(r.Context(), session)
 	a.renderAdminDiscovery(w, "minecraft_servers.html", data)
-}
-
-func (a *App) addServerWizardPage(w http.ResponseWriter, r *http.Request) {
-	session, client, identity, ok := a.setupWizardRequest(w, r, false)
-	if !ok {
-		return
-	}
-	if a.redirectCurrentSetupOperation(w, r, session, client) {
-		return
-	}
-	draft, exists := addServerDrafts.get(a, session)
-	if r.URL.Query().Get("new") == "1" {
-		// A fresh launch must not discard an uncertain or partially created server.
-		if exists && (draft.CreationAttempted || draft.CoreCreated) {
-			http.Redirect(w, r, addServerBasePath+"/review", http.StatusSeeOther)
-			return
-		}
-		addServerReviews.delete(a, session)
-		addServerDrafts.delete(a, session)
-		http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
-		return
-	}
-	if !exists {
-		draft = setupDraft{AddServer: true}
-	}
-	if draft.CurrentStep == setupReviewStep {
-		http.Redirect(w, r, addServerBasePath+"/review", http.StatusSeeOther)
-		return
-	}
-	if draft.Started && (draft.CurrentStep == setupStorageStep || draft.CurrentStep == setupBackupsStep) {
-		inventory, err := client.AdminStorage(r.Context(), session)
-		if err != nil {
-			a.handleAdminDiscoveryError(w, r, err)
-			return
-		}
-		draft.Inventory = inventory
-		addServerDrafts.save(a, session, draft)
-	}
-	a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "")
 }
 
 // Same Phase 1 friendly-name rules, with a required non-empty name for this UI.
@@ -412,81 +357,4 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 		}
 	}
 	return draft, nil
-}
-
-func (a *App) addServerWizardStart(w http.ResponseWriter, r *http.Request) {
-	session, client, _, ok := a.setupWizardRequest(w, r, true)
-	if !ok {
-		return
-	}
-	draft, err := a.newAddServerDraft(r.Context(), session, client)
-	if err != nil {
-		message := "Server defaults are unavailable. Check existing server configuration and appliance storage, then try again."
-		if detail, ok := api.ErrorMessage(err); ok {
-			message += " " + detail
-		}
-		http.Error(w, message, http.StatusServiceUnavailable)
-		return
-	}
-	draft.Mode = "advanced"
-
-	addServerReviews.delete(a, session)
-	addServerDrafts.save(a, session, draft)
-	http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
-}
-
-func (a *App) addServerReviewState(ctx context.Context, session string, draft setupDraft) (setupReviewState, error) {
-	if !setupDraftReadyForReview(draft) {
-		return setupReviewState{}, errors.New("Complete all six setup steps before creating the server.")
-	}
-	client, ok := a.api.(adminDiscoveryAPI)
-	if !ok {
-		return setupReviewState{}, errors.New("Setup planning is unavailable.")
-	}
-	state, err, _, ready := a.setupReviewState(ctx, session, client, draft)
-	if !ready {
-		return state, err
-	}
-	return state, nil
-}
-
-func (a *App) addServerWizardReview(w http.ResponseWriter, r *http.Request) {
-	session, _, identity, ok := a.setupWizardRequest(w, r, false)
-	if !ok {
-		return
-	}
-	draft, exists := addServerDrafts.get(a, session)
-	if !exists || !setupDraftReadyForReview(draft) {
-		http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
-		return
-	}
-	state, err := a.addServerReviewState(r.Context(), session, draft)
-	message := draft.CreationError
-	if err != nil {
-		state = setupReviewState{AddServer: true, SetupMode: draft.Mode, DisplayName: draft.DisplayName}
-		message = err.Error()
-		w.WriteHeader(http.StatusBadRequest)
-	}
-	state.CreationBlocked = draft.CreationAttempted && !draft.CoreCreated
-	a.renderSetupReview(w, identity, state, csrfFromRequest(r), message)
-}
-
-func (a *App) addServerWizardReviewBack(w http.ResponseWriter, r *http.Request) {
-	session, _, _, ok := a.setupWizardRequest(w, r, true)
-	if !ok {
-		return
-	}
-	draft, exists := addServerDrafts.get(a, session)
-	if exists {
-		if draft.Mode == "recommended" && !draft.CoreCreated {
-			draft.Started = false
-			draft.SimpleState = 3
-			draft.CurrentStep = setupServerStep
-		} else {
-			draft.CurrentStep = setupBackupsStep
-		}
-		addServerDrafts.save(a, session, draft)
-		addServerReviews.delete(a, session)
-	}
-	http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
 }

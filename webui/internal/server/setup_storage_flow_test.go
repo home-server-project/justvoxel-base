@@ -25,7 +25,7 @@ func TestAdvancedWizardHasSixCombinedSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	server := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", "")).Body.String()
 	if strings.Contains(server, "Timezone follows") {
@@ -40,7 +40,7 @@ func TestAdvancedWizardHasSixCombinedSteps(t *testing.T) {
 	if rr := saveConnectionsStep(t, app, values); rr.Code != http.StatusSeeOther {
 		t.Fatal(rr.Code)
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupServerStep || draft.Minecraft.ImageTag != "java21" || draft.Minecraft.Version != "1.21.8" || draft.Minecraft.VersionComplete {
 		t.Fatal("Cross-play Back lost version edits")
 	}
@@ -58,12 +58,12 @@ func TestAdvancedWizardHasSixCombinedSteps(t *testing.T) {
 	if rr := saveConnectionsStep(t, app, values); rr.Code != http.StatusSeeOther {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupMemoryStep || !draft.Minecraft.VersionComplete {
 		t.Fatal("combined validation did not advance to Memory")
 	}
 	_ = saveResourcesStep(t, app, validResourceValues())
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupStorageStep || !draft.Minecraft.Complete {
 		t.Fatal("Memory did not advance to Storage")
 	}
@@ -82,7 +82,7 @@ func TestNormalSetupStorageSelectsBackendFilesystemIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	advanceToStorage(t, app)
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()

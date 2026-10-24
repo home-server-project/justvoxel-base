@@ -105,7 +105,7 @@ type setupDraftStore struct {
 	drafts map[setupDraftKey]setupDraft
 }
 
-var firstRunSetupDrafts = setupDraftStore{drafts: make(map[setupDraftKey]setupDraft)}
+var setupDrafts = setupDraftStore{drafts: make(map[setupDraftKey]setupDraft)}
 
 type setupWizardStepView struct {
 	Number      int
@@ -173,7 +173,8 @@ var setupWizardSteps = []setupWizardStepView{
 func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /setup", a.setupWizardPage)
 	mux.HandleFunc("POST /setup/start", a.setupWizardStart)
-	mux.HandleFunc("POST /setup/recommended", a.setupWizardRecommended)
+	mux.HandleFunc("POST /setup/recommended", a.setupWizardSimple)
+	mux.HandleFunc("POST /setup/simple", a.setupWizardSimple)
 	mux.HandleFunc("POST /setup/server", a.setupWizardSaveServer)
 	mux.HandleFunc("POST /setup/connections", a.setupWizardSaveConnections)
 	mux.HandleFunc("POST /setup/resources", a.setupWizardSaveResources)
@@ -193,7 +194,7 @@ func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	draft, exists := setupDraftsFor(r).get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !draft.Started || draft.CurrentStep != setupCrossplayStep {
 		http.Error(w, "Version setup is unavailable", http.StatusConflict)
 		return
@@ -225,12 +226,23 @@ func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
 	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
+	draft, exists := setupDrafts.get(a, session)
+	if isAddServerRequest(r) && r.URL.Query().Get("new") == "1" {
+		// Never discard another context or uncertain/partially created evidence.
+		if exists && (!draft.AddServer || draft.CreationAttempted || draft.CoreCreated) {
+			http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
+			return
+		}
+		setupReviews.delete(a, session)
+		setupDrafts.delete(a, session)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
 	if !exists {
-		draft = setupDraft{}
+		draft = setupDraft{AddServer: isAddServerRequest(r)}
 	} else if draft.Started && draft.CurrentStep == setupReviewStep {
 		if setupDraftReadyForReview(draft) {
-			http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
+			http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
 			return
 		}
 		// A revisited form may have invalidated a previously visited Review.
@@ -248,7 +260,7 @@ func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
 		default:
 			draft.CurrentStep = setupBackupsStep
 		}
-		firstRunSetupDrafts.save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 	} else if draft.Started && (draft.CurrentStep == setupStorageStep || draft.CurrentStep == setupBackupsStep) {
 		storage, err := client.AdminStorage(r.Context(), session)
 		if err != nil {
@@ -256,9 +268,31 @@ func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		draft.Inventory = storage
-		firstRunSetupDrafts.save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 	}
 	a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "")
+}
+
+// Initialization is the only context-specific entry into the shared wizard.
+func (a *App) newSetupDraft(ctx context.Context, session string, client adminDiscoveryAPI, addServer bool) (setupDraft, error) {
+	if addServer {
+		return a.newAddServerDraft(ctx, session, client)
+	}
+	diagnosticID := a.beginSetupDiagnosticBestEffort(ctx, client, session)
+	defaults, err := client.AdminSetupDefaults(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	storage, err := client.AdminStorage(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	draft := draftFromSetupDefaults(defaults, storage)
+	draft.DisplayName = "Minecraft server"
+	draft.StartOnBoot, draft.StartAfterSetup = true, true
+	draft.DiagnosticSessionID = diagnosticID
+	a.recordSetupDraftDiagnosticBestEffort(ctx, client, session, "initial WebUI setup defaults loaded", draft)
+	return draft, nil
 }
 
 func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
@@ -269,92 +303,23 @@ func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
 	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
-	diagnosticID := a.beginSetupDiagnosticBestEffort(r.Context(), client, session)
-	defaults, err := client.AdminSetupDefaults(r.Context(), session)
+	draft, err := a.newSetupDraft(r.Context(), session, client, isAddServerRequest(r))
 	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
+		if isAddServerRequest(r) {
+			message := "Server defaults are unavailable. Check existing server configuration and appliance storage, then try again."
+			if detail, ok := api.ErrorMessage(err); ok {
+				message += " " + detail
+			}
+			http.Error(w, message, http.StatusServiceUnavailable)
+		} else {
+			a.handleAdminDiscoveryError(w, r, err)
+		}
 		return
 	}
-	storage, err := client.AdminStorage(r.Context(), session)
-	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
-		return
-	}
-	firstRunSetupReviews.delete(a, session)
-	firstRunSetupDrafts.start(a, session, normalizedSetupDefaults(defaults), storage)
-	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
-		draft.Mode = "advanced"
-		draft.DisplayName = "Minecraft server"
-		draft.DiagnosticSessionID = diagnosticID
-		firstRunSetupDrafts.save(a, session, draft)
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "initial WebUI setup defaults loaded", draft)
-	}
-	http.Redirect(w, r, "/setup", http.StatusSeeOther)
-}
-
-func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
-	session, client, _, ok := a.setupWizardRequest(w, r, true)
-	if !ok {
-		return
-	}
-	if a.redirectCurrentSetupOperation(w, r, session, client) {
-		return
-	}
-	serverType := strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
-	if serverType != "paper" && serverType != "purpur" && serverType != "vanilla" {
-		http.Error(w, "selected Minecraft server type is not available yet", http.StatusBadRequest)
-		return
-	}
-
-	diagnosticID := a.beginSetupDiagnosticBestEffort(r.Context(), client, session)
-	defaults, err := client.AdminSetupDefaults(r.Context(), session)
-	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
-		return
-	}
-	storage, err := client.AdminStorage(r.Context(), session)
-	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
-		return
-	}
-
-	firstRunSetupReviews.delete(a, session)
-	firstRunSetupDrafts.start(a, session, normalizedSetupDefaults(defaults), storage)
-	draft, exists := firstRunSetupDrafts.get(a, session)
-	if !exists {
-		http.Error(w, "could not create setup draft", http.StatusInternalServerError)
-		return
-	}
-
-	draft.Mode = "recommended"
-	if err := a.resolveRecommendedSetupStorage(r.Context(), session, &draft); err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	draft.DiagnosticSessionID = diagnosticID
-	draft.Minecraft.ServerType = serverType
-	draft.Server.BedrockEnabled = recommendedServerSupportsBedrock(serverType)
-	draft.Server.Complete = true
-	draft.Minecraft.ConnectionsComplete = true
-	draft.Minecraft.ResourcesComplete = true
-	draft.Minecraft.VersionComplete = true
-	draft.Minecraft.Complete = true
-	draft.Storage.Complete = true
-	draft.Backups.Complete = true
-	draft.CurrentStep = setupReviewStep
-
-	if err := validateSetupServer(draft.Server); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := validateSetupMinecraft(draft.Minecraft, draft.Defaults); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	firstRunSetupDrafts.save(a, session, draft)
-	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "recommended WebUI setup defaults accepted", draft)
-	http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
+	draft.Mode = "advanced"
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 }
 
 func validSetupServerType(value string) bool {
@@ -379,7 +344,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	draft, exists := setupDraftsFor(r).get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !draft.Started {
 		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
@@ -394,7 +359,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validSetupServerType(serverType) {
 		draft.Server.Complete = false
-		setupDraftsFor(r).save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "Selected Minecraft server software is not available yet.")
 		return
@@ -432,13 +397,11 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if draft.AddServer || draft.Mode == "advanced" {
 		draft.DisplayName = r.FormValue("display_name")
-		if draft.AddServer {
-			draft.StartAfterSetup = r.FormValue("start_after_setup") == "on"
-			draft.StartOnBoot = r.FormValue("start_on_boot") == "on"
-		}
+		draft.StartAfterSetup = r.FormValue("start_after_setup") == "on"
+		draft.StartOnBoot = r.FormValue("start_on_boot") == "on"
 		if err := a.validateAddServerName(r.Context(), session, draft.DisplayName); err != nil {
 			draft.Server.Complete = false
-			setupDraftsFor(r).save(a, session, draft)
+			setupDrafts.save(a, session, draft)
 			w.WriteHeader(http.StatusBadRequest)
 			a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 			return
@@ -451,7 +414,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	draft.Server.MaxPlayers = strings.TrimSpace(r.FormValue("max_players"))
 	if err := validateSetupServer(draft.Server); err != nil {
 		draft.Server.Complete = false
-		setupDraftsFor(r).save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "server settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
@@ -459,7 +422,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validSetupGameMode(draft.Minecraft.GameMode) || serverType == "bedrock" && draft.Minecraft.GameMode == "spectator" {
 		draft.Server.Complete = false
-		setupDraftsFor(r).save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "Choose a valid game mode.")
 		return
@@ -467,7 +430,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	if serverType == "bedrock" {
 		draft.Minecraft.ResolvedVersion = ""
 		if err := a.resolveSetupRuntime(r.Context(), session, &draft, false); err != nil {
-			setupDraftsFor(r).save(a, session, draft)
+			setupDrafts.save(a, session, draft)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 			return
@@ -475,8 +438,8 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	}
 	draft.Server.Complete = true
 	draft.CurrentStep = setupCrossplayStep
-	setupReviewsFor(r).delete(a, session)
-	setupDraftsFor(r).save(a, session, draft)
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "server settings saved", draft)
 	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 }
@@ -486,7 +449,7 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	draft, exists := setupDraftsFor(r).get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !draft.Started {
 		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
@@ -504,13 +467,13 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 	draft.Minecraft.ConnectionsComplete = false
 	draft.Minecraft.VersionComplete = false
 	draft.Minecraft.Complete = false
-	setupReviewsFor(r).delete(a, session)
+	setupReviews.delete(a, session)
 
 	if r.FormValue("direction") == "back" {
 		draft.Minecraft.ConnectionsComplete = false
 		draft.CurrentStep = setupServerStep
-		setupReviewsFor(r).delete(a, session)
-		setupDraftsFor(r).save(a, session, draft)
+		setupReviews.delete(a, session)
+		setupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings changed; user returned to Server", draft)
 		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
@@ -520,7 +483,7 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 			draft.Server.BedrockEnabled = false
 		}
 		draft.Minecraft.ConnectionsComplete = false
-		setupDraftsFor(r).save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
@@ -533,8 +496,8 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 	draft.Minecraft.ConnectionsComplete = true
 	draft.Minecraft.Complete = draft.Minecraft.ResourcesComplete && draft.Minecraft.VersionComplete
 	draft.CurrentStep = setupMemoryStep
-	setupReviewsFor(r).delete(a, session)
-	setupDraftsFor(r).save(a, session, draft)
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings saved", draft)
 	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 }
@@ -544,7 +507,7 @@ func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	draft, exists := setupDraftsFor(r).get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !draft.Started {
 		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
@@ -557,8 +520,8 @@ func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
 		draft.Minecraft.ResourcesComplete = false
 		draft.Minecraft.Complete = false
 		draft.CurrentStep = setupCrossplayStep
-		setupReviewsFor(r).delete(a, session)
-		setupDraftsFor(r).save(a, session, draft)
+		setupReviews.delete(a, session)
+		setupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings changed; user returned to Cross-play", draft)
 		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
@@ -566,7 +529,7 @@ func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
 	if err := validateSetupResources(draft.Minecraft, draft.Defaults); err != nil {
 		draft.Minecraft.ResourcesComplete = false
 		draft.Minecraft.Complete = false
-		setupDraftsFor(r).save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
@@ -575,8 +538,8 @@ func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
 	draft.Minecraft.ResourcesComplete = true
 	draft.Minecraft.Complete = draft.Minecraft.ConnectionsComplete && draft.Minecraft.VersionComplete
 	draft.CurrentStep = setupStorageStep
-	setupReviewsFor(r).delete(a, session)
-	setupDraftsFor(r).save(a, session, draft)
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings saved", draft)
 	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 }
@@ -592,7 +555,7 @@ func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target, _ := strconv.Atoi(r.FormValue("step"))
-	if !setupDraftsFor(r).navigateTo(a, session, direction, target) {
+	if !setupDrafts.navigateTo(a, session, direction, target) {
 		if direction != "jump" {
 			http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 			return
@@ -600,8 +563,8 @@ func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "setup step has not been visited", http.StatusBadRequest)
 		return
 	}
-	setupReviewsFor(r).delete(a, session)
-	if draft, exists := setupDraftsFor(r).get(a, session); exists {
+	setupReviews.delete(a, session)
+	if draft, exists := setupDrafts.get(a, session); exists {
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "wizard navigation changed", draft)
 		if draft.CurrentStep == setupReviewStep {
 			http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
@@ -616,11 +579,14 @@ func (a *App) setupWizardCancel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if draft, exists := setupDraftsFor(r).get(a, session); exists {
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
+	if draft, exists := setupDrafts.get(a, session); exists {
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "WebUI setup wizard cancelled", draft)
 	}
-	setupReviewsFor(r).delete(a, session)
-	setupDraftsFor(r).delete(a, session)
+	setupReviews.delete(a, session)
+	setupDrafts.delete(a, session)
 	if isAddServerRequest(r) {
 		a.renderAdminDiscovery(w, "add_server_cancelled.html", nil)
 		return
@@ -655,11 +621,20 @@ func (a *App) setupWizardRequest(w http.ResponseWriter, r *http.Request, require
 			http.Error(w, "Complete appliance setup before adding a server.", http.StatusConflict)
 			return "", nil, api.SessionInfo{}, false
 		}
+		if draft, exists := setupDrafts.get(a, session); exists && !draft.AddServer {
+			if a.redirectCurrentSetupOperation(w, r, session, client) {
+				return "", nil, api.SessionInfo{}, false
+			}
+			http.Error(w, "Finish or cancel the existing setup before adding a server.", http.StatusConflict)
+			return "", nil, api.SessionInfo{}, false
+		}
 		return session, client, identity, true
 	}
 	if configuration.Configured {
-		firstRunSetupReviews.delete(a, session)
-		firstRunSetupDrafts.delete(a, session)
+		if draft, exists := setupDrafts.get(a, session); exists && !draft.AddServer {
+			setupReviews.delete(a, session)
+			setupDrafts.delete(a, session)
+		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return "", nil, api.SessionInfo{}, false
 	}
@@ -670,11 +645,9 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 	if draft.SimpleState == 0 {
 		draft.SimpleState = 1
 	}
-	if draft.AddServer {
-		candidate, valid := setupMemoryMiB(draft.Minecraft.ContainerMemory)
-		draft.StartAfterUnavailable = draft.StartCapacityUnknown || !valid || draft.RunningMemoryMiB+candidate+1024 > draft.Defaults.SystemMemoryMiB
-		draft.StartBootUnavailable = draft.BootCapacityUnknown || !valid || draft.BootMemoryMiB+candidate+1024 > draft.Defaults.SystemMemoryMiB
-	}
+	candidate, valid := setupMemoryMiB(draft.Minecraft.ContainerMemory)
+	draft.StartAfterUnavailable = draft.StartCapacityUnknown || !valid || draft.RunningMemoryMiB+candidate+1024 > draft.Defaults.SystemMemoryMiB
+	draft.StartBootUnavailable = draft.BootCapacityUnknown || !valid || draft.BootMemoryMiB+candidate+1024 > draft.Defaults.SystemMemoryMiB
 	steps := make([]setupWizardStepView, len(setupWizardSteps))
 	copy(steps, setupWizardSteps)
 	current := setupWizardStepView{}
@@ -707,9 +680,6 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 		basePath = addServerBasePath
 	}
 	softwareGroups := setupSoftwareGroups()
-	if draft.AddServer {
-		softwareGroups = addServerSoftwareGroups()
-	}
 	data := setupWizardPageData{
 		SoftwareGroups: softwareGroups, SimpleState: draft.SimpleState, SimpleFamily: draft.SimpleFamily, SimpleSoftware: simpleSoftware(draft.SimpleFamily),
 		AddServer: draft.AddServer, BasePath: basePath, DisplayName: draft.DisplayName, RunningMemory: runningMemory,

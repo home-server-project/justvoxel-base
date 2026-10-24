@@ -123,7 +123,7 @@ func TestVersionValidationPreservesDraftOnRefresh(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
 			startSetup(t, app)
 			_ = saveServerStep(t, app, validServerValues())
 			values := validConnectionValues()
@@ -139,7 +139,7 @@ func TestVersionValidationPreservesDraftOnRefresh(t *testing.T) {
 			if rr.Code != tc.code {
 				t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 			}
-			draft, _ := firstRunSetupDrafts.get(app, "session-token")
+			draft, _ := setupDrafts.get(app, "session-token")
 			expectedStep := setupCrossplayStep
 			if tc.code == http.StatusSeeOther {
 				expectedStep = setupMemoryStep
@@ -170,20 +170,20 @@ func TestVersionPreviewUsesCurrentCrossplayWithoutChangingDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/version-preview?policy=recommended", ""))
 	if rr.Code != http.StatusConflict {
 		t.Fatal("preview allowed before Cross-play")
 	}
 	_ = saveServerStep(t, app, validServerValues())
-	before, _ := firstRunSetupDrafts.get(app, "session-token")
+	before, _ := setupDrafts.get(app, "session-token")
 	for _, enabled := range []string{"on", "off"} {
 		rr = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/version-preview?policy=pinned&version=1.21.8&bedrock_enabled="+enabled, ""))
 		if rr.Code != http.StatusOK || client.bedrock != (enabled == "on") {
 			t.Fatalf("preview: %d bedrock=%v", rr.Code, client.bedrock)
 		}
-		draft, _ := firstRunSetupDrafts.get(app, "session-token")
+		draft, _ := setupDrafts.get(app, "session-token")
 		if draft.Server != before.Server || draft.Minecraft != before.Minecraft || draft.CurrentStep != setupCrossplayStep {
 			t.Fatal("preview changed draft")
 		}
@@ -234,7 +234,7 @@ func TestSetupInventoryRefreshRetainsActualMountedPartition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	advanceToStorage(t, app)
 	for i := range client.storage.Devices {
 		if client.storage.Devices[i].Path == "/dev/vdb1" {
@@ -245,7 +245,7 @@ func TestSetupInventoryRefreshRetainsActualMountedPartition(t *testing.T) {
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `data-setup-existing-partition data-device="/dev/vdb1" data-mountpoint="/var/mnt/vdb1"`) {
 		t.Fatal("mounted partition is not offered with its actual mount point")
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	storage := setupStorageDraft{Type: "partition", Device: "/dev/vdb1", MountPoint: "/var/mnt/vdb1", Path: "/var/mnt/vdb1/minecraft"}
 	if err := validateSetupStorage(storage, draft.Inventory, draft.Defaults); err != nil {
 		t.Fatal(err)
@@ -272,23 +272,23 @@ func TestIncompleteVisitedReviewCannotSkipFormsOrLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupReviewStep || draft.HighestStep != setupReviewStep || !setupDraftReadyForReview(draft) {
 		t.Fatal("six-step flow did not reach validated Review")
 	}
 	draft.Minecraft.ConnectionsComplete = false
 	draft.Minecraft.Complete = false
 	draft.CurrentStep = setupCrossplayStep
-	firstRunSetupDrafts.save(app, "session-token", draft)
+	setupDrafts.save(app, "session-token", draft)
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", "csrf=csrf-token&direction=jump&step=6"))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatal("jump skipped incomplete Cross-play")
 	}
 	draft.CurrentStep = setupReviewStep
-	firstRunSetupDrafts.save(app, "session-token", draft)
+	setupDrafts.save(app, "session-token", draft)
 	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "<h2>Cross-play</h2>") {
 		t.Fatalf("incomplete Review looped: %d", rr.Code)
@@ -304,10 +304,10 @@ func TestServerSoftwareChangeRequiresCrossplayRevalidationBeforeReview(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
-	completed, _ := firstRunSetupDrafts.get(app, "session-token")
+	completed, _ := setupDrafts.get(app, "session-token")
 	if !setupDraftReadyForReview(completed) {
 		t.Fatal("wizard did not reach validated Review")
 	}
@@ -320,7 +320,7 @@ func TestServerSoftwareChangeRequiresCrossplayRevalidationBeforeReview(t *testin
 	if rr := saveServerStep(t, app, values); rr.Code != http.StatusSeeOther {
 		t.Fatalf("software change: %d: %s", rr.Code, rr.Body.String())
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.Minecraft.ServerType != "purpur" || draft.CurrentStep != setupCrossplayStep || draft.Minecraft.ConnectionsComplete || draft.Minecraft.Complete {
 		t.Fatal("software change did not invalidate Cross-play and Minecraft completion")
 	}
@@ -337,7 +337,7 @@ func TestServerSoftwareChangeRequiresCrossplayRevalidationBeforeReview(t *testin
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("Review jump before revalidation: %d", rr.Code)
 		}
-		draft, _ := firstRunSetupDrafts.get(app, "session-token")
+		draft, _ := setupDrafts.get(app, "session-token")
 		if draft.CurrentStep != setupCrossplayStep || setupDraftReadyForReview(draft) {
 			t.Fatal("blocked Review jump left Cross-play")
 		}
@@ -356,7 +356,7 @@ func TestServerSoftwareChangeRequiresCrossplayRevalidationBeforeReview(t *testin
 	if client.software != "purpur" || client.policy != "recommended" || !client.bedrock {
 		t.Fatal("Cross-play revalidation used stale choices")
 	}
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupMemoryStep || !draft.Minecraft.ConnectionsComplete || !draft.Minecraft.Complete {
 		t.Fatal("successful Cross-play revalidation did not restore completion")
 	}
@@ -367,7 +367,7 @@ func TestServerSoftwareChangeRequiresCrossplayRevalidationBeforeReview(t *testin
 	_ = saveResourcesStep(t, app, validResourceValues())
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", "csrf=csrf-token&storage_type=system&direction=next"))
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/backups", "csrf=csrf-token&backup_type=system&backup_keep=7&backup_daily_time=04%3A30&backup_automatic=on&direction=next"))
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if !setupDraftReadyForReview(draft) {
 		t.Fatal("revalidated wizard did not reach Review")
 	}
@@ -379,8 +379,8 @@ func TestSixStepBackRoutesPreserveMemoryStorageAndBackups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	startSetup(t, app)
 	_ = saveServerStep(t, app, validServerValues())
 	_ = saveConnectionsStep(t, app, validConnectionValues())
@@ -391,7 +391,7 @@ func TestSixStepBackRoutesPreserveMemoryStorageAndBackups(t *testing.T) {
 	if rr := saveResourcesStep(t, app, memory); rr.Code != http.StatusSeeOther {
 		t.Fatal(rr.Code)
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupCrossplayStep || draft.Minecraft.JavaMemory != "5G" || draft.Minecraft.ContainerMemory != "7G" {
 		t.Fatal("Memory Back lost values or skipped Cross-play")
 	}
@@ -399,21 +399,21 @@ func TestSixStepBackRoutesPreserveMemoryStorageAndBackups(t *testing.T) {
 	memory.Set("direction", "next")
 	_ = saveResourcesStep(t, app, memory)
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", "csrf=csrf-token&storage_type=system&direction=back"))
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if rr.Code != http.StatusSeeOther || draft.CurrentStep != setupMemoryStep || draft.Storage.Path != draft.Defaults.DataPath {
 		t.Fatal("Storage Back lost destination or skipped Memory")
 	}
 	_ = saveResourcesStep(t, app, memory)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", "csrf=csrf-token&storage_type=system&direction=next"))
 	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/backups", "csrf=csrf-token&backup_type=system&backup_keep=19&backup_daily_time=09%3A37&backup_automatic=on&direction=back"))
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if rr.Code != http.StatusSeeOther || draft.CurrentStep != setupStorageStep || draft.Backups.Keep != "19" || draft.Backups.DailyTime != "09:37" || !draft.Backups.Automatic {
 		t.Fatal("Backups Back lost settings or skipped Storage")
 	}
 }
 
 // Both modes reach Review through their real forms before navigation is tested.
-func sixStepProgressFixture(t *testing.T, addServer bool) (*App, string, *setupDraftStore, *setupDraftStore) {
+func sixStepProgressFixture(t *testing.T, addServer bool) (*App, string, *setupDraftStore) {
 	t.Helper()
 	if !addServer {
 		app, err := New(setupReviewClient(), Config{Version: "test", ManagementAPI: "v1"})
@@ -421,16 +421,13 @@ func sixStepProgressFixture(t *testing.T, addServer bool) (*App, string, *setupD
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			firstRunSetupDrafts.delete(app, "session-token")
-			firstRunSetupReviews.delete(app, "session-token")
-			addServerDrafts.delete(app, "session-token")
+			setupDrafts.delete(app, "session-token")
+			setupReviews.delete(app, "session-token")
 		})
 		advanceSetupToReview(t, app)
-		addServerDrafts.save(app, "session-token", setupDraft{AddServer: true, DisplayName: "Separate Add Server draft"})
-		return app, "/setup", &firstRunSetupDrafts, &addServerDrafts
+		return app, "/setup", &setupDrafts
 	}
 	app, _ := newAddServerTestApp(t)
-	firstRunSetupDrafts.save(app, "session-token", setupDraft{Started: true, CurrentStep: setupMemoryStep, Server: setupServerDraft{MOTD: "Separate first-run draft"}})
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
 	server := validServerValues()
 	server.Set("display_name", "Family Survival")
@@ -440,10 +437,10 @@ func sixStepProgressFixture(t *testing.T, addServer bool) (*App, string, *setupD
 	connections.Set("bedrock_port", "19134")
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/connections", connections))
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/resources", url.Values{"java_memory": {"1G"}, "container_memory": {"2G"}, "direction": {"next"}}))
-	draft, _ := addServerDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/storage", url.Values{"storage_type": {draft.Storage.Type}, "storage_path": {draft.Storage.Path}, "direction": {"next"}}))
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/backups", url.Values{"backup_type": {draft.Backups.Type}, "backup_path": {draft.Backups.Path}, "backup_daily_time": {"06:00"}, "backup_keep": {"9"}, "backup_automatic": {"on"}, "direction": {"next"}}))
-	return app, "/minecraft/servers/add", &addServerDrafts, &firstRunSetupDrafts
+	return app, "/minecraft/servers/add", &setupDrafts
 }
 
 func assertRenderedSixStepProgress(t *testing.T, body, basePath string, current int) {
@@ -488,12 +485,11 @@ func assertRenderedSixStepProgress(t *testing.T, body, basePath string, current 
 func TestSixStepProgressCardsOnlyNavigateBackward(t *testing.T) {
 	for _, addServer := range []bool{false, true} {
 		t.Run(fmt.Sprintf("AddServer=%t", addServer), func(t *testing.T) {
-			app, basePath, drafts, otherDrafts := sixStepProgressFixture(t, addServer)
+			app, basePath, drafts := sixStepProgressFixture(t, addServer)
 			complete, _ := drafts.get(app, "session-token")
 			if !setupDraftReadyForReview(complete) || complete.CurrentStep != setupReviewStep {
 				t.Fatal("fixture did not complete all six steps")
 			}
-			otherBefore, _ := otherDrafts.get(app, "session-token")
 			for current := setupServerStep; current <= setupReviewStep; current++ {
 				draft := complete
 				draft.CurrentStep = current
@@ -516,10 +512,7 @@ func TestSixStepProgressCardsOnlyNavigateBackward(t *testing.T) {
 					if !reflect.DeepEqual(expected, after) {
 						t.Fatalf("jump %d -> %d changed draft values", current, target)
 					}
-					otherAfter, exists := otherDrafts.get(app, "session-token")
-					if !exists || !reflect.DeepEqual(otherBefore, otherAfter) {
-						t.Fatal("navigation changed or resumed the other wizard's draft")
-					}
+
 				}
 			}
 		})
@@ -539,17 +532,14 @@ func TestSixStepRecommendedFirstRunOmitsProgressAndKeepsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		firstRunSetupDrafts.delete(app, "session-token")
-		firstRunSetupReviews.delete(app, "session-token")
-		addServerDrafts.delete(app, "session-token")
+		setupDrafts.delete(app, "session-token")
+		setupReviews.delete(app, "session-token")
 	})
-	addServerDrafts.save(app, "session-token", setupDraft{AddServer: true, DisplayName: "Separate draft"})
-	otherBefore, _ := addServerDrafts.get(app, "session-token")
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", "csrf=csrf-token&server_type=paper"))
-	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/review" {
+	rr := completeSimpleSetup(t, app, "/setup", "paper")
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup" {
 		t.Fatalf("recommended: %d %q", rr.Code, rr.Header().Get("Location"))
 	}
-	draft, exists := firstRunSetupDrafts.get(app, "session-token")
+	draft, exists := setupDrafts.get(app, "session-token")
 	if !exists || draft.AddServer || draft.Mode != "recommended" || draft.CurrentStep != setupReviewStep || !setupDraftReadyForReview(draft) || draft.Minecraft.ServerType != "paper" || !draft.Server.BedrockEnabled || draft.Storage.Type != "system" || draft.Backups.Type != "system" || !draft.Backups.Automatic || draft.Minecraft.JavaMemory != draft.Defaults.JavaMemory || draft.Minecraft.ContainerMemory != draft.Defaults.ContainerMemory {
 		t.Fatal("recommended first-run defaults or direct Review changed")
 	}
@@ -557,8 +547,5 @@ func TestSixStepRecommendedFirstRunOmitsProgressAndKeepsDefaults(t *testing.T) {
 	if page.Code != http.StatusOK || strings.Contains(page.Body.String(), `class="setup-progress"`) || strings.Contains(page.Body.String(), `action="/setup/navigate"`) || !strings.Contains(page.Body.String(), `class="setup-review-summary"`) {
 		t.Fatalf("recommended Review presentation changed: %d", page.Code)
 	}
-	otherAfter, _ := addServerDrafts.get(app, "session-token")
-	if !reflect.DeepEqual(otherBefore, otherAfter) {
-		t.Fatal("recommended first-run changed the Add Server draft")
-	}
+
 }

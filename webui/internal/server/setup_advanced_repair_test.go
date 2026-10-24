@@ -36,7 +36,7 @@ func TestSetupStorageBrowserFormSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	advanceToStorage(t, app)
 	type page struct {
 		Name string `json:"name"`
@@ -52,9 +52,9 @@ func TestSetupStorageBrowserFormSubmission(t *testing.T) {
 		pages = append(pages, page{name, rr.Body.String()})
 	}
 	capture("storage-system")
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	draft.Storage.Type = "partition"
-	firstRunSetupDrafts.save(app, "session-token", draft)
+	setupDrafts.save(app, "session-token", draft)
 	capture("storage-custom")
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", "csrf=csrf-token&storage_type=system&direction=next"))
 	if rr.Code != http.StatusSeeOther {
@@ -63,7 +63,7 @@ func TestSetupStorageBrowserFormSubmission(t *testing.T) {
 	capture("backups-system")
 	// The shared component still renders the full migration workflow for Control
 	// Center. Setup isolation must not remove or disable those controls globally.
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	controlCenter := setupStorageBrowserData(draft, "csrf-token", false)
 	controlCenter.SetupPurpose = ""
 	var rendered bytes.Buffer

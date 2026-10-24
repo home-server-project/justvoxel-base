@@ -44,7 +44,7 @@ type setupReviewStore struct {
 	reviews map[setupDraftKey]setupReviewState
 }
 
-var firstRunSetupReviews = setupReviewStore{reviews: make(map[setupDraftKey]setupReviewState)}
+var setupReviews = setupReviewStore{reviews: make(map[setupDraftKey]setupReviewState)}
 
 type setupReviewPageData struct {
 	AddServer          bool
@@ -79,7 +79,7 @@ func (a *App) registerSetupWizardReviewRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /setup/review/configuration", a.setupWizardReviewConfiguration)
 	mux.HandleFunc("POST /setup/review/eula", a.setupWizardReviewEULA)
 	mux.HandleFunc("POST /setup/review/back", a.setupWizardReviewBack)
-	mux.HandleFunc("POST /setup/review/cancel", a.setupWizardReviewCancel)
+	mux.HandleFunc("POST /setup/review/cancel", a.setupWizardCancel)
 	a.registerSetupWizardApplyRoutes(mux)
 }
 
@@ -91,14 +91,16 @@ func (a *App) setupWizardReviewPage(w http.ResponseWriter, r *http.Request) {
 	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !setupDraftReadyForReview(draft) {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
 	}
 
 	state, message, status, ok := a.setupReviewState(r.Context(), session, client, draft)
+	state.CreationBlocked = draft.CreationAttempted && !draft.CoreCreated
 	if !ok {
+		state.AddServer, state.SetupMode, state.DisplayName = draft.AddServer, draft.Mode, draft.DisplayName
 		if status == http.StatusUnauthorized || status == http.StatusForbidden {
 			a.handleAdminDiscoveryError(w, r, message)
 			return
@@ -107,7 +109,7 @@ func (a *App) setupWizardReviewPage(w http.ResponseWriter, r *http.Request) {
 		a.renderSetupReview(w, identity, state, csrfFromRequest(r), setupReviewErrorMessage(message))
 		return
 	}
-	a.renderSetupReview(w, identity, state, csrfFromRequest(r), "")
+	a.renderSetupReview(w, identity, state, csrfFromRequest(r), draft.CreationError)
 }
 
 func (a *App) setupWizardReviewConfiguration(w http.ResponseWriter, r *http.Request) {
@@ -115,9 +117,9 @@ func (a *App) setupWizardReviewConfiguration(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !setupDraftReadyForReview(draft) {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
 	}
 	state, err, status, ready := a.setupReviewState(r.Context(), session, client, draft)
@@ -222,9 +224,9 @@ func (a *App) setupWizardReviewEULA(w http.ResponseWriter, r *http.Request) {
 	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !setupDraftReadyForReview(draft) {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
 	}
 	state, planErr, status, ready := a.setupReviewState(r.Context(), session, client, draft)
@@ -239,22 +241,22 @@ func (a *App) setupWizardReviewEULA(w http.ResponseWriter, r *http.Request) {
 	}
 	if submitted := r.FormValue("plan_fingerprint"); submitted == "" || submitted != state.Plan.PlanFingerprint {
 		state.EULAAccepted = false
-		firstRunSetupReviews.save(a, session, state)
+		setupReviews.save(a, session, state)
 		w.WriteHeader(http.StatusConflict)
 		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Setup changed since it was reviewed. Review the updated configuration before continuing.")
 		return
 	}
 	if r.FormValue("eula_accepted") != "on" {
 		state.EULAAccepted = false
-		firstRunSetupReviews.save(a, session, state)
+		setupReviews.save(a, session, state)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Accept the Minecraft End User License Agreement before this setup can be marked ready.")
 		return
 	}
 	state.EULAAccepted = true
-	firstRunSetupReviews.save(a, session, state)
+	setupReviews.save(a, session, state)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft EULA acceptance recorded", draft)
-	http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
+	http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
 }
 
 func (a *App) setupWizardReviewBack(w http.ResponseWriter, r *http.Request) {
@@ -265,38 +267,22 @@ func (a *App) setupWizardReviewBack(w http.ResponseWriter, r *http.Request) {
 	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !draft.Started {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
 	}
-	firstRunSetupReviews.delete(a, session)
-	if draft.Mode == "recommended" {
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "user returned from recommended Review to setup choice", draft)
-		firstRunSetupDrafts.delete(a, session)
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
-		return
+	setupReviews.delete(a, session)
+	if draft.Mode == "recommended" && !draft.CoreCreated {
+		draft.Started = false
+		draft.SimpleState = 3
+		draft.CurrentStep = setupServerStep
+	} else {
+		draft.CurrentStep = setupBackupsStep
 	}
-	draft.CurrentStep = setupBackupsStep
-	firstRunSetupDrafts.save(a, session, draft)
+	setupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "user returned from Review to Backups", draft)
-	http.Redirect(w, r, "/setup", http.StatusSeeOther)
-}
-
-func (a *App) setupWizardReviewCancel(w http.ResponseWriter, r *http.Request) {
-	session, client, _, ok := a.setupWizardRequest(w, r, true)
-	if !ok {
-		return
-	}
-	if a.redirectCurrentSetupOperation(w, r, session, client) {
-		return
-	}
-	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "WebUI setup cancelled from Review", draft)
-	}
-	firstRunSetupReviews.delete(a, session)
-	firstRunSetupDrafts.delete(a, session)
-	http.Redirect(w, r, "/setup", http.StatusSeeOther)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 }
 
 func (a *App) setupReviewState(ctx context.Context, session string, client adminDiscoveryAPI, draft setupDraft) (setupReviewState, error, int, bool) {
@@ -304,7 +290,7 @@ func (a *App) setupReviewState(ctx context.Context, session string, client admin
 	if err != nil {
 		return setupReviewState{}, err, http.StatusBadRequest, false
 	}
-	if cached, ok := setupReviewStoreForDraft(draft).get(a, session); ok && cached.DraftUpdatedAt.Equal(draft.UpdatedAt) && cached.Request == request && validSetupPlanFingerprint(cached.Plan.PlanFingerprint) {
+	if cached, ok := setupReviews.get(a, session); ok && cached.DraftUpdatedAt.Equal(draft.UpdatedAt) && cached.Request == request && validSetupPlanFingerprint(cached.Plan.PlanFingerprint) {
 		return cached, nil, http.StatusOK, true
 	}
 	planner, ok := client.(setupPlanningAPI)
@@ -335,7 +321,7 @@ func (a *App) setupReviewState(ctx context.Context, session string, client admin
 	if !validSetupPlanFingerprint(plan.PlanFingerprint) {
 		return state, errors.New("setup planning did not return a valid plan identity"), http.StatusBadGateway, false
 	}
-	setupReviewStoreForDraft(draft).save(a, session, state)
+	setupReviews.save(a, session, state)
 	return state, nil, http.StatusOK, true
 }
 
@@ -573,11 +559,4 @@ func (s *setupReviewStore) delete(app *App, session string) {
 	s.mu.Lock()
 	delete(s.reviews, key)
 	s.mu.Unlock()
-}
-
-func setupReviewStoreForDraft(draft setupDraft) *setupReviewStore {
-	if draft.AddServer {
-		return &addServerReviews
-	}
-	return &firstRunSetupReviews
 }

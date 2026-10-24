@@ -95,8 +95,8 @@ func TestSetupReviewConfigureActionRequiresAcceptedEULA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -130,8 +130,8 @@ func TestSetupReviewRequestsSMBPasswordOnlyAtExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -148,7 +148,7 @@ func TestSetupReviewRequestsSMBPasswordOnlyAtExecution(t *testing.T) {
 	}
 
 	client.plan.Requirements.SMBPasswordRequired = false
-	firstRunSetupReviews.delete(app, "session-token")
+	setupReviews.delete(app, "session-token")
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	if strings.Contains(page.Body.String(), `name="smb_password"`) {
 		t.Fatal("SMB password field rendered when the reviewed plan does not require it")
@@ -171,8 +171,8 @@ func TestSetupReviewApplyStartsExactReviewedOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	acceptSetupEULA(t, app)
@@ -192,7 +192,7 @@ func TestSetupReviewApplyStartsExactReviewedOperation(t *testing.T) {
 	if !client.applyRequest.EULAAccepted || client.applyRequest.PlanFingerprint != setupReviewFingerprint || client.applyRequest.SMBPassword != "family-secret" {
 		t.Fatalf("unexpected setup apply request: %#v", client.applyRequest)
 	}
-	state, ok := firstRunSetupReviews.get(app, "session-token")
+	state, ok := setupReviews.get(app, "session-token")
 	if !ok || client.applyRequest.Request != state.Request {
 		t.Fatalf("apply did not use the exact reviewed request: %#v vs %#v", client.applyRequest.Request, state.Request)
 	}
@@ -204,8 +204,8 @@ func TestSetupReviewApplyDoesNotMutateBeforeEULA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 
@@ -226,8 +226,8 @@ func TestSetupReviewAcceptAndContinueBindsEULAToCurrentPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	stale := url.Values{"csrf": {"csrf-token"}, "plan_fingerprint": {"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "eula_accepted": {"on"}}
@@ -235,7 +235,7 @@ func TestSetupReviewAcceptAndContinueBindsEULAToCurrentPlan(t *testing.T) {
 	if rr.Code != http.StatusConflict || client.applyCalls != 0 {
 		t.Fatalf("stale EULA started setup: %d, calls=%d", rr.Code, client.applyCalls)
 	}
-	state, _ := firstRunSetupReviews.get(app, "session-token")
+	state, _ := setupReviews.get(app, "session-token")
 	if state.EULAAccepted {
 		t.Fatal("stale plan retained EULA acceptance")
 	}
@@ -245,7 +245,7 @@ func TestSetupReviewAcceptAndContinueBindsEULAToCurrentPlan(t *testing.T) {
 	if rr.Code != http.StatusSeeOther || client.applyCalls != 1 || !client.applyRequest.EULAAccepted {
 		t.Fatalf("accept and continue failed: %d, calls=%d", rr.Code, client.applyCalls)
 	}
-	state, _ = firstRunSetupReviews.get(app, "session-token")
+	state, _ = setupReviews.get(app, "session-token")
 	if !state.EULAAccepted {
 		t.Fatal("current plan EULA acceptance was not recorded")
 	}
@@ -432,21 +432,33 @@ func TestRolledBackSetupCanStartFreshDraft(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			defer firstRunSetupReviews.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
+			defer setupReviews.delete(app, "session-token")
 			path, form, location := "/setup/start", "csrf=csrf-token", "/setup"
 			if mode == "recommended" {
-				path, form, location = "/setup/recommended", "csrf=csrf-token&server_type=paper", "/setup/review"
+				path, form, location = "/setup/simple", "csrf=csrf-token&family=plugins", "/setup"
 			}
 			start := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example"+path, form))
+			if mode == "recommended" && start.Code == http.StatusSeeOther {
+				step := sharedWizardRequest(app, http.MethodPost, "/setup", "/simple", url.Values{"server_type": {"paper"}})
+				if step.Code != http.StatusSeeOther {
+					t.Fatal(step.Code)
+				}
+				start = sharedWizardRequest(app, http.MethodPost, "/setup", "/simple", url.Values{"display_name": {"Family"}, "game_mode": {"survival"}})
+				location = "/setup"
+			}
 			if start.Code != http.StatusSeeOther || start.Header().Get("Location") != location {
 				t.Fatalf("start over returned %d %q", start.Code, start.Header().Get("Location"))
 			}
-			draft, exists := firstRunSetupDrafts.get(app, "session-token")
+			draft, exists := setupDrafts.get(app, "session-token")
 			if !exists || !draft.Started || draft.Mode != mode {
 				t.Fatalf("fresh %s draft unavailable: %#v", mode, draft)
 			}
-			wizard := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+location, ""))
+			wizardPath := location
+			if mode == "recommended" {
+				wizardPath = "/setup/review"
+			}
+			wizard := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+wizardPath, ""))
 			if wizard.Code != http.StatusOK {
 				t.Fatalf("fresh setup unavailable: %d", wizard.Code)
 			}
@@ -480,9 +492,9 @@ func TestNeedsAttentionSetupCannotStartFreshDraft(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			defer firstRunSetupReviews.delete(app, "session-token")
-			firstRunSetupReviews.save(app, "session-token", setupReviewState{EULAAccepted: true, DraftUpdatedAt: time.Now()})
+			defer setupDrafts.delete(app, "session-token")
+			defer setupReviews.delete(app, "session-token")
+			setupReviews.save(app, "session-token", setupReviewState{EULAAccepted: true, DraftUpdatedAt: time.Now()})
 			response := httptestResponse(app, authenticatedAdminRequest(entry.method, "http://example"+entry.path, "csrf=csrf-token&server_type=paper"))
 			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID {
 				t.Fatalf("recovery lock was bypassed: %d %q", response.Code, response.Header().Get("Location"))
@@ -490,10 +502,10 @@ func TestNeedsAttentionSetupCannotStartFreshDraft(t *testing.T) {
 			if client.currentCalls != 1 || client.diagnosticCalls != 0 || client.defaultsHit != 0 || client.storageHit != 0 || client.planHit != 0 || client.applyCalls != 0 {
 				t.Fatalf("entry bypassed recovery discovery: %#v", client)
 			}
-			if _, exists := firstRunSetupDrafts.get(app, "session-token"); exists {
+			if _, exists := setupDrafts.get(app, "session-token"); exists {
 				t.Fatal("recovery lock created a fresh setup draft")
 			}
-			if review, exists := firstRunSetupReviews.get(app, "session-token"); !exists || !review.EULAAccepted {
+			if review, exists := setupReviews.get(app, "session-token"); !exists || !review.EULAAccepted {
 				t.Fatal("recovery lock discarded the existing review")
 			}
 		})
@@ -537,8 +549,8 @@ func TestSetupEntryCurrentOperationErrorsFailClosed(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					defer firstRunSetupDrafts.delete(app, "session-token")
-					defer firstRunSetupReviews.delete(app, "session-token")
+					defer setupDrafts.delete(app, "session-token")
+					defer setupReviews.delete(app, "session-token")
 					method := http.MethodGet
 					if path == "/setup/start" || path == "/setup/recommended" {
 						method = http.MethodPost
@@ -553,7 +565,7 @@ func TestSetupEntryCurrentOperationErrorsFailClosed(t *testing.T) {
 					if client.currentCalls != 1 || client.diagnosticCalls != 0 || client.defaultsHit != 0 || client.storageHit != 0 || client.planHit != 0 || client.applyCalls != 0 {
 						t.Fatalf("current operation error allowed setup entry: %#v", client)
 					}
-					if _, exists := firstRunSetupDrafts.get(app, "session-token"); exists {
+					if _, exists := setupDrafts.get(app, "session-token"); exists {
 						t.Fatal("current operation error created a fresh setup draft")
 					}
 				})
@@ -656,7 +668,7 @@ func TestRuntimeRecoveryCompletionOffersFreshSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	// The WebUI consumes operation state, so legacy and durable manifests use
 	// the same recovery action. Incomplete runtime verification stays retryable.
 	client.operation.Status = "Runtime recovery failed: The Minecraft container remains or its absence could not be verified."
@@ -719,8 +731,8 @@ func TestSetupApplyErrorReconcilesOnlyExactReviewedOperation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			defer firstRunSetupReviews.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
+			defer setupReviews.delete(app, "session-token")
 			advanceSetupToReview(t, app)
 			acceptSetupEULA(t, app)
 			client.applyErr = errors.New("response connection lost")

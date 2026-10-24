@@ -270,13 +270,13 @@ func TestWizardScheduleAndHeadings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	for _, mode := range []string{"advanced", "recommended"} {
-		draft, _ := firstRunSetupDrafts.get(app, "session-token")
+		draft, _ := setupDrafts.get(app, "session-token")
 		draft.Mode = mode
-		firstRunSetupDrafts.save(app, "session-token", draft)
+		setupDrafts.save(app, "session-token", draft)
 		page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 		body := page.Body.String()
 		if page.Code != http.StatusOK || strings.Contains(body, `aria-label="Setup progress"`) != (mode == "advanced") {

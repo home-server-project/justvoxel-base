@@ -18,7 +18,7 @@ func TestAdvancedServerExpansionCards(t *testing.T) {
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
 	body := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
 	previous := -1
-	for _, group := range addServerSoftwareGroups() {
+	for _, group := range setupSoftwareGroups() {
 		at := strings.Index(html.UnescapeString(body), "<legend>"+group.Name+"</legend>")
 		if at <= previous {
 			t.Fatalf("group missing or reordered: %s", group.Name)
@@ -75,7 +75,7 @@ func TestUnavailableServerCardsRejectForgedJavaSetup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
 			startSetup(t, app)
 			values := validServerValues()
 			values.Set("server_type", software)
@@ -83,7 +83,7 @@ func TestUnavailableServerCardsRejectForgedJavaSetup(t *testing.T) {
 			if response.Code != http.StatusBadRequest {
 				t.Fatalf("forged %s selection returned %d", software, response.Code)
 			}
-			draft, _ := firstRunSetupDrafts.get(app, "session-token")
+			draft, _ := setupDrafts.get(app, "session-token")
 			if draft.Minecraft.ServerType == software || draft.CurrentStep != setupServerStep {
 				t.Fatal("unavailable software entered Java setup")
 			}

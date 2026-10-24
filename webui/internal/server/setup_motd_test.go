@@ -46,10 +46,10 @@ func TestRecommendedSetupAutomaticMOTD(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			defer firstRunSetupReviews.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
+			defer setupReviews.delete(app, "session-token")
 			values := url.Values{"csrf": {"csrf-token"}, "server_type": {tc.software}}
-			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+			rr := completeSimpleSetup(t, app, "/setup", values.Get("server_type"))
 			if rr.Code != http.StatusSeeOther {
 				t.Fatalf("recommended: %d %s", rr.Code, rr.Body.String())
 			}
@@ -90,8 +90,8 @@ func TestAdvancedSetupMOTDStateSurvivesSoftwareAndVersionChanges(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			defer firstRunSetupReviews.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
+			defer setupReviews.delete(app, "session-token")
 			advanceSetupToReview(t, app)
 			for _, software := range []string{"paper", "purpur", "vanilla"} {
 				values := validServerValues()
@@ -117,7 +117,7 @@ func TestAdvancedSetupMOTDStateSurvivesSoftwareAndVersionChanges(t *testing.T) {
 				if rr.Code != http.StatusSeeOther {
 					t.Fatalf("version: %d %s", rr.Code, rr.Body.String())
 				}
-				draft, _ := firstRunSetupDrafts.get(app, "session-token")
+				draft, _ := setupDrafts.get(app, "session-token")
 				if draft.Server.MOTD != custom || draft.Server.MOTDAutomatic != tc.automatic {
 					t.Fatalf("MOTD state changed: %#v", draft.Server)
 				}
@@ -134,14 +134,14 @@ func TestAdvancedSetupMOTDStateSurvivesSoftwareAndVersionChanges(t *testing.T) {
 					t.Fatal("revisited automatic placeholder lost selected software")
 				}
 			}
-			draft, _ := firstRunSetupDrafts.get(app, "session-token")
+			draft, _ := setupDrafts.get(app, "session-token")
 			draft.CurrentStep = setupReviewStep
-			firstRunSetupDrafts.save(app, "session-token", draft)
+			setupDrafts.save(app, "session-token", draft)
 			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 			if rr.Code != http.StatusOK {
 				t.Fatalf("review: %d %s", rr.Code, rr.Body.String())
 			}
-			state, _ := firstRunSetupReviews.get(app, "session-token")
+			state, _ := setupReviews.get(app, "session-token")
 			want := custom
 			if tc.automatic {
 				want = client.resolvedMOTD
@@ -223,7 +223,7 @@ func TestSetupMOTDHasNoVisibleAutomaticControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	landing := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	if landing.Code != http.StatusOK || strings.Contains(landing.Body.String(), `name="motd"`) || strings.Contains(landing.Body.String(), `name="motd_automatic"`) {
 		t.Fatal("setup landing added a MOTD prompt")

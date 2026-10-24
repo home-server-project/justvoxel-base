@@ -104,7 +104,7 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	draft, exists := setupDraftsFor(r).get(a, session)
+	draft, exists := setupDrafts.get(a, session)
 	if !exists || !setupDraftReadyForReview(draft) {
 		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
@@ -122,7 +122,7 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if submitted := r.FormValue("plan_fingerprint"); submitted == "" || submitted != state.Plan.PlanFingerprint {
 		state.EULAAccepted = false
-		setupReviewsFor(r).save(a, session, state)
+		setupReviews.save(a, session, state)
 		w.WriteHeader(http.StatusConflict)
 		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Setup changed since it was reviewed. Review the updated configuration before continuing.")
 		return
@@ -134,7 +134,7 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		state.EULAAccepted = true
-		setupReviewsFor(r).save(a, session, state)
+		setupReviews.save(a, session, state)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft EULA acceptance recorded", draft)
 	}
 
@@ -163,12 +163,12 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if draft.AddServer {
 		draft.CreationAttempted = true
-		setupDraftsFor(r).save(a, session, draft)
+		setupDrafts.save(a, session, draft)
 		// The persistent operation is authoritative after submission, even if the
 		// browser disconnects. Do not allocate another instance from this draft.
-		draft, _ = setupDraftsFor(r).get(a, session)
+		draft, _ = setupDrafts.get(a, session)
 		state.DraftUpdatedAt = draft.UpdatedAt
-		setupReviewsFor(r).save(a, session, state)
+		setupReviews.save(a, session, state)
 	}
 	result, err := executor.AdminSetupApply(r.Context(), session, api.AdminSetupApplyRequest{
 		DiagnosticSessionID: state.Request.DiagnosticSessionID,
@@ -201,10 +201,10 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 		var refusal *api.ResponseError
 		if draft.AddServer && currentErr == nil && current.Operation == nil && errors.As(err, &refusal) && (refusal.StatusCode == http.StatusBadRequest || refusal.StatusCode == http.StatusConflict) {
 			draft.CreationAttempted = false
-			setupDraftsFor(r).save(a, session, draft)
-			draft, _ = setupDraftsFor(r).get(a, session)
+			setupDrafts.save(a, session, draft)
+			draft, _ = setupDrafts.get(a, session)
 			state.DraftUpdatedAt = draft.UpdatedAt
-			setupReviewsFor(r).save(a, session, state)
+			setupReviews.save(a, session, state)
 		}
 		message := "Could not start JustVoxel setup."
 		if apiMessage, ok := api.ErrorMessage(err); ok {
@@ -248,12 +248,10 @@ func (a *App) setupWizardProgressPage(w http.ResponseWriter, r *http.Request) {
 	}
 	switch response.Operation.State {
 	case "succeeded":
-		addServerReviews.delete(a, session)
-		addServerDrafts.delete(a, session)
-		firstRunSetupReviews.delete(a, session)
-		firstRunSetupDrafts.delete(a, session)
+		setupReviews.delete(a, session)
+		setupDrafts.delete(a, session)
 	case "rolled_back":
-		firstRunSetupReviews.delete(a, session)
+		setupReviews.delete(a, session)
 	}
 	a.renderAdminDiscovery(w, "setup_progress.html", setupProgressPageData{
 		Title: "Configuring JustVoxel", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
@@ -313,12 +311,10 @@ func (a *App) setupWizardProgressStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	switch response.Operation.State {
 	case "succeeded":
-		addServerReviews.delete(a, session)
-		addServerDrafts.delete(a, session)
-		firstRunSetupReviews.delete(a, session)
-		firstRunSetupDrafts.delete(a, session)
+		setupReviews.delete(a, session)
+		setupDrafts.delete(a, session)
 	case "rolled_back":
-		firstRunSetupReviews.delete(a, session)
+		setupReviews.delete(a, session)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

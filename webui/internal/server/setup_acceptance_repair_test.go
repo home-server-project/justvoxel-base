@@ -13,7 +13,7 @@ func TestAdvancedFirstRunFriendlyNameValidationAndReviewedRequest(t *testing.T) 
 	app, client := newAddServerTestApp(t)
 	client.configuration.Configured = false
 	startSetup(t, app)
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	for _, name := range []string{"", ".", "..", "Bad\nName", "Bad\u200bName", strings.Repeat("a", 65)} {
 		values := validServerValues()
 		values.Set("display_name", name)
@@ -28,7 +28,7 @@ func TestAdvancedFirstRunFriendlyNameValidationAndReviewedRequest(t *testing.T) 
 	if response.Code != http.StatusSeeOther {
 		t.Fatal(response.Code, response.Body.String())
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.DisplayName != "Family Survival" || draft.Server.MOTD != values.Get("motd") {
 		t.Fatal("name and MOTD were not stored separately", draft)
 	}

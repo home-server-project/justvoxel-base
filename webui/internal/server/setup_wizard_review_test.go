@@ -108,8 +108,8 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -242,8 +242,8 @@ func TestSetupReviewLatestShowsResolvedVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	if rr.Code != http.StatusOK {
@@ -269,8 +269,8 @@ func TestSetupReviewKeepsTechnicalValuesInDownloadAndUsesPlanWarnings(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	if rr.Code != http.StatusOK {
@@ -317,15 +317,15 @@ func TestRecommendedAndAdvancedPlanRequestsDifferOnlyInMountedOnly(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 
 	values := url.Values{"csrf": {"csrf-token"}, "server_type": {"paper"}}
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
-	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/review" {
+	rr := completeSimpleSetup(t, app, "/setup", values.Get("server_type"))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup" {
 		t.Fatalf("recommended setup returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
-	recommended, ok := firstRunSetupDrafts.get(app, "session-token")
+	recommended, ok := setupDrafts.get(app, "session-token")
 	if !ok {
 		t.Fatal("recommended setup draft missing")
 	}
@@ -364,8 +364,8 @@ func TestSetupReviewConfigurationDownloadExcludesSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review/configuration", ""))
@@ -392,8 +392,8 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -520,8 +520,8 @@ func TestSetupReviewConfigureButtonDisabledForInvalidPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -553,8 +553,8 @@ func TestSetupReviewKeepsCompatibleRecommendedBedrockEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -580,8 +580,8 @@ func TestSetupReviewEULAMustBeExplicitAndIsBoundToReviewedPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 
@@ -609,8 +609,8 @@ func TestSetupReviewRejectsStalePlanFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 
@@ -619,7 +619,7 @@ func TestSetupReviewRejectsStalePlanFingerprint(t *testing.T) {
 	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "Setup changed since it was reviewed") {
 		t.Fatalf("stale reviewed plan was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
-	state, ok := firstRunSetupReviews.get(app, "session-token")
+	state, ok := setupReviews.get(app, "session-token")
 	if !ok || state.EULAAccepted {
 		t.Fatalf("stale fingerprint left EULA accepted: %#v", state)
 	}
@@ -634,8 +634,8 @@ func TestSetupReviewRejectsMissingOrMalformedPlanIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			defer firstRunSetupReviews.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
+			defer setupReviews.delete(app, "session-token")
 			advanceSetupToReview(t, app)
 
 			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -652,8 +652,8 @@ func TestSetupReviewBackInvalidatesAcceptedReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/review/eula", eulaForm(true, setupReviewFingerprint)))
@@ -662,10 +662,10 @@ func TestSetupReviewBackInvalidatesAcceptedReview(t *testing.T) {
 	if back.Code != http.StatusSeeOther || back.Header().Get("Location") != "/setup" {
 		t.Fatalf("review back returned %d %q", back.Code, back.Header().Get("Location"))
 	}
-	if _, ok := firstRunSetupReviews.get(app, "session-token"); ok {
+	if _, ok := setupReviews.get(app, "session-token"); ok {
 		t.Fatal("review/EULA state survived editing an earlier setup step")
 	}
-	draft, ok := firstRunSetupDrafts.get(app, "session-token")
+	draft, ok := setupDrafts.get(app, "session-token")
 	if !ok || draft.CurrentStep != setupBackupsStep {
 		t.Fatalf("review back did not return to backups: %#v", draft)
 	}
@@ -682,8 +682,8 @@ func TestSetupReviewShowsAuthoritativeValidationError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -701,8 +701,8 @@ func TestSetupReviewPlannerUnavailableIsFriendly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 	advanceSetupToReview(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
@@ -720,18 +720,18 @@ func TestSetupReviewCancelPreservesFirstRunDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		firstRunSetupDrafts.delete(app, "session-token")
-		firstRunSetupReviews.delete(app, "session-token")
+		setupDrafts.delete(app, "session-token")
+		setupReviews.delete(app, "session-token")
 	})
 	advanceSetupToReview(t, app)
 	response := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/review/cancel", "csrf=csrf-token"))
 	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/setup" {
 		t.Fatalf("first-run cancel returned %d %q", response.Code, response.Header().Get("Location"))
 	}
-	if _, exists := firstRunSetupDrafts.get(app, "session-token"); exists {
+	if _, exists := setupDrafts.get(app, "session-token"); exists {
 		t.Fatal("first-run cancel retained its draft")
 	}
-	if _, exists := firstRunSetupReviews.get(app, "session-token"); exists {
+	if _, exists := setupReviews.get(app, "session-token"); exists {
 		t.Fatal("first-run cancel retained its review")
 	}
 }

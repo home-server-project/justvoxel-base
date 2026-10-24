@@ -46,7 +46,7 @@ func TestSimpleNativeBedrockStatesAndReview(t *testing.T) {
 		t.Fatal("Bedrock Spectator accepted")
 	}
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"display_name": {"Bedrock family"}, "game_mode": {"survival"}}))
-	draft, _ := addServerDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupReviewStep || draft.Minecraft.Version != "1.26.50.1" || draft.Minecraft.VersionPolicy != "pinned" || draft.Server.BedrockEnabled {
 		t.Fatal("native runtime resolution lost", draft.Minecraft)
 	}
@@ -103,7 +103,7 @@ func TestAdvancedNativeBedrockSixStepsAndValidation(t *testing.T) {
 		t.Fatal("Bedrock memory uses Java heap")
 	}
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/resources", url.Values{"container_memory": {"2G"}, "direction": {"next"}}))
-	draft, _ := addServerDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupStorageStep || draft.Minecraft.JavaMemory != "" || len(setupWizardSteps) != 6 {
 		t.Fatal("native Advanced step progression changed")
 	}

@@ -77,10 +77,8 @@ func newAddServerTestApp(t *testing.T) (*App, *addServerTestAPI) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		addServerDrafts.delete(app, "session-token")
-		addServerReviews.delete(app, "session-token")
-		firstRunSetupDrafts.delete(app, "session-token")
-		firstRunSetupReviews.delete(app, "session-token")
+		setupDrafts.delete(app, "session-token")
+		setupReviews.delete(app, "session-token")
 	})
 	return app, client
 }
@@ -114,7 +112,7 @@ func recommendedAddReview(t *testing.T, app *App, software string) setupReviewSt
 	if page.Code != http.StatusOK {
 		t.Fatalf("review: %d %s", page.Code, page.Body.String())
 	}
-	state, ok := addServerReviews.get(app, "session-token")
+	state, ok := setupReviews.get(app, "session-token")
 	if !ok {
 		t.Fatal("missing independent review")
 	}
@@ -166,15 +164,11 @@ func TestAddServerCancelClearsStateAndCompletesInWizardTab(t *testing.T) {
 	for _, suffix := range []string{"/review/cancel", "/cancel"} {
 		t.Run(suffix, func(t *testing.T) {
 			app, _ := newAddServerTestApp(t)
-			review := recommendedAddReview(t, app, "paper")
-			draft, exists := addServerDrafts.get(app, "session-token")
+			_ = recommendedAddReview(t, app, "paper")
+			_, exists := setupDrafts.get(app, "session-token")
 			if !exists {
 				t.Fatal("missing Add Server draft before cancellation")
 			}
-			firstRunSetupDrafts.save(app, "session-token", draft)
-			firstRunSetupReviews.save(app, "session-token", review)
-			firstRunDraft, _ := firstRunSetupDrafts.get(app, "session-token")
-			firstRunReview, _ := firstRunSetupReviews.get(app, "session-token")
 
 			response := addWizardRequest(app, http.MethodPost, suffix, nil)
 			if response.Code != http.StatusOK || response.Header().Get("Location") != "" {
@@ -185,17 +179,11 @@ func TestAddServerCancelClearsStateAndCompletesInWizardTab(t *testing.T) {
 					t.Fatalf("cancel completion missing %q", want)
 				}
 			}
-			if _, exists := addServerDrafts.get(app, "session-token"); exists {
+			if _, exists := setupDrafts.get(app, "session-token"); exists {
 				t.Fatal("cancel retained the Add Server draft")
 			}
-			if _, exists := addServerReviews.get(app, "session-token"); exists {
+			if _, exists := setupReviews.get(app, "session-token"); exists {
 				t.Fatal("cancel retained the Add Server review")
-			}
-			if got, exists := firstRunSetupDrafts.get(app, "session-token"); !exists || !reflect.DeepEqual(got, firstRunDraft) {
-				t.Fatal("Add Server cancel changed the first-run draft")
-			}
-			if got, exists := firstRunSetupReviews.get(app, "session-token"); !exists || !reflect.DeepEqual(got, firstRunReview) {
-				t.Fatal("Add Server cancel changed the first-run review")
 			}
 			reopened := addWizardRequest(app, http.MethodGet, "?new=1", nil)
 			if reopened.Code != http.StatusSeeOther || reopened.Header().Get("Location") != addServerBasePath {
@@ -210,7 +198,7 @@ func TestAddServerCancelClearsStateAndCompletesInWizardTab(t *testing.T) {
 }
 
 func TestAddServerEntryAndSharedRecommended(t *testing.T) {
-	app, client := newAddServerTestApp(t)
+	app, _ := newAddServerTestApp(t)
 	workspace := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))
 	body := workspace.Body.String()
 	if workspace.Code != http.StatusOK || !strings.Contains(body, `href="/minecraft/servers/add?new=1" target="justvoxel-add-server">Add Server</a>`) {
@@ -219,9 +207,6 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	if strings.Contains(body, "minecraft-add-server-card") || strings.Contains(body, "data-minecraft-action") {
 		t.Fatal("Add Server must be an action, not a card")
 	}
-	legacy := draftFromSetupDefaults(client.defaults, api.AdminStorageDiscovery{})
-	firstRunSetupDrafts.save(app, "session-token", legacy)
-	before, _ := firstRunSetupDrafts.get(app, "session-token")
 	landing := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
 	for _, want := range []string{"Simple setup", "Use simple setup", "JustVoxel chooses the defaults for you.", "Advanced setup", `name="family"`, `value="plugins"`, "server-software-card", `action="/minecraft/servers/add/simple"`} {
 		if !strings.Contains(landing, want) {
@@ -241,10 +226,6 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	if state.Plan.Normalized.Server.MOTD == "Family Survival" || !strings.Contains(state.Plan.Normalized.Server.MOTD, "Paper Minecraft") {
 		t.Fatal("friendly name used as MOTD")
 	}
-	after, _ := firstRunSetupDrafts.get(app, "session-token")
-	if !reflect.DeepEqual(before, after) {
-		t.Fatal("Add Server changed the first-run draft")
-	}
 	page := addWizardRequest(app, http.MethodGet, "/review", nil).Body.String()
 	for _, forbidden := range []string{"/private/", "RCON", "Quadlet", "data-instance-preflight", "Download configuration", "jv-created1"} {
 		if strings.Contains(page, forbidden) {
@@ -261,9 +242,8 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	if response := addWizardRequest(app, http.MethodPost, "/cancel", nil); response.Code != http.StatusOK {
 		t.Fatalf("cancel: %d", response.Code)
 	}
-	after, _ = firstRunSetupDrafts.get(app, "session-token")
-	if !reflect.DeepEqual(before, after) {
-		t.Fatal("Cancel changed the first-run draft")
+	if _, exists := setupDrafts.get(app, "session-token"); exists {
+		t.Fatal("Cancel retained shared draft")
 	}
 }
 
@@ -273,12 +253,12 @@ func TestAddServerProgressSuccessClearsDraftAndReview(t *testing.T) {
 		t.Run(endpoint, func(t *testing.T) {
 			app, client := newAddServerTestApp(t)
 			review := recommendedAddReview(t, app, "paper")
-			draft, ok := addServerDrafts.get(app, "session-token")
+			draft, ok := setupDrafts.get(app, "session-token")
 			if !ok || draft.CurrentStep != setupReviewStep {
 				t.Fatal("expected an Add Server draft at Review")
 			}
-			firstRunSetupDrafts.save(app, "session-token", draft)
-			firstRunSetupReviews.save(app, "session-token", review)
+			setupDrafts.save(app, "session-token", draft)
+			setupReviews.save(app, "session-token", review)
 			stale := addWizardRequest(app, http.MethodGet, "", nil)
 			if stale.Code != http.StatusSeeOther || stale.Header().Get("Location") != addServerBasePath+"/review" {
 				t.Fatal("fixture must reproduce the stale Review redirect")
@@ -297,15 +277,11 @@ func TestAddServerProgressSuccessClearsDraftAndReview(t *testing.T) {
 					t.Fatal("status must report authoritative operation success")
 				}
 			}
-			for name, store := range map[string]*setupDraftStore{"add-server": &addServerDrafts, "first-run": &firstRunSetupDrafts} {
-				if _, ok := store.get(app, "session-token"); ok {
-					t.Fatalf("%s draft survived success", name)
-				}
+			if _, ok := setupDrafts.get(app, "session-token"); ok {
+				t.Fatal("shared draft survived success")
 			}
-			for name, store := range map[string]*setupReviewStore{"add-server": &addServerReviews, "first-run": &firstRunSetupReviews} {
-				if _, ok := store.get(app, "session-token"); ok {
-					t.Fatalf("%s review survived success", name)
-				}
+			if _, ok := setupReviews.get(app, "session-token"); ok {
+				t.Fatal("shared Review survived success")
 			}
 			landing := addWizardRequest(app, http.MethodGet, "", nil)
 			if landing.Code != http.StatusOK || landing.Header().Get("Location") != "" {
@@ -328,14 +304,14 @@ func TestAddServerProgressStatusPreservesUnfinishedDraft(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			app, client := newAddServerTestApp(t)
 			review := recommendedAddReview(t, app, "paper")
-			draft, _ := addServerDrafts.get(app, "session-token")
+			draft, _ := setupDrafts.get(app, "session-token")
 			client.operation = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: state}
 			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/api/setup/progress/"+setupExecutionOperationID, ""))
 			if response.Code != http.StatusOK {
 				t.Fatalf("progress returned %d", response.Code)
 			}
-			afterDraft, draftOK := addServerDrafts.get(app, "session-token")
-			afterReview, reviewOK := addServerReviews.get(app, "session-token")
+			afterDraft, draftOK := setupDrafts.get(app, "session-token")
+			afterReview, reviewOK := setupReviews.get(app, "session-token")
 			if !draftOK || !reviewOK || !reflect.DeepEqual(draft, afterDraft) || !reflect.DeepEqual(review, afterReview) {
 				t.Fatal("unfinished operation lost its draft or review protection")
 			}
@@ -355,10 +331,7 @@ func TestAdvancedWizardSystemDefaultsLifecycle(t *testing.T) {
 			// No existing schedules: the normal default time needs no adjustment.
 			client.configuration.Backup.TimerEnabled = false
 			client.backups = map[string]api.InstanceBackupSettings{}
-			store := &firstRunSetupDrafts
-			if addServer {
-				store = &addServerDrafts
-			}
+			store := &setupDrafts
 			assertDefaults := func(draft setupDraft) {
 				t.Helper()
 				if draft.Storage != initialSetupStorageDraft(draft.Defaults) || draft.Backups != initialSetupBackupDraft(draft.Defaults) {
@@ -425,7 +398,7 @@ func TestAddServerAdvancedSixStepsAndManualDestinations(t *testing.T) {
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/connections", url.Values{"java_port": {"25567"}, "bedrock_port": {"19134"}, "image_tag": {"stable"}, "version_policy": {"recommended"}, "bedrock_enabled": {"on"}, "direction": {"next"}}))
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/resources", url.Values{"java_memory": {"1G"}, "container_memory": {"2G"}, "direction": {"next"}}))
 	storage := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
-	draft, _ := addServerDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.Storage.Type != "system" || draft.Storage.Path != draft.Defaults.DataPath || draft.Storage.Complete ||
 		draft.Backups.Type != "system" || draft.Backups.Path != draft.Defaults.BackupPath || draft.Backups.Complete ||
 		draft.Backups.Keep != strconv.Itoa(draft.Defaults.BackupKeep) || !addServerBackupTimePattern.MatchString(draft.Backups.DailyTime) {
@@ -456,7 +429,7 @@ func TestAddServerAdvancedSixStepsAndManualDestinations(t *testing.T) {
 		t.Fatal("fixed backup restriction remains")
 	}
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/backups", url.Values{"backup_type": {"nfs"}, "backup_source": {"nas:/archives"}, "backup_mount_point": {"/var/mnt/family-backups"}, "backup_path": {"/var/mnt/family-backups/backups"}, "backup_daily_time": {"06:00"}, "backup_keep": {"9"}, "backup_automatic": {"on"}}))
-	draft, _ = addServerDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if draft.Storage.Path != "/srv/data/minecraft" || draft.Backups.Source != "nas:/archives" || draft.CurrentStep != 6 {
 		t.Fatal("manual placement lost in draft")
 	}
@@ -464,7 +437,7 @@ func TestAddServerAdvancedSixStepsAndManualDestinations(t *testing.T) {
 	if page.Code != 200 || !strings.Contains(page.Body.String(), draft.Storage.Path) || !strings.Contains(page.Body.String(), draft.Backups.Path) {
 		t.Fatal("manual destinations missing in Review", page.Body.String())
 	}
-	state, _ := addServerReviews.get(app, "session-token")
+	state, _ := setupReviews.get(app, "session-token")
 	client.applyResponse = api.AdminSetupApplyResponse{OK: true, Created: true, Operation: &api.PersistentOperation{OperationID: setupExecutionOperationID}}
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/review/apply", addCreateValues(state)))
 	if client.applyRequest.Request.Storage != state.Request.Storage || client.applyRequest.Request.Backups != state.Request.Backups || !client.applyRequest.Request.AddServer || client.applyRequest.Request.MountedOnly {
@@ -573,19 +546,15 @@ func TestAddServerWithoutGlobalBackupDestinationResolvesItsOwn(t *testing.T) {
 	}
 }
 
-func TestLegacyWizardKeepsEditableDestinationsAndIndependentDraft(t *testing.T) {
+func TestFirstSetupKeepsEditableDestinations(t *testing.T) {
 	app, err := New(setupWizardStorageClient(), Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		firstRunSetupDrafts.delete(app, "session-token")
-		firstRunSetupReviews.delete(app, "session-token")
-		addServerDrafts.delete(app, "session-token")
+		setupDrafts.delete(app, "session-token")
+		setupReviews.delete(app, "session-token")
 	})
-	independent := setupDraft{AddServer: true, DisplayName: "Independent draft"}
-	addServerDrafts.save(app, "session-token", independent)
-	before, _ := addServerDrafts.get(app, "session-token")
 	advanceToStorage(t, app)
 	storage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", "")).Body.String()
 	for _, want := range []string{`action="/setup/storage"`, "data-setup-storage-form", "data-setup-storage-internal", "storage_device"} {
@@ -601,10 +570,7 @@ func TestLegacyWizardKeepsEditableDestinationsAndIndependentDraft(t *testing.T) 
 			t.Fatalf("legacy backups lost %s", want)
 		}
 	}
-	after, _ := addServerDrafts.get(app, "session-token")
-	if !reflect.DeepEqual(before, after) {
-		t.Fatal("legacy setup changed the independent draft")
-	}
+
 }
 
 func TestMinecraftServersAddActionUsesApplianceConfiguration(t *testing.T) {
@@ -634,7 +600,7 @@ func TestUnconfiguredAddServerRedirectsGETAndRefusesPOST(t *testing.T) {
 	// Preserve a stale reviewed Add Server draft from before the appliance became
 	// unconfigured. A POST must never apply it through either creation path.
 	state := recommendedAddReview(t, app, "paper")
-	before, _ := addServerDrafts.get(app, "session-token")
+	before, _ := setupDrafts.get(app, "session-token")
 	client.configuration.Configured = false
 	response := addWizardRequest(app, http.MethodGet, "", nil)
 	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/setup" {
@@ -650,11 +616,11 @@ func TestUnconfiguredAddServerRedirectsGETAndRefusesPOST(t *testing.T) {
 	if malformed.Code != http.StatusForbidden || malformed.Header().Get("Location") != "" {
 		t.Fatalf("malformed POST did not fail closed: %d", malformed.Code)
 	}
-	after, _ := addServerDrafts.get(app, "session-token")
+	after, _ := setupDrafts.get(app, "session-token")
 	if !reflect.DeepEqual(before, after) || len(client.created) != 0 || len(client.backupWrites) != 0 {
 		t.Fatal("unconfigured Add Server mutated state")
 	}
-	if _, exists := firstRunSetupDrafts.get(app, "session-token"); exists {
+	if !after.AddServer {
 		t.Fatal("Add Server POST became first-run setup")
 	}
 }
@@ -718,7 +684,7 @@ func TestAddServerDefiniteSetupRefusalRemainsEditable(t *testing.T) {
 	if response.Code < 400 {
 		t.Fatal("refusal claimed success")
 	}
-	draft, _ := addServerDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CreationAttempted {
 		t.Fatal("definite refusal stranded editable setup")
 	}

@@ -460,15 +460,15 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 
 .minecraft-servers-body > .setup-shell { flex: none; padding-bottom: 2rem; gap: 1rem; }
 
-/* Add Server entry keeps the ordinary page flow, including its footer. */
-.setup-entry-add-server{margin-top:0;padding:.8rem 1rem}
-.setup-entry-add-server .eyebrow{margin:.2rem 0}
-.setup-entry-add-server h1{margin:.25rem 0 .4rem}
-.setup-entry-add-server .setup-mode-grid{margin-top:.5rem;gap:.65rem}
-.setup-entry-add-server .setup-mode-card{padding:.7rem .8rem}
-.setup-entry-add-server .setup-mode-card p{margin-bottom:.45rem}
-.setup-entry-add-server .setup-server-type.server-software-card{min-height:0;padding:.5rem .65rem}
-.setup-entry-add-server .setup-terminal-note{margin-top:.5rem;padding:.45rem .65rem}
+/* Setup entry keeps the ordinary page flow, including its footer. */
+.setup-entry-wizard{margin-top:0;padding:.8rem 1rem}
+.setup-entry-wizard .eyebrow{margin:.2rem 0}
+.setup-entry-wizard h1{margin:.25rem 0 .4rem}
+.setup-entry-wizard .setup-mode-grid{margin-top:.5rem;gap:.65rem}
+.setup-entry-wizard .setup-mode-card{padding:.7rem .8rem}
+.setup-entry-wizard .setup-mode-card p{margin-bottom:.45rem}
+.setup-entry-wizard .setup-server-type.server-software-card{min-height:0;padding:.5rem .65rem}
+.setup-entry-wizard .setup-terminal-note{margin-top:.5rem;padding:.45rem .65rem}
 
 /* Setup-local framed switches reuse the shared Date & Time widget. */
 .setup-startup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
@@ -508,37 +508,40 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 @media(max-width:850px){.setup-software-groups{grid-template-columns:1fr}}
 @media(max-width:430px){.setup-simple-choices,.setup-software-groups .setup-server-types{grid-template-columns:1fr}}
 
-/* Add Server family lanes and a reserved desktop Simple content area. */
-.setup-entry-add-server .setup-simple-families{grid-template-columns:1fr}
-.setup-entry-add-server .setup-simple-families .server-software-copy strong{font-size:1rem}
-.setup-entry-add-server .setup-simple-families .server-software-copy small,.setup-entry-add-server .setup-simple-families .setup-family-items{font-size:.82rem}
-.setup-entry-add-server .setup-family-items{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem}
-.setup-entry-add-server .setup-family-items>span{display:inline-flex;align-items:center;gap:.25rem}
+/* Shared family lanes and a reserved desktop Simple content area. */
+.setup-entry-wizard .setup-simple-families{grid-template-columns:1fr}
+.setup-entry-wizard .setup-simple-families .server-software-copy strong{font-size:1rem}
+.setup-entry-wizard .setup-simple-families .server-software-copy small,.setup-entry-wizard .setup-simple-families .setup-family-items{font-size:.82rem}
+.setup-entry-wizard .setup-family-items{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem}
+.setup-entry-wizard .setup-family-items>span{display:inline-flex;align-items:center;gap:.25rem}
 .setup-family-items img{width:20px;height:20px;object-fit:contain}
-.setup-entry-add-server .setup-simple-families .setup-family-items img{width:24px;height:24px}
-.setup-entry-add-server [data-simple-setup]{display:flex;flex:1;flex-direction:column;gap:.5rem;margin-top:0}
-.setup-entry-add-server .setup-simple-content{min-height:21rem}
-.setup-entry-add-server .setup-simple-actions,.setup-entry-add-server [data-simple-setup]>button{margin-top:auto}
-.setup-entry-add-server .setup-terminal-note form{margin:0}
+.setup-entry-wizard .setup-simple-families .setup-family-items img{width:24px;height:24px}
+/* Normalize artwork footprints without changing the shared icon boxes. */
+:is(.server-software-icon img,.setup-family-items img)[src$="/paper.svg"]{transform:scale(.82);transform-origin:center}
+:is(.server-software-icon img,.setup-family-items img)[src$="/purpur.svg"]{transform:scale(.90);transform-origin:center}
+.setup-entry-wizard [data-simple-setup]{display:flex;flex:1;flex-direction:column;gap:.5rem;margin-top:0}
+.setup-entry-wizard .setup-simple-content{min-height:21rem}
+.setup-entry-wizard .setup-simple-actions,.setup-entry-wizard [data-simple-setup]>button{margin-top:auto}
+.setup-entry-wizard .setup-terminal-note form{margin:0}
 
-/* Share software card sizing only between Add Server Simple and Advanced. */
-:is(.setup-entry-add-server .setup-simple-choices:not(.setup-simple-families),.setup-add-server-software-lanes) .server-software-card{grid-template-columns:40px minmax(0,1fr);gap:.7rem;min-height:104px;padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start}
-:is(.setup-entry-add-server .setup-simple-choices:not(.setup-simple-families),.setup-add-server-software-lanes) .server-software-icon,:is(.setup-entry-add-server .setup-simple-choices:not(.setup-simple-families),.setup-add-server-software-lanes) .server-software-icon img{width:40px;min-width:40px;height:40px}
-:is(.setup-entry-add-server .setup-simple-choices:not(.setup-simple-families),.setup-add-server-software-lanes) .server-software-copy{overflow-wrap:anywhere}
-:is(.setup-entry-add-server .setup-simple-choices:not(.setup-simple-families),.setup-add-server-software-lanes) .server-software-copy strong{font-size:1rem}
-:is(.setup-entry-add-server .setup-simple-choices:not(.setup-simple-families),.setup-add-server-software-lanes) .server-software-copy small{font-size:.82rem}
+/* Share software card sizing between Simple and Advanced setup. */
+:is(.setup-entry-wizard .setup-simple-choices:not(.setup-simple-families),.setup-software-lanes) .server-software-card{grid-template-columns:40px minmax(0,1fr);gap:.7rem;min-height:104px;padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start}
+:is(.setup-entry-wizard .setup-simple-choices:not(.setup-simple-families),.setup-software-lanes) .server-software-icon,:is(.setup-entry-wizard .setup-simple-choices:not(.setup-simple-families),.setup-software-lanes) .server-software-icon img{width:40px;min-width:40px;height:40px}
+:is(.setup-entry-wizard .setup-simple-choices:not(.setup-simple-families),.setup-software-lanes) .server-software-copy{overflow-wrap:anywhere}
+:is(.setup-entry-wizard .setup-simple-choices:not(.setup-simple-families),.setup-software-lanes) .server-software-copy strong{font-size:1rem}
+:is(.setup-entry-wizard .setup-simple-choices:not(.setup-simple-families),.setup-software-lanes) .server-software-copy small{font-size:.82rem}
 
-/* Only Add Server Step 1 uses the approved three full-width software lanes. */
-.setup-add-server-software-lanes{grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}
-.setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;align-content:start;min-width:0;margin:0}
-.setup-wizard-panel .setup-add-server-software-lanes .setup-server-types legend{font-size:.9rem}
+/* Both setup contexts use the approved three full-width software lanes. */
+.setup-software-lanes{grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}
+.setup-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;align-content:start;min-width:0;margin:0}
+.setup-wizard-panel .setup-software-lanes .setup-server-types legend{font-size:.9rem}
 @media(max-width:1000px){
-  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .setup-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:760px){
-  .setup-entry-add-server .setup-simple-content{min-height:0}
-  .setup-entry-add-server [data-simple-setup]{flex:none}
+  .setup-entry-wizard .setup-simple-content{min-height:0}
+  .setup-entry-wizard [data-simple-setup]{flex:none}
 }
 @media(max-width:430px){
-  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:1fr}
+  .setup-software-lanes .setup-server-types{grid-template-columns:1fr}
 }

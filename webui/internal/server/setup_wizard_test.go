@@ -45,7 +45,7 @@ func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer firstRunSetupDrafts.delete(app, "session-token")
+				defer setupDrafts.delete(app, "session-token")
 				startSetup(t, app)
 				page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 				assertSetupApplicationLogo(t, page.Body.String())
@@ -89,7 +89,7 @@ func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
 					if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusSeeOther {
 						t.Fatalf("Bedrock submission returned %d: %s", rr.Code, rr.Body.String())
 					}
-					draft, _ := firstRunSetupDrafts.get(app, "session-token")
+					draft, _ := setupDrafts.get(app, "session-token")
 					if !draft.Server.BedrockEnabled {
 						t.Fatal("supported server did not preserve Bedrock enabled")
 					}
@@ -228,18 +228,18 @@ func TestSetupEightGBClassDefaultsReachBothWizardModes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			defer firstRunSetupReviews.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
+			defer setupReviews.delete(app, "session-token")
 			if mode == "advanced" {
 				startSetup(t, app)
 			} else {
 				values := url.Values{"csrf": {"csrf-token"}, "server_type": {"paper"}}
-				rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+				rr := completeSimpleSetup(t, app, "/setup", values.Get("server_type"))
 				if rr.Code != http.StatusSeeOther {
 					t.Fatalf("recommended setup returned %d: %s", rr.Code, rr.Body.String())
 				}
 			}
-			draft, ok := firstRunSetupDrafts.get(app, "session-token")
+			draft, ok := setupDrafts.get(app, "session-token")
 			if !ok || draft.Minecraft.JavaMemory != "4G" || draft.Minecraft.ContainerMemory != "6G" {
 				t.Fatalf("%s fresh setup lost Recommended 4G/6G defaults: %#v", mode, draft.Minecraft)
 			}
@@ -287,7 +287,7 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	}
 	for _, addServer := range []bool{false, true} {
 		t.Run(fmt.Sprintf("AddServer=%t", addServer), func(t *testing.T) {
-			app, basePath, drafts, _ := sixStepProgressFixture(t, addServer)
+			app, basePath, drafts := sixStepProgressFixture(t, addServer)
 			complete, _ := drafts.get(app, "session-token")
 			for current := setupServerStep; current <= setupReviewStep; current++ {
 				draft := complete
@@ -365,11 +365,12 @@ func saveResourcesStep(t *testing.T, app *App, values url.Values) *httptest.Resp
 
 func validServerValues() url.Values {
 	return url.Values{
-		"server_type": {"paper"},
-		"motd":        {"Family Minecraft"},
-		"max_players": {"20"},
-		"game_mode":   {"survival"},
-		"timezone":    {"America/Toronto"},
+		"server_type":  {"paper"},
+		"display_name": {"Minecraft server"},
+		"motd":         {"Family Minecraft"},
+		"max_players":  {"20"},
+		"game_mode":    {"survival"},
+		"timezone":     {"America/Toronto"},
 	}
 }
 
@@ -379,9 +380,9 @@ func TestSetupGameModeDefaultAndSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
-	draft, ok := firstRunSetupDrafts.get(app, "session-token")
+	draft, ok := setupDrafts.get(app, "session-token")
 	if !ok || draft.Minecraft.GameMode != "survival" {
 		t.Fatalf("default game mode = %q", draft.Minecraft.GameMode)
 	}
@@ -390,7 +391,7 @@ func TestSetupGameModeDefaultAndSelection(t *testing.T) {
 	if rr := saveServerStep(t, app, values); rr.Code != http.StatusSeeOther {
 		t.Fatalf("Creative selection returned %d: %s", rr.Code, rr.Body.String())
 	}
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if draft.Minecraft.GameMode != "creative" {
 		t.Fatalf("selected game mode = %q", draft.Minecraft.GameMode)
 	}
@@ -432,7 +433,7 @@ func TestSetupWizardShowsRecommendedAndAdvancedChoices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	if rr.Code != http.StatusOK {
@@ -440,8 +441,8 @@ func TestSetupWizardShowsRecommendedAndAdvancedChoices(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"Set up your Minecraft server", "Recommended setup", "Advanced setup", "Paper", "Purpur", "Vanilla",
-		"Use recommended setup", "Start advanced setup", "You can change these settings later", "mjust setup", "setup-terminal-note",
+		"Set up your Minecraft server", "Simple setup", "Advanced setup", "Paper", "Purpur", "Vanilla",
+		"Use simple setup", "Start advanced setup", "You can change these settings later", "mjust setup", "setup-terminal-note",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("setup entry missing %q: %s", want, body)
@@ -464,16 +465,16 @@ func TestRecommendedSetupBuildsReadyPaperDraftAndJumpsToReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
+	defer setupReviews.delete(app, "session-token")
 
 	values := url.Values{"csrf": {"csrf-token"}, "server_type": {"paper"}}
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
-	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/review" {
+	rr := completeSimpleSetup(t, app, "/setup", values.Get("server_type"))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup" {
 		t.Fatalf("recommended setup returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 
-	draft, ok := firstRunSetupDrafts.get(app, "session-token")
+	draft, ok := setupDrafts.get(app, "session-token")
 	if !ok {
 		t.Fatal("recommended setup did not create a draft")
 	}
@@ -492,18 +493,19 @@ func TestRecommendedSetupBuildsReadyPaperDraftAndJumpsToReview(t *testing.T) {
 }
 
 func TestRecommendedSetupRejectsUnsupportedServerTypes(t *testing.T) {
-	for _, serverType := range []string{"fabric", "PAPER-invalid", ""} {
+	for _, serverType := range []string{"PAPER-invalid", ""} {
 		client := setupWizardClient()
 		app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		values := url.Values{"csrf": {"csrf-token"}, "server_type": {serverType}}
-		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+		_ = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/simple", "csrf=csrf-token&family=plugins"))
+		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/simple", values.Encode()))
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("%s placeholder returned %d, want 400", serverType, rr.Code)
 		}
-		firstRunSetupDrafts.delete(app, "session-token")
+		setupDrafts.delete(app, "session-token")
 	}
 }
 
@@ -513,7 +515,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
@@ -524,7 +526,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 	if strings.Contains(body, "Future multi-instance placeholder") {
 		t.Fatal("obsolete naming placeholder remains")
 	}
-	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", `name="display_name"`, `value="Minecraft server"`, "Family", "Maximum players", "Plugins &#43; managed cross-play", "Mod loaders &#43; managed cross-play", "Native Bedrock server", "Paper", "Technical name: MOTD"} {
+	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", `name="display_name"`, `value="Minecraft server"`, "Family", "Maximum players", "Plugins &#43; managed cross-play", "Mod loaders · Cross-play: Fabric · NeoForge", "Vanilla Java · Bedrock", "Paper", "Technical name: MOTD"} {
 		if want == "Family" {
 			continue
 		}
@@ -550,11 +552,11 @@ func TestSetupWizardPreservesApplianceTimezone(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer firstRunSetupDrafts.delete(app, "session-token")
-				defer firstRunSetupReviews.delete(app, "session-token")
+				defer setupDrafts.delete(app, "session-token")
+				defer setupReviews.delete(app, "session-token")
 				expected := "" // Appliance timezone is never duplicated in Minecraft setup.
 				if mode == "recommended" {
-					rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", "csrf=csrf-token&server_type=paper"))
+					rr := completeSimpleSetup(t, app, "/setup", "paper")
 					if rr.Code != http.StatusSeeOther {
 						t.Fatal(rr.Code, rr.Body.String())
 					}
@@ -572,7 +574,7 @@ func TestSetupWizardPreservesApplianceTimezone(t *testing.T) {
 						}
 					}
 				}
-				draft, _ := firstRunSetupDrafts.get(app, "session-token")
+				draft, _ := setupDrafts.get(app, "session-token")
 				if err := validateSetupServer(draft.Server); err != nil {
 					t.Fatal(err)
 				}
@@ -591,7 +593,7 @@ func TestSetupWizardConnectionsValidateBeforeResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d", rr.Code)
@@ -603,7 +605,7 @@ func TestSetupWizardConnectionsValidateBeforeResources(t *testing.T) {
 	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Minecraft Java TCP port must be between 1 and 65535") {
 		t.Fatalf("invalid Java port was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != 2 {
 		t.Fatalf("invalid Connections form advanced to step %d", draft.CurrentStep)
 	}
@@ -624,7 +626,7 @@ func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 
 	step1 := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
@@ -688,7 +690,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 
 	rr := saveServerStep(t, app, validServerValues())
@@ -723,7 +725,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != 4 {
 		t.Fatalf("Memory advanced to step %d, want Step 4 Storage", draft.CurrentStep)
 	}
@@ -800,7 +802,7 @@ func TestSetupWizardServerStepRejectsInvalidPlayerLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 
 	values := validServerValues()
@@ -812,7 +814,7 @@ func TestSetupWizardServerStepRejectsInvalidPlayerLimit(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "Maximum players must be a positive number") || !strings.Contains(rr.Body.String(), `value="0"`) {
 		t.Fatalf("invalid server step did not explain and preserve value: %s", rr.Body.String())
 	}
-	draft, ok := firstRunSetupDrafts.get(app, "session-token")
+	draft, ok := setupDrafts.get(app, "session-token")
 	if !ok || draft.CurrentStep != 1 {
 		t.Fatalf("invalid server form advanced draft: %#v", draft)
 	}
@@ -824,7 +826,7 @@ func TestSetupWizardSpecificVersionRequiresExplicitValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d", rr.Code)
@@ -845,7 +847,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d", rr.Code)
@@ -860,7 +862,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "must be larger than Minecraft game memory") {
 		t.Fatalf("invalid memory was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != 3 {
 		t.Fatalf("invalid Resources form advanced to step %d", draft.CurrentStep)
 	}
@@ -903,7 +905,7 @@ func TestSetupWizardCrossplayBackPreservesUnsavedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	_ = saveServerStep(t, app, validServerValues())
 	values := validConnectionValues()
@@ -916,7 +918,7 @@ func TestSetupWizardCrossplayBackPreservesUnsavedValues(t *testing.T) {
 	if rr := saveConnectionsStep(t, app, values); rr.Code != http.StatusSeeOther {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupServerStep || draft.Minecraft.ConnectionsComplete || draft.Minecraft.VersionComplete {
 		t.Fatal("Back did not return to Server with incomplete edits")
 	}
@@ -936,7 +938,7 @@ func TestSetupWizardCrossplayBackPreservesUnsavedValues(t *testing.T) {
 	if rr := saveConnectionsStep(t, app, values); rr.Code != http.StatusBadRequest {
 		t.Fatalf("Cross-play edits were not revalidated: %d %s", rr.Code, rr.Body.String())
 	}
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupCrossplayStep || draft.Minecraft.ConnectionsComplete || draft.Minecraft.VersionComplete {
 		t.Fatal("invalid Cross-play edits advanced or completed the step")
 	}
@@ -945,7 +947,7 @@ func TestSetupWizardCrossplayBackPreservesUnsavedValues(t *testing.T) {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
 	_ = saveResourcesStep(t, app, validResourceValues())
-	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	draft, _ = setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupStorageStep || draft.HighestStep != setupStorageStep || !draft.Minecraft.Complete {
 		t.Fatal("combined flow did not reach Storage")
 	}
@@ -957,14 +959,14 @@ func TestSetupWizardGenericNavigationCannotSkipRealForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", "csrf=csrf-token&direction=next"))
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("generic next returned %d", rr.Code)
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.CurrentStep != 1 {
 		t.Fatalf("generic navigation skipped required server form to step %d", draft.CurrentStep)
 	}
@@ -976,7 +978,7 @@ func TestSetupWizardCancelDiscardsDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 
 	startSetup(t, app)
 	cancel := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/cancel", "csrf=csrf-token"))
@@ -999,7 +1001,7 @@ func TestSetupWizardRejectsMutationWithoutCSRF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "http://example/setup/start", strings.NewReader(""))
@@ -1009,7 +1011,7 @@ func TestSetupWizardRejectsMutationWithoutCSRF(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("setup start without CSRF status = %d, want 403", rr.Code)
 	}
-	if _, ok := firstRunSetupDrafts.get(app, "session-token"); ok {
+	if _, ok := setupDrafts.get(app, "session-token"); ok {
 		t.Fatal("setup draft was created without CSRF")
 	}
 }
@@ -1038,7 +1040,7 @@ func TestConfiguredApplianceCannotEnterFirstRunWizard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/" {
@@ -1079,7 +1081,7 @@ func TestSetupWizardVisitedStepNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatal(rr.Code)
@@ -1093,7 +1095,7 @@ func TestSetupWizardVisitedStepNavigation(t *testing.T) {
 		if rr.Code != step.status {
 			t.Fatalf("jump to %d returned %d", step.target, rr.Code)
 		}
-		draft, _ := firstRunSetupDrafts.get(app, "session-token")
+		draft, _ := setupDrafts.get(app, "session-token")
 		if draft.CurrentStep != step.current || draft.HighestStep != 3 {
 			t.Fatalf("jump to %d changed visited steps: %#v", step.target, draft)
 		}
@@ -1108,14 +1110,14 @@ func TestRecommendedSetupServerSoftwareCapabilities(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			defer firstRunSetupReviews.delete(app, "session-token")
+			defer setupDrafts.delete(app, "session-token")
+			defer setupReviews.delete(app, "session-token")
 			values := url.Values{"csrf": {"csrf-token"}, "server_type": {serverType}}
-			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+			rr := completeSimpleSetup(t, app, "/setup", values.Get("server_type"))
 			if rr.Code != http.StatusSeeOther {
 				t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 			}
-			draft, ok := firstRunSetupDrafts.get(app, "session-token")
+			draft, ok := setupDrafts.get(app, "session-token")
 			if !ok || draft.Minecraft.ServerType != serverType || draft.Server.BedrockEnabled != (serverType != "vanilla") {
 				t.Fatalf("wrong capabilities: %#v", draft)
 			}
@@ -1135,7 +1137,7 @@ func TestVanillaAdvancedConnectionsCannotEnableBedrock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer setupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	values := validServerValues()
 	values.Set("server_type", "vanilla")
@@ -1151,7 +1153,7 @@ func TestVanillaAdvancedConnectionsCannotEnableBedrock(t *testing.T) {
 	if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusBadRequest {
 		t.Fatalf("Bedrock accepted: %d", rr.Code)
 	}
-	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	draft, _ := setupDrafts.get(app, "session-token")
 	if draft.Server.BedrockEnabled || draft.CurrentStep != 2 {
 		t.Fatal("Rejected Bedrock request changed the saved draft")
 	}

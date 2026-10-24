@@ -72,7 +72,7 @@ func TestSimpleSetupStatesAndReview(t *testing.T) {
 			}
 			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"server_type": {"paper"}}))
 			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"display_name": {"Family"}, "game_mode": {gameMode}}))
-			draft, _ := addServerDrafts.get(app, "session-token")
+			draft, _ := setupDrafts.get(app, "session-token")
 			if !setupDraftReadyForReview(draft) || draft.Minecraft.ResolvedVersion == "" || draft.Minecraft.GameMode != gameMode {
 				t.Fatalf("not ready for existing Review: %+v", draft)
 			}
@@ -84,7 +84,7 @@ func TestSimpleSetupStatesAndReview(t *testing.T) {
 			if rr.Code != http.StatusOK || rr.Header().Get("Location") != "" {
 				t.Fatal("cancel must render completion in wizard tab")
 			}
-			if _, exists := addServerDrafts.get(app, "session-token"); exists {
+			if _, exists := setupDrafts.get(app, "session-token"); exists {
 				t.Fatal("cancel retained draft")
 			}
 		})
@@ -179,14 +179,14 @@ func TestAdvancedJavaSoftwareCanContinueWithoutCrossplay(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { addServerDrafts.delete(app, "session-token"); addServerReviews.delete(app, "session-token") })
+			t.Cleanup(func() { setupDrafts.delete(app, "session-token"); setupReviews.delete(app, "session-token") })
 			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
 			values := validServerValues()
 			values.Set("server_type", software)
 			values.Set("display_name", "Family")
 			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/server", values))
 			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/connections", url.Values{"java_port": {"25567"}, "bedrock_port": {"19134"}, "image_tag": {"stable"}, "version_policy": {"recommended"}, "direction": {"next"}}))
-			draft, _ := addServerDrafts.get(app, "session-token")
+			draft, _ := setupDrafts.get(app, "session-token")
 			if draft.CurrentStep != setupMemoryStep || draft.Server.BedrockEnabled || draft.Minecraft.LoaderVersion != loader {
 				t.Fatalf("Java setup blocked or pin lost: %+v", draft)
 			}
@@ -207,7 +207,7 @@ func TestSimpleAllJavaSoftwareUsesExistingReview(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { addServerDrafts.delete(app, "session-token"); addServerReviews.delete(app, "session-token") })
+			t.Cleanup(func() { setupDrafts.delete(app, "session-token"); setupReviews.delete(app, "session-token") })
 			review := recommendedAddReview(t, app, software)
 			if review.Request.Minecraft.LoaderVersion != loader || review.Plan.Normalized.Minecraft.LoaderVersion != loader || review.Plan.Normalized.Server.BedrockEnabled {
 				t.Fatal("Review lost exact runtime or enabled unproven cross-play")
