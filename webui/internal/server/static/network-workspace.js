@@ -138,7 +138,7 @@ ${failed ? "" : `<p class="muted">This page will open ${providerName} automatica
   const providerControls = (provider) => {
     const blocked = !provider.installed || remoteBusy || provider.service_state === "deactivating";
     return {
-      activateDisabled: blocked || (providerTransitional(provider) && !(provider.id === "netbird" && provider.service_state === "activating")) || (["netbird", "tailscale"].includes(provider.id) ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
+      activateDisabled: blocked || (providerTransitional(provider) && !(provider.id === "netbird" && provider.service_state === "activating")) || (["netbird", "tailscale", "nordvpn"].includes(provider.id) ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
       deactivateDisabled: blocked || (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
     };
   };
@@ -1019,6 +1019,117 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     return section;
   };
 
+  const validNordLoginURL = (value) => {
+    if (typeof value !== "string" || !value || value.length > 2048 || /[\s<>"'\\]/.test(value)) return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && !url.username && !url.password && !url.hash &&
+        ["api.nordvpn.com", "nordaccount.com", "my.nordaccount.com"].includes(url.host) &&
+        ["/v1/users/oauth/login", "/v1/users/oauth/login-redirect", "/oauth/authorize", "/login"].includes(url.pathname);
+    } catch (_) { return false; }
+  };
+  const validNordCallback = (value) => {
+    if (typeof value !== "string" || !value || value.length > 2048 || /[\s<>"'\\]/.test(value)) return false;
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "nordvpn:" || url.host !== "login" || url.pathname || url.username || url.password || url.hash) return false;
+      if ((url.searchParams.get("exchange_token") || "").length > 1024 || url.searchParams.getAll("exchange_token").length !== 1 || !/^[A-Za-z0-9._~+\/-]{1,1024}={0,2}$/.test(url.searchParams.get("exchange_token") || "")) return false;
+      for (const [key, item] of url.searchParams) {
+        if (url.searchParams.getAll(key).length !== 1 ||
+            !["exchange_token", "action", "status"].includes(key) ||
+            (key === "action" && item !== "login") || (key === "status" && item !== "done")) return false;
+      }
+      return true;
+    } catch (_) { return false; }
+  };
+  let nordDialog = null;
+  const showNordAccountDialog = () => {
+    if (nordDialog?.open) return;
+    const popup = document.createElement("dialog");
+    nordDialog = popup;
+    popup.className = "system-action-dialog";
+    const body = document.createElement("div");
+    body.className = "system-action-dialog-content";
+    const title = document.createElement("h2");
+    title.id = "nord-login-title";
+    popup.setAttribute("aria-labelledby", title.id);
+    const message = document.createElement("p");
+    const details = document.createElement("div");
+    const status = document.createElement("p");
+    status.setAttribute("role", "status");
+    const actions = document.createElement("div");
+    actions.className = "action-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => popup.close());
+    actions.appendChild(cancel);
+    body.append(title, message, details, status, actions);
+    popup.appendChild(body);
+    popup.addEventListener("close", () => {
+      details.replaceChildren(); // Erase transient callback input on Cancel/Escape too.
+      popup.remove();
+      if (nordDialog === popup) nordDialog = null;
+    });
+    title.textContent = "NordVPN account required";
+    message.textContent = "NordVPN Meshnet requires a Nord Account.";
+    const existing = document.createElement("p"); existing.textContent = "Already have an account?";
+    const login = document.createElement("button"); login.type = "button"; login.textContent = "Log in to NordVPN";
+    const newAccount = document.createElement("p"); newAccount.textContent = "Don’t have a NordVPN account yet?";
+    const referralText = document.createElement("p"); referralText.textContent = "You can create one using the JustVoxel creator’s referral link.";
+    const referral = document.createElement("a");
+    referral.href = "https://refer-nordvpn.com/pZGMpGTrBrO";
+    referral.target = "_blank"; referral.rel = "noopener noreferrer";
+    referral.className = "button-link"; referral.textContent = "Create NordVPN account";
+    details.append(existing, login, newAccount, referralText, referral);
+    login.addEventListener("click", async () => {
+      login.disabled = true;
+      // Reserve a tab during the click; suppress opener and referrer before navigation.
+      let tab = null;
+      try { tab = window.open("about:blank", "_blank"); if (tab) tab.opener = null; } catch (_) { /* Keep the explicit login link available. */ }
+      status.textContent = "Preparing NordVPN login…";
+      try {
+        const result = await postForm("/api/network/remote-access/nordvpn/login", { action: "login" });
+        if (!validNordLoginURL(result?.login_url)) throw new Error("NordVPN login link unavailable.");
+        if (!popup.open) { if (tab) tab.close(); return; }
+        if (tab && !tab.closed) {
+          const meta = tab.document.createElement("meta"); meta.name = "referrer"; meta.content = "no-referrer"; tab.document.head.appendChild(meta);
+          tab.location.replace(result.login_url);
+        }
+        title.textContent = "Complete NordVPN login";
+        message.textContent = "Sign in on the NordVPN page that opened.";
+        details.replaceChildren();
+        const instructions = document.createElement("p"); instructions.textContent = "On the Continue button, copy the link address and paste it below.";
+        const label = document.createElement("label"); label.textContent = "Continue link";
+        const input = document.createElement("input");
+        input.type = "text"; input.maxLength = 2048; input.placeholder = "nordvpn://...";
+        input.autocomplete = "off"; input.spellcheck = false;
+        label.appendChild(input);
+        const reopen = document.createElement("a"); reopen.href = result.login_url;
+        reopen.target = "_blank"; reopen.rel = "noopener noreferrer"; reopen.textContent = "Open NordVPN login";
+        details.append(instructions, reopen, label);
+        status.textContent = "";
+        const complete = document.createElement("button"); complete.type = "button"; complete.textContent = "Complete login";
+        actions.appendChild(complete);
+        complete.addEventListener("click", async () => {
+          if (!validNordCallback(input.value)) { status.textContent = "Paste a valid NordVPN Continue link."; return; }
+          complete.disabled = true;
+          const callback = input.value; input.value = "";
+          try {
+            await postForm("/api/network/remote-access/nordvpn/login", { action: "complete-login", callback });
+            popup.close();
+            await refreshRemoteAccess();
+          } catch (_) { status.textContent = "NordVPN login could not be completed. Try logging in again."; }
+          finally { complete.disabled = false; }
+        });
+      } catch (_) {
+        if (tab && !tab.closed) tab.close();
+        status.textContent = "NordVPN login could not be started. Try again.";
+        login.disabled = false;
+      }
+    });
+    document.body.appendChild(popup); popup.showModal();
+  };
+
   const renderRemoteAccess = () => {
     const section = document.createElement("section");
     section.className = "panel network-section";
@@ -1027,7 +1138,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     grid.className = "network-provider-grid";
     const hint = document.createElement("p");
     hint.className = "state-text";
-    hint.textContent = remoteError || "Activate enables and starts a provider; Deactivate stops and disables it. Manage accounts and tunnels in the provider dashboard.";
+    hint.textContent = remoteError || "Activate enables and starts a provider; Deactivate stops and disables it. Manage accounts and tunnels in the provider dashboard. Using multiple VPN options at the same time is possible but not recommended. Routing, DNS or firewall rules can conflict. If something breaks, report a reproducible issue on GitHub; it may be possible to fix. Playit remains independent.";
     section.appendChild(hint);
     remoteProviders.forEach((provider) => {
       const card = document.createElement("article");
@@ -1038,8 +1149,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         row("Software", provider.status_unavailable ? "Unknown" : provider.installed ? "Installed" : "Unavailable"),
         row("Service enabled", provider.status_unavailable ? "Unknown" : provider.service_enabled ? "Yes" : "No"),
         row("Service", providerTransitional(provider) ? provider.service_state[0].toUpperCase() + provider.service_state.slice(1) + "…" : provider.service_active ? "Running" : label(provider.service_state).replace(/^./, (c) => c.toUpperCase())),
-        row("Configuration", provider.status_unavailable ? "Unknown" : provider.configured ? "Configured" : "Not configured")
+        row(provider.id === "nordvpn" ? "Account" : "Configuration", provider.id === "nordvpn" ? provider.account || "Unknown" : provider.status_unavailable ? "Unknown" : provider.configured ? "Configured" : "Not configured")
       );
+      if (provider.id === "nordvpn") {
+        card.appendChild(row("Meshnet", provider.meshnet || "Unknown"));
+        if (provider.nord_name) card.appendChild(row("Nord name", provider.nord_name));
+        if (provider.ip) card.appendChild(row("Meshnet IP", provider.ip));
+      }
       if (provider.id === "netbird" && provider.connected && provider.ip) card.appendChild(row("NetBird IP", provider.ip.split("/")[0]));
       if (provider.id === "tailscale") {
         card.appendChild(row("Connection", provider.summary || "Unknown"));
@@ -1105,11 +1221,11 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       }
       const dashboard = document.createElement("a");
       // Fixed destinations only, even if a malformed status payload is received.
-      dashboard.href = { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[provider.id];
+      dashboard.href = { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/", nordvpn: "https://my.nordaccount.com/" }[provider.id];
       dashboard.target = "_blank";
       dashboard.rel = "noopener noreferrer";
       dashboard.className = "button-link warning network-action-button";
-      dashboard.textContent = { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard" }[provider.id];
+      dashboard.textContent = { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard", nordvpn: "Open Nord account" }[provider.id];
       actions.appendChild(dashboard);
       if (activate.parentElement === actions) actions.appendChild(activate);
       card.appendChild(actions);
@@ -1228,12 +1344,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         { id: "tailscale", display_name: "Tailscale", status_unavailable: true },
         { id: "netbird", display_name: "NetBird", status_unavailable: true },
         { id: "playit", display_name: "Playit.gg", status_unavailable: true },
+        { id: "nordvpn", display_name: "NordVPN Meshnet", status_unavailable: true },
       ];
       remoteError = "";
       try {
         const remote = await requestJSON("/api/network/remote-access");
         if (sequence !== loadSequence) return;
-        remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
+        remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit", "nordvpn"].includes(provider.id));
         if (isAdministrator() && selectedTab === "Remote Access") {
           playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
         }
@@ -1420,7 +1537,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
   const refreshRemoteAccess = async () => {
     if (selectedTab === "Remote Access") playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
     const remote = await requestJSON("/api/network/remote-access");
-    remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
+    remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit", "nordvpn"].includes(provider.id));
     updatePlayitPopup();
     openActivatedDashboards();
     if (remoteProviders.some((provider) => provider.id === "netbird" && provider.connected)) {
@@ -1532,6 +1649,11 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
           // The existing setup endpoint enables/starts the fixed service before setup.
           playitSetup = await postForm("/api/network/remote-access/playit/setup");
           updatePlayitPopup();
+        });
+      } else if (id === "nordvpn" && provider.dataset.action === "activate") {
+        runRemoteAction(async () => {
+          const result = await postForm("/api/network/remote-access/nordvpn", { action: "activate" });
+          if (result?.login_required) showNordAccountDialog();
         });
       } else if (id === "tailscale" && provider.dataset.action === "activate") {
         const loginTab = openRemoteLoginPopup(id);

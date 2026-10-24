@@ -38,7 +38,7 @@ The existing draggable, resizable Network window retains Refresh and now has fiv
 - **Ethernet**: active profile, carrier, speed, IPv4, gateway, DNS, MTU and autoconnect, with automatic/DHCP or manual IPv4 controls.
 - **Wi-Fi**: radio, nearby networks, scan, saved-profile activation, new/hidden networks, disconnect and forget.
 - **Troubleshoot**: NetworkManager connectivity, interface/carrier state, addresses, gateway, DNS and active profile. Administrators can request a fresh connectivity check or reconnect a selected active Ethernet/Wi-Fi profile behind a checkpoint.
-- **Remote Access**: Tailscale, NetBird and Playit.gg availability, enabled/running state, configuration evidence, lifecycle controls and external dashboard links.
+- **Remote Access**: Tailscale, NetBird, Playit.gg and NordVPN Meshnet availability, enabled/running state, configuration evidence, lifecycle controls and external dashboard links.
 
 Operators and Viewers receive Overview only. Management Agent authorization remains authoritative for all mutations; WebUI POST requests retain CSRF protection.
 
@@ -163,7 +163,7 @@ See NetworkManager's [Device applied-connection and Reapply API](https://network
 
 ## Remote Access providers
 
-Tailscale, NetBird and Playit are separate providers outside `management/internal/networking`; NetworkManager remains the Ethernet/Wi-Fi authority. A fixed Management Agent provider layer controls only `tailscaled.service`, `netbird.service` and `playit.service` with bounded systemctl operations. Arbitrary provider or unit names are rejected.
+Tailscale, NetBird, Playit and NordVPN Meshnet are separate providers outside `management/internal/networking`; NetworkManager remains the Ethernet/Wi-Fi authority. A fixed Management Agent provider layer controls only `tailscaled.service`, `netbird.service`, `playit.service`, `nordvpnd.service` and `nordvpnd.socket` with bounded systemctl operations. Arbitrary provider or unit names are rejected.
 
 **Activate** enables and starts the fixed service. **Deactivate** stops and disables it, so the administrator's choice survives reboot. Successful and failed lifecycle changes are audited. Status is read-access; mutations require administrator authorization.
 
@@ -176,8 +176,27 @@ Provider cloud configuration remains external:
 - [Tailscale admin console](https://console.tailscale.com/admin/)
 - [NetBird dashboard](https://app.netbird.io/)
 - [Playit.gg account](https://playit.gg/account/)
+- [Nord Account](https://my.nordaccount.com/)
 
 JustVoxel does not collect provider API keys or implement cloud account, policy or tunnel management. Playit is enabled during image composition, without starting it or creating a secret. On the first deployed boot, a running unconfigured Playit service is a normal waiting-for-secret state, not a failure. Initial account/agent setup is available in `mjust net` option three, using the packaged `/usr/bin/playit setup`. The packaged CLI owns the setup interaction and persistent configuration; further tunnel/account management belongs at Playit's account page.
+
+### NordVPN Meshnet
+
+NordVPN uses the official native RPM, `/usr/bin/nordvpn`, `/usr/sbin/nordvpnd`, and the packaged daemon/socket units. It is not a container. JustVoxel controls Meshnet only; it never selects or connects to a commercial NordVPN server. Activate enables/starts the fixed units, checks the account and turns Meshnet on, verifying the setting. Deactivate turns Meshnet off, verifies it, then stops/disables both units. It does not log out or remove account state.
+
+When an account is required, the small **NordVPN account required** dialog offers **Log in to NordVPN**, **Create NordVPN account**, or **Cancel**. Create opens the fixed [JustVoxel creator’s referral link](https://refer-nordvpn.com/pZGMpGTrBrO) in a separate tab. Log in starts the native browser flow. After signing in, copy the Continue button’s link address into **Complete NordVPN login**. JustVoxel accepts only a bounded `nordvpn://login` callback with an exchange token and optional fixed login/completion fields, passes it as one CLI argument, then enables and verifies Meshnet. The callback is never saved or included in JustVoxel logs/audit. Optional vendor analytics consent is declined during first login. Account/dashboard and referral destinations cannot be supplied by callers.
+
+Status reads bounded CLI output without opening credential files. Only recognized account and Meshnet states are displayed; unfamiliar or unavailable output is Unknown. Local Nord name/IP rows appear only when the CLI identifies this device. Service activity alone does not mean Meshnet is enabled.
+
+Using multiple VPN options at the same time is possible but not recommended. Routing, DNS or firewall rules can conflict. If something breaks, report a reproducible issue on GitHub; it may be possible to fix. JustVoxel neither blocks simultaneous activation nor automatically disables another provider. Playit remains independent.
+
+Remote Access cards use their workspace container width: one column by default, two from 580px, three from 860px, and four from 1140px. Resizing reflows the cards without changing workspace geometry or card styling.
+
+### Local network diagnostics
+
+Administrators can open **System -> Logs -> Network** and select **Generate network report**. The fixed, bounded report includes release/source metadata, device/address/routes/DNS summaries, failed units, NetworkManager and remote-access service states/current-boot journals, and sanitized provider summaries. Missing commands/providers produce unavailable sections. It does not run NordVPN’s broad diagnostics bundle or read configuration/credential files.
+
+Reports reuse private diagnostic storage in `network-logs` (root-owned 0700 directory and 0600 files), the existing sanitizer and 256 KiB report/64 KiB section limits. Sensitive network lines, authentication URLs, callbacks and key material are redacted. Reports use the existing allowlisted list/read/download flow. They stay local and are never uploaded automatically; review a report before attaching it to an issue.
 
 ## Development rule
 

@@ -28,6 +28,7 @@ type diagnosticLogEntry struct {
 
 func registerAdminDiagnosticLogRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/logs/support", s.adminSupportReport)
+	mux.HandleFunc("POST /v1/admin/logs/network", s.adminNetworkReport)
 	mux.HandleFunc("GET /v1/admin/logs", s.adminDiagnosticLogList)
 	mux.HandleFunc("GET /v1/admin/logs/{category}/{id}", s.adminDiagnosticLogRead)
 }
@@ -179,7 +180,7 @@ func validDiagnosticOperationType(value string) bool {
 
 func validDiagnosticCategory(value string) bool {
 	switch value {
-	case "setup", "migration", "restore", "plugins", "reset", "support", "operation":
+	case "setup", "migration", "restore", "plugins", "reset", "network", "support", "operation":
 		return true
 	}
 	return false
@@ -252,7 +253,7 @@ func (s *operationStore) readDiagnosticLog(category, id string) ([]byte, error) 
 			return nil, os.ErrNotExist
 		}
 		category = diagnosticCategoryForOperationType(journal.OperationType)
-	} else if journal, err := s.get(id); category != "support" && err == nil && diagnosticCategoryForOperationType(journal.OperationType) != category {
+	} else if journal, err := s.get(id); category != "support" && category != "network" && err == nil && diagnosticCategoryForOperationType(journal.OperationType) != category {
 		return nil, os.ErrNotExist
 	}
 	s.diagnosticMu.Lock()
@@ -295,7 +296,7 @@ func (s *operationStore) listDiagnosticLogs() ([]diagnosticLogEntry, error) {
 	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return nil, err
 	}
-	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "support"} {
+	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "network", "support"} {
 		dir := s.diagnosticCategoryDirectory(category)
 		if err := validatePrivateDiagnosticDirectory(dir); err != nil {
 			return nil, err

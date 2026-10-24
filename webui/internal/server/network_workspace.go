@@ -29,6 +29,7 @@ func (a *App) registerNetworkWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/network", a.networkStatus)
 	mux.HandleFunc("GET /api/network/remote-access/playit/setup", a.networkPlayitSetup)
 	mux.HandleFunc("POST /api/network/remote-access/playit/setup", a.networkPlayitSetup)
+	mux.HandleFunc("POST /api/network/remote-access/nordvpn/login", a.networkNordLogin)
 	mux.HandleFunc("GET /api/network/remote-access", a.networkRemoteAccessStatus)
 	mux.HandleFunc("POST /api/network/remote-access/{provider}", a.networkConfigurationChange)
 	mux.HandleFunc("POST /api/network/ethernet/{interface}", a.networkConfigurationChange)
@@ -436,6 +437,9 @@ func (a *App) networkRemoteAccessStatus(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("provider") == "nordvpn" {
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	}
 	if !a.validCSRF(r) {
 		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
 		return
@@ -457,6 +461,18 @@ func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request)
 	var err error
 	switch {
 	case r.PathValue("provider") != "":
+		if r.PathValue("provider") == "nordvpn" {
+			if r.URL.RawQuery != "" || (r.PostForm.Get("action") != "activate" && r.PostForm.Get("action") != "deactivate") {
+				writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN action")
+				return
+			}
+			for key, values := range r.PostForm {
+				if (key != "action" && key != "csrf") || len(values) != 1 {
+					writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN request")
+					return
+				}
+			}
+		}
 		result, err = client.ChangeRemoteAccess(r.Context(), session, r.PathValue("provider"), r.FormValue("action"))
 	case strings.HasPrefix(r.URL.Path, "/api/network/ethernet/"):
 		prefix, prefixErr := strconv.ParseUint(r.FormValue("prefix"), 10, 32)
@@ -514,4 +530,45 @@ func (a *App) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeNetworkWebJSON(w, http.StatusOK, status)
+}
+
+type networkNordAPI interface {
+	NordVPNLogin(context.Context, string, string, string) (api.RemoteAccessChange, error)
+}
+
+func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" || r.ParseForm() != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN login request")
+		return
+	}
+	for key, values := range r.PostForm {
+		if (key != "action" && key != "callback" && key != "csrf") || len(values) != 1 {
+			writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN login request")
+			return
+		}
+	}
+	action, callback := r.PostForm.Get("action"), r.PostForm.Get("callback")
+	if (action != "login" && action != "complete-login") || (action == "login" && callback != "") || (action == "complete-login" && !api.ValidNordCallback(callback)) {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN Continue link")
+		return
+	}
+	client, ok := a.api.(networkNordAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "NordVPN login unavailable")
+		return
+	}
+	result, err := client.NordVPNLogin(r.Context(), session, action, callback)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
 }

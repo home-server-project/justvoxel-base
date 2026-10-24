@@ -245,7 +245,11 @@ func (s *operationStore) generateSupportReport(ctx context.Context) (diagnosticL
 }
 
 func (s *operationStore) storeSupportReport(id string, data []byte) (diagnosticLogEntry, error) {
-	if !validOperationID(id) || len(data) > supportReportLimit {
+	return s.storeDiagnosticReport("support", id, data)
+}
+
+func (s *operationStore) storeDiagnosticReport(category, id string, data []byte) (diagnosticLogEntry, error) {
+	if (category != "support" && category != "network") || !validOperationID(id) || len(data) > supportReportLimit {
 		return diagnosticLogEntry{}, errors.New("invalid support report")
 	}
 	s.diagnosticMu.Lock()
@@ -253,7 +257,7 @@ func (s *operationStore) storeSupportReport(id string, data []byte) (diagnosticL
 	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return diagnosticLogEntry{}, err
 	}
-	dir := s.diagnosticCategoryDirectory("support")
+	dir := s.diagnosticCategoryDirectory(category)
 	if err := validatePrivateDiagnosticDirectory(dir); err != nil {
 		return diagnosticLogEntry{}, err
 	}
@@ -310,5 +314,5 @@ func (s *operationStore) storeSupportReport(id string, data []byte) (diagnosticL
 		return diagnosticLogEntry{}, err
 	}
 	complete = true
-	return diagnosticLogEntry{Category: "support", LogID: id, Timestamp: info.ModTime().UTC().Format(time.RFC3339Nano)}, nil
+	return diagnosticLogEntry{Category: category, LogID: id, Timestamp: info.ModTime().UTC().Format(time.RFC3339Nano)}, nil
 }

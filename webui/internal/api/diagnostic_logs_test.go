@@ -10,7 +10,7 @@ import (
 
 func TestValidDiagnosticLogIdentifier(t *testing.T) {
 	const validID = "12345678-1234-4234-8234-123456789abc"
-	categories := []string{"setup", "migration", "restore", "plugins", "reset", "support", "operation"}
+	categories := []string{"setup", "migration", "restore", "plugins", "reset", "network", "support", "operation"}
 	for _, category := range categories {
 		t.Run(category, func(t *testing.T) {
 			if !validDiagnosticLogIdentifier(category, validID) {
@@ -88,6 +88,32 @@ func TestSupportGenerationExactRouteAndValidatedResponse(t *testing.T) {
 	} {
 		body = bad
 		if _, err := client.AdminGenerateSupportReport(context.Background(), "session"); err == nil {
+			t.Fatal("accepted malformed identity", body)
+		}
+	}
+}
+
+func TestNetworkGenerationExactRouteAndValidatedResponse(t *testing.T) {
+	body := `{"ok":true,"log":{"category":"network","log_id":"12345678-1234-4234-8234-123456789abc","timestamp":"2026-10-17T12:00:00Z"}}`
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/admin/logs/network" || r.URL.RawQuery != "" || r.Body != nil || r.Header.Get("Authorization") != "Bearer session" {
+			t.Fatal("unsafe generation request", r)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+	entry, err := client.AdminGenerateNetworkReport(context.Background(), "session")
+	if err != nil || entry.Category != "network" {
+		t.Fatal(entry, err)
+	}
+	original := body
+	for _, bad := range []string{
+		strings.Replace(original, `"network"`, `"setup"`, 1),
+		strings.Replace(original, "12345678-1234-4234-8234-123456789abc", "../file", 1),
+		strings.Replace(original, "2026-10-17T12:00:00Z", "invalid", 1),
+		original + ` {}`, strings.Replace(original, `"ok":true`, `"ok":false`, 1),
+	} {
+		body = bad
+		if _, err := client.AdminGenerateNetworkReport(context.Background(), "session"); err == nil {
 			t.Fatal("accepted malformed identity", body)
 		}
 	}

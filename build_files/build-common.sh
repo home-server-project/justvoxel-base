@@ -39,6 +39,35 @@ dnf install -y "${playit_rpm}"
 # Appliance policy: enabled for deployed boot, never started in composition.
 systemctl enable playit.service
 
+# Official native RPM; resolve the current Nord package only during composition.
+dnf install -y https://repo.nordvpn.com/yum/nordvpn/centos/noarch/Packages/n/nordvpn-release-1.0.0-1.noarch.rpm
+dnf install -y nordvpn
+# Disable every repository shipped by the bootstrap package for deployed hosts.
+while IFS= read -r nord_repo; do
+    case "${nord_repo}" in
+        /etc/yum.repos.d/*.repo)
+            # Explicitly disable sections even when enabled was omitted.
+            python3 - "${nord_repo}" <<'NORD_REPO'
+import configparser
+import sys
+path = sys.argv[1]
+repo = configparser.RawConfigParser()
+repo.read(path)
+for section in repo.sections():
+    repo.set(section, 'enabled', '0')
+with open(path, 'w') as target:
+    repo.write(target)
+NORD_REPO
+            ;;
+    esac
+done < <(rpm -ql nordvpn-release)
+# Undo vendor installation enablement. No account, identity or Meshnet setup.
+# Composition has no running systemd; --root changes only finished-image links.
+if systemctl is-active --quiet nordvpnd.socket nordvpnd.service 2>/dev/null; then
+    systemctl stop nordvpnd.socket nordvpnd.service
+fi
+systemctl --root=/ disable nordvpnd.socket nordvpnd.service
+
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable systemd-resolved.service
 systemctl enable firewalld.service 2>/dev/null || true

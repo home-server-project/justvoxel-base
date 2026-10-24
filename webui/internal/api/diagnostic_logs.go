@@ -20,7 +20,7 @@ type DiagnosticLogEntry struct {
 }
 
 func validDiagnosticLogIdentifier(category, id string) bool {
-	return (category == "setup" || category == "migration" || category == "restore" || category == "plugins" || category == "reset" || category == "operation" || category == "support") && persistentOperationIDPattern.MatchString(id)
+	return (category == "setup" || category == "migration" || category == "restore" || category == "plugins" || category == "reset" || category == "operation" || category == "support" || category == "network") && persistentOperationIDPattern.MatchString(id)
 }
 
 func (c *Client) AdminDiagnosticLogs(ctx context.Context, session string) ([]DiagnosticLogEntry, error) {
@@ -100,7 +100,15 @@ func (c *Client) AdminDiagnosticLog(ctx context.Context, session, category, id s
 
 // AdminGenerateSupportReport has no caller-controlled paths, units or command arguments.
 func (c *Client) AdminGenerateSupportReport(ctx context.Context, session string) (DiagnosticLogEntry, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/admin/logs/support", nil)
+	return c.adminGenerateReport(ctx, session, "support")
+}
+
+func (c *Client) AdminGenerateNetworkReport(ctx context.Context, session string) (DiagnosticLogEntry, error) {
+	return c.adminGenerateReport(ctx, session, "network")
+}
+
+func (c *Client) adminGenerateReport(ctx context.Context, session, category string) (DiagnosticLogEntry, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/admin/logs/"+category, nil)
 	if err != nil {
 		return DiagnosticLogEntry{}, err
 	}
@@ -108,6 +116,9 @@ func (c *Client) AdminGenerateSupportReport(ctx context.Context, session string)
 	client := *c.http
 	// Four fixed commands may take four seconds each, plus bounded collection.
 	client.Timeout = 25 * time.Second
+	if category == "network" {
+		client.Timeout = 65 * time.Second
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return DiagnosticLogEntry{}, errors.New("support report is unavailable")
@@ -132,7 +143,7 @@ func (c *Client) AdminGenerateSupportReport(ctx context.Context, session string)
 		return DiagnosticLogEntry{}, errors.New("invalid support report response")
 	}
 	_, timestampErr := time.Parse(time.RFC3339Nano, payload.Log.Timestamp)
-	if !payload.OK || payload.Log.Category != "support" || !validDiagnosticLogIdentifier(payload.Log.Category, payload.Log.LogID) || timestampErr != nil || payload.Log.OperationID != "" || payload.Log.OperationType != "" || payload.Log.State != "" {
+	if !payload.OK || payload.Log.Category != category || !validDiagnosticLogIdentifier(payload.Log.Category, payload.Log.LogID) || timestampErr != nil || payload.Log.OperationID != "" || payload.Log.OperationType != "" || payload.Log.State != "" {
 		return DiagnosticLogEntry{}, errors.New("invalid support report identity")
 	}
 	if decoder.Decode(new(any)) != io.EOF {

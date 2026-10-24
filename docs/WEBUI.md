@@ -181,11 +181,17 @@ shortcut where available. Re-check recovery retains maintenance exclusion until
 an exact target or restored original state can be verified.
 
 System Logs categories appear exactly in this order: **Setup, Migration,
-Restore, Plugins, Reset, Support, Failed units**. Plugins supports the same
+Restore, Plugins, Reset, Network, Support, Failed units**. Plugins supports the same
 list/select/read/download flow as other operation groups. Deep links accept
 `workspace=system&tab=logs&log_group=plugins&log_id=<operation UUID>` with existing
 identifier validation. Plugin startup failure evidence is bounded and sanitized;
 it does not expose the full Minecraft server log.
+
+In **System -> Logs -> Network**, **Generate network report** creates a private, bounded and sanitized local report of NetworkManager, interfaces, routes, DNS, failed units and the four Remote Access providers. Reports open in the same Viewer and download through **Download log**. There is no automatic upload, arbitrary command/unit selection or credential/configuration dump.
+
+Network -> Remote Access includes **NordVPN Meshnet** as its fourth provider. Its native RPM/daemon controls are Meshnet-only. Activate either enables verified Meshnet or opens the account-required dialog: log in, create an account through the fixed [JustVoxel creator’s referral link](https://refer-nordvpn.com/pZGMpGTrBrO), or cancel. After browser login, paste the Continue link into **Complete NordVPN login**; the callback is transient and never logged. Deactivate preserves the Nord account. **Open Nord account** opens the fixed official dashboard. Unknown account/Meshnet output stays Unknown; local Nord name/IP rows require CLI evidence.
+
+Provider cards reflow with container width from one to two (580px), three (860px), and four (1140px) columns, preserving workspace geometry and card appearance. The multiple-VPN message is informational: concurrent use is possible but routing, DNS or firewall rules may conflict. It neither blocks activation nor deactivates other providers; Playit remains independent.
 
 In **System -> Logs -> Support**, administrators can select **Generate support report** to create a bounded, redacted local appliance snapshot. The new report opens in the existing Viewer; **Download log** saves it locally. Reports remain in private appliance storage until normal log/state cleanup removes them. There is no external transmission or automatic upload.
 

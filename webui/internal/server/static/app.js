@@ -4721,11 +4721,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
 
   let failedUnitsSelected = false;
   let supportLogsSelected = false;
+  let networkLogsSelected = false;
 
   const renderLogs = async (sequence) => {
     const payload = await systemFetchJSON("/api/system/workspace/logs");
     if (!payload || sequence !== loadSequence || !content) return;
-    const groups = ["Setup", "Migration", "Restore", "Plugins", "Reset", "Support", "Failed units"];
+    const groups = ["Setup", "Migration", "Restore", "Plugins", "Reset", "Network", "Support", "Failed units"];
     const logs = Array.isArray(payload.logs) ? payload.logs : [];
     const failedUnits = Array.isArray(payload.failed_units) ? payload.failed_units : [];
     const root = document.createElement("div");
@@ -4762,7 +4763,16 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     supportProgress.hidden = true;
     const fileList = document.createElement("div");
     fileList.className = "system-logs-list";
-    fileColumn.append(generateSupport, supportProgress, fileList);
+    const networkDescription = document.createElement("p");
+    networkDescription.className = "muted";
+    networkDescription.textContent = "Create a local network diagnostics report for troubleshooting or attaching to a JustVoxel GitHub issue.";
+    const generateNetwork = document.createElement("button");
+    generateNetwork.type = "button";
+    generateNetwork.textContent = "Generate network report";
+    const networkProgress = document.createElement("p");
+    networkProgress.className = "muted";
+    networkProgress.setAttribute("role", "status");
+    fileColumn.append(generateSupport, supportProgress, networkDescription, generateNetwork, networkProgress, fileList);
     const reader = makeColumn("Viewer", "system-logs-reader");
     const viewer = document.createElement("div");
     viewer.className = "system-logs-viewer";
@@ -4774,7 +4784,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     documentText.textContent = "Select a file to read it here.";
     viewer.append(download, documentText);
     reader.appendChild(viewer);
-    let selectedGroup = requestedMigrationLog?.group || (failedUnitsSelected ? "Failed units" : supportLogsSelected ? "Support" : "Setup");
+    let selectedGroup = requestedMigrationLog?.group || (failedUnitsSelected ? "Failed units" : supportLogsSelected ? "Support" : networkLogsSelected ? "Network" : "Setup");
     let selectedFile = "";
     let requestedEntry = requestedMigrationLog ? logs.find((entry) => entry.category === requestedMigrationLog.group.toLowerCase() && entry.log_id === requestedMigrationLog.id) : null;
     requestedMigrationLog = null;
@@ -4784,6 +4794,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       download.hidden = true;
       const live = selectedGroup === "Failed units";
       generateSupport.hidden = selectedGroup !== "Support";
+      networkDescription.hidden = selectedGroup !== "Network";
+      generateNetwork.hidden = selectedGroup !== "Network";
+      networkProgress.hidden = selectedGroup !== "Network" || !networkProgress.textContent;
       fileList.className = selectedGroup === "Support"
         ? "system-logs-list system-support-report-files" : "system-logs-list";
       supportProgress.hidden = selectedGroup !== "Support" || !supportProgress.textContent;
@@ -4836,6 +4849,26 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         }
       });
     };
+    generateNetwork.addEventListener("click", async () => {
+      generateNetwork.disabled = true;
+      networkProgress.textContent = "Generating network report…";
+      networkProgress.hidden = false;
+      try {
+        const result = await systemPostForm("/api/system/workspace/logs/network");
+        if (!result?.ok || result.log?.category !== "network") throw new Error("Network report unavailable.");
+        if (sequence !== loadSequence || !root.isConnected) return;
+        logs.unshift(result.log);
+        requestedEntry = result.log;
+        networkProgress.textContent = "Network report generated.";
+        if (selectedGroup === "Network") renderFiles();
+      } catch (_) {
+        if (sequence !== loadSequence || !root.isConnected) return;
+        networkProgress.textContent = "Network report could not be generated. Try again.";
+      } finally {
+        generateNetwork.disabled = false;
+        networkProgress.hidden = selectedGroup !== "Network";
+      }
+    });
     generateSupport.addEventListener("click", async () => {
       generateSupport.disabled = true;
       supportProgress.textContent = "Generating support report…";
@@ -4866,6 +4899,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         selectedGroup = group;
         failedUnitsSelected = group === "Failed units";
         supportLogsSelected = group === "Support";
+        networkLogsSelected = group === "Network";
         selectedFile = "";
         groupColumn.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
         renderFiles();

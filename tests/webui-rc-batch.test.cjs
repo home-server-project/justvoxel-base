@@ -231,7 +231,7 @@ test('Failed units appends the exact category and lists each live unit separatel
   const live = { failed_units: failedUnits, journalText: 'Current boot last 60 lines' };
   const page = await openLogs('', [migrationLog], live);
   assert.deepEqual(page.content.all().filter(node => node.className === 'system-log-group secondary').map(node => node.textContent),
-    ['Setup', 'Migration', 'Restore', 'Plugins', 'Reset', 'Support', 'Failed units']);
+    ['Setup', 'Migration', 'Restore', 'Plugins', 'Reset', 'Network', 'Support', 'Failed units']);
   assert.equal(logGroup(page, 'Setup').attrs['aria-pressed'], 'true');
   await logGroup(page, 'Failed units').click();
   assert.equal(logEntries(page).length, 3);

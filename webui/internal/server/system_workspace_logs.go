@@ -83,7 +83,7 @@ func (a *App) systemWorkspaceLog(w http.ResponseWriter, r *http.Request) {
 
 func validWorkspaceLogID(category, id string) bool {
 	switch category {
-	case "setup", "migration", "restore", "plugins", "reset", "support", "operation":
+	case "setup", "migration", "restore", "plugins", "reset", "network", "support", "operation":
 	default:
 		return false
 	}
@@ -155,6 +155,22 @@ type systemWorkspaceSupportAPI interface {
 }
 
 func (a *App) systemWorkspaceSupportReport(w http.ResponseWriter, r *http.Request) {
+	a.systemWorkspaceGenerateReport(w, r, "support")
+}
+
+func (a *App) systemWorkspaceNetworkReport(w http.ResponseWriter, r *http.Request) {
+	a.systemWorkspaceGenerateReport(w, r, "network")
+}
+
+type systemWorkspaceNetworkReportAPI interface {
+	AdminGenerateNetworkReport(context.Context, string) (api.DiagnosticLogEntry, error)
+}
+
+func (a *App) systemWorkspaceGenerateReport(w http.ResponseWriter, r *http.Request, category string) {
+	reportName := "Support"
+	if category == "network" {
+		reportName = "Network"
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if !a.validCSRF(r) {
 		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
@@ -165,28 +181,39 @@ func (a *App) systemWorkspaceSupportReport(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if r.URL.RawQuery != "" || r.ParseForm() != nil || len(r.PostForm) > 1 || len(r.PostForm["csrf"]) > 1 {
-		writeSystemWorkspaceError(w, http.StatusBadRequest, "Support report takes no input.")
+		writeSystemWorkspaceError(w, http.StatusBadRequest, reportName+" report takes no input.")
 		return
 	}
 	for key := range r.PostForm {
 		if key != "csrf" {
-			writeSystemWorkspaceError(w, http.StatusBadRequest, "Support report takes no input.")
+			writeSystemWorkspaceError(w, http.StatusBadRequest, reportName+" report takes no input.")
 			return
 		}
 	}
-	client, ok := a.api.(systemWorkspaceSupportAPI)
-	if !ok {
-		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Support report is unavailable.")
-		return
+	var entry api.DiagnosticLogEntry
+	var err error
+	if category == "network" {
+		client, supported := a.api.(systemWorkspaceNetworkReportAPI)
+		if !supported {
+			writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Network report is unavailable.")
+			return
+		}
+		entry, err = client.AdminGenerateNetworkReport(r.Context(), session)
+	} else {
+		client, supported := a.api.(systemWorkspaceSupportAPI)
+		if !supported {
+			writeSystemWorkspaceError(w, http.StatusServiceUnavailable, reportName+" report is unavailable.")
+			return
+		}
+		entry, err = client.AdminGenerateSupportReport(r.Context(), session)
 	}
-	entry, err := client.AdminGenerateSupportReport(r.Context(), session)
 	if err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, "Support report could not be generated.")
+		a.writeSystemWorkspaceAPIError(w, err, reportName+" report could not be generated.")
 		return
 	}
 	_, timestampErr := time.Parse(time.RFC3339Nano, entry.Timestamp)
-	if entry.Category != "support" || !validWorkspaceLogID(entry.Category, entry.LogID) || timestampErr != nil || entry.OperationID != "" || entry.OperationType != "" || entry.State != "" {
-		writeSystemWorkspaceError(w, http.StatusBadGateway, "Support report is unavailable.")
+	if entry.Category != category || !validWorkspaceLogID(entry.Category, entry.LogID) || timestampErr != nil || entry.OperationID != "" || entry.OperationType != "" || entry.State != "" {
+		writeSystemWorkspaceError(w, http.StatusBadGateway, reportName+" report is unavailable.")
 		return
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, map[string]any{"ok": true, "log": entry})

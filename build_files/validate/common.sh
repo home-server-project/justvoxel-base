@@ -52,6 +52,27 @@ test -f /usr/lib/systemd/system/playit.service
 test "$(systemctl is-enabled playit.service)" = "enabled"
 test ! -e /etc/playit/playit.toml
 
+# NordVPN is native, dormant on fresh boot, with its external repo disabled.
+rpm -q nordvpn nordvpn-release >/dev/null
+test -x /usr/bin/nordvpn
+test -x /usr/sbin/nordvpnd
+for nord_unit in nordvpnd.service nordvpnd.socket; do
+    test -f "/usr/lib/systemd/system/${nord_unit}"
+    test "$(systemctl is-enabled "${nord_unit}" 2>/dev/null || true)" = "disabled"
+done
+python3 - <<'NORD_REPO'
+import configparser
+import subprocess
+paths = subprocess.check_output(['rpm', '-ql', 'nordvpn-release'], text=True).splitlines()
+repos = [path for path in paths if path.startswith('/etc/yum.repos.d/') and path.endswith('.repo')]
+assert repos, 'Nord repository definition missing'
+for path in repos:
+    repo = configparser.RawConfigParser()
+    repo.read(path)
+    assert repo.sections()
+    assert all(not repo.getboolean(section, 'enabled', fallback=True) for section in repo.sections())
+NORD_REPO
+
 test -f /etc/pam.d/justvoxel
 grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
 grep -Fqx 'account    include      system-auth' /etc/pam.d/justvoxel

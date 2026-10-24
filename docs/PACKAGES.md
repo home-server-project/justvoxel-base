@@ -27,6 +27,14 @@ They are **not configured automatically** and their services are **disabled by d
 
 Their external package repositories are used only during image composition and are disabled in the finished image.
 
+## NordVPN Meshnet
+
+The testing image installs the native `nordvpn` RPM from NordVPN’s official YUM repository using its [repository bootstrap RPM](https://repo.nordvpn.com/yum/nordvpn/centos/noarch/Packages/n/nordvpn-release-1.0.0-1.noarch.rpm). The repository resolves the current package at composition time; there is no package version/digest resolver, container, or runtime layering.
+
+All repository sections supplied by `nordvpn-release` are explicitly disabled after installation. The bootstrap package remains installed with disabled repository definitions. Composition normalizes vendor service enablement by stopping the daemon/socket if running and disabling both `nordvpnd.service` and `nordvpnd.socket` in the finished image. Fresh boot is dormant: no Nord login, account, Meshnet identity or Meshnet configuration is created during composition. Account state is established only by an administrator at runtime and survives normal Meshnet off/on operations.
+
+Image validation checks the RPMs, `/usr/bin/nordvpn`, `/usr/sbin/nordvpnd`, both native units, disabled service/socket state and disabled repository sections. JustVoxel’s WebUI controls Meshnet only.
+
 ## Playit.gg public game access
 
 Playit is consumed exclusively from the Home Server Packages artifact `ghcr.io/home-server-project/playit:stable`. The Containerfile copies its `/rpms` payload through a package stage, and image composition installs the verified `playit-*.x86_64.rpm`. JustVoxel has no Playit software version pin or custom digest resolution. HSP owns upstream tracking, build and provenance.

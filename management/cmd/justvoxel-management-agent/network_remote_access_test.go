@@ -45,7 +45,7 @@ func remoteFixture(t *testing.T) *[]string {
 	return &calls
 }
 
-func TestRemoteAccessExactlyThreeProvidersAndUnconfiguredPlayitRunning(t *testing.T) {
+func TestRemoteAccessExactlyFourProvidersAndUnconfiguredPlayitRunning(t *testing.T) {
 	remoteFixture(t)
 	s := roleServerForTest(roleOperator)
 	mux := http.NewServeMux()
@@ -55,10 +55,10 @@ func TestRemoteAccessExactlyThreeProvidersAndUnconfiguredPlayitRunning(t *testin
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}
-	if len(remoteProviders) != 3 {
+	if len(remoteProviders) != 4 {
 		t.Fatal("unexpected provider count")
 	}
-	for _, id := range []string{"tailscale", "netbird", "playit"} {
+	for _, id := range []string{"tailscale", "netbird", "playit", "nordvpn"} {
 		if !strings.Contains(rr.Body.String(), `"id":"`+id+`"`) {
 			t.Fatalf("missing %s", id)
 		}
@@ -76,6 +76,10 @@ func TestRemoteProviderLifecycleUsesFixedUnitsAndAudits(t *testing.T) {
 	s := adminServerForTest()
 	s.store = store
 	for _, provider := range remoteProviders {
+		// Nord has a Meshnet-specific lifecycle, covered separately.
+		if provider.id == "nordvpn" {
+			continue
+		}
 		for _, action := range []string{"activate", "deactivate"} {
 			*calls = nil
 			rr := networkAdminRequest(s, "/v1/admin/network/remote-access/"+provider.id, `{"action":"`+action+`"}`)

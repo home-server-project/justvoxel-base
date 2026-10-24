@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 type NetworkIPAddress struct {
@@ -216,18 +217,22 @@ func (c *Client) ForgetWiFiProfile(ctx context.Context, session, profileUUID str
 }
 
 type RemoteAccessProvider struct {
-	ID             string         `json:"id"`
-	DisplayName    string         `json:"display_name"`
-	Installed      bool           `json:"installed"`
-	ServiceEnabled bool           `json:"service_enabled"`
-	ServiceActive  bool           `json:"service_active"`
-	Configured     bool           `json:"configured"`
-	DashboardURL   string         `json:"dashboard_url"`
-	ServiceState   string         `json:"service_state"`
-	Summary        string         `json:"summary"`
-	Connected      bool           `json:"connected"`
-	IP             string         `json:"ip,omitempty"`
-	Tunnels        []PlayitTunnel `json:"tunnels,omitempty"`
+	StatusUnavailable bool           `json:"status_unavailable,omitempty"`
+	Account           string         `json:"account,omitempty"`
+	Meshnet           string         `json:"meshnet,omitempty"`
+	NordName          string         `json:"nord_name,omitempty"`
+	ID                string         `json:"id"`
+	DisplayName       string         `json:"display_name"`
+	Installed         bool           `json:"installed"`
+	ServiceEnabled    bool           `json:"service_enabled"`
+	ServiceActive     bool           `json:"service_active"`
+	Configured        bool           `json:"configured"`
+	DashboardURL      string         `json:"dashboard_url"`
+	ServiceState      string         `json:"service_state"`
+	Summary           string         `json:"summary"`
+	Connected         bool           `json:"connected"`
+	IP                string         `json:"ip,omitempty"`
+	Tunnels           []PlayitTunnel `json:"tunnels,omitempty"`
 }
 
 type PlayitTunnel struct {
@@ -254,18 +259,31 @@ type EthernetSettings struct {
 
 func (c *Client) RemoteAccessStatus(ctx context.Context, session string) (RemoteAccessStatus, error) {
 	var out RemoteAccessStatus
-	err := c.do(ctx, http.MethodGet, "/v1/network/remote-access", session, nil, &out)
+	client := *c
+	transport := *c.http
+	transport.Timeout = 25 * time.Second
+	client.http = &transport
+	err := client.do(ctx, http.MethodGet, "/v1/network/remote-access", session, nil, &out)
 	return out, err
 }
 
 type RemoteAccessChange struct {
-	OK       bool   `json:"ok"`
-	LoginURL string `json:"login_url,omitempty"`
+	LoginRequired bool   `json:"login_required,omitempty"`
+	OK            bool   `json:"ok"`
+	LoginURL      string `json:"login_url,omitempty"`
 }
 
 func (c *Client) ChangeRemoteAccess(ctx context.Context, session, provider, action string) (RemoteAccessChange, error) {
 	var out RemoteAccessChange
-	err := c.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/"+url.PathEscape(provider), session, map[string]string{"action": action}, &out)
+	client := c
+	if provider == "nordvpn" {
+		copyClient := *c
+		transport := *c.http
+		transport.Timeout = 35 * time.Second
+		copyClient.http = &transport
+		client = &copyClient
+	}
+	err := client.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/"+url.PathEscape(provider), session, map[string]string{"action": action}, &out)
 	return out, err
 }
 
@@ -297,5 +315,16 @@ func (c *Client) PlayitSetup(ctx context.Context, session string, start bool) (P
 		method = http.MethodPost
 	}
 	err := c.do(ctx, method, "/v1/admin/network/remote-access/playit/setup", session, nil, &out)
+	return out, err
+}
+
+// NordVPNLogin uses only the fixed provider endpoint; callbacks never enter URLs.
+func (c *Client) NordVPNLogin(ctx context.Context, session, action, callback string) (RemoteAccessChange, error) {
+	var out RemoteAccessChange
+	client := *c
+	transport := *c.http
+	transport.Timeout = 35 * time.Second
+	client.http = &transport
+	err := client.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/nordvpn", session, map[string]string{"action": action, "callback": callback}, &out)
 	return out, err
 }

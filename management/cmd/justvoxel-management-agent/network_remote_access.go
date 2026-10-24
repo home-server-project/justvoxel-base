@@ -15,18 +15,22 @@ import (
 )
 
 type remoteProvider struct {
-	ID           string         `json:"id"`
-	Name         string         `json:"display_name"`
-	Installed    bool           `json:"installed"`
-	Enabled      bool           `json:"service_enabled"`
-	Active       bool           `json:"service_active"`
-	Configured   bool           `json:"configured"`
-	Dashboard    string         `json:"dashboard_url"`
-	ServiceState string         `json:"service_state"`
-	Summary      string         `json:"summary"`
-	Connected    bool           `json:"connected"`
-	IP           string         `json:"ip,omitempty"`
-	Tunnels      []playitTunnel `json:"tunnels,omitempty"`
+	StatusUnavailable bool           `json:"status_unavailable,omitempty"`
+	Account           string         `json:"account,omitempty"`
+	Meshnet           string         `json:"meshnet,omitempty"`
+	NordName          string         `json:"nord_name,omitempty"`
+	ID                string         `json:"id"`
+	Name              string         `json:"display_name"`
+	Installed         bool           `json:"installed"`
+	Enabled           bool           `json:"service_enabled"`
+	Active            bool           `json:"service_active"`
+	Configured        bool           `json:"configured"`
+	Dashboard         string         `json:"dashboard_url"`
+	ServiceState      string         `json:"service_state"`
+	Summary           string         `json:"summary"`
+	Connected         bool           `json:"connected"`
+	IP                string         `json:"ip,omitempty"`
+	Tunnels           []playitTunnel `json:"tunnels,omitempty"`
 }
 
 type remoteProviderMetadata struct {
@@ -38,6 +42,7 @@ var remoteProviders = []remoteProviderMetadata{
 	{"tailscale", "Tailscale", "tailscaled.service", "https://console.tailscale.com/admin/", nil},
 	{"netbird", "NetBird", "netbird.service", "https://app.netbird.io/", []string{"/var/lib/netbird/default.json", "/etc/netbird/config.json", "/etc/netbird/config.yaml"}},
 	{"playit", "Playit.gg", "playit.service", "https://playit.gg/account/", []string{"/etc/playit/playit.toml"}},
+	{"nordvpn", "NordVPN Meshnet", "nordvpnd.service", "https://my.nordaccount.com/", nil},
 }
 
 // NetBird uses the packaged CLI for login and connected-state information.
@@ -359,6 +364,15 @@ func remoteProviderStatus(ctx context.Context, provider remoteProviderMetadata) 
 		if status.Configured && !status.Active && status.Summary == "Connected" {
 			status.Summary = "Stopped"
 		}
+	} else if provider.id == "nordvpn" {
+		status.Installed = status.Installed && nordSoftwareInstalled()
+		status.Account, status.Meshnet = "Unknown", "Unknown"
+		if status.Installed && status.Active {
+			status.Account, status.Meshnet, status.NordName, status.IP = nordStatus(ctx)
+		}
+		status.Configured = status.Account == "Logged in"
+		status.Connected = status.Active && status.Meshnet == "Enabled"
+		status.Summary = status.Meshnet
 	} else if provider.id == "netbird" {
 		if status.Configured {
 			status.Summary = "Stopped"
@@ -394,11 +408,16 @@ func (s *server) networkRemoteAccessStatus(w http.ResponseWriter, r *http.Reques
 	if _, ok := s.requireReadAccess(w, r); !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 16*time.Second)
 	defer cancel()
 	providers := make([]remoteProvider, 0, len(remoteProviders))
 	for _, provider := range remoteProviders {
 		status, err := remoteProviderStatus(ctx, provider)
+		if err != nil && provider.id == "nordvpn" {
+			// An unavailable optional Nord daemon must not hide existing providers.
+			providers = append(providers, remoteProvider{ID: provider.id, Name: provider.name, StatusUnavailable: true, ServiceState: "unknown", Account: "Unknown", Meshnet: "Unknown", Summary: "Unavailable"})
+			continue
+		}
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "remote-access service status is unavailable")
 			return
@@ -423,6 +442,10 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 	provider, ok := remoteProviderByID(r.PathValue("provider"))
 	if !ok {
 		writeError(w, http.StatusBadRequest, "unknown remote-access provider")
+		return
+	}
+	if provider.id == "nordvpn" {
+		s.networkNordChange(w, r, actor, provider)
 		return
 	}
 	var request struct {
