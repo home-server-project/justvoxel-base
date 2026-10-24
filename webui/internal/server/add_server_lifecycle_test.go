@@ -1,6 +1,7 @@
 package server
 
 import (
+	"html"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -144,10 +145,29 @@ func TestAddServerAdvancedThreeLanesAndLaunchTarget(t *testing.T) {
 	if len(lanes) != 3 || !strings.Contains(body, "setup-add-server-software-lanes") {
 		t.Fatal("Advanced must use three full-width lanes")
 	}
-	for i, count := range []int{3, 4, 2} {
-		if strings.Count(lanes[i], `name="server_type"`) != count {
-			t.Fatalf("lane %d software count", i)
+	for i, expected := range []struct {
+		heading  string
+		software []string
+	}{
+		{"Plugins + managed cross-play", []string{"paper", "purpur", "spigot"}},
+		{"Mod loaders · Cross-play: Fabric · NeoForge", []string{"fabric", "neoforge", "forge", "quilt"}},
+		{"Vanilla Java · Bedrock", []string{"vanilla", "bedrock"}},
+	} {
+		renderedLane := html.UnescapeString(lanes[i])
+		if !strings.Contains(renderedLane, "<legend>"+expected.heading+"</legend>") {
+			t.Fatalf("lane %d heading", i)
 		}
+		inputs := regexp.MustCompile(`name="server_type" value="([^"]+)"`).FindAllStringSubmatch(lanes[i], -1)
+		var software []string
+		for _, input := range inputs {
+			software = append(software, input[1])
+		}
+		if !reflect.DeepEqual(software, expected.software) {
+			t.Fatalf("lane %d software: got %v; want %v", i, software, expected.software)
+		}
+	}
+	if strings.Contains(body, "<legend>Mods</legend>") || addServerSoftwareGroups()[1].Description != "" {
+		t.Fatal("Advanced Mods must have one heading without a separate description")
 	}
 	if !strings.Contains(lanes[1], "Cross-play: Fabric · NeoForge") || !strings.Contains(lanes[2], "Original Minecraft · no plugins or mods") || !strings.Contains(lanes[2], "Native Bedrock server · no plugins or mods") {
 		t.Fatal("lane descriptions missing")

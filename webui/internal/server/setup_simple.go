@@ -243,7 +243,7 @@ func setupSoftwareGroups() []setupSoftwareGroup {
 func addServerSoftwareGroups() []setupSoftwareGroup {
 	return []setupSoftwareGroup{
 		{Name: "Plugins + managed cross-play", Software: simpleSoftware("plugins")},
-		{Name: "Mods", Description: "Mod loaders · Cross-play: Fabric · NeoForge", Software: simpleSoftware("mods")},
+		{Name: "Mod loaders · Cross-play: Fabric · NeoForge", Software: simpleSoftware("mods")},
 		{Name: "Vanilla Java · Bedrock", Software: simpleSoftware("original")},
 	}
 }

@@ -124,9 +124,28 @@ test('desktop Simple sizing is reserved without scroll and released at the paire
 
 test('Advanced Add Server uses full-width lanes with four, two, then one column', () => {
   const css = read('static/setup.css');
-  assert.ok(css.includes('.setup-add-server-software-lanes{grid-template-columns:1fr}'));
+  assert.ok(css.includes('.setup-add-server-software-lanes{grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}'));
   assert.ok(css.includes('.setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr))'));
   assert.ok(css.includes('@media(max-width:1000px){\n  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}'));
   assert.ok(css.includes('@media(max-width:430px){\n  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:1fr}'));
-  assert.ok(css.includes('min-height:104px;box-sizing:border-box;align-items:start;align-content:start'));
+  assert.ok(css.includes('.setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;align-content:start;min-width:0;margin:0}'));
+  assert.ok(css.includes('.setup-server-types{grid-auto-rows:1fr}'));
+  assert.ok(css.includes('.setup-wizard-panel .setup-add-server-software-lanes .setup-server-types legend{font-size:.9rem}'));
+});
+
+test('Add Server Simple software and Advanced share card proportions and typography', () => {
+  const css = read('static/setup.css');
+  const shared = ':is(.setup-entry-add-server .setup-simple-choices:not(.setup-simple-families),.setup-add-server-software-lanes)';
+  assert.ok(css.includes(`${shared} .server-software-card{grid-template-columns:40px minmax(0,1fr);gap:.7rem;min-height:104px;padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start}`));
+  assert.ok(css.includes(`${shared} .server-software-icon,${shared} .server-software-icon img{width:40px;min-width:40px;height:40px}`));
+  assert.ok(css.includes(`${shared} .server-software-copy strong{font-size:1rem}`));
+  assert.ok(css.includes(`${shared} .server-software-copy small{font-size:.82rem}`));
+});
+
+test('Add Server family readability is scoped without changing the family layout', () => {
+  const css = read('static/setup.css');
+  assert.ok(css.includes('.setup-entry-add-server .setup-simple-families{grid-template-columns:1fr}'));
+  assert.ok(css.includes('.setup-entry-add-server .setup-simple-families .server-software-copy strong{font-size:1rem}'));
+  assert.ok(css.includes('.setup-entry-add-server .setup-simple-families .server-software-copy small,.setup-entry-add-server .setup-simple-families .setup-family-items{font-size:.82rem}'));
+  assert.ok(css.includes('.setup-entry-add-server .setup-simple-families .setup-family-items img{width:24px;height:24px}'));
 });
