@@ -54,6 +54,12 @@ test ! -e /etc/playit/playit.toml
 
 # NordVPN is native, dormant on fresh boot, with its external repo disabled.
 rpm -q nordvpn nordvpn-release >/dev/null
+if rpm -q nordvpn-gui >/dev/null 2>&1; then
+    echo "ERROR: nordvpn-gui must not be installed in the headless image." >&2
+    exit 1
+fi
+test -f /usr/lib/sysusers.d/justvoxel-nordvpn.conf
+test "$(grep -Ev '^[[:space:]]*(#|$)' /usr/lib/sysusers.d/justvoxel-nordvpn.conf)" = 'g nordvpn -'
 test -x /usr/bin/nordvpn
 test -x /usr/sbin/nordvpnd
 for nord_unit in nordvpnd.service nordvpnd.socket; do

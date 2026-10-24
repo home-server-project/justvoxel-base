@@ -41,7 +41,7 @@ systemctl enable playit.service
 
 # Official native RPM; resolve the current Nord package only during composition.
 dnf install -y https://repo.nordvpn.com/yum/nordvpn/centos/noarch/Packages/n/nordvpn-release-1.0.0-1.noarch.rpm
-dnf install -y nordvpn
+dnf install -y --setopt=install_weak_deps=False nordvpn
 # Disable every repository shipped by the bootstrap package for deployed hosts.
 while IFS= read -r nord_repo; do
     case "${nord_repo}" in
