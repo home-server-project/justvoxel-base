@@ -146,6 +146,7 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 			}
 			return []byte("inactive\n"), errors.New("inactive")
 		case command == "systemctl" && args[0] == "start":
+			testPluginStartupPrerequisite(t)
 			f.active = true
 			return nil, nil
 		case command == "systemctl" && args[0] == "stop":

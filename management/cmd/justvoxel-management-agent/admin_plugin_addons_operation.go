@@ -135,7 +135,7 @@ func addonTransactionFile(root *os.File, name string, tx addonTransaction) (bool
 	}
 	return true, nil
 }
-func restoreAddonRuntime(ctx context.Context, tx addonTransaction) error {
+func restoreAddonRuntime(ctx context.Context, tx addonTransaction, lock *pluginMaintenanceLock) error {
 	ctx = withPluginInstance(ctx, tx.InstanceID)
 	if !tx.RestartRequired {
 		return nil
@@ -146,7 +146,7 @@ func restoreAddonRuntime(ctx context.Context, tx addonTransaction) error {
 	}
 	if tx.OriginallyRunning {
 		if !active {
-			if err = pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
+			if err = lock.start(ctx, pluginInstanceID(ctx)); err != nil {
 				return err
 			}
 		}
@@ -163,7 +163,10 @@ func restoreAddonRuntime(ctx context.Context, tx addonTransaction) error {
 	}
 	return nil
 }
-func rollbackAddon(ctx context.Context, tx addonTransaction) error {
+func rollbackAddon(ctx context.Context, tx addonTransaction, lock *pluginMaintenanceLock) error {
+	if !lock.protected() {
+		return errors.New("Minecraft maintenance ownership unavailable; evidence preserved")
+	}
 	ctx = withPluginInstance(ctx, tx.InstanceID)
 	_, raw, err := loadAddonManifest(tx.DataPath)
 	if err != nil {
@@ -200,7 +203,7 @@ func rollbackAddon(ctx context.Context, tx addonTransaction) error {
 	if err = root.Sync(); err != nil {
 		return err
 	}
-	return restoreAddonRuntime(ctx, tx)
+	return restoreAddonRuntime(ctx, tx, lock)
 }
 func (s *server) revalidateAddon(ctx context.Context, p addonPlan, file *os.File) error {
 	ctx = withPluginInstance(ctx, p.Server.InstanceID)
@@ -251,7 +254,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 	failUntouched := func(err error) {
 		_, _ = s.operations.transition(id, operationRolledBack, "complete", "Add-ons installation cancelled before content or runtime changes: "+err.Error())
 	}
-	lock, err := acquirePluginRuntimeLock()
+	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
 		failUntouched(err)
 		return
@@ -379,7 +382,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 		}
 		recoveryCtx, c := context.WithTimeout(withPluginInstance(context.Background(), p.Server.InstanceID), 20*time.Minute)
 		defer c()
-		if e := rollbackAddon(recoveryCtx, tx); e != nil {
+		if e := rollbackAddon(recoveryCtx, tx, lock); e != nil {
 			s.operations.transition(id, operationNeedsAttention, "rollback", "Add-ons recovery needs attention. Retry recovery uses preserved evidence: "+e.Error())
 			return
 		}
@@ -456,7 +459,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 			fail(err)
 			return
 		}
-		if err = pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
+		if err = lock.start(ctx, pluginInstanceID(ctx)); err != nil {
 			fail(err)
 			return
 		}
@@ -470,7 +473,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 			fail(err)
 			return
 		}
-		if err = restoreAddonRuntime(ctx, tx); err != nil {
+		if err = restoreAddonRuntime(ctx, tx, lock); err != nil {
 			fail(err)
 			return
 		}
@@ -562,7 +565,7 @@ func (s *server) adminAddonRecover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "Add-ons operation is not awaiting recovery")
 		return
 	}
-	lock, err := acquirePluginRuntimeLock()
+	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
 		writeError(w, 409, "Minecraft maintenance is busy")
 		return
@@ -607,11 +610,11 @@ func (s *server) adminAddonRecover(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if err == nil {
-				err = restoreAddonRuntime(ctx, tx)
+				err = restoreAddonRuntime(ctx, tx, lock)
 			}
 		}
 	} else if err == nil {
-		err = rollbackAddon(ctx, tx)
+		err = rollbackAddon(ctx, tx, lock)
 	}
 	if err != nil {
 		writeError(w, 409, "Recovery cannot yet be verified; evidence is preserved: "+err.Error())

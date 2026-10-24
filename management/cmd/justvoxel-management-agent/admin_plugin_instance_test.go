@@ -110,8 +110,9 @@ func TestPluginDurableIdentityBeforeColdBackup(t *testing.T) {
 func TestAddonRuntimeRecoveryUsesPersistedInstance(t *testing.T) {
 	f := newPluginInstallFixture(t)
 	tx := addonTransaction{InstanceID: "jv-a1b2c3", DataPath: f.data, Version: "1.21.8", RestartRequired: true, OriginallyRunning: false}
+	lock := testPluginMaintenanceLock(t)
 	// Caller selection cannot redirect the durable transaction's recovery target.
-	if err := restoreAddonRuntime(withPluginInstance(context.Background(), "jv-d4e5f6"), tx); err != nil {
+	if err := restoreAddonRuntime(withPluginInstance(context.Background(), "jv-d4e5f6"), tx, lock); err != nil {
 		t.Fatal(err)
 	}
 	if f.active {
@@ -123,7 +124,7 @@ func TestAddonRuntimeRecoveryUsesPersistedInstance(t *testing.T) {
 		}
 	}
 	tx.InstanceID = ""
-	if err := restoreAddonRuntime(context.Background(), tx); err == nil {
+	if err := restoreAddonRuntime(context.Background(), tx, lock); err == nil {
 		t.Fatal("old Add-ons evidence without ID accepted")
 	}
 }

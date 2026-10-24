@@ -1007,6 +1007,60 @@ func acquirePluginRuntimeLock() (*os.File, error) {
 	}
 	return f, nil
 }
+
+// pluginMaintenanceLock owns the current descriptor across synchronous starts.
+// The transaction journal continues reserving the operation during the handoff.
+type pluginMaintenanceLock struct {
+	file *os.File
+}
+
+func acquirePluginMaintenanceLock() (*pluginMaintenanceLock, error) {
+	file, err := acquirePluginRuntimeLock()
+	if err != nil {
+		return nil, err
+	}
+	return &pluginMaintenanceLock{file: file}, nil
+}
+
+func (lock *pluginMaintenanceLock) protected() bool {
+	return lock != nil && lock.file != nil
+}
+
+func (lock *pluginMaintenanceLock) Close() error {
+	if !lock.protected() {
+		return nil
+	}
+	file := lock.file
+	lock.file = nil
+	return file.Close()
+}
+
+func (lock *pluginMaintenanceLock) start(ctx context.Context, id string) error {
+	if err := validatePluginInstance(id, ""); err != nil {
+		return err
+	}
+	return lock.startHandoff(func() error { return pluginService(ctx, id, "start") })
+}
+
+func (lock *pluginMaintenanceLock) startHandoff(start func() error) error {
+	if !lock.protected() {
+		return errors.New("Minecraft maintenance ownership unavailable; evidence preserved")
+	}
+	// ExecStartPre must acquire the same maintenance flock in its own process.
+	if err := lock.Close(); err != nil {
+		return err
+	}
+	startErr := start()
+	// Reacquire even after cancellation or a failed start, before any caller
+	// verifies, commits, or attempts ordinary rollback mutation.
+	file, err := acquirePluginRuntimeLock()
+	if err != nil {
+		return errors.Join(startErr, errors.New("Minecraft maintenance could not be reacquired; evidence preserved"), err)
+	}
+	lock.file = file
+	return startErr
+}
+
 func pluginServiceActive(ctx context.Context, id string) (bool, error) {
 	if err := validatePluginInstance(id, ""); err != nil {
 		return false, err
@@ -1519,7 +1573,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if err := checkPluginInstallCollisions(root, plan); err != nil {
 		return failUntouched(err)
 	}
-	lock, err := acquirePluginRuntimeLock()
+	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
 		return failUntouched(err)
 	}
@@ -1563,7 +1617,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	}
 	created := []pluginInstallArtifact{}
 	rollback := func(cause error) error {
-		return rollbackPluginInstall(s, id, plan, root, created, originallyRunning, cause)
+		return rollbackPluginInstall(s, id, plan, root, created, originallyRunning, cause, lock)
 	}
 	err = instanceMaintenanceColdBackup(ctx, plan.Server.InstanceID)
 	if err != nil {
@@ -1596,7 +1650,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if err := s.operations.pluginProgress(id, "restarting", "Starting Minecraft for runtime verification."); err != nil {
 		return rollback(err)
 	}
-	if err := pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
+	if err := lock.start(ctx, pluginInstanceID(ctx)); err != nil {
 		return rollback(errors.New("Minecraft could not start"))
 	}
 	if _, err := s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and installed plugin runtime state."); err != nil {
@@ -1915,7 +1969,11 @@ func removePluginTransactionArtifact(root *os.File, a pluginInstallArtifact) err
 	}
 	return root.Sync()
 }
-func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *os.File, created []pluginInstallArtifact, originallyRunning bool, cause error) error {
+func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *os.File, created []pluginInstallArtifact, originallyRunning bool, cause error, lock *pluginMaintenanceLock) error {
+	if !lock.protected() {
+		_, err := s.operations.transition(id, operationNeedsAttention, "rollback", "Minecraft maintenance ownership unavailable. Transaction evidence and cold backup were preserved.")
+		return errors.Join(cause, err, errors.New("Minecraft maintenance ownership unavailable"))
+	}
 	if _, err := s.operations.transition(id, operationFailed, "rollback", "Plugin installation failed; restoring the previous runtime."); err != nil {
 		return errors.Join(cause, err)
 	}
@@ -1931,7 +1989,7 @@ func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *o
 		recoverErr = stateErr
 		if recoverErr == nil && originallyRunning {
 			if !active {
-				recoverErr = pluginService(ctx, pluginInstanceID(ctx), "start")
+				recoverErr = lock.start(ctx, pluginInstanceID(ctx))
 			}
 			if recoverErr == nil {
 				recoverErr = verifyPluginRuntime(ctx, pluginInstanceID(ctx), plan.Server.MinecraftVersion)
@@ -1971,7 +2029,7 @@ func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *o
 		}
 	}
 	if recoverErr == nil && originallyRunning {
-		recoverErr = pluginService(ctx, pluginInstanceID(ctx), "start")
+		recoverErr = lock.start(ctx, pluginInstanceID(ctx))
 		if recoverErr == nil {
 			recoverErr = verifyPluginRuntime(ctx, pluginInstanceID(ctx), plan.Server.MinecraftVersion)
 		}

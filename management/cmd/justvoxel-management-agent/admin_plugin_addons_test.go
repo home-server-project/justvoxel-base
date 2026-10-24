@@ -399,7 +399,7 @@ func TestAddonRollbackRefusesChangedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Original manifest comparison also fails closed after a completed commit.
-	if err = rollbackAddon(context.Background(), tx); err == nil {
+	if err = rollbackAddon(context.Background(), tx, testPluginMaintenanceLock(t)); err == nil {
 		t.Fatal("committed ownership removed by rollback")
 	}
 	os.WriteFile(filepath.Join(fixture.data, p.Target), []byte("changed"), 0644)

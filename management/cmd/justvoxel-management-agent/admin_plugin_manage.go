@@ -495,7 +495,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 		_, err = s.operations.transition(id, operationRolledBack, "complete", "Plugin action cancelled safely before changes.")
 		return errors.Join(cause, err)
 	}
-	lock, err := acquirePluginRuntimeLock()
+	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
 		return untouched(err)
 	}
@@ -525,7 +525,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if err != nil || online > 0 && !confirm {
 		return untouched(errors.New("Final player status changed or requires interruption confirmation"))
 	}
-	rollback := func(cause error) error { return rollbackPluginManage(s, id, tx, cause) }
+	rollback := func(cause error) error { return rollbackPluginManage(s, id, tx, cause, lock) }
 	if _, err = s.operations.transition(id, operationRunning, "backup", "Creating a verified cold Minecraft backup."); err != nil {
 		return untouched(err)
 	}
@@ -590,7 +590,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if err != nil {
 		return rollback(err)
 	}
-	if err = pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
+	if err = lock.start(ctx, pluginInstanceID(ctx)); err != nil {
 		return rollback(errors.New("Minecraft could not start"))
 	}
 	if _, err = s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and managed plugin state."); err != nil {
@@ -744,13 +744,13 @@ func restorePluginManageFiles(tx pluginManageTransaction) error {
 	}
 	return nil
 }
-func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction) error {
+func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction, lock *pluginMaintenanceLock) error {
 	ctx = withPluginInstance(ctx, tx.InstanceID)
 	previous, err := snapshotPluginLifecycleStartup(tx.DataPath)
 	if err != nil {
 		return err
 	}
-	if err := pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
+	if err := lock.start(ctx, pluginInstanceID(ctx)); err != nil {
 		return err
 	}
 	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion); err != nil {
@@ -777,8 +777,12 @@ func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction)
 	}
 	return nil
 }
-func rollbackPluginManage(s *server, id string, tx pluginManageTransaction, cause error) error {
+func rollbackPluginManage(s *server, id string, tx pluginManageTransaction, cause error, lock *pluginMaintenanceLock) error {
 	_ = s.operations.appendOperationDiagnostic(id, "plugin_"+tx.Action, "failure", "Managed plugin action failed", map[string]string{"reason": cause.Error()})
+	if !lock.protected() {
+		_, err := s.operations.transition(id, operationNeedsAttention, "rollback", "Minecraft maintenance ownership unavailable. Durable evidence is preserved.")
+		return errors.Join(cause, err, errors.New("Minecraft maintenance ownership unavailable"))
+	}
 	_, _ = s.operations.transition(id, operationFailed, "rollback", "Plugin action failed; restoring the exact original state.")
 	_, _ = s.operations.transition(id, operationRollingBack, "rollback", "Restoring verified JAR location, ownership and Minecraft state.")
 	ctx, cancel := context.WithTimeout(withPluginInstance(context.Background(), tx.InstanceID), 20*time.Minute)
@@ -793,7 +797,7 @@ func rollbackPluginManage(s *server, id string, tx pluginManageTransaction, caus
 		err = restorePluginManageFiles(tx)
 	}
 	if err == nil {
-		err = restorePluginManageRuntime(ctx, tx)
+		err = restorePluginManageRuntime(ctx, tx, lock)
 	}
 	if err != nil {
 		_, _ = s.operations.transition(id, operationNeedsAttention, "rollback", "Plugin recovery could not be proven. Durable evidence is preserved. See System -> Logs -> Plugins.")
@@ -856,7 +860,7 @@ func (s *server) adminPluginManageAcknowledge(w http.ResponseWriter, r *http.Req
 		writeError(w, 409, "Plugin management operation is not awaiting recovery")
 		return
 	}
-	lock, err := acquirePluginRuntimeLock()
+	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
 		writeError(w, 409, "Minecraft maintenance is busy")
 		return
@@ -894,7 +898,7 @@ func (s *server) adminPluginManageAcknowledge(w http.ResponseWriter, r *http.Req
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Minute)
 	defer cancel()
 	if pluginManageTargetState(tx) == nil {
-		if err = verifyPluginManageTargetRuntime(ctx, tx); err == nil {
+		if err = verifyPluginManageTargetRuntime(ctx, tx, lock); err == nil {
 			resolved, e := s.operations.transition(req.OperationID, operationResolved, "resolved", "Complete target plugin ownership, JAR location and runtime state verified.")
 			if e != nil {
 				writeError(w, 500, "Recovery result could not be persisted")
@@ -916,6 +920,10 @@ func (s *server) adminPluginManageAcknowledge(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
+	if !lock.protected() {
+		writeError(w, 409, "Minecraft maintenance could not be reacquired; recovery evidence is preserved")
+		return
+	}
 	// Bounded deterministic rollback is safe only with one exact rollback copy
 	// and either the original or transaction-specific committed manifest.
 	if err = pluginService(ctx, pluginInstanceID(ctx), "stop"); err == nil {
@@ -927,7 +935,7 @@ func (s *server) adminPluginManageAcknowledge(w http.ResponseWriter, r *http.Req
 		err = restorePluginManageFiles(tx)
 	}
 	if err == nil {
-		err = restorePluginManageRuntime(ctx, tx)
+		err = restorePluginManageRuntime(ctx, tx, lock)
 	}
 	if err != nil {
 		writeError(w, 409, "Plugin recovery cannot yet be proven. See System -> Logs -> Plugins. Evidence and maintenance exclusion remain preserved.")
@@ -1247,7 +1255,7 @@ func pluginManageTargetState(tx pluginManageTransaction) error {
 	}
 	return nil
 }
-func verifyPluginManageTargetRuntime(ctx context.Context, tx pluginManageTransaction) error {
+func verifyPluginManageTargetRuntime(ctx context.Context, tx pluginManageTransaction, lock *pluginMaintenanceLock) error {
 	ctx = withPluginInstance(ctx, tx.InstanceID)
 	if err := pluginService(ctx, pluginInstanceID(ctx), "stop"); err != nil {
 		return err
@@ -1259,7 +1267,7 @@ func verifyPluginManageTargetRuntime(ctx context.Context, tx pluginManageTransac
 	if err != nil {
 		return err
 	}
-	if err := pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
+	if err := lock.start(ctx, pluginInstanceID(ctx)); err != nil {
 		return err
 	}
 	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion); err != nil {

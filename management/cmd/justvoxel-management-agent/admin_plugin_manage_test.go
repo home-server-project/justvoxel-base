@@ -65,6 +65,7 @@ func newPluginManageFixture(t *testing.T, state string) *pluginManageFixture {
 				}
 				return []byte("inactive\n"), errors.New("inactive")
 			case "start":
+				testPluginStartupPrerequisite(t)
 				f.active = true
 				return nil, nil
 			case "stop":
