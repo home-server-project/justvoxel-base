@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 type fakeNordAPI struct {
 	*fakeNetworkConfigurationAPI
 	callback, loginAction string
+	actionError           error
 }
 
 func (f *fakeNordAPI) NordVPNLogin(_ context.Context, _, action, callback string) (api.RemoteAccessChange, error) {
@@ -108,6 +110,9 @@ func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 func (f *fakeNordAPI) ChangeRemoteAccess(_ context.Context, _, provider, action string) (api.RemoteAccessChange, error) {
 	f.calls++
 	f.provider, f.action = provider, action
+	if f.actionError != nil {
+		return api.RemoteAccessChange{}, f.actionError
+	}
 	return api.RemoteAccessChange{OK: true, LoginRequired: provider == "nordvpn" && action == "activate"}, nil
 }
 
@@ -125,5 +130,38 @@ func TestNordActivationLoginRequiredResponse(t *testing.T) {
 	app.Handler().ServeHTTP(rr, req)
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"login_required":true`) || fake.provider != "nordvpn" {
 		t.Fatal(rr.Code, rr.Body.String())
+	}
+}
+
+func TestNordLifecycleErrorsPassThroughSafely(t *testing.T) {
+	for _, tc := range []struct{ action, message string }{
+		{"activate", "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."},
+		{"deactivate", "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying."},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			fake := &fakeNordAPI{
+				fakeNetworkConfigurationAPI: &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: "administrator"}},
+				actionError:                 &api.ResponseError{StatusCode: http.StatusServiceUnavailable, Message: tc.message},
+			}
+			app, err := New(fake, Config{ManagementAPI: "v1", ExternalScheme: "http"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/network/remote-access/nordvpn", strings.NewReader("csrf=token&action="+tc.action))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+			req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			var response struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if rr.Code != http.StatusServiceUnavailable || response.Error != tc.message || fake.calls != 1 {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+		})
 	}
 }

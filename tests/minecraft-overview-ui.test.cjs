@@ -54,15 +54,17 @@ test('Overview uses the setup-style toggle, combined framed Save and compact del
   assert.match(overview, /Permanently removes this active server and its world data\. Existing backup archives are preserved as historical archives\./);
 });
 
-test('Cross-play reuses Version opener inline and Support has a primary button and scoped gap', () => {
+test('Cross-play reuses Version opener inline and diagnostic reports share a scoped gap', () => {
   assert.match(source, /minecraft-crossplay-status.*data-crossplay-compatibility.*· open.*data-open-version>Version</);
   assert.ok(source.includes('node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}`;'));
   assert.match(source, /querySelector\('\[data-open-version\]'\).*document.querySelector\("\[data-version-open\]"\)\?\.click\(\)/);
   assert.match(css, /\.minecraft-crossplay-status\{[^}]*flex-wrap:wrap/);
   assert.doesNotMatch(source, /generateSupport.className = "secondary"/);
   assert.match(source, /generateSupport.textContent = "Generate support report"/);
-  assert.match(source, /fileList.className = selectedGroup === "Support"\s*\? "system-logs-list system-support-report-files" : "system-logs-list"/);
-  assert.match(css, /\.system-logs-list.system-support-report-files\{margin-top:\.8rem\}/);
+  assert.doesNotMatch(source, /Create a local network diagnostics report for troubleshooting or attaching to a JustVoxel GitHub issue\./);
+  assert.doesNotMatch(source, /networkDescription/);
+  assert.match(source, /fileList.className = selectedGroup === "Network" \|\| selectedGroup === "Support"\s*\? "system-logs-list system-diagnostic-report-files" : "system-logs-list"/);
+  assert.match(css, /\.system-logs-list.system-diagnostic-report-files\{margin-top:\.8rem\}/);
   assert.doesNotMatch(header + read('templates/dashboard.html'), /(?:href|src)="[^"']*setup\.css/);
 });
 

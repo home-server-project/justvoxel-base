@@ -325,3 +325,106 @@ func TestNordLoginStartAndPersistentSocketLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestNordDeactivateVerifiesMeshnetBeforeStopping(t *testing.T) {
+	for _, tc := range []struct {
+		name, initial, followup      string
+		readErr, setErr, followupErr error
+		setOff, success              bool
+	}{
+		{name: "already disabled", initial: "Meshnet: disabled", success: true},
+		{name: "enabled", initial: "Meshnet: enabled", followup: "Meshnet: disabled", setOff: true, success: true},
+		{name: "concurrent disable", initial: "Meshnet: enabled", followup: "Meshnet: disabled", setErr: errors.New("private vendor error"), setOff: true, success: true},
+		{name: "unknown", initial: "Meshnet: maybe"},
+		{name: "ambiguous", initial: "Meshnet: enabled\nMeshnet: disabled"},
+		{name: "settings error", initial: "Meshnet: disabled", readErr: errors.New("private settings error")},
+		{name: "still enabled", initial: "Meshnet: enabled", followup: "Meshnet: enabled", setOff: true},
+		{name: "set failed still enabled", initial: "Meshnet: enabled", followup: "Meshnet: enabled", setErr: errors.New("private vendor error"), setOff: true},
+		{name: "followup unknown", initial: "Meshnet: enabled", followup: "Meshnet: maybe", setOff: true},
+		{name: "followup failed", initial: "Meshnet: enabled", followup: "Meshnet: disabled", followupErr: errors.New("private followup error"), setOff: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nordFixture(t)
+			var calls []string
+			reads := 0
+			runNordCommand = func(ctx context.Context, args ...string) (string, error) {
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("unbounded Nord operation")
+				}
+				call := strings.Join(args, " ")
+				calls = append(calls, call)
+				switch call {
+				case "settings":
+					reads++
+					if reads == 1 {
+						return tc.initial, tc.readErr
+					}
+					return tc.followup, tc.followupErr
+				case "set meshnet off":
+					return "private vendor output", tc.setErr
+				default:
+					t.Fatal("unexpected Nord command", args)
+					return "", errors.New("unexpected command")
+				}
+			}
+			remoteSystemctl = func(_ context.Context, args ...string) (string, error) {
+				calls = append(calls, strings.Join(args, " "))
+				return "", nil
+			}
+			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"deactivate"}`)
+			want := []string{"start nordvpnd.socket nordvpnd.service", "settings"}
+			if tc.setOff {
+				want = append(want, "set meshnet off", "settings")
+			}
+			if tc.success {
+				want = append(want, "stop nordvpnd.socket nordvpnd.service", "disable nordvpnd.socket nordvpnd.service")
+				if rr.Code != http.StatusOK {
+					t.Fatal(rr.Code, rr.Body.String())
+				}
+			} else {
+				var response struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if rr.Code != http.StatusServiceUnavailable || response.Error != "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying." {
+					t.Fatal(rr.Code, rr.Body.String())
+				}
+			}
+			if !reflect.DeepEqual(calls, want) {
+				t.Fatalf("commands %v, want %v", calls, want)
+			}
+		})
+	}
+}
+
+func TestNordActionFailuresAreSafeAndActionable(t *testing.T) {
+	for _, tc := range []struct{ action, message string }{
+		{"activate", "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."},
+		{"deactivate", "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying."},
+		{"login", "NordVPN login could not be started. Open Troubleshoot and generate a Network report before retrying."},
+		{"complete-login", "NordVPN login could not be completed. Open Troubleshoot and generate a Network report before retrying."},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			nordFixture(t)
+			remoteSystemctl = func(context.Context, ...string) (string, error) {
+				return "private vendor output", errors.New("private command error")
+			}
+			body := `{"action":"` + tc.action + `"}`
+			if tc.action == "complete-login" {
+				body = `{"action":"complete-login","callback":"nordvpn://login?exchange_token=private_callback"}`
+			}
+			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", body)
+			var response struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if rr.Code != http.StatusServiceUnavailable || response.Error != tc.message || strings.Contains(rr.Body.String(), "private") || strings.Contains(rr.Body.String(), "NordVPN operation failed; refresh provider status and retry") {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+		})
+	}
+}

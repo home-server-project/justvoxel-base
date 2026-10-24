@@ -204,6 +204,17 @@ const validNetbirdLoginURL = (value) => typeof value === "string" && value.start
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
 const render = (provider) => { remoteProviders = [provider]; return flatten(renderRemoteAccess()); };
 const base = { id: "playit", display_name: "Playit.gg", installed: true, service_active: true, service_enabled: true, service_state: "active", configured: false, dashboard_url: "https://evil.test/" };
+for (const account of ["Logged in", "Not logged in", "Unknown"]) {
+  for (const meshnet of ["Enabled", "Disabled", "Unknown"]) {
+    for (const service_enabled of [false, true]) {
+      for (const service_active of [false, true]) {
+        const nord = render({ ...base, id: "nordvpn", account, meshnet, connected: meshnet === "Enabled", service_active, service_enabled, service_state: service_active ? "active" : "inactive" });
+        assert(nord.some((n) => n.textContent === "Activate" && n.disabled === service_active));
+        assert(nord.some((n) => n.textContent === "Deactivate" && n.disabled === !service_active));
+      }
+    }
+  }
+}
 let nodes = render(base);
 assert(!nodes.some((n) => n.textContent === "Set up Playit"));
 assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
@@ -1055,5 +1066,70 @@ for (const id of ["tailscale", "netbird"]) {
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Provider dashboard flow: %v\n%s", err, output)
+	}
+}
+
+func TestRemoteAccessFailuresRenderOnlyInSectionHint(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	renderStart := strings.Index(script, "  const renderRemoteAccess =")
+	renderEnd := strings.Index(script, "  const renderNetwork =")
+	actionStart := strings.Index(script, "  const pollRemoteAccess =")
+	actionEnd := strings.Index(script, "  const submitEthernet =")
+	if renderStart < 0 || renderEnd <= renderStart || actionStart < 0 || actionEnd <= actionStart {
+		t.Fatal("remote render/action functions missing")
+	}
+	if strings.Contains(script, "state.textContent = remoteError") {
+		t.Fatal("Remote Access error copied to outer workspace")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.textContent = ""; }
+  appendChild(node) { this.children.push(node); return node; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const sectionHeading = () => new Element("heading");
+const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+let remoteBusy = false, remoteError = "", remotePollSequence = 0, remoteProviders = [];
+const state = { get textContent() { return "Existing network state"; }, set textContent(_) { assert.fail("Remote Access changed outer workspace state"); } };
+const pendingDashboards = new Set(), providerProgress = new Map();
+const dialog = { open: true }, isAdministrator = () => true;
+const setupRunning = () => false, providerTransitional = (p) => p.service_state === "activating";
+const failPlayitPopup = () => {};
+const setTimeout = (callback) => callback();
+let refreshRemoteAccess = async () => {};
+` + script[renderStart:renderEnd] + `
+let nodes = [];
+const renderNetwork = () => { nodes = flatten(renderRemoteAccess()); };
+` + script[actionStart:actionEnd] + `
+(async () => {
+  for (const message of [
+    "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying.",
+    "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying.",
+    "<img src=x onerror=alert(1)>"
+  ]) {
+    await runRemoteAction(async () => { throw new Error(message); });
+    assert.equal(remoteError, message);
+    assert.equal(nodes.filter((n) => n.textContent === message).length, 1);
+    assert.equal(nodes.find((n) => n.textContent === message).tag, "p");
+    assert.equal(state.textContent, "Existing network state");
+    assert.equal(remoteBusy, false);
+  }
+  remoteProviders = [{ service_state: "activating" }];
+  refreshRemoteAccess = async () => { remoteProviders = []; throw new Error("Remote access status unavailable. Refresh to retry."); };
+  await pollRemoteAccess();
+  assert.equal(remoteError, "Remote access status unavailable. Refresh to retry.");
+  assert.equal(nodes.filter((n) => n.textContent === remoteError).length, 1);
+  assert.equal(state.textContent, "Existing network state");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("remote error rendering: %v\n%s", err, output)
 	}
 }

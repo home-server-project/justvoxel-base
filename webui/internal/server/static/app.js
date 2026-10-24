@@ -4866,16 +4866,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     supportProgress.hidden = true;
     const fileList = document.createElement("div");
     fileList.className = "system-logs-list";
-    const networkDescription = document.createElement("p");
-    networkDescription.className = "muted";
-    networkDescription.textContent = "Create a local network diagnostics report for troubleshooting or attaching to a JustVoxel GitHub issue.";
     const generateNetwork = document.createElement("button");
     generateNetwork.type = "button";
     generateNetwork.textContent = "Generate network report";
     const networkProgress = document.createElement("p");
     networkProgress.className = "muted";
     networkProgress.setAttribute("role", "status");
-    fileColumn.append(generateSupport, supportProgress, networkDescription, generateNetwork, networkProgress, fileList);
+    fileColumn.append(generateSupport, supportProgress, generateNetwork, networkProgress, fileList);
     const reader = makeColumn("Viewer", "system-logs-reader");
     const viewer = document.createElement("div");
     viewer.className = "system-logs-viewer";
@@ -4897,11 +4894,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       download.hidden = true;
       const live = selectedGroup === "Failed units";
       generateSupport.hidden = selectedGroup !== "Support";
-      networkDescription.hidden = selectedGroup !== "Network";
       generateNetwork.hidden = selectedGroup !== "Network";
       networkProgress.hidden = selectedGroup !== "Network" || !networkProgress.textContent;
-      fileList.className = selectedGroup === "Support"
-        ? "system-logs-list system-support-report-files" : "system-logs-list";
+      fileList.className = selectedGroup === "Network" || selectedGroup === "Support"
+        ? "system-logs-list system-diagnostic-report-files" : "system-logs-list";
       supportProgress.hidden = selectedGroup !== "Support" || !supportProgress.textContent;
       fileColumn.children[0].textContent = live ? "Units" : "Files";
       documentText.textContent = live ? "Select a unit to read its last 60 current-boot journal lines here." : "Select a file to read it here.";

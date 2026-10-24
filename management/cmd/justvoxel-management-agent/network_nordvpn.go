@@ -222,6 +222,23 @@ func nordEnableMeshnet(ctx context.Context) error {
 	return nil
 }
 
+func nordDisableMeshnet(ctx context.Context) error {
+	output, err := runNordCommand(ctx, "settings")
+	switch nordMeshnet(output, err) {
+	case "Disabled":
+		return nil
+	case "Enabled":
+		// A concurrent disable can make the vendor command fail. Only the
+		// authoritative follow-up settings can establish the desired state.
+		_, _ = runNordCommand(ctx, "set", "meshnet", "off")
+		output, err = runNordCommand(ctx, "settings")
+		if nordMeshnet(output, err) == "Disabled" {
+			return nil
+		}
+	}
+	return errors.New("Meshnet deactivation could not be verified")
+}
+
 func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor session, provider remoteProviderMetadata) {
 	var request struct {
 		Action   string `json:"action"`
@@ -260,13 +277,7 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 	if err == nil {
 		switch request.Action {
 		case "deactivate":
-			_, err = runNordCommand(ctx, "set", "meshnet", "off")
-			if err == nil {
-				output, checkErr := runNordCommand(ctx, "settings")
-				if nordMeshnet(output, checkErr) != "Disabled" {
-					err = errors.New("Meshnet deactivation could not be verified")
-				}
-			}
+			err = nordDisableMeshnet(ctx)
 			if err == nil {
 				_, err = remoteSystemctl(ctx, "stop", "nordvpnd.socket", provider.unit)
 			}
@@ -315,7 +326,16 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 		_ = s.store.recordAuditEvent(actor, "network_remote_access_"+request.Action, provider.id, err == nil, "fixed Meshnet lifecycle")
 	}
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "NordVPN operation failed; refresh provider status and retry")
+		message := "NordVPN login could not be started. Open Troubleshoot and generate a Network report before retrying."
+		switch request.Action {
+		case "activate":
+			message = "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."
+		case "deactivate":
+			message = "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying."
+		case "complete-login":
+			message = "NordVPN login could not be completed. Open Troubleshoot and generate a Network report before retrying."
+		}
+		writeError(w, http.StatusServiceUnavailable, message)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

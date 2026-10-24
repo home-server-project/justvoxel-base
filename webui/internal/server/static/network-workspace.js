@@ -138,8 +138,8 @@ ${failed ? "" : `<p class="muted">This page will open ${providerName} automatica
   const providerControls = (provider) => {
     const blocked = !provider.installed || remoteBusy || provider.service_state === "deactivating";
     return {
-      activateDisabled: blocked || (providerTransitional(provider) && !(provider.id === "netbird" && provider.service_state === "activating")) || (["netbird", "tailscale", "nordvpn"].includes(provider.id) ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
-      deactivateDisabled: blocked || (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
+      activateDisabled: blocked || (providerTransitional(provider) && !(provider.id === "netbird" && provider.service_state === "activating")) || (["netbird", "tailscale"].includes(provider.id) ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
+      deactivateDisabled: blocked || (provider.id === "nordvpn" ? !provider.service_active : (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive"))
     };
   };
   const effectiveTabs = (snapshot) => (snapshot?.workspace_tabs || ["Overview"])
@@ -1573,7 +1573,6 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     } catch (error) {
       failPlayitPopup();
       remoteError = error?.message || "Remote access status unavailable. Refresh to retry.";
-      state.textContent = remoteError;
       renderNetwork();
     }
   };
@@ -1591,7 +1590,6 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     } catch (error) {
       failPlayitPopup();
       remoteError = error?.message || "Remote access change failed.";
-      state.textContent = remoteError;
       try { await refreshRemoteAccess(); pollRemoteAccess(); } catch (_) { /* Keep the reported failure visible. */ }
     } finally {
       remoteBusy = false;

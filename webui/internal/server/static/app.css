@@ -1694,7 +1694,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .minecraft-overview-delete h3{margin:0;color:var(--jv-error);font-weight:800;overflow-wrap:anywhere}
 .minecraft-crossplay-status{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;margin-top:.8rem;min-width:0}
 .minecraft-crossplay-status [data-crossplay-compatibility]{min-width:0;overflow-wrap:anywhere}
-.system-logs-list.system-support-report-files{margin-top:.8rem}
+.system-logs-list.system-diagnostic-report-files{margin-top:.8rem}
 
 /* Recent logs follows the System Health flex-height chain. */
 .minecraft-workspace-body:has(.minecraft-recent-logs-view){display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
