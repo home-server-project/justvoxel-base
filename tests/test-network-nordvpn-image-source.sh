@@ -5,6 +5,13 @@ python3 - <<'PY'
 from pathlib import Path
 build = Path('build_files/build-common.sh').read_text()
 validation = Path('build_files/validate/common.sh').read_text()
+nord = Path('management/cmd/justvoxel-management-agent/network_nordvpn.go').read_text()
+service = Path('system_files/usr/lib/systemd/system/justvoxel-management.service').read_text()
+assert 'HOME=/root' not in nord
+assert '/run/justvoxel/nordvpn-cli' in nord
+assert 'ProtectHome=yes' in service.splitlines()
+assert 'ReadWritePaths=/root' not in service
+assert 'ProtectHome=no' not in service
 assert 'dnf install -y https://repo.nordvpn.com/yum/nordvpn/centos/noarch/Packages/n/nordvpn-release-1.0.0-1.noarch.rpm' in build
 assert 'dnf install -y --setopt=install_weak_deps=False nordvpn\n' in build
 assert 'nordvpn-gui' not in build

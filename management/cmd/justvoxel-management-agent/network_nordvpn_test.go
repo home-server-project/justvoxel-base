@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -187,9 +188,64 @@ func TestNordLoginRequiredAndCallbackAuditPrivacy(t *testing.T) {
 	}
 }
 
+func nordNativeFixture(t *testing.T) {
+	t.Helper()
+	oldCommand, oldHome := nordCommand, nordCLIHome
+	nordCLIHome = filepath.Join(t.TempDir(), "nordvpn-cli")
+	t.Cleanup(func() { nordCommand, nordCLIHome = oldCommand, oldHome })
+}
+
+func TestNordNativePrivateHome(t *testing.T) {
+	nordNativeFixture(t)
+	if _, err := os.Stat(nordCLIHome); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("private HOME already exists", err)
+	}
+	var command *exec.Cmd
+	nordCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if name != "/usr/bin/nordvpn" || !reflect.DeepEqual(args, []string{"settings"}) {
+			t.Fatal("unexpected Nord command", name, args)
+		}
+		deadline, ok := ctx.Deadline()
+		if remaining := time.Until(deadline); !ok || remaining <= 0 || remaining > 4*time.Second {
+			t.Fatal("Nord command deadline", deadline)
+		}
+		command = exec.CommandContext(ctx, "/bin/sh", "-c", `printf '%s' "$HOME"`)
+		return command
+	}
+	output, err := runNordCommand(context.Background(), "settings")
+	if err != nil || output != nordCLIHome {
+		t.Fatal("subprocess HOME", output, err)
+	}
+	info, err := os.Stat(nordCLIHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 {
+		t.Fatal("private HOME permissions", info.Mode())
+	}
+	wantEnv := []string{"PATH=/usr/sbin:/usr/bin", "HOME=" + nordCLIHome, "LANG=C", "LC_ALL=C", "NO_COLOR=1", "TERM=dumb"}
+	if !reflect.DeepEqual(command.Env, wantEnv) {
+		t.Fatal("restricted Nord environment changed")
+	}
+}
+
+func TestNordNativePrivateHomeCreationFailure(t *testing.T) {
+	nordNativeFixture(t)
+	if err := os.WriteFile(nordCLIHome, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nordCommand = func(context.Context, string, ...string) *exec.Cmd {
+		t.Fatal("Nord command reached after HOME creation failed")
+		return nil
+	}
+	output, err := runNordCommand(context.Background(), "settings")
+	if output != "" || err == nil || err.Error() != "NordVPN output unavailable" {
+		t.Fatal("HOME creation failure must return a generic error", output, err)
+	}
+}
+
 func TestNordNativeOutputAndTimeoutBounded(t *testing.T) {
-	old := nordCommand
-	defer func() { nordCommand = old }()
+	nordNativeFixture(t)
 	nordCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if name != "/usr/bin/nordvpn" {
 			t.Fatal(name)

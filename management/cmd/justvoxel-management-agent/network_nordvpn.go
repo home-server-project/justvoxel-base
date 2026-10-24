@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -34,14 +35,18 @@ func (b *nordCommandOutput) Write(p []byte) (int, error) {
 
 var nordOperation sync.Mutex
 var nordCommand = exec.CommandContext
+var nordCLIHome = "/run/justvoxel/nordvpn-cli"
 
 // Vendor output is never logged or returned. Even unsuccessful commands may
 // contain authentication material. Bound combined output and reject overflow.
 var runNordCommand = func(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
+	if err := os.MkdirAll(nordCLIHome, 0o700); err != nil {
+		return "", errors.New("NordVPN output unavailable")
+	}
 	cmd := nordCommand(ctx, "/usr/bin/nordvpn", args...)
-	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin", "HOME=/root", "LANG=C", "LC_ALL=C", "NO_COLOR=1", "TERM=dumb"}
+	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin", "HOME=" + nordCLIHome, "LANG=C", "LC_ALL=C", "NO_COLOR=1", "TERM=dumb"}
 	cmd.WaitDelay = time.Second
 	var output nordCommandOutput
 	cmd.Stdout, cmd.Stderr = &output, &output

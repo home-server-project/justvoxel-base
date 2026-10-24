@@ -76,10 +76,13 @@ func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(source)
-	for _, want := range []string{"NordVPN account required", "NordVPN Meshnet requires a Nord Account.", "Already have an account?", "Log in to NordVPN", "Create NordVPN account", "https://refer-nordvpn.com/pZGMpGTrBrO", "Complete NordVPN login", "On the Continue button, copy the link address and paste it below.", "Continue link", "Complete login", "noopener noreferrer", "https://my.nordaccount.com/", `input.maxLength = 2048`, `input.autocomplete = "off"`, `input.value = ""`, `if (result?.login_required) showNordAccountDialog()`} {
+	for _, want := range []string{"NordVPN account required", "NordVPN Meshnet requires a Nord Account.", "Already have an account?", "Log in to NordVPN", "Create NordVPN account", "https://refer-nordvpn.com/pZGMpGTrBrO", "Complete NordVPN login", "On the Continue button, copy the link address and paste it below.", "Continue link", "Complete login", "noopener noreferrer", "Open NordVPN account", "https://my.nordaccount.com/", `input.maxLength = 2048`, `input.autocomplete = "off"`, `input.value = ""`, `if (result?.login_required) showNordAccountDialog()`} {
 		if !strings.Contains(script, want) {
 			t.Fatal("approved UI missing", want)
 		}
+	}
+	if strings.Contains(script, `"Open Nord account"`) {
+		t.Fatal("old Nord account button label remains")
 	}
 	if strings.Contains(script, "provider.dashboard_url") || strings.Contains(script, "result.referral") {
 		t.Fatal("caller controlled destination")

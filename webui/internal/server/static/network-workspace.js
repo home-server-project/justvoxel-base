@@ -1225,7 +1225,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       dashboard.target = "_blank";
       dashboard.rel = "noopener noreferrer";
       dashboard.className = "button-link warning network-action-button";
-      dashboard.textContent = { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard", nordvpn: "Open Nord account" }[provider.id];
+      dashboard.textContent = { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard", nordvpn: "Open NordVPN account" }[provider.id];
       actions.appendChild(dashboard);
       if (activate.parentElement === actions) actions.appendChild(activate);
       card.appendChild(actions);
