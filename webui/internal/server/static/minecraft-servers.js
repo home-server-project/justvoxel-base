@@ -122,14 +122,28 @@
       const byID = new Map(rows.filter(row => row && /^jv-[a-z0-9]{6,12}$/.test(row.id)).map(row => [row.id, row]));
       const now = Date.now();
       for (const card of cards()) {
+        const row = byID.get(card.dataset.serverId);
         const tile = card.querySelector('[data-server-ram]');
+        if (row && typeof row.state === 'string' && typeof row.state_class === 'string'
+            && typeof row.running === 'boolean' && typeof row.can_switch === 'boolean') {
+          const status = card.querySelector('.minecraft-server-state');
+          if (status) {
+            status.textContent = row.state;
+            status.className = `minecraft-server-state ${row.state_class}`;
+          }
+          const running = card.querySelector('[data-server-running]');
+          if (running) {
+            running.checked = row.running;
+            running.disabled = !row.can_switch;
+          }
+          if (tile) tile.dataset.serverState = row.state;
+        }
         if (!tile) continue;
         const value = tile.querySelector('[data-server-ram-value]');
         const graph = tile.querySelector('[data-server-ram-graph]');
         const id = card.dataset.serverId;
-        const row = byID.get(id);
         graph.replaceChildren();
-        // Only the server-rendered authoritative state can declare a stop.
+        // Only authoritative lifecycle state can declare a stop.
         if (tile.dataset.serverState === 'Stopped') {
           value.textContent = '---';
           history.delete(id);

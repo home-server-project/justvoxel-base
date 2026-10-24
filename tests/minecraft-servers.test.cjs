@@ -765,6 +765,11 @@ function liveMemoryHarness(states = ['Running', 'Running', 'Stopped', 'Starting'
   const list = {isConnected: true};
   const cards = states.map((state, index) => {
     const card = new Element('card', {serverId: ids[index] || 'jv-start01'});
+    const status = card.appendChild(new Element('.minecraft-server-state'));
+    status.textContent = state;
+    card.appendChild(new Element('[data-server-running]'));
+    const menu = card.appendChild(new Element('details')); menu.open = true;
+    const boot = card.appendChild(new Element('[data-server-boot]')); boot.checked = true;
     const tile = card.appendChild(new Element('[data-server-ram]', {serverState: state}));
     tile.appendChild(new Element('[data-server-ram-value]'));
     const graph = tile.appendChild(new Element('[data-server-ram-graph]'));
@@ -890,4 +895,77 @@ test('disconnection stops the shared timer and outstanding reads never update re
   replacement.start(); await replacement.settle();
   assert.equal(replacement.calls.length, 1);
   assert.equal(replacement.intervals.length, 1);
+});
+
+const stateRow = (id, state, state_class, running, can_switch) => ({id, state, state_class, running, can_switch});
+
+for (const transition of [
+  ['Starting', stateRow(ids[0], 'Running', 'success', true, true), 'Unavailable'],
+  ['Stopping', stateRow(ids[0], 'Stopped', 'error', false, true), '---'],
+  ['Running', stateRow(ids[0], 'Failed', 'error', false, false), 'Unavailable'],
+  ['Stopped', stateRow(ids[0], 'Starting', 'warning', false, false), 'Unavailable'],
+]) {
+  test(`live lifecycle updates ${transition[0]} -> ${transition[1].state} in place without RAM`, async () => {
+    const [initial, row, ram] = transition;
+    const f = liveMemoryHarness([initial]);
+    const card = f.cards[0];
+    const status = card.querySelector('.minecraft-server-state');
+    const running = card.querySelector('[data-server-running]');
+    const tile = card.querySelector('[data-server-ram]');
+    f.start(); await f.settle();
+    f.responses.push([row]); await f.tick();
+    assert.equal(f.cards[0], card);
+    assert.equal(card.querySelector('.minecraft-server-state'), status);
+    assert.equal(status.textContent, row.state);
+    assert.equal(status.className, `minecraft-server-state ${row.state_class}`);
+    assert.equal(running.checked, row.running);
+    assert.equal(running.disabled, !row.can_switch);
+    assert.equal(tile.dataset.serverState, row.state);
+    assert.equal(f.value(0), ram);
+    assert.equal(f.points(0), undefined);
+    assert.equal(card.querySelector('details').open, true);
+    assert.equal(card.querySelector('[data-server-boot]').checked, true);
+    assert.equal(f.intervals.length, 1);
+    assert.equal(f.calls.length, 2);
+  });
+}
+
+test('live lifecycle and RAM share one response and preserve graph history across Starting -> Running', async () => {
+  const f = liveMemoryHarness(['Stopped']);
+  const row = (state, running, canSwitch, usage) => [{
+    ...stateRow(ids[0], state, running ? 'success' : 'warning', running, canSwitch),
+    ...memoryRow(ids[0], usage, 100),
+  }];
+  f.responses.push(row('Starting', false, false, 25)); f.start(); await f.settle();
+  assert.equal(f.value(0), '0 MB');
+  f.responses.push(row('Running', true, true, 50)); await f.tick();
+  assert.equal(f.points(0), '112,9 116,6');
+  f.responses.push([stateRow(ids[0], 'Stopped', 'error', false, true)]); await f.tick();
+  assert.equal(f.value(0), '---');
+  assert.equal(f.points(0), undefined);
+  f.responses.push(row('Running', true, true, 50)); await f.tick();
+  assert.equal(f.points(0), undefined, 'stopped history is cleared');
+});
+
+test('memory-only rows and poll failures never infer or overwrite lifecycle state', async () => {
+  const f = liveMemoryHarness(['Starting']);
+  f.responses.push([stateRow(ids[0], 'Running', 'success', true, true)]);
+  f.start(); await f.settle();
+  for (const response of [[memoryRow(ids[0], 100)], [], new Error('offline'), [stateRow('jv-other01', 'Stopped', 'error', false, true)]]) {
+    f.responses.push(response); await f.tick();
+    assert.equal(f.cards[0].querySelector('.minecraft-server-state').textContent, 'Running');
+    assert.equal(f.cards[0].querySelector('[data-server-running]').checked, true);
+    assert.equal(f.cards[0].querySelector('[data-server-ram]').dataset.serverState, 'Running');
+  }
+});
+
+test('periodic live polling retains exactly one 2000 ms interval and never refreshes cards or workspace', () => {
+  assert.equal((source.match(/setInterval\s*\(/g) || []).length, 1);
+  const start = source.indexOf('  function initializeLiveMemory(');
+  const end = source.indexOf('  function initializeCard(', start);
+  const poll = source.slice(start, end);
+  assert.match(poll, /setInterval\(poll, 2000\)/);
+  assert.doesNotMatch(poll, /setTimeout|justVoxelRefreshServers|innerHTML|outerHTML|location\./);
+  const app = readFileSync(`${root}static/app.js`, 'utf8');
+  assert.ok(app.includes('minecraftServersDialog.querySelector("[data-minecraft-servers-refresh]").addEventListener("click", load)'));
 });
