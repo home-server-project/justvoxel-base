@@ -724,14 +724,18 @@ existing Plugins ownership schema, runtime targets or SELinux policy.
 
 Plugins keeps its existing name and tabs, with **CurseForge API** following
 Discover, Installed and Add-ons. Administrators can configure, replace or remove
-an approved third-party API key there. The tab and configuration dialog link to
+an approved third-party API key there. The tab contains the password field
+directly and links to
 [CurseForge's official application help](https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key);
 approval is required, and saving a key does not validate it against CurseForge.
 
 The Discover CurseForge switch starts off. Without a configured key, enabling
 it immediately returns it to off and opens a compact notice beside it. The
 notice closes after 15 seconds, with X or Escape; repeating the attempt restarts
-the timer. Configure API selects the API tab and opens the configuration dialog.
+the timer. Configure API selects the API tab and focuses its key field without
+opening an overlay.
+If configuration status cannot be loaded, the field and Save API key remain usable
+so administrators can still save or replace a key; presence remains unknown.
 With a key configured, the switch stays on while the workspace is open and shows
 that catalog support will arrive in the next integration step. This switch does
 not reload or change Modrinth/Hangar results or pagination.
@@ -759,8 +763,8 @@ token. PUT accepts a form `key` (forwarded once as strict JSON `{"key":"…"}`);
 DELETE accepts only the CSRF form field. Query parameters are rejected.
 Every successful response contains only `{"configured":true}` or
 `{"configured":false}` and is marked `no-store`. Status does not read key
-contents. Inputs are never prefilled, are cleared after submission/dismissal,
-and replacements require a complete key. The UI displays only a fixed mask.
+contents. Inputs are never prefilled and are cleared as soon as submission starts
+and when the workspace closes. Replacements require a complete key. The UI displays only a fixed mask.
 The key is never returned, logged, included in diagnostic contents, placed in
 browser storage or URLs, or passed to Minecraft. Removing it turns the switch
 off without changing installed plugins or manifests.

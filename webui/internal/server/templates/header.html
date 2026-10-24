@@ -346,10 +346,18 @@
           <p>Configure the CurseForge API key for CurseForge plugin and mod discovery.</p>
           <p>CurseForge requires an approved third-party API key.</p>
           <p><a href="https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key" target="_blank" rel="noopener noreferrer">Apply for CurseForge API key</a></p>
+          <form data-curseforge-key-form>
+            <label>API key
+              <input type="password" data-curseforge-key autocomplete="new-password" maxlength="1024" required>
+            </label>
+            <p data-curseforge-mask hidden>Stored API key: <span>••••••••••••••••</span></p>
+            <p data-curseforge-key-feedback role="status"></p>
+            <div class="plugins-curseforge-key-actions">
+              <button type="submit" data-curseforge-save>Save API key</button>
+              <button type="button" data-curseforge-remove hidden>Remove API key</button>
+            </div>
+          </form>
           <p data-curseforge-status role="status">Checking configuration…</p>
-          <p data-curseforge-mask hidden>API key <span>••••••••••••••••</span></p>
-          <button type="button" data-curseforge-configure disabled>Configure API</button>
-          <button type="button" data-curseforge-remove hidden>Remove API key</button>
         </section>
         <p class="plugins-workspace-state" data-plugins-state role="status" aria-live="polite"></p>
         <div class="plugins-results" data-plugins-results></div>

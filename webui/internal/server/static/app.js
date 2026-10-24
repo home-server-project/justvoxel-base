@@ -6997,7 +6997,10 @@ if (pluginsDialog && pluginsOpen) {
   const curseForgeSection = pluginsDialog.querySelector("[data-plugins-curseforge-section]");
   const curseForgeNotice = pluginsDialog.querySelector("[data-plugins-curseforge-notice]");
   const curseForgeInfo = pluginsDialog.querySelector("[data-plugins-curseforge-info]");
-  const curseForgeConfigure = pluginsDialog.querySelector("[data-curseforge-configure]");
+  const curseForgeKeyForm = pluginsDialog.querySelector("[data-curseforge-key-form]");
+  const curseForgeKey = pluginsDialog.querySelector("[data-curseforge-key]");
+  const curseForgeSave = pluginsDialog.querySelector("[data-curseforge-save]");
+  const curseForgeFeedback = pluginsDialog.querySelector("[data-curseforge-key-feedback]");
   const curseForgeRemove = pluginsDialog.querySelector("[data-curseforge-remove]");
   let curseForgeConfigured = false, curseForgeNoticeTimer = null, curseForgeRevision = 0;
   const dismissCurseForgeNotice = () => {
@@ -7011,12 +7014,11 @@ if (pluginsDialog && pluginsOpen) {
   const applyCurseForgeStatus = (status) => {
     curseForgeConfigured = status.configured === true;
     curseForgeSwitch.disabled = false;
-    curseForgeConfigure.disabled = false;
     if (!curseForgeConfigured) curseForgeSwitch.checked = false;
     else dismissCurseForgeNotice();
     pluginsDialog.querySelector("[data-curseforge-status]").textContent = curseForgeConfigured ? "Configured" : "Not configured";
     pluginsDialog.querySelector("[data-curseforge-mask]").hidden = !curseForgeConfigured;
-    curseForgeConfigure.textContent = curseForgeConfigured ? "Replace API key" : "Configure API";
+    curseForgeSave.textContent = curseForgeConfigured ? "Replace API key" : "Save API key";
     curseForgeRemove.hidden = !curseForgeConfigured;
     syncCurseForgeInfo();
   };
@@ -7035,7 +7037,11 @@ if (pluginsDialog && pluginsOpen) {
   const refreshCurseForgeStatus = async () => {
     const revision = ++curseForgeRevision;
     curseForgeSwitch.disabled = true;
-    curseForgeConfigure.disabled = true;
+    curseForgeConfigured = false;
+    pluginsDialog.querySelector("[data-curseforge-mask]").hidden = true;
+    curseForgeRemove.hidden = true;
+    curseForgeSave.textContent = "Save API key";
+    pluginsDialog.querySelector("[data-curseforge-status]").textContent = "Checking configuration…";
     try {
       const status = await curseForgeRequest();
       if (revision === curseForgeRevision) applyCurseForgeStatus(status);
@@ -7043,7 +7049,7 @@ if (pluginsDialog && pluginsOpen) {
       if (revision !== curseForgeRevision) return;
       curseForgeSwitch.checked = false;
       syncCurseForgeInfo();
-      pluginsDialog.querySelector("[data-curseforge-status]").textContent = "Configuration status is unavailable. Refresh to retry.";
+      pluginsDialog.querySelector("[data-curseforge-status]").textContent = "Configuration status is unavailable. You can still save or replace the API key.";
     }
   };
   curseForgeSwitch.addEventListener("change", () => {
@@ -7066,49 +7072,28 @@ if (pluginsDialog && pluginsOpen) {
       event.preventDefault(); event.stopPropagation(); dismissCurseForgeNotice();
     }
   });
-  const curseForgeHelp = () => {
-    const link = text("a", "Apply for CurseForge API key");
-    link.href = "https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key";
-    link.target = "_blank"; link.rel = "noopener noreferrer";
-    return link;
-  };
-  const configureCurseForge = () => {
-    dismissCurseForgeNotice();
-    showPanel("CurseForge API", true);
-    panel.classList.add("plugins-curseforge-panel");
-    panelBody.append(text("h3", "CurseForge API"), text("p", "CurseForge requires an approved third-party API key."), curseForgeHelp());
-    const keyForm = document.createElement("form");
-    keyForm.dataset.curseforgeKeyForm = "";
-    const label = text("label", "API key");
-    const input = document.createElement("input");
-    input.type = "password"; input.autocomplete = "new-password"; input.maxLength = 1024; input.required = true;
-    label.append(input); keyForm.append(label);
-    const error = text("p", ""); error.setAttribute("role", "status"); keyForm.append(error);
-    const save = text("button", "Save"); save.type = "submit";
-    const cancel = panelAction("Cancel", closePanel, true);
-    const actions = text("div", "", "plugins-overlay-actions"); actions.append(save, cancel); keyForm.append(actions);
-    panelBody.append(keyForm);
-    keyForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (!input.value.trim() || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(input.value)) { error.textContent = "Enter a complete API key without line breaks or control characters."; return; }
-      const request = curseForgeRequest("PUT", input.value);
-      input.value = "";
-      save.disabled = true; cancel.disabled = true; panel.dataset.curseforgeBusy = "true";
-      ++curseForgeRevision;
-      try {
-        applyCurseForgeStatus(await request);
-        delete panel.dataset.curseforgeBusy; closePanel();
-      } catch {
-        error.textContent = "API key could not be saved. Enter the complete key and retry.";
-      } finally { delete panel.dataset.curseforgeBusy; save.disabled = false; cancel.disabled = false; }
-    });
-    queueMicrotask(() => input.focus());
-  };
-  curseForgeConfigure.addEventListener("click", configureCurseForge);
+  curseForgeKeyForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (curseForgeSave.disabled) return;
+    if (!curseForgeKey.value.trim() || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(curseForgeKey.value)) {
+      curseForgeFeedback.textContent = "Enter a complete API key without line breaks or control characters.";
+      return;
+    }
+    const request = curseForgeRequest("PUT", curseForgeKey.value);
+    curseForgeKey.value = "";
+    curseForgeSave.disabled = true;
+    ++curseForgeRevision;
+    try {
+      applyCurseForgeStatus(await request);
+      curseForgeFeedback.textContent = "";
+    } catch {
+      curseForgeFeedback.textContent = "API key could not be saved. Enter the complete key and retry.";
+    } finally { curseForgeSave.disabled = false; }
+  });
   pluginsDialog.querySelector("[data-curseforge-notice-configure]").addEventListener("click", () => {
     dismissCurseForgeNotice();
     pluginsDialog.querySelector('[data-plugins-tab="curseforge-api"]').click();
-    configureCurseForge();
+    curseForgeKey.focus();
   });
   curseForgeRemove.addEventListener("click", () => {
     showPanel("Remove API key", true);
@@ -7121,6 +7106,8 @@ if (pluginsDialog && pluginsOpen) {
       ++curseForgeRevision;
       try {
         applyCurseForgeStatus(await curseForgeRequest("DELETE"));
+        curseForgeKey.value = "";
+        curseForgeFeedback.textContent = "";
         dismissCurseForgeNotice(); delete panel.dataset.curseforgeBusy; closePanel();
       } catch { error.textContent = "API key could not be removed. Retry."; }
       finally { delete panel.dataset.curseforgeBusy; remove.disabled = false; cancel.disabled = false; }
@@ -7698,7 +7685,7 @@ if (pluginsDialog && pluginsOpen) {
   });
   const refreshWorkspace = () => globalThis.justVoxelServerSelection(pluginsDialog.querySelector("[data-server-selector-slot]"), true)
     .then(() => { refreshCurseForgeStatus(); resetCursors(); load(); }).catch(error => { if (state) state.textContent = error.message; });
-  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { updateCapacity(false); refreshWorkspace(); resumePluginInstall(); }, onClose: () => { dismissCurseForgeNotice(); curseForgeSwitch.checked = false; syncCurseForgeInfo(); clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); resetCursors(); closePanel(); } });
+  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { updateCapacity(false); refreshWorkspace(); resumePluginInstall(); }, onClose: () => { curseForgeKey.value = ""; dismissCurseForgeNotice(); curseForgeSwitch.checked = false; syncCurseForgeInfo(); clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); resetCursors(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const controlCenter = document.querySelector("[data-control-center]");

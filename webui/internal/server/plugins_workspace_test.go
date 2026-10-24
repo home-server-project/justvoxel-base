@@ -2101,6 +2101,7 @@ const selectorSlot={};let selectionRefreshes=0,curseForgeRefreshes=0;
 const pluginsDialog={open:true,querySelector:s=>s==="[data-server-selector-slot]"?selectorSlot:s.includes("refresh")?refresh:close,querySelectorAll:()=>tabs};
 globalThis.justVoxelServerSelection=(slot,refresh)=>{assert.equal(slot,selectorSlot);assert.equal(refresh,true);selectionRefreshes++;return Promise.resolve()};
 const state={};const document={body:{classList:{contains:()=>true}},querySelector:()=>null};
+const curseForgeKey={value:"unsaved-private-key"};
 const refreshCurseForgeStatus=()=>curseForgeRefreshes++,dismissCurseForgeNotice=()=>{},curseForgeSwitch={},syncCurseForgeInfo=()=>{};
 const setupWorkspaceWindow=(dialog,callbacks)=>{options=callbacks;return {open:callbacks.onOpen,close:callbacks.onClose}};
 const clearTimeout=()=>{},setTimeout=(fn)=>{searchTimer=fn;return fn},clearInventoryTimer=()=>{},closePanel=()=>closes++,resumePluginInstall=()=>resumes++;
@@ -2121,7 +2122,7 @@ for(const control of controls){dirty();const signal=controller.signal;control.ev
 dirty();const searchSignal=controller.signal;form.elements.q.events.input();clean();assert(searchSignal.aborted);searchTimer();
 dirty();let prevented=false;form.events.submit({preventDefault:()=>prevented=true});clean();assert(prevented);
 dirty();wantedCapacity=12;updateCapacity();clean();assert.equal(pageLimit,12);
-dirty();const closeSignal=controller.signal;options.onClose();clean();assert(closeSignal.aborted);assert.equal(closes,1);
+dirty();const closeSignal=controller.signal;options.onClose();assert.equal(curseForgeKey.value,"");clean();assert(closeSignal.aborted);assert.equal(closes,1);
 dirty();options.onOpen();assert.equal(resumes,1);await Promise.resolve();clean();assert.equal(selectionRefreshes,2);assert.equal(curseForgeRefreshes,2);
 dirty();tabs[1].events.click();clean();assert.equal(tab,"installed");tabs[0].events.click();clean();assert.equal(tab,"discover");
 // Normal Previous/Next still navigate the composite cursor history.

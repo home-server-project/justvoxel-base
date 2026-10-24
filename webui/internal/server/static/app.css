@@ -1743,8 +1743,10 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .plugins-curseforge-notice [data-curseforge-notice-dismiss]{position:absolute;right:.2rem;top:.15rem;padding:.1rem .35rem;border:0;background:transparent;color:inherit}
 .plugins-curseforge-info{margin:.25rem 0;font-size:.85rem;color:var(--jv-muted,#aeb8c0)}
 .plugins-curseforge-panel .plugins-install-content{width:min(420px,100%)}
-.plugins-curseforge-panel label{display:flex;flex-direction:column;gap:.35rem;margin-top:.75rem}
-.plugins-curseforge-panel input[type=password]{width:100%;box-sizing:border-box}
+[data-curseforge-key-form]{width:min(420px,100%)}
+[data-curseforge-key-form] label{display:flex;flex-direction:column;gap:.35rem}
+[data-curseforge-key]{width:100%;box-sizing:border-box}
+.plugins-curseforge-key-actions{display:flex;flex-wrap:wrap;gap:.5rem}
 [data-plugins-curseforge-section]{min-height:0;overflow:auto}
 @container(max-width:700px){.plugins-search:has([data-plugins-curseforge]) .plugins-search-filters{flex-shrink:1;min-width:0}}
 
