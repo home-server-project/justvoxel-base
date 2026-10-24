@@ -30,7 +30,7 @@ type adminSetupPlanServerRequest struct {
 	MOTDAutomatic  bool   `json:"motd_automatic,omitempty"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
-	Timezone       string `json:"timezone"`
+	Timezone       string `json:"timezone,omitempty"`
 }
 
 type adminSetupPlanMinecraftRequest struct {
@@ -41,6 +41,9 @@ type adminSetupPlanMinecraftRequest struct {
 	ContainerMemory string `json:"container_memory"`
 	JavaPort        int    `json:"java_port"`
 	BedrockPort     int    `json:"bedrock_port"`
+	BedrockTCPPort  int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd   int    `json:"bedrock_udp_end,omitempty"`
 	ImageTag        string `json:"image_tag"`
 	VersionPolicy   string `json:"version_policy"`
 	Version         string `json:"version"`
@@ -88,7 +91,7 @@ type adminSetupPlanServer struct {
 	MOTD           string `json:"motd"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
-	Timezone       string `json:"timezone"`
+	Timezone       string `json:"timezone,omitempty"`
 }
 
 type adminSetupPlanMinecraft struct {
@@ -99,6 +102,9 @@ type adminSetupPlanMinecraft struct {
 	ContainerMemory        string `json:"container_memory"`
 	JavaPort               int    `json:"java_port"`
 	BedrockPort            int    `json:"bedrock_port"`
+	BedrockTCPPort         int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart        int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd          int    `json:"bedrock_udp_end,omitempty"`
 	ImageTag               string `json:"image_tag"`
 	RequestedVersionPolicy string `json:"requested_version_policy"`
 	VersionPolicy          string `json:"version_policy"`
@@ -189,6 +195,9 @@ type adminSetupFingerprintMinecraft struct {
 	ContainerMemory        string `json:"container_memory"`
 	JavaPort               int    `json:"java_port"`
 	BedrockPort            int    `json:"bedrock_port"`
+	BedrockTCPPort         int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart        int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd          int    `json:"bedrock_udp_end,omitempty"`
 	ImageTag               string `json:"image_tag"`
 	RequestedVersionPolicy string `json:"requested_version_policy"`
 	VersionPolicy          string `json:"version_policy"`
@@ -310,6 +319,10 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	if validateJavaServerSelection(request.Minecraft.ServerType, request.Minecraft.VersionPolicy, request.Minecraft.Version, request.Minecraft.LoaderVersion, request.Minecraft.ImageTag, request.Server.BedrockEnabled) != nil {
 		return out, &adminSetupPlanningError{status: http.StatusBadRequest, message: "invalid server software or Bedrock choice"}
 	}
+	request.Server.Timezone = "" // Legacy wire field is accepted but never selected or persisted.
+	if request.Minecraft.ServerType == "bedrock" && request.Minecraft.GameMode == "spectator" {
+		return out, &adminSetupPlanningError{status: 400, message: "Bedrock does not support Spectator as an initial game mode"}
+	}
 	// Friendly names belong to the Go instance registry, not the shell planner.
 	displayName, nameErr := validateInstanceName(request.Server.DisplayName)
 	if nameErr != nil || (request.Server.DisplayName != "" && displayName == "") {
@@ -374,7 +387,19 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 		}
 		capabilities, _ := javaServerSoftware(out.Normalized.Minecraft.ServerType)
 		software := capabilities.Name
+		if out.Normalized.Minecraft.ServerType == "bedrock" {
+			software = "Bedrock"
+		}
 		out.Normalized.Server.MOTD = "JustVoxel " + software + " Minecraft " + version + " Server"
+	}
+	out.Normalized.Server.Timezone = ""
+	if request.Minecraft.ServerType == "bedrock" {
+		out.Normalized.Minecraft.BedrockTCPPort = request.Minecraft.BedrockTCPPort
+		out.Normalized.Minecraft.BedrockUDPStart = request.Minecraft.BedrockUDPStart
+		out.Normalized.Minecraft.BedrockUDPEnd = request.Minecraft.BedrockUDPEnd
+		if err := instanceRuntimes.planNativeBedrock(parent, &out.Normalized.Minecraft, request.Server.MaxPlayers); err != nil {
+			return out, &adminSetupPlanningError{status: 409, message: err.Error()}
+		}
 	}
 	out.Normalized.Server.DisplayName = displayName
 	out.Normalized.StartAfterSetup = request.AddServer && request.StartAfterSetup
@@ -431,7 +456,7 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 				ServerType: serverType, LoaderVersion: normalized.Minecraft.LoaderVersion,
 				GameMode:   normalized.Minecraft.GameMode,
 				JavaMemory: normalized.Minecraft.JavaMemory, ContainerMemory: normalized.Minecraft.ContainerMemory,
-				JavaPort: normalized.Minecraft.JavaPort, BedrockPort: normalized.Minecraft.BedrockPort,
+				JavaPort: normalized.Minecraft.JavaPort, BedrockPort: normalized.Minecraft.BedrockPort, BedrockTCPPort: normalized.Minecraft.BedrockTCPPort, BedrockUDPStart: normalized.Minecraft.BedrockUDPStart, BedrockUDPEnd: normalized.Minecraft.BedrockUDPEnd,
 				ImageTag: normalized.Minecraft.ImageTag, RequestedVersionPolicy: normalized.Minecraft.RequestedVersionPolicy,
 				VersionPolicy: normalized.Minecraft.VersionPolicy, Version: normalized.Minecraft.Version,
 				MinecraftUID: normalized.Minecraft.MinecraftUID, MinecraftGID: normalized.Minecraft.MinecraftGID,
@@ -466,7 +491,7 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 
 func validSetupServerType(value string) bool {
 	_, ok := javaServerSoftware(value)
-	return ok
+	return ok || value == "bedrock"
 }
 
 func validSetupGameMode(mode string) bool {

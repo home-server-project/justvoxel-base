@@ -14,7 +14,7 @@ jv_migration_load_instance() {
     BEDROCK_PORT="$(jq -er '.runtime.bedrock_port' "${record}")"
     JAVA_MEMORY="$(jq -er '.runtime.java_memory' "${record}")"
     CONTAINER_MEMORY="$(jq -er '.runtime.container_memory' "${record}")"
-    TIMEZONE="$(jq -er '.runtime.timezone' "${record}")"
+    TIMEZONE="$(timedatectl show --property=Timezone --value)"
     GAME_MODE="$(jq -er '.runtime.game_mode' "${record}")"
     DIFFICULTY="$(jq -er '.runtime.difficulty' "${record}")"
     MAX_PLAYERS="$(jq -er '.runtime.max_players' "${record}")"

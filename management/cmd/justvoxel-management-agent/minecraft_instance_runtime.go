@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -30,6 +29,9 @@ type minecraftInstanceRuntimeConfig struct {
 	JavaPort         int    `json:"java_port"`
 	BedrockEnabled   bool   `json:"bedrock_enabled"`
 	BedrockPort      int    `json:"bedrock_port"`
+	BedrockTCPPort   int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart  int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd    int    `json:"bedrock_udp_end,omitempty"`
 	JavaMemory       string `json:"java_memory"`
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
@@ -43,7 +45,7 @@ type minecraftInstanceRuntimeConfig struct {
 	EULAAccepted     bool   `json:"eula_accepted"`
 	UID              uint32 `json:"uid"`
 	GID              uint32 `json:"gid"`
-	Timezone         string `json:"timezone"`
+	Timezone         string `json:"timezone,omitempty"` // Decode deployed records only; new runtimes inherit /etc/localtime.
 	GameMode         string `json:"game_mode"`
 	Difficulty       string `json:"difficulty"`
 	MaxPlayers       int    `json:"max_players"`
@@ -81,7 +83,6 @@ var instanceRuntimePathPattern = regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
 var instanceRuntimeMemoryPattern = regexp.MustCompile(`^([1-9][0-9]{0,8})([MmGg])$`)
 var instanceRuntimeVersionPattern = regexp.MustCompile(`^(LATEST|[0-9]+\.[0-9]+(\.[0-9]+)?([-+][A-Za-z0-9.-]+)?)$`)
 var instanceRuntimeSecretPattern = regexp.MustCompile(`^[a-fA-F0-9]{32,128}$`)
-var instanceRuntimeTimezonePattern = regexp.MustCompile(`^[A-Za-z0-9_+/-]{1,128}$`)
 var instanceRuntimeUUIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,128}$`)
 
 func (ctx minecraftInstanceRuntimeContext) forInstance(id string) minecraftInstanceRuntimeContext {
@@ -329,8 +330,36 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 				return nil, errors.New("instance data overlaps protected state")
 			}
 		}
-		if err := reserve(c.JavaPort, tcp); err != nil {
+		if c.Software == "bedrock" {
+			if !nativeBedrockValid(c) {
+				return nil, errors.New("invalid native Bedrock runtime")
+			}
+			// Cross-protocol number reservation for native Bedrock.
+			if udp[c.BedrockTCPPort] {
+				return nil, errors.New("conflicting native Bedrock port")
+			}
+			if err := reserve(c.BedrockTCPPort, tcp); err != nil {
+				return nil, err
+			}
+			for port := c.BedrockUDPStart; port <= c.BedrockUDPEnd; port++ {
+				if tcp[port] {
+					return nil, errors.New("conflicting native Bedrock port")
+				}
+				if err := reserve(port, udp); err != nil {
+					return nil, err
+				}
+			}
+		} else if err := reserve(c.JavaPort, tcp); err != nil {
 			return nil, err
+		}
+		for _, other := range ordered {
+			if other.Software == "bedrock" && other.ID != c.ID && c.Software != "bedrock" {
+				for _, port := range []int{c.JavaPort, c.BedrockPort} {
+					if port != 0 && (port == other.BedrockTCPPort || port >= other.BedrockUDPStart && port <= other.BedrockUDPEnd) {
+						return nil, errors.New("conflicting native Bedrock listener")
+					}
+				}
+			}
 		}
 		if c.BedrockEnabled && !javaServerCrossplay(c.Software) {
 			return nil, errors.New("unsupported cross-play software")
@@ -345,7 +374,11 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		} else if c.BedrockPort != 0 {
 			return nil, errors.New("disabled Bedrock must not reserve a port")
 		}
-		heap, err := instanceRuntimeMemoryMiB(c.JavaMemory)
+		heap := int64(0)
+		var err error
+		if c.Software != "bedrock" {
+			heap, err = instanceRuntimeMemoryMiB(c.JavaMemory)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -359,7 +392,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if limit > ctx.TotalMemoryMiB-1024 {
 			return nil, errors.New("container memory must leave at least 1 GiB for the appliance")
 		}
-		if (c.ImageDigest != "" && !operationFingerprintPattern.MatchString(c.ImageDigest)) || (c.VersionPolicy != "" && c.VersionPolicy != "pinned" && c.VersionPolicy != "recommended" && c.VersionPolicy != "latest") || !validSetupServerType(c.Software) || !instanceRuntimeVersionPattern.MatchString(c.Version) || !imageTagInputPattern.MatchString(c.ImageTag) {
+		if (c.ImageDigest != "" && !operationFingerprintPattern.MatchString(c.ImageDigest)) || (c.VersionPolicy != "" && c.VersionPolicy != "pinned" && c.VersionPolicy != "recommended" && c.VersionPolicy != "latest") || !validSetupServerType(c.Software) || !(instanceRuntimeVersionPattern.MatchString(c.Version) || c.Software == "bedrock" && bedrockVersionPattern.MatchString(c.Version)) || !imageTagInputPattern.MatchString(c.ImageTag) {
 			return nil, errors.New("invalid Minecraft software, version, or image tag")
 		}
 		if err := validateJavaServerSelection(c.Software, c.VersionPolicy, c.Version, c.LoaderVersion, c.ImageTag, c.BedrockEnabled); err != nil {
@@ -380,12 +413,10 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if c.Difficulty != "peaceful" && c.Difficulty != "easy" && c.Difficulty != "normal" && c.Difficulty != "hard" {
 			return nil, errors.New("invalid difficulty")
 		}
-		if c.MaxPlayers < 1 || c.MaxPlayers > 1000 || !instanceRuntimeTimezonePattern.MatchString(c.Timezone) || !instanceRuntimeText(c.MOTD, 1024) || !instanceRuntimeSecretPattern.MatchString(c.RCONPassword) {
+		if c.MaxPlayers < 1 || c.MaxPlayers > 1000 || !instanceRuntimeText(c.MOTD, 1024) || !instanceRuntimeSecretPattern.MatchString(c.RCONPassword) {
 			return nil, errors.New("invalid startup configuration")
 		}
-		if _, err := time.LoadLocation(c.Timezone); err != nil {
-			return nil, errors.New("invalid startup timezone")
-		}
+
 	}
 
 	envTemplate, err := os.ReadFile(filepath.Join(ctx.TemplateRoot, "config", "minecraft.env.in"))
@@ -404,7 +435,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		capabilities, _ := javaServerSoftware(c.Software)
 		values := map[string]string{
 			"EULA": "TRUE", "MINECRAFT_SERVER_TYPE": capabilities.Type, "MINECRAFT_VERSION": c.Version, "PAPER_CHANNEL": c.PaperChannel,
-			"MINECRAFT_UID": strconv.FormatUint(uint64(c.UID), 10), "MINECRAFT_GID": strconv.FormatUint(uint64(c.GID), 10), "TIMEZONE": instanceRuntimeEnvEscape(c.Timezone),
+			"MINECRAFT_UID": strconv.FormatUint(uint64(c.UID), 10), "MINECRAFT_GID": strconv.FormatUint(uint64(c.GID), 10),
 			"JAVA_MEMORY": strings.ToUpper(c.JavaMemory), "GAME_MODE": c.GameMode, "DIFFICULTY": c.Difficulty, "MAX_PLAYERS": strconv.Itoa(c.MaxPlayers),
 			"WHITELIST_ENABLED": instanceRuntimeBool(c.Whitelist), "ENFORCE_WHITELIST": instanceRuntimeBool(c.EnforceWhitelist),
 			"RCON_PASSWORD": instanceRuntimeEnvEscape(c.RCONPassword), "MOTD": instanceRuntimeEnvEscape(c.MOTD), "PLUGINS_LINE": "# Instance cross-play is not supported in Phase 2.",
@@ -425,6 +456,9 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		} else if capabilities.ModLoader {
 			f.Environment = append(f.Environment, []byte(capabilities.LoaderEnvironment+"="+c.LoaderVersion+"\n")...)
 		}
+		if c.Software == "bedrock" {
+			f.Environment = bedrockEnvironment(c)
+		}
 		install := "# Start on Boot disabled; service remains manually startable."
 		if c.StartOnBoot {
 			install = "[Install]\nWantedBy=multi-user.target"
@@ -444,6 +478,11 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		}
 		if c.Software != "vanilla" && !capabilities.ManagedCrossplay {
 			f.Quadlet = bytes.Replace(f.Quadlet, []byte("/instance-crossplay-start "), []byte("/validate-instance-start-memory "), 1)
+		}
+		if c.Software == "bedrock" {
+			// Host networking supplies reachable appliance addresses to NetherNet.
+			f.Quadlet = regexp.MustCompile(`(?m)^PublishPort=.*\n`).ReplaceAll(f.Quadlet, nil)
+			f.Quadlet = bytes.Replace(f.Quadlet, []byte("[Container]\n"), []byte("[Container]\nNetwork=host\n"), 1)
 		}
 		files = append(files, f)
 	}
@@ -545,8 +584,12 @@ func (s *minecraftInstanceStore) stageInstanceRuntimes(ctx minecraftInstanceRunt
 }
 
 func instanceRuntimeImage(c minecraftInstanceRuntimeConfig) string {
-	if c.ImageDigest != "" {
-		return "docker.io/itzg/minecraft-server@" + c.ImageDigest
+	repo := "docker.io/itzg/minecraft-server"
+	if c.Software == "bedrock" {
+		repo = "docker.io/itzg/minecraft-bedrock-server"
 	}
-	return "docker.io/itzg/minecraft-server:" + c.ImageTag
+	if c.ImageDigest != "" {
+		return repo + "@" + c.ImageDigest
+	}
+	return repo + ":" + c.ImageTag
 }

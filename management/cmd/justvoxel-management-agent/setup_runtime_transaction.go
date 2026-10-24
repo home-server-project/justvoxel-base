@@ -64,7 +64,7 @@ type setupRuntimeServer struct {
 	MOTD           string `json:"motd"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
-	Timezone       string `json:"timezone"`
+	Timezone       string `json:"timezone,omitempty"`
 }
 
 type setupRuntimeMinecraft struct {
@@ -75,6 +75,9 @@ type setupRuntimeMinecraft struct {
 	ContainerMemory string `json:"container_memory"`
 	JavaPort        int    `json:"java_port"`
 	BedrockPort     int    `json:"bedrock_port"`
+	BedrockTCPPort  int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd   int    `json:"bedrock_udp_end,omitempty"`
 	ImageTag        string `json:"image_tag"`
 	VersionPolicy   string `json:"version_policy"`
 	Version         string `json:"version"`
@@ -143,7 +146,7 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 	return setupRuntimeTransactionRequest{
 		AddServer: plan.AddServer, StartOnBoot: plan.StartOnBoot, StartAfterSetup: plan.StartAfterSetup, InstanceOnly: true, SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
 		Server:    setupRuntimeServer{DisplayName: plan.Server.DisplayName, MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
-		Minecraft: setupRuntimeMinecraft{ServerType: serverType, LoaderVersion: plan.Minecraft.LoaderVersion, GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
+		Minecraft: setupRuntimeMinecraft{ServerType: serverType, LoaderVersion: plan.Minecraft.LoaderVersion, GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, BedrockTCPPort: plan.Minecraft.BedrockTCPPort, BedrockUDPStart: plan.Minecraft.BedrockUDPStart, BedrockUDPEnd: plan.Minecraft.BedrockUDPEnd, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
 		Storage:   setupRuntimeStorage{Type: plan.Storage.Type, Path: plan.Storage.Path, MountPoint: plan.Storage.MountPoint, ExpectedUUID: plan.Storage.ExpectedUUID, ExpectedSource: plan.Storage.ExpectedSource},
 		Backups:   setupRuntimeBackups{Type: plan.Backups.Type, Path: plan.Backups.Path, MountPoint: plan.Backups.MountPoint, ExpectedUUID: plan.Backups.ExpectedUUID, ExpectedSource: plan.Backups.ExpectedSource, Automatic: plan.Backups.Automatic, Schedule: plan.Backups.Schedule, Keep: plan.Backups.Keep},
 	}, nil
@@ -151,6 +154,9 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 
 func runSetupRuntimeTransactionAction(parent context.Context, action string, timeout time.Duration, request setupRuntimeTransactionRequest) (setupRuntimeTransactionResponse, error) {
 	if request.InstanceOnly {
+		if request.Minecraft.ServerType == "bedrock" && (action == "apply" || action == "rollback") && timeout < 10*time.Minute {
+			timeout = 10 * time.Minute
+		}
 		ctx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
 		return runSetupInstanceRuntimeAction(ctx, action, request)

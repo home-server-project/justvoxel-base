@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-const vanillaBedrockHelp = "Select Paper, Purpur or Spigot on Step 1 to enable Bedrock cross-play."
+const vanillaBedrockHelp = "This software supports Java only."
 
 func assertSetupApplicationLogo(t *testing.T, body string) {
 	t.Helper()
@@ -36,7 +36,7 @@ func assertSetupApplicationLogo(t *testing.T, body string) {
 }
 
 func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
-	for _, serverType := range []string{"paper", "purpur", "vanilla"} {
+	for _, serverType := range []string{"paper", "purpur", "vanilla", "forge", "quilt"} {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/enabled=%t", serverType, enabled), func(t *testing.T) {
 				client := setupWizardClient()
@@ -73,7 +73,7 @@ func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
 				if !strings.Contains(copy, `<span><strong>Enable Bedrock cross-play</strong><small class="field-help">`) || !strings.HasSuffix(copy, `</small></span>`) || !strings.HasPrefix(body[start+len(control):], `</label>`) {
 					t.Fatal("Bedrock label and description must precede the trailing Date & Time switch")
 				}
-				vanilla := serverType == "vanilla"
+				vanilla := serverType == "vanilla" || serverType == "forge" || serverType == "quilt"
 				if strings.Contains(control, "disabled") != vanilla {
 					t.Fatalf("incorrect disabled state: %s", control)
 				}
@@ -127,7 +127,7 @@ function open(mib, heap, maximum, players = "10") {
   const panel = { dataset: { systemMemoryMib: String(mib), minReserveMib: "1024", recommendedReserveMib: "1536" }, querySelectorAll() { return buttons; } };
   const status = { classList: { remove() {}, add() {} } };
   const fields = { "java-memory": game, "container-memory": max, "max-players": player, "memory-status": status };
-  const document = { querySelector(selector) { return selector === "[data-memory-settings]" ? panel : null; }, getElementById(id) { return fields[id] || null; } };
+  const document = { querySelectorAll() { return []; }, querySelector(selector) { return selector === "[data-memory-settings]" ? panel : null; }, getElementById(id) { return fields[id] || null; } };
   vm.runInNewContext(source, { document, window: { location: { hash: "" } } });
   return { game, max, player, selected: () => buttons.find((b) => b.selected)?.dataset.memoryPreset, click: (name) => buttons.find((b) => b.dataset.memoryPreset === name).events.click() };
 }
@@ -524,7 +524,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 	if strings.Contains(body, "Future multi-instance placeholder") {
 		t.Fatal("obsolete naming placeholder remains")
 	}
-	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", `name="display_name"`, `value="Minecraft server"`, "Family", "Maximum players", "Server software", "Paper", "Technical name: MOTD"} {
+	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", `name="display_name"`, `value="Minecraft server"`, "Family", "Maximum players", "Plugins &#43; managed cross-play", "Mod loaders &#43; managed cross-play", "Native Bedrock server", "Paper", "Technical name: MOTD"} {
 		if want == "Family" {
 			continue
 		}
@@ -552,10 +552,7 @@ func TestSetupWizardPreservesApplianceTimezone(t *testing.T) {
 				}
 				defer firstRunSetupDrafts.delete(app, "session-token")
 				defer firstRunSetupReviews.delete(app, "session-token")
-				expected := zone
-				if expected == "" {
-					expected = "UTC"
-				}
+				expected := "" // Appliance timezone is never duplicated in Minecraft setup.
 				if mode == "recommended" {
 					rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", "csrf=csrf-token&server_type=paper"))
 					if rr.Code != http.StatusSeeOther {
@@ -576,15 +573,12 @@ func TestSetupWizardPreservesApplianceTimezone(t *testing.T) {
 					}
 				}
 				draft, _ := firstRunSetupDrafts.get(app, "session-token")
-				if draft.Server.Timezone != expected {
-					t.Fatalf("timezone = %q, want %q", draft.Server.Timezone, expected)
-				}
 				if err := validateSetupServer(draft.Server); err != nil {
 					t.Fatal(err)
 				}
 				plan, err := setupPlanRequestFromDraft(draft)
 				if err != nil || plan.Server.Timezone != expected {
-					t.Fatalf("timezone lost from Review/apply planning request: %q, %v", plan.Server.Timezone, err)
+					t.Fatalf("independent timezone leaked into Review/apply planning request: %q, %v", plan.Server.Timezone, err)
 				}
 			})
 		}

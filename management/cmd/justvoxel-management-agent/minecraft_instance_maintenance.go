@@ -41,13 +41,28 @@ func (b *instanceRuntimeBackend) rcon(ctx context.Context, id, command string) (
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := b.command(ctx, "podman", "exec", "minecraft-"+id, "rcon-cli", command)
+	tool := "rcon-cli"
+	record, readErr := b.readRuntimeConfig(id)
+	if readErr != nil {
+		return nil, readErr
+	}
+	if record.Runtime.Software == "bedrock" {
+		tool = "send-command"
+	}
+	out, err := b.command(ctx, "podman", "exec", "minecraft-"+id, tool, command)
 	if err != nil || len(out) > 8192 {
 		return nil, instanceRuntimeFailure("Instance console is unavailable.")
 	}
 	return out, nil
 }
 func (b *instanceRuntimeBackend) players(ctx context.Context, id string) (instancePlayers, error) {
+	record, err := b.readRuntimeConfig(id)
+	if err != nil {
+		return instancePlayers{ID: id, State: "unknown"}, err
+	}
+	if record.Runtime.Software == "bedrock" {
+		return b.bedrockPlayers(ctx, id)
+	}
 	out, err := b.rcon(ctx, id, "list")
 	if err != nil {
 		return instancePlayers{ID: id, State: "unknown"}, instanceRuntimeFailure("Player presence cannot be verified; the instance was not interrupted.")
@@ -71,6 +86,15 @@ func (b *instanceRuntimeBackend) waitMaintenance(ctx context.Context, d time.Dur
 	return instancePause(ctx, d)
 }
 func (b *instanceRuntimeBackend) stopWithWarnings(ctx context.Context, id string) error {
+	record, err := b.readRuntimeConfig(id)
+	if err != nil {
+		return err
+	}
+	if record.Runtime.Software == "bedrock" {
+		// The image announces and waits 60 seconds, then sends BDS stop and saves.
+		_, err = b.command(ctx, "systemctl", "stop", "--", "minecraft-"+id+".service")
+		return err
+	}
 	// Match interrupt-safety.sh: itzg's normal 60-second delay plus the same
 	// announcement points. Never bypass that delay for an occupied instance.
 	ctx, cancel := context.WithTimeout(ctx, 150*time.Second)

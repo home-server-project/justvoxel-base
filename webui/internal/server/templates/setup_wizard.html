@@ -39,6 +39,7 @@
         <span class="setup-mode-kicker">Fast path</span>
         <h2>{{if .AddServer}}Simple setup{{else}}Recommended setup{{end}}</h2>
         <p>{{if .AddServer}}JustVoxel chooses the defaults for you.{{else}}JustVoxel chooses safe defaults for memory, ports, system storage, automatic backups and Minecraft version, and keeps the appliance timezone.{{end}}</p>
+        {{if .AddServer}}{{template "setup-simple-card" .}}{{else}}
         <form method="post" action="{{$wizard.BasePath}}/recommended" class="setup-recommended-form">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           {{if .AddServer}}{{template "setup-instance-name" .}}{{end}}
@@ -58,7 +59,7 @@
             </label>
           </fieldset>
           <button type="submit">{{if .AddServer}}Use simple setup{{else}}Use recommended setup{{end}}</button>
-        </form>
+        </form>{{end}}
       </section>
 
       <section class="setup-mode-card setup-mode-advanced">
@@ -88,23 +89,21 @@
     <form method="post" action="{{$wizard.BasePath}}/server" class="setup-form">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div class="setup-software-groups">
+      {{range .SoftwareGroups}}
       <fieldset class="setup-server-types setup-server-types-compact">
-        <legend>Server software</legend>
-        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="paper" {{if or (eq .Minecraft.ServerType "") (eq .Minecraft.ServerType "paper")}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/paper.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Paper</strong><span class="software-availability">Available</span><small>Recommended · Plugins and managed Bedrock cross-play.</small></span></label>
-        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="purpur" {{if eq .Minecraft.ServerType "purpur"}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/purpur.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Purpur</strong><span class="software-availability">Available</span><small>Plugins and managed Bedrock cross-play.</small></span></label>
-        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="spigot" {{if eq .Minecraft.ServerType "spigot"}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/spigot.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Spigot</strong><span class="software-availability">Available</span><small>Plugins and managed Bedrock cross-play.</small></span></label>
-        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="vanilla" {{if eq .Minecraft.ServerType "vanilla"}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/vanilla.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Vanilla</strong><span class="software-availability">Available</span><small>Original Minecraft · Java only · no plugins or mods.</small></span></label>
-        <label class="setup-server-type server-software-card is-unavailable"><input type="radio" name="server_type" value="bedrock" disabled><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/bedrock.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Bedrock</strong><span class="software-availability">Unavailable · runtime not implemented</span><small>Separate Bedrock only · no plugins or mods.</small></span></label>
-        <label class="setup-server-type server-software-card is-unavailable"><input type="radio" name="server_type" value="fabric" disabled><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/fabric.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Fabric</strong><span class="software-availability">Unavailable · exact loader selection required</span><small>Mod loader and managed Bedrock cross-play.</small></span></label>
-        <label class="setup-server-type server-software-card is-unavailable"><input type="radio" name="server_type" value="forge" disabled><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/forge.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Forge</strong><span class="software-availability">Unavailable · exact loader selection required</span><small>Mod loader.</small></span></label>
-        <label class="setup-server-type server-software-card is-unavailable"><input type="radio" name="server_type" value="neoforge" disabled><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/neoforge.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>NeoForge</strong><span class="software-availability">Unavailable · exact loader selection required</span><small>Mod loader and managed Bedrock cross-play.</small></span></label>
-        <label class="setup-server-type server-software-card is-unavailable"><input type="radio" name="server_type" value="quilt" disabled><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/quilt.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Quilt</strong><span class="software-availability">Unavailable · exact loader selection required</span><small>Mod loader.</small></span></label>
+        <legend>{{.Name}}</legend>{{if .Description}}<small>{{.Description}}</small>{{end}}
+        {{range .Software}}
+        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="{{.ID}}" {{if eq .ID $wizard.Minecraft.ServerType}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>{{.Name}}</strong><small>{{.Description}}</small></span></label>
+        {{end}}
       </fieldset>
+      {{end}}
+      </div>
       <div class="setup-form-grid">
         <input type="hidden" name="motd_automatic" value="{{.Server.MOTDAutomatic}}" data-setup-motd-automatic>
         {{template "setup-instance-name" .}}
         <label class="setup-field">Welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" {{if .Server.MOTDAutomatic}}placeholder="Automatic: JustVoxel {{if eq .Minecraft.ServerType "purpur"}}Purpur{{else if eq .Minecraft.ServerType "vanilla"}}Vanilla{{else}}Paper{{end}} Minecraft &lt;resolved version&gt; Server"{{end}} data-setup-motd><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
-        <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option><option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option></select></label>
+        <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option>{{if ne .Minecraft.ServerType "bedrock"}}<option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option>{{end}}</select></label>
         <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
 
       </div>
@@ -125,9 +124,13 @@
     </form>
 
     {{else if eq .CurrentStep 2}}
-    <form method="post" action="{{$wizard.BasePath}}/connections" class="setup-form" data-setup-connections data-setup-version{{if .AddServer}} data-version-preview-url="{{$wizard.BasePath}}/version-preview"{{end}}>
+    <form method="post" action="{{$wizard.BasePath}}/connections" class="setup-form" data-server-type="{{.Minecraft.ServerType}}" {{if ne .Minecraft.ServerType "bedrock"}}data-setup-connections data-setup-version{{end}}{{if .AddServer}} data-version-preview-url="{{$wizard.BasePath}}/version-preview"{{end}}>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
+      {{if eq .Minecraft.ServerType "bedrock"}}
+      <h3>Native Bedrock connection</h3>
+      <dl><div><dt>TCP signaling port</dt><dd>{{.Minecraft.BedrockTCPPort}}</dd></div><div><dt>UDP gameplay range</dt><dd>{{.Minecraft.BedrockUDPStart}}–{{.Minecraft.BedrockUDPEnd}}</dd></div><div><dt>Minecraft version</dt><dd>{{.Minecraft.ResolvedVersion}} · Recommended release</dd></div></dl>
+      {{else}}
       <div class="setup-form-grid">
         <label class="setup-field">Minecraft Java TCP port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field" data-bedrock-port-field>Bedrock TCP/UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/TCP and UDP. Used only when Bedrock cross-play is enabled.</span></label>
@@ -145,15 +148,19 @@
         </section>
       </div>
       <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
-      <label class="setup-toggle-card"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper, Purpur or Spigot on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked above.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
+      <label class="setup-toggle-card"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if or (eq .Minecraft.ServerType "vanilla") (eq .Minecraft.ServerType "forge") (eq .Minecraft.ServerType "quilt")}}This software supports Java only.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked above.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if or (eq .Minecraft.ServerType "vanilla") (eq .Minecraft.ServerType "forge") (eq .Minecraft.ServerType "quilt") (eq .Minecraft.ServerType "fabric") (eq .Minecraft.ServerType "neoforge")}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
+      {{end}}
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" {{if ne .Minecraft.ServerType "bedrock"}}disabled{{end}}>Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 3}}
     <form method="post" action="{{$wizard.BasePath}}/resources" class="setup-form">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" id="max-players" value="{{.Server.MaxPlayers}}">
+      {{if eq .Minecraft.ServerType "bedrock"}}
+      <label class="setup-field">Maximum Minecraft memory<input name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="2G"><span class="field-help">Container memory limit for the native Bedrock server.</span></label>
+      {{else}}
       <div class="setup-memory" data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}"{{if .AddServer}} data-other-memory-mib="{{.OtherMemoryMiB}}"{{end}}>
         <div class="setup-memory-summary"><div><span>System memory</span><strong>{{.SystemMemory}} detected</strong></div><div><span>Recommended headroom</span><strong>{{.SystemReserveRecommended}}</strong></div><div><span>Minimum headroom</span><strong>{{.SystemReserveMinimum}}</strong></div></div>
         <p class="field-help">JustVoxel typically uses 0.6–1.0 GiB. Memory outside Minecraft remains available for Linux, cache, backups, updates and temporary spikes.</p>
@@ -162,6 +169,7 @@
         <div class="setup-form-grid"><label class="setup-field">Minecraft game memory<input id="java-memory" name="java_memory" value="{{.Minecraft.JavaMemory}}" autocomplete="off" placeholder="4G"><span class="field-help">Memory available directly to the Minecraft Java server. Technical name: Java heap.</span></label><label class="setup-field">Maximum Minecraft memory<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="6G"><span class="field-help">Maximum for Minecraft, Java, plugins and runtime overhead. Technical name: container memory limit.</span></label></div>
         <div id="memory-status" class="memory-status" aria-live="polite"></div>
       </div>
+      {{end}}
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
@@ -304,3 +312,27 @@
 </html>{{end}}
 
 {{define "setup-instance-name"}}<label class="setup-field">Server name<input name="display_name" value="{{.DisplayName}}" placeholder="Family Survival" required maxlength="64" autocomplete="off" {{if not .AddServer}}aria-describedby="setup-instance-name-help"{{end}}>{{if not .AddServer}}<span class="field-help" id="setup-instance-name-help">Your name for this server in JustVoxel. Separate from the welcome message shown to players.</span>{{end}}</label>{{end}}
+
+{{define "setup-simple-card"}}
+<form method="post" action="{{.BasePath}}/simple" class="setup-recommended-form" data-simple-setup>
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+{{if eq .SimpleState 1}}
+<fieldset class="setup-simple-choices"><legend>Choose family</legend>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="plugins" required {{if eq .SimpleFamily "plugins"}}checked{{end}}><span class="server-software-copy"><strong>Plugins</strong><span>Paper · Purpur · Spigot</span><small>Plugins · Managed Bedrock cross-play</small></span></label>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="mods" required {{if eq .SimpleFamily "mods"}}checked{{end}}><span class="server-software-copy"><strong>Mods</strong><span>Fabric · NeoForge · Forge · Quilt</span><small>Mod loaders</small><small>Cross-play: Fabric · NeoForge</small></span></label>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="vanilla" required {{if eq .SimpleFamily "vanilla"}}checked{{end}}><span class="server-software-copy"><strong>Vanilla Java</strong><span>Vanilla</span><small>Original Minecraft · no plugins or mods</small></span></label>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="bedrock" required {{if eq .SimpleFamily "bedrock"}}checked{{end}}><span class="server-software-copy"><strong>Bedrock</strong><small>Native Bedrock server</small></span></label>
+</fieldset>
+<button type="submit" data-simple-next {{if eq .SimpleFamily ""}}disabled{{end}}>Use simple setup</button>
+{{else if eq .SimpleState 2}}
+<fieldset class="setup-simple-choices"><legend>Choose software</legend>
+{{range .SimpleSoftware}}<label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="{{.ID}}" required {{if eq .ID $.Minecraft.ServerType}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>{{.Name}}</strong><small>{{.Description}}</small></span></label>{{end}}
+</fieldset>
+<div class="setup-simple-actions"><button class="secondary" type="submit" formaction="{{.BasePath}}/cancel" formnovalidate>Cancel</button><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" data-simple-next {{if eq .Minecraft.ServerType ""}}disabled{{end}}>Next</button></div>
+{{else}}
+{{template "setup-instance-name" .}}
+<label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option>{{if ne .Minecraft.ServerType "bedrock"}}<option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option>{{end}}</select></label>
+<div class="setup-simple-actions"><button class="secondary" type="submit" formaction="{{.BasePath}}/cancel" formnovalidate>Cancel</button><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit">Next</button></div>
+{{end}}
+</form>
+{{end}}

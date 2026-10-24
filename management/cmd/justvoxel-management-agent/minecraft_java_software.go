@@ -46,7 +46,7 @@ func javaServerPluginsWorkspace(software string) bool {
 func javaServerAllowsSwitch(from, to string) bool {
 	_, a := javaServerSoftware(from)
 	_, b := javaServerSoftware(to)
-	return a && b && (from == to || (from == "paper" || from == "purpur") && (to == "paper" || to == "purpur"))
+	return (from == "bedrock" && to == "bedrock") || a && b && (from == to || (from == "paper" || from == "purpur") && (to == "paper" || to == "purpur"))
 }
 
 var javaLoaderVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$`)
@@ -57,6 +57,12 @@ var java25GameReleasePattern = regexp.MustCompile(`^26\.[1-9][0-9]*(\.(0|[1-9][0
 // types require explicit pins and the Java generation for the game release.
 // Exact upstream game/loader verification is still required before activation.
 func validateJavaServerSelection(software, policy, version, loader, image string, bedrock bool) error {
+	if software == "bedrock" {
+		if policy != "pinned" || !bedrockVersionPattern.MatchString(version) || loader != "" || image != "stable" || bedrock {
+			return errors.New("native Bedrock requires an exact stable release and no Java cross-play")
+		}
+		return nil
+	}
 	c, ok := javaServerSoftware(software)
 	if !ok || bedrock && !c.ManagedCrossplay {
 		return errors.New("unsupported Java server capabilities")

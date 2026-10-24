@@ -52,7 +52,6 @@ func setupDraftDiagnosticValues(draft setupDraft) map[string]string {
 		"motd":                draft.Server.MOTD,
 		"max_players":         draft.Server.MaxPlayers,
 		"bedrock_enabled":     strconv.FormatBool(draft.Server.BedrockEnabled),
-		"timezone":            draft.Server.Timezone,
 		"java_memory":         draft.Minecraft.JavaMemory,
 		"container_memory":    draft.Minecraft.ContainerMemory,
 		"java_port":           draft.Minecraft.JavaPort,

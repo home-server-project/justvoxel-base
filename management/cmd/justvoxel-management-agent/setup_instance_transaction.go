@@ -181,7 +181,15 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		if r.Server.BedrockEnabled {
 			port = r.Minecraft.BedrockPort
 		}
-		c := minecraftInstanceRuntimeConfig{JavaPort: r.Minecraft.JavaPort, BedrockEnabled: r.Server.BedrockEnabled, BedrockPort: port, JavaMemory: r.Minecraft.JavaMemory, ContainerMemory: r.Minecraft.ContainerMemory, Software: r.Minecraft.ServerType, LoaderVersion: r.Minecraft.LoaderVersion, Version: r.Minecraft.Version, VersionPolicy: r.Minecraft.VersionPolicy, PaperChannel: "default", ImageTag: r.Minecraft.ImageTag, StartOnBoot: !r.AddServer || r.StartOnBoot, EULAAccepted: true, UID: uid, GID: gid, Timezone: r.Server.Timezone, GameMode: r.Minecraft.GameMode, Difficulty: "normal", MaxPlayers: r.Server.MaxPlayers, Whitelist: true, EnforceWhitelist: true, MOTD: r.Server.MOTD, RCONPassword: hex.EncodeToString(secret[:])}
+		c := minecraftInstanceRuntimeConfig{JavaPort: r.Minecraft.JavaPort, BedrockEnabled: r.Server.BedrockEnabled, BedrockPort: port, JavaMemory: r.Minecraft.JavaMemory, ContainerMemory: r.Minecraft.ContainerMemory, Software: r.Minecraft.ServerType, LoaderVersion: r.Minecraft.LoaderVersion, Version: r.Minecraft.Version, VersionPolicy: r.Minecraft.VersionPolicy, PaperChannel: "default", ImageTag: r.Minecraft.ImageTag, StartOnBoot: !r.AddServer || r.StartOnBoot, EULAAccepted: true, UID: uid, GID: gid, GameMode: r.Minecraft.GameMode, Difficulty: "normal", MaxPlayers: r.Server.MaxPlayers, Whitelist: true, EnforceWhitelist: true, MOTD: r.Server.MOTD, RCONPassword: hex.EncodeToString(secret[:])}
+		if c.Software == "bedrock" {
+			c.BedrockTCPPort, c.BedrockUDPStart, c.BedrockUDPEnd = r.Minecraft.BedrockTCPPort, r.Minecraft.BedrockUDPStart, r.Minecraft.BedrockUDPEnd
+			c.JavaPort = 0
+			c.JavaMemory = ""
+			c.Whitelist = false
+			c.EnforceWhitelist = false
+			c.MOTD = r.Server.DisplayName
+		}
 		if r.AddServer {
 			// Preserve Add Server's existing startup settings while sharing
 			// the storage and activation transaction.

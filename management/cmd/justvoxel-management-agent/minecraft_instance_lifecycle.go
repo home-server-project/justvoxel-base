@@ -216,18 +216,29 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 	}
 	var players instancePlayers
 	if (action == "stop" || action == "restart") && state.State == "running" {
-		rawPlayers, err := b.rcon(ctx, id, "list")
-		if err != nil {
-			return err
+		if record.Runtime.Software == "bedrock" {
+			players, err = b.players(ctx, id)
+			if err != nil {
+				return err
+			}
+			if players.Online > 0 && !warnings {
+				return &instancePlayersConfirmation{Players: players}
+			}
+		} else {
+			rawPlayers, err := b.rcon(ctx, id, "list")
+			if err != nil {
+				return err
+			}
+			players, err = parseInstancePlayers(id, rawPlayers)
+			if err != nil {
+				return err
+			}
+			if players.Online > 0 && !warnings {
+				names := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(rawPlayers)))[3]
+				return &instancePlayersConfirmation{Players: players, Names: strings.Split(names, ", ")}
+			}
 		}
-		players, err = parseInstancePlayers(id, rawPlayers)
-		if err != nil {
-			return err
-		}
-		if players.Online > 0 && !warnings {
-			names := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(rawPlayers)))[3]
-			return &instancePlayersConfirmation{Players: players, Names: strings.Split(names, ", ")}
-		}
+
 	}
 	// Reservation validation is needed before startup, not to refuse a safe
 	// graceful stop that can reduce an existing resource overcommit.
@@ -294,6 +305,13 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 	} else if state.State != "stopped" && state.State != "failed" {
 		return instanceRuntimeFailure("Instance cannot be started in its current state.")
 	}
+	if record.Runtime.Software == "bedrock" {
+		ports, e := holdNativeBedrock(record.Runtime)
+		if e != nil {
+			return e
+		}
+		closeBedrockPorts(ports)
+	}
 	if record.Runtime.BedrockEnabled {
 		heldUDP, e := instanceHoldCrossplayPort(record.Runtime.BedrockPort)
 		if e != nil {
@@ -302,7 +320,7 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 		heldUDP.Close()
 	}
 	// A stopped instance's reservation does not prove the host port is still free.
-	held, err := instanceHoldPort(record.Runtime.JavaPort)
+	held, err := instanceHoldPort(instanceSignalingPort(record.Runtime))
 	if err != nil {
 		return err
 	}
@@ -344,7 +362,11 @@ func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next ins
 	}
 	desired := []instanceFirewallRule{}
 	for _, permanent := range []bool{true, false} {
-		desired = append(desired, instanceFirewallRule{Zone: zone, Port: next.Runtime.JavaPort, Permanent: permanent})
+		if next.Runtime.Software == "bedrock" {
+			desired = append(desired, nativeBedrockRules(next.Runtime, zone, permanent)...)
+		} else {
+			desired = append(desired, instanceFirewallRule{Zone: zone, Port: next.Runtime.JavaPort, Permanent: permanent})
+		}
 		if next.Runtime.BedrockEnabled {
 			desired = append(desired, instanceFirewallRule{Zone: zone, Port: next.Runtime.BedrockPort, Permanent: permanent, Protocol: "tcp"}, instanceFirewallRule{Zone: zone, Port: next.Runtime.BedrockPort, Permanent: permanent, Protocol: "udp"})
 		}
@@ -451,6 +473,17 @@ func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftI
 		return "", err
 	}
 	c.ID = "jv-" + hex.EncodeToString(entropy[:])
+	if c.Software == "bedrock" {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			instances, e := b.identities().listInstances("")
+			if e != nil {
+				return "", e
+			}
+			name = generatedInstanceName(instances, c.ID, c.Software)
+		}
+		c.MOTD = name
+	}
 	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: c, Storage: instanceStorageFor(snapshot, c.ID), Backups: instanceBackupsFor(snapshot, c.ID), Firewall: []instanceFirewallRule{}}
 	candidates := instanceReplaceRecord(records, next)
 	if c.StartOnBoot {
@@ -464,10 +497,25 @@ func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftI
 	if err = b.storage(ctx, "preflight-new", next); err != nil {
 		return "", err
 	}
+	if c.Software == "bedrock" {
+		if err = b.validateNewNativeBedrock(ctx, c); err != nil {
+			return "", err
+		}
+		if _, err = b.command(ctx, instanceRuntimeHelper, "bedrock-release", c.Version); err != nil {
+			return "", instanceRuntimeFailure("The exact official Bedrock release could not be verified")
+		}
+	}
 	if err = b.validateSoftware(ctx, c); err != nil {
 		return "", err
 	}
-	held, err := instanceHoldPort(c.JavaPort)
+	if c.Software == "bedrock" {
+		ports, e := holdNativeBedrock(c)
+		if e != nil {
+			return "", e
+		}
+		closeBedrockPorts(ports)
+	}
+	held, err := instanceHoldPort(instanceSignalingPort(c))
 	if err != nil {
 		return "", err
 	}

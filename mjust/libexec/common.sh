@@ -84,6 +84,9 @@ require_config() {
     # shellcheck disable=SC1090
     MINECRAFT_SERVER_TYPE=paper
     source "${JV_CONFIG}"
+    # Legacy readers may still need a timezone value, always from the appliance.
+    TIMEZONE="$(timedatectl show --property=Timezone --value 2>/dev/null || true)"
+    TIMEZONE="${TIMEZONE:-UTC}"
 
     # Compatibility defaults for configurations created before image/version
     # policy and portable Minecraft settings became administrator-configurable.
@@ -342,7 +345,6 @@ write_main_config() {
         shell_quote_assignment MINECRAFT_VERSION "${MINECRAFT_VERSION}"
         shell_quote_assignment MINECRAFT_UID "${MINECRAFT_UID}"
         shell_quote_assignment MINECRAFT_GID "${MINECRAFT_GID}"
-        shell_quote_assignment TIMEZONE "${TIMEZONE}"
         shell_quote_assignment GAME_MODE "${GAME_MODE:-survival}"
         shell_quote_assignment DIFFICULTY "${DIFFICULTY:-normal}"
         shell_quote_assignment WHITELIST_ENABLED "${WHITELIST_ENABLED:-yes}"
@@ -487,7 +489,7 @@ resolve_latest_stable_paper_version() {
 
 # Fixed Java implementations, with Paper compatibility for pre-existing configs.
 validate_server_type() {
-    case "$1" in paper|purpur|vanilla|spigot|forge|neoforge|fabric|quilt) return 0 ;; *) return 1 ;; esac
+    case "$1" in paper|purpur|vanilla|spigot|forge|neoforge|fabric|quilt|bedrock) return 0 ;; *) return 1 ;; esac
 }
 # Preserve the deployed legacy migration/export integration boundary.
 server_supports_plugins() { [[ ${1:-${MINECRAFT_SERVER_TYPE-paper}} == paper || ${1:-${MINECRAFT_SERVER_TYPE-paper}} == purpur ]]; }
@@ -596,6 +598,59 @@ java_server_version_available() {
     [[ ${digest} =~ ^[a-fA-F0-9]{40}$ ]]
 }
 
+# Setup-time discovery only. Every selected pin is checked by the existing
+# exact upstream verifier before it can leave this resolver.
+resolve_setup_loader() {
+    local software="$1" game="$2" metadata prefix
+    case "${software}" in
+        spigot) return 0 ;;
+        fabric|quilt)
+            local api=https://meta.fabricmc.net/v2
+            [[ ${software} != quilt ]] || api=https://meta.quiltmc.org/v3
+            curl --connect-timeout 3 --max-time 8 -fsSL "${api}/versions/loader/${game}" |
+                jq -er '[.[] | .loader | select(.stable != false) | .version | select(test("^[0-9]+([.][0-9]+){1,3}$"))][0] // empty'
+            ;;
+        forge)
+            curl --connect-timeout 3 --max-time 8 -fsSL https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json |
+                jq -er --arg game "${game}" '.promos | .[$game + "-recommended"] // .[$game + "-latest"] | select(type == "string" and test("^[0-9]+([.][0-9]+){1,3}$"))'
+            ;;
+        neoforge)
+            if [[ ${game} =~ ^26\.([1-9][0-9]*)(\.([0-9]+))?$ ]]; then
+                prefix="26.${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
+            elif [[ ${game} =~ ^1\.(20|21)(\.([0-9]+))?$ ]]; then
+                prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
+            else return 1; fi
+            metadata="$(curl --connect-timeout 3 --max-time 8 -fsSL https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml)" || return 1
+            printf '%s\n' "${metadata}" | sed -n 's/.*<version>\([0-9][0-9.]*\)<\/version>.*/\1/p' |
+                jq -Rrs --arg prefix "${prefix}" 'split("\n") | map(select(startswith($prefix) and test("^[0-9]+([.][0-9]+){2,3}$"))) | sort_by(split(".") | map(tonumber)) | last // empty'
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+resolve_setup_java_runtime() {
+    local software="$1" policy="$2" specific="$3" game loader image releases
+    case "${policy}" in recommended|pinned) ;; *) return 1 ;; esac
+    if [[ ${policy} == pinned ]]; then
+        [[ ${specific} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+        releases="${specific}"
+    else
+        releases="$(vanilla_metadata | jq -er '[.versions[] | select(.type == "release") | .id][0:8][]')" || return 1
+    fi
+    while IFS= read -r game; do
+        if [[ ${game} =~ ^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$ ]]; then image=java21
+        elif [[ ${game} =~ ^26\.[1-9][0-9]*(\.(0|[1-9][0-9]*))?$ ]]; then image=java25
+        else continue; fi
+        [[ ${software} != spigot ]] || image+=-jdk
+        loader="$(resolve_setup_loader "${software}" "${game}")" || continue
+        validate_java_server_selection "${software}" pinned "${game}" "${loader}" "${image}" || continue
+        java_server_version_available "${software}" "${game}" "${loader}" || continue
+        jq -cn --arg game "${game}" --arg loader "${loader}" --arg image "${image}" '{game:$game,loader:$loader,image:$image}'
+        return
+    done <<< "${releases}"
+    return 1
+}
+
 purpur_metadata() {
     curl --connect-timeout 5 --max-time 20 -fsSL https://api.purpurmc.org/v2/purpur | jq -e '
         select(.metadata.current | type == "string" and test("^[0-9]+([.][0-9]+){1,2}$"))
@@ -685,7 +740,6 @@ render_runtime_files() {
     replace_token "${env_tmp}" PAPER_CHANNEL "${paper_channel}"
     replace_token "${env_tmp}" MINECRAFT_UID "${MINECRAFT_UID}"
     replace_token "${env_tmp}" MINECRAFT_GID "${MINECRAFT_GID}"
-    replace_token "${env_tmp}" TIMEZONE "$(systemd_env_escape "${TIMEZONE}")"
     replace_token "${env_tmp}" JAVA_MEMORY "${JAVA_MEMORY^^}"
     replace_token "${env_tmp}" GAME_MODE "${GAME_MODE}"
     replace_token "${env_tmp}" DIFFICULTY "${DIFFICULTY}"
@@ -864,4 +918,12 @@ configure_geyser_floodgate() {
     grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}"
     systemctl start minecraft.service
     wait_for_rcon 900
+}
+
+# The official Linux release entry is the sole authority. Never use preview or LATEST.
+resolve_bedrock_release() {
+    curl --connect-timeout 3 --max-time 8 -fsSL https://net.web.minecraft-services.net/api/v1.0/download/links |
+      jq -er '[.result.links[] | select(.downloadType == "serverBedrockLinux") | .downloadUrl |
+        capture("^https://www[.]minecraft[.]net/bedrockdedicatedserver/bin-linux/bedrock-server-(?<version>[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?)[.]zip$").version] |
+        unique | select(length == 1) | .[0]'
 }

@@ -71,7 +71,7 @@ _a55_parse_request() {
       (.server.motd|type == "string") and
       (.server.max_players|type == "number") and
       (.server.bedrock_enabled|type == "boolean") and
-      (.server.timezone|type == "string") and
+      ((.server.timezone // "")|type == "string") and
       (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla"))) and
       (.minecraft.java_memory|type == "string") and
       (.minecraft.container_memory|type == "string") and
@@ -161,7 +161,7 @@ _a55_load_values() {
     MINECRAFT_VERSION="$(jq -r '.minecraft.version' <<< "${A55_REQUEST}")"
     MINECRAFT_UID="$(jq -r '.minecraft.minecraft_uid' <<< "${A55_REQUEST}")"
     MINECRAFT_GID="$(jq -r '.minecraft.minecraft_gid' <<< "${A55_REQUEST}")"
-    TIMEZONE="$(jq -r '.server.timezone' <<< "${A55_REQUEST}")"
+    TIMEZONE="$(timedatectl show --property=Timezone --value)"
     MAX_PLAYERS="$(jq -r '.server.max_players' <<< "${A55_REQUEST}")"
     MOTD="$(jq -r '.server.motd' <<< "${A55_REQUEST}")"
     GAME_MODE="$(jq -r '.minecraft.game_mode' <<< "${A55_REQUEST}")"

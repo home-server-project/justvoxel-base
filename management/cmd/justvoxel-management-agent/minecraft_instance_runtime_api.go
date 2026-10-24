@@ -17,6 +17,9 @@ type instanceRuntimeSettings struct {
 	JavaPort         int    `json:"java_port"`
 	BedrockEnabled   bool   `json:"bedrock_enabled"`
 	BedrockPort      int    `json:"bedrock_port"`
+	BedrockTCPPort   int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart  int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd    int    `json:"bedrock_udp_end,omitempty"`
 	JavaMemory       string `json:"java_memory"`
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
@@ -27,7 +30,7 @@ type instanceRuntimeSettings struct {
 	ImageTag         string `json:"image_tag"`
 	StartOnBoot      bool   `json:"start_on_boot"`
 	EULAAccepted     bool   `json:"eula_accepted"`
-	Timezone         string `json:"timezone"`
+	Timezone         string `json:"timezone,omitempty"`
 	GameMode         string `json:"game_mode"`
 	Difficulty       string `json:"difficulty"`
 	MaxPlayers       int    `json:"max_players"`
@@ -37,10 +40,10 @@ type instanceRuntimeSettings struct {
 }
 
 func (settings instanceRuntimeSettings) runtime(id string, uid, gid uint32, password string) minecraftInstanceRuntimeConfig {
-	return minecraftInstanceRuntimeConfig{ID: id, JavaPort: settings.JavaPort, BedrockEnabled: settings.BedrockEnabled, BedrockPort: settings.BedrockPort, JavaMemory: settings.JavaMemory, ContainerMemory: settings.ContainerMemory, Software: settings.Software, LoaderVersion: settings.LoaderVersion, Version: settings.Version, VersionPolicy: settings.VersionPolicy, PaperChannel: settings.PaperChannel, ImageTag: settings.ImageTag, StartOnBoot: settings.StartOnBoot, EULAAccepted: settings.EULAAccepted, UID: uid, GID: gid, Timezone: settings.Timezone, GameMode: settings.GameMode, Difficulty: settings.Difficulty, MaxPlayers: settings.MaxPlayers, Whitelist: settings.Whitelist, EnforceWhitelist: settings.EnforceWhitelist, MOTD: settings.MOTD, RCONPassword: password}
+	return minecraftInstanceRuntimeConfig{ID: id, JavaPort: settings.JavaPort, BedrockEnabled: settings.BedrockEnabled, BedrockPort: settings.BedrockPort, BedrockTCPPort: settings.BedrockTCPPort, BedrockUDPStart: settings.BedrockUDPStart, BedrockUDPEnd: settings.BedrockUDPEnd, JavaMemory: settings.JavaMemory, ContainerMemory: settings.ContainerMemory, Software: settings.Software, LoaderVersion: settings.LoaderVersion, Version: settings.Version, VersionPolicy: settings.VersionPolicy, PaperChannel: settings.PaperChannel, ImageTag: settings.ImageTag, StartOnBoot: settings.StartOnBoot, EULAAccepted: settings.EULAAccepted, UID: uid, GID: gid, GameMode: settings.GameMode, Difficulty: settings.Difficulty, MaxPlayers: settings.MaxPlayers, Whitelist: settings.Whitelist, EnforceWhitelist: settings.EnforceWhitelist, MOTD: settings.MOTD, RCONPassword: password}
 }
 func instancePublicSettings(c minecraftInstanceRuntimeConfig) instanceRuntimeSettings {
-	return instanceRuntimeSettings{JavaPort: c.JavaPort, BedrockEnabled: c.BedrockEnabled, BedrockPort: c.BedrockPort, JavaMemory: c.JavaMemory, ContainerMemory: c.ContainerMemory, Software: c.Software, LoaderVersion: c.LoaderVersion, Version: c.Version, VersionPolicy: c.VersionPolicy, PaperChannel: c.PaperChannel, ImageTag: c.ImageTag, StartOnBoot: c.StartOnBoot, EULAAccepted: c.EULAAccepted, Timezone: c.Timezone, GameMode: c.GameMode, Difficulty: c.Difficulty, MaxPlayers: c.MaxPlayers, Whitelist: c.Whitelist, EnforceWhitelist: c.EnforceWhitelist, MOTD: c.MOTD}
+	return instanceRuntimeSettings{JavaPort: c.JavaPort, BedrockEnabled: c.BedrockEnabled, BedrockPort: c.BedrockPort, BedrockTCPPort: c.BedrockTCPPort, BedrockUDPStart: c.BedrockUDPStart, BedrockUDPEnd: c.BedrockUDPEnd, JavaMemory: c.JavaMemory, ContainerMemory: c.ContainerMemory, Software: c.Software, LoaderVersion: c.LoaderVersion, Version: c.Version, VersionPolicy: c.VersionPolicy, PaperChannel: c.PaperChannel, ImageTag: c.ImageTag, StartOnBoot: c.StartOnBoot, EULAAccepted: c.EULAAccepted, GameMode: c.GameMode, Difficulty: c.Difficulty, MaxPlayers: c.MaxPlayers, Whitelist: c.Whitelist, EnforceWhitelist: c.EnforceWhitelist, MOTD: c.MOTD}
 }
 func registerInstanceRuntimeRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/minecraft/instances/deletions", s.instanceDeletionInventory)
@@ -236,6 +239,14 @@ func (b *instanceRuntimeBackend) configureRegistered(ctx context.Context, id str
 	}
 	if err = b.storage(ctx, "preflight-new", next); err != nil {
 		return err
+	}
+	if next.Runtime.Software == "bedrock" {
+		if err = b.validateNewNativeBedrock(ctx, next.Runtime); err != nil {
+			return err
+		}
+		if _, err = b.command(ctx, instanceRuntimeHelper, "bedrock-release", next.Runtime.Version); err != nil {
+			return instanceRuntimeFailure("The exact official Bedrock release could not be verified")
+		}
 	}
 	if err = b.validateSoftware(ctx, next.Runtime); err != nil {
 		return err

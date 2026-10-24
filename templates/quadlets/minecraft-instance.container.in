@@ -6,6 +6,7 @@ After=network-online.target
 RequiresMountsFor=@@DATA_PATH@@
 
 [Container]
+Volume=/etc/localtime:/etc/localtime:ro
 Image=@@MINECRAFT_IMAGE@@
 ContainerName=minecraft-@@INSTANCE_ID@@
 PublishPort=@@JAVA_PORT@@:25565/tcp

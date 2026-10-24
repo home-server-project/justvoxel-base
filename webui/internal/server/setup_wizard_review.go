@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -142,23 +143,28 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	}
 	b.WriteString("Welcome message: " + plan.Normalized.Server.MOTD + "\n")
 	b.WriteString("Maximum players: " + strconv.Itoa(plan.Normalized.Server.MaxPlayers) + "\n")
-	if plan.Normalized.Server.BedrockEnabled {
+	if plan.Normalized.Minecraft.ServerType == "bedrock" {
+		b.WriteString("Native Bedrock connection\n")
+	} else if plan.Normalized.Server.BedrockEnabled {
 		b.WriteString("Bedrock cross-play: Enabled\n")
 	} else {
 		b.WriteString("Bedrock cross-play: Disabled\n")
 	}
-	b.WriteString("Timezone: " + plan.Normalized.Server.Timezone + "\n\n")
 
 	b.WriteString("Minecraft\n")
 	b.WriteString("Server software: " + setupServerTypeLabel(plan.Normalized.Minecraft.ServerType) + "\n")
 	b.WriteString("Game mode: " + setupGameModeLabel(plan.Normalized.Minecraft.GameMode) + "\n")
-	b.WriteString("Game memory: " + plan.Normalized.Minecraft.JavaMemory + "\n")
-	b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
-	b.WriteString("Java port: " + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
-	if plan.Normalized.Server.BedrockEnabled {
-		b.WriteString("Bedrock port: " + strconv.Itoa(plan.Normalized.Minecraft.BedrockPort) + "/TCP/UDP\n")
+	if plan.Normalized.Minecraft.ServerType == "bedrock" {
+		b.WriteString(fmt.Sprintf("TCP signaling port: %d\nUDP gameplay range: %d-%d\nMaximum memory: %s\n", plan.Normalized.Minecraft.BedrockTCPPort, plan.Normalized.Minecraft.BedrockUDPStart, plan.Normalized.Minecraft.BedrockUDPEnd, plan.Normalized.Minecraft.ContainerMemory))
+	} else {
+		b.WriteString("Game memory: " + plan.Normalized.Minecraft.JavaMemory + "\n")
+		b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
+		b.WriteString("Java port: " + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
+		if plan.Normalized.Server.BedrockEnabled {
+			b.WriteString("Bedrock port: " + strconv.Itoa(plan.Normalized.Minecraft.BedrockPort) + "/TCP/UDP\n")
+		}
+		b.WriteString("Container tag: " + plan.Normalized.Minecraft.ImageTag + "\n")
 	}
-	b.WriteString("Container tag: " + plan.Normalized.Minecraft.ImageTag + "\n")
 	b.WriteString("Minecraft version: " + plan.Normalized.Minecraft.Version + "\n\n")
 
 	b.WriteString("Storage\n")
@@ -350,6 +356,7 @@ func setupDraftReadyForReview(draft setupDraft) bool {
 }
 
 func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, error) {
+	draft.Minecraft = effectiveSetupMinecraft(draft.Minecraft)
 	maxPlayers, err := strconv.Atoi(draft.Server.MaxPlayers)
 	if err != nil || maxPlayers < 1 {
 		return api.AdminSetupPlanRequest{}, errors.New("Maximum players must be a positive number.")
@@ -370,11 +377,11 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 		AddServer: draft.AddServer, StartOnBoot: draft.StartOnBoot, StartAfterSetup: draft.StartAfterSetup, MountedOnly: draft.Mode == "recommended", DiagnosticSessionID: draft.DiagnosticSessionID,
 		Server: api.AdminSetupPlanServerRequest{
 			DisplayName: draft.DisplayName, MOTD: draft.Server.MOTD, MOTDAutomatic: draft.Server.MOTDAutomatic, MaxPlayers: maxPlayers,
-			BedrockEnabled: draft.Server.BedrockEnabled, Timezone: draft.Server.Timezone,
+			BedrockEnabled: draft.Server.BedrockEnabled,
 		},
 		Minecraft: api.AdminSetupPlanMinecraftRequest{
-			ServerType: draft.Minecraft.ServerType, JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
-			JavaPort: javaPort, BedrockPort: bedrockPort, ImageTag: draft.Minecraft.ImageTag,
+			LoaderVersion: draft.Minecraft.LoaderVersion, ServerType: draft.Minecraft.ServerType, JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
+			JavaPort: javaPort, BedrockPort: bedrockPort, BedrockTCPPort: draft.Minecraft.BedrockTCPPort, BedrockUDPStart: draft.Minecraft.BedrockUDPStart, BedrockUDPEnd: draft.Minecraft.BedrockUDPEnd, ImageTag: draft.Minecraft.ImageTag,
 			VersionPolicy: draft.Minecraft.VersionPolicy, Version: draft.Minecraft.Version, GameMode: draft.Minecraft.GameMode,
 		},
 		Storage: api.AdminSetupPlanStorageRequest{
@@ -422,6 +429,9 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 		ImageChannelLabel:  setupImageChannelLabel(plan.Normalized.Minecraft.ImageTag),
 		GameModeLabel:      setupGameModeLabel(plan.Normalized.Minecraft.GameMode),
 	}
+	if validSetupServerType(plan.Normalized.Minecraft.ServerType) && setupNeedsExactRuntime(plan.Normalized.Minecraft.ServerType) {
+		data.ImageChannelLabel = "Automatic"
+	}
 	if plan.Normalized.Storage.SizeBytes > 0 {
 		data.StorageSize = humanBytes(plan.Normalized.Storage.SizeBytes)
 	}
@@ -460,6 +470,16 @@ func setupServerTypeLabel(value string) string {
 		return "Spigot"
 	case "vanilla":
 		return "Vanilla"
+	case "fabric":
+		return "Fabric"
+	case "forge":
+		return "Forge"
+	case "neoforge":
+		return "NeoForge"
+	case "bedrock":
+		return "Bedrock"
+	case "quilt":
+		return "Quilt"
 	default:
 		return value
 	}

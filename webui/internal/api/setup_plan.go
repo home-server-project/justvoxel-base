@@ -21,16 +21,20 @@ type AdminSetupPlanServerRequest struct {
 	MOTDAutomatic  bool   `json:"motd_automatic,omitempty"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
-	Timezone       string `json:"timezone"`
+	Timezone       string `json:"timezone,omitempty"`
 }
 
 type AdminSetupPlanMinecraftRequest struct {
+	LoaderVersion   string `json:"loader_version,omitempty"`
 	ServerType      string `json:"server_type"`
 	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
 	JavaPort        int    `json:"java_port"`
 	BedrockPort     int    `json:"bedrock_port"`
+	BedrockTCPPort  int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd   int    `json:"bedrock_udp_end,omitempty"`
 	ImageTag        string `json:"image_tag"`
 	VersionPolicy   string `json:"version_policy"`
 	Version         string `json:"version"`
@@ -78,16 +82,20 @@ type AdminSetupPlanServer struct {
 	MOTD           string `json:"motd"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
-	Timezone       string `json:"timezone"`
+	Timezone       string `json:"timezone,omitempty"`
 }
 
 type AdminSetupPlanMinecraft struct {
+	LoaderVersion          string `json:"loader_version,omitempty"`
 	ServerType             string `json:"server_type"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
 	JavaPort               int    `json:"java_port"`
 	BedrockPort            int    `json:"bedrock_port"`
+	BedrockTCPPort         int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart        int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd          int    `json:"bedrock_udp_end,omitempty"`
 	ImageTag               string `json:"image_tag"`
 	RequestedVersionPolicy string `json:"requested_version_policy"`
 	VersionPolicy          string `json:"version_policy"`

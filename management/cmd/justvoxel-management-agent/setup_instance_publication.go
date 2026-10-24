@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -148,6 +149,9 @@ func (b *instanceRuntimeBackend) prepareSetupInstance(ctx context.Context, c min
 	if instanceNameUsed(instances, c.ID, name) {
 		return errInstanceNameDuplicate
 	}
+	if c.Software == "bedrock" {
+		c.MOTD = name
+	}
 	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: c, Storage: instanceStorageFor(snapshot, c.ID), Backups: instanceBackupsFor(snapshot, c.ID), Firewall: []instanceFirewallRule{}}
 	candidates := instanceReplaceRecord(records, next)
 	if c.StartOnBoot {
@@ -171,10 +175,28 @@ func (b *instanceRuntimeBackend) prepareSetupInstance(ctx context.Context, c min
 	if err = b.storage(ctx, "preflight-new", next); err != nil {
 		return err
 	}
+	if c.Software == "bedrock" {
+		if err = b.validateNewNativeBedrock(ctx, c); err != nil {
+			return err
+		}
+		if _, err = b.command(ctx, instanceRuntimeHelper, "bedrock-release", c.Version); err != nil {
+			return instanceRuntimeFailure("The exact official Bedrock release could not be verified")
+		}
+	}
 	if err = b.validateSoftware(ctx, c); err != nil {
 		return err
 	}
-	held, err := instanceHoldPort(c.JavaPort)
+	if c.Software == "bedrock" {
+		ports, err := holdNativeBedrock(c)
+		if err != nil {
+			return err
+		}
+		defer closeBedrockPorts(ports)
+	}
+	var held []net.Listener
+	if c.Software != "bedrock" {
+		held, err = instanceHoldPort(instanceSignalingPort(c))
+	}
 	if err != nil {
 		return err
 	}
@@ -435,7 +457,7 @@ func (b *instanceRuntimeBackend) verifyProvisionalSetup(ctx context.Context, e *
 	id := e.Record.Runtime.ID
 	// Preserve Add Server's stopped preparation contract.
 	if !e.Request.AddServer {
-		held, err := instanceHoldPort(e.Record.Runtime.JavaPort)
+		held, err := instanceHoldPort(instanceSignalingPort(e.Record.Runtime))
 		if err != nil {
 			return err
 		}
@@ -448,7 +470,11 @@ func (b *instanceRuntimeBackend) verifyProvisionalSetup(ctx context.Context, e *
 		if err = b.waitSetupInstanceRunning(ctx, id); err != nil {
 			return err
 		}
-		if _, err = b.command(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, e.Record.Runtime.Version); err != nil {
+		if e.Record.Runtime.Software == "bedrock" {
+			if err = b.waitNativeBedrockReady(ctx, id); err != nil {
+				return err
+			}
+		} else if _, err = b.command(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, e.Record.Runtime.Version); err != nil {
 			return instanceRuntimeFailure("The selected Minecraft instance did not pass readiness verification.")
 		}
 	} else {

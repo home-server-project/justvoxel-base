@@ -26,10 +26,12 @@ jv_load_instance() {
     MINECRAFT_LOADER_VERSION="$(jq -r '.runtime.loader_version // ""' "${record}")" || return 1
     MINECRAFT_IMAGE_TAG="$(jq -er '.runtime.image_tag' "${record}")" || return 1
     JV_INSTANCE_IMAGE_DIGEST="$(jq -r '.runtime.image_digest // ""' "${record}")" || return 1
-    JV_INSTANCE_IMAGE_REF="docker.io/itzg/minecraft-server:${MINECRAFT_IMAGE_TAG}"
+    local instance_image_repo=docker.io/itzg/minecraft-server
+    [[ ${MINECRAFT_SERVER_TYPE} != bedrock ]] || instance_image_repo=docker.io/itzg/minecraft-bedrock-server
+    JV_INSTANCE_IMAGE_REF="${instance_image_repo}:${MINECRAFT_IMAGE_TAG}"
     if [[ -n ${JV_INSTANCE_IMAGE_DIGEST} ]]; then
         [[ ${JV_INSTANCE_IMAGE_DIGEST} =~ ^sha256:[a-f0-9]{64}$ ]] || return 1
-        JV_INSTANCE_IMAGE_REF="docker.io/itzg/minecraft-server@${JV_INSTANCE_IMAGE_DIGEST}"
+        JV_INSTANCE_IMAGE_REF="${instance_image_repo}@${JV_INSTANCE_IMAGE_DIGEST}"
     fi
     MINECRAFT_VERSION="$(jq -er '.runtime.version' "${record}")" || return 1
     MINECRAFT_VERSION_MODE="$(jq -r '.runtime.version_policy // (if .runtime.version == "LATEST" then "latest" else "pinned" end)' "${record}")" || return 1

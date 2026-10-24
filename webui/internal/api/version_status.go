@@ -11,6 +11,10 @@ import (
 )
 
 type AdminVersionStatus struct {
+	BedrockTCPPort            int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart           int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd             int    `json:"bedrock_udp_end,omitempty"`
+	LoaderVersion             string `json:"loader_version,omitempty"`
 	InstanceID                string `json:"instance_id,omitempty"`
 	ServerType                string `json:"server_type"`
 	ServerSupported           bool   `json:"server_supported"`
@@ -44,12 +48,21 @@ type AdminVersionStatus struct {
 }
 
 func (c *Client) AdminSetupVersionPreview(ctx context.Context, session, policy, version string, bedrock bool, serverType string) (AdminVersionStatus, error) {
+	return c.setupVersionPreview(ctx, session, policy, version, bedrock, serverType, 0)
+}
+func (c *Client) AdminSetupNativeBedrockPreview(ctx context.Context, session string, players int) (AdminVersionStatus, error) {
+	return c.setupVersionPreview(ctx, session, "recommended", "", false, "bedrock", players)
+}
+func (c *Client) setupVersionPreview(ctx context.Context, session, policy, version string, bedrock bool, serverType string, players int) (AdminVersionStatus, error) {
 	var out AdminVersionStatus
 	choice := "no"
 	if bedrock {
 		choice = "yes"
 	}
 	path := "/v1/admin/setup/version-preview?policy=" + url.QueryEscape(policy) + "&version=" + url.QueryEscape(version) + "&bedrock=" + choice + "&server_type=" + url.QueryEscape(serverType)
+	if players > 0 {
+		path += fmt.Sprintf("&max_players=%d", players)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix"+path, nil)
 	if err != nil {
 		return out, err

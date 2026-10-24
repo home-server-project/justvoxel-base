@@ -7,6 +7,12 @@ import (
 )
 
 func instanceCrossplayValid(c minecraftInstanceRuntimeConfig) bool {
+	if c.Software == "bedrock" {
+		return nativeBedrockValid(c)
+	}
+	if c.BedrockTCPPort != 0 || c.BedrockUDPStart != 0 || c.BedrockUDPEnd != 0 {
+		return false
+	}
 	if !c.BedrockEnabled {
 		return c.BedrockPort == 0
 	}
@@ -21,6 +27,9 @@ func (r instanceFirewallRule) protocol() string {
 	return r.Protocol
 }
 func instanceRuleForRuntime(r instanceFirewallRule, c minecraftInstanceRuntimeConfig) bool {
+	if c.Software == "bedrock" {
+		return r.protocol() == "tcp" && r.Port == c.BedrockTCPPort || r.protocol() == "udp" && r.Port >= c.BedrockUDPStart && r.Port <= c.BedrockUDPEnd
+	}
 	return (r.protocol() == "tcp" && r.Port == c.JavaPort) || ((r.protocol() == "tcp" || r.protocol() == "udp") && c.BedrockEnabled && r.Port == c.BedrockPort)
 }
 func instanceHoldUDP(port int) (net.PacketConn, error) {

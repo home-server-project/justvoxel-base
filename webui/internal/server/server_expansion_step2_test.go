@@ -1,6 +1,7 @@
 package server
 
 import (
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,59 +14,47 @@ import (
 )
 
 func TestAdvancedServerExpansionCards(t *testing.T) {
-	data, err := os.ReadFile("templates/setup_wizard.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(data)
-	start := strings.Index(source, `<legend>Server software</legend>`)
-	end := strings.Index(source[start:], `</fieldset>`)
-	cards := regexp.MustCompile(`(?s)<label class="setup-server-type server-software-card [^"]+">.*?</label>`).FindAllString(source[start:start+end], -1)
-	types := []string{"paper", "purpur", "spigot", "vanilla", "bedrock", "fabric", "forge", "neoforge", "quilt"}
-	descriptions := []string{
-		"Recommended · Plugins and managed Bedrock cross-play.", "Plugins and managed Bedrock cross-play.", "Plugins and managed Bedrock cross-play.",
-		"Original Minecraft · Java only · no plugins or mods.", "Separate Bedrock only · no plugins or mods.", "Mod loader and managed Bedrock cross-play.",
-		"Mod loader.", "Mod loader and managed Bedrock cross-play.", "Mod loader.",
-	}
-	if len(cards) != len(types) {
-		t.Fatalf("got %d cards", len(cards))
-	}
-	for i, software := range types {
-		for _, want := range []string{`value="` + software + `"`, descriptions[i], `/static/server-software/` + software + `.svg`} {
-			if !strings.Contains(cards[i], want) {
-				t.Fatalf("%s missing %q", software, want)
+	app, _ := newAddServerTestApp(t)
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
+	body := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
+	previous := -1
+	for _, group := range setupSoftwareGroups() {
+		at := strings.Index(html.UnescapeString(body), "<legend>"+group.Name+"</legend>")
+		if at <= previous {
+			t.Fatalf("group missing or reordered: %s", group.Name)
+		}
+		previous = at
+		for _, choice := range group.Software {
+			input := regexp.MustCompile(`<input[^>]+name="server_type"[^>]+value="` + choice.ID + `"[^>]*>`).FindString(body)
+			if input == "" || strings.Contains(input, "disabled") {
+				t.Fatalf("wrong availability: %s", choice.ID)
+			}
+			if _, err := os.Stat("static/server-software/" + choice.ID + ".svg"); err != nil {
+				t.Fatal(err)
 			}
 		}
-		if _, err := os.Stat("static/server-software/" + software + ".svg"); err != nil {
-			t.Fatal(err)
-		}
-		unavailable := software == "bedrock" || software == "fabric" || software == "forge" || software == "neoforge" || software == "quilt"
-		if strings.Contains(cards[i], " disabled") != unavailable {
-			t.Fatalf("wrong availability: %s", software)
-		}
-		if validSetupServerType(software) == unavailable {
-			t.Fatalf("wizard accepted unavailable software %s", software)
-		}
 	}
-	// Vanilla and Bedrock are consecutive in the existing three-column grid.
-	if !strings.Contains(cards[3], `value="vanilla"`) || !strings.Contains(cards[4], `value="bedrock"`) {
-		t.Fatal("Java/Bedrock row changed")
+	if len(setupWizardSteps) != 6 {
+		t.Fatal("Advanced steps changed")
 	}
 }
 
-func TestSpigotSetupRequiresCompleteExplicitSelection(t *testing.T) {
-	for _, tc := range []struct {
-		policy, version, image string
-		valid                  bool
-	}{
-		{"recommended", "", "stable", false}, {"pinned", "1.21.8", "stable", false},
-		{"pinned", "1.21.8", "java21-jdk", true}, {"pinned", "26.3", "java25-jdk", true},
-		{"pinned", "26.3", "java21-jdk", false}, {"pinned", "1.20.4", "java21-jdk", false},
-	} {
-		err := validateSetupVersion(setupMinecraftDraft{ServerType: "spigot", VersionPolicy: tc.policy, Version: tc.version, ImageTag: tc.image})
-		if (err == nil) != tc.valid {
-			t.Fatalf("%+v: %v", tc, err)
+func TestSpigotSetupUsesAutomaticRuntime(t *testing.T) {
+	for _, policy := range []string{"recommended", "pinned"} {
+		if err := validateSetupVersion(setupMinecraftDraft{ServerType: "spigot", VersionPolicy: policy, Version: "1.21.8", ImageTag: "stable"}); err != nil {
+			t.Fatal(err)
 		}
+	}
+	for _, tc := range []struct{ game, image string }{{"1.20.5", "java21-jdk"}, {"1.20.6", "java21-jdk"}, {"1.21", "java21-jdk"}, {"1.21.11", "java21-jdk"}, {"26.1", "java25-jdk"}, {"26.3", "java25-jdk"}} {
+		if setupRuntimeImage("spigot", tc.game) != tc.image {
+			t.Fatal(tc)
+		}
+	}
+	if setupRuntimeImage("spigot", "1.20.4") != "" {
+		t.Fatal("unsupported release")
+	}
+	if validateSetupVersion(setupMinecraftDraft{ServerType: "spigot", VersionPolicy: "recommended", ImageTag: "stable", ResolvedVersion: "26.3", RuntimeImageTag: "java21-jdk"}) == nil {
+		t.Fatal("wrong derived JDK accepted")
 	}
 }
 
@@ -80,7 +69,7 @@ func TestCrossplayOverlayPreservesExactLoader(t *testing.T) {
 }
 
 func TestUnavailableServerCardsRejectForgedJavaSetup(t *testing.T) {
-	for _, software := range []string{"bedrock", "fabric", "forge", "neoforge", "quilt"} {
+	for _, software := range []string{"unknown-software"} {
 		t.Run(software, func(t *testing.T) {
 			app, err := New(setupWizardClient(), Config{Version: "test", ManagementAPI: "v1"})
 			if err != nil {

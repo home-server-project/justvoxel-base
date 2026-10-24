@@ -491,3 +491,19 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 }
 /* Long content and zoom can extend Add Server Review without clipping actions. */
 .setup-body.setup-add-server-review{height:auto;min-height:100dvh;overflow:visible}
+
+/* Approved Add Server card states and software capability groups only. */
+.setup-simple-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;border:0;padding:0;margin:.4rem 0}
+.setup-simple-choices legend{margin-bottom:.4rem}
+.setup-simple-choices .server-software-card{grid-template-columns:32px minmax(0,1fr)}
+.setup-simple-choices .server-software-card:not(:has(.server-software-icon)){grid-template-columns:1fr}
+.setup-simple-choices .server-software-icon,.setup-simple-choices .server-software-icon img{width:32px;min-width:32px;height:32px}
+.setup-simple-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:.5rem}
+.setup-software-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem}
+.setup-software-groups .setup-server-types{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.35rem}
+.setup-software-groups .setup-server-types>small{grid-column:1/-1}
+.setup-software-groups .server-software-card{grid-template-columns:32px minmax(0,1fr);gap:.4rem}
+.setup-software-groups .server-software-icon,.setup-software-groups .server-software-icon img{width:32px;min-width:32px;height:32px}
+.setup-software-groups .server-software-copy{overflow-wrap:anywhere}
+@media(max-width:850px){.setup-software-groups{grid-template-columns:1fr}}
+@media(max-width:430px){.setup-simple-choices,.setup-software-groups .setup-server-types{grid-template-columns:1fr}}

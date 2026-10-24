@@ -20,7 +20,7 @@ type deleteFixture struct {
 func newDeleteFixture(t *testing.T) *deleteFixture {
 	return newDeleteFixtureWithPlacement(t, false)
 }
-func newDeleteFixtureWithPlacement(t *testing.T, separate bool) *deleteFixture {
+func newDeleteFixtureWithPlacement(t *testing.T, separate bool, native ...bool) *deleteFixture {
 	t.Helper()
 	f := newInstanceActivationFixture(t)
 	if separate {
@@ -45,6 +45,25 @@ func newDeleteFixtureWithPlacement(t *testing.T, separate bool) *deleteFixture {
 				t.Fatal(err)
 			}
 		}
+	}
+	if len(native) > 0 && native[0] {
+		c := nativeBedrockFixture(f.configs[0])
+		c.BedrockTCPPort = f.configs[0].JavaPort
+		tcp, start, end, err := allocateNativeBedrock(nil, c.MaxPlayers, c.BedrockTCPPort, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.BedrockTCPPort, c.BedrockUDPStart, c.BedrockUDPEnd = tcp, start, end
+		record, err := f.backend.readRecord(c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Runtime = c
+		dir, _, _ := f.backend.paths(c.ID)
+		if err = f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+			t.Fatal(err)
+		}
+		f.configs[0] = c
 	}
 	f.activateBoth()
 	d := &deleteFixture{f: f, backupState: "inactive"}
@@ -491,5 +510,43 @@ func TestDeleteUsesPinnedStorageAndLeavesSiblingFilesystemIntact(t *testing.T) {
 		if strings.HasPrefix(call, "umount ") || strings.HasPrefix(call, "mount ") || strings.Contains(call, "stop -- minecraft-"+sibling) || strings.Contains(call, "restart -- minecraft-"+sibling) || strings.Contains(call, "start -- minecraft-"+sibling) {
 			t.Fatal("sibling runtime or topology changed", call)
 		}
+	}
+}
+
+func TestNativeBedrockDeleteRetiresWholeOwnedRangeOnly(t *testing.T) {
+	d := newDeleteFixtureWithPlacement(t, false, true)
+	b := d.f.backend
+	c := d.f.configs[0]
+	sibling, err := b.readRecord(d.f.configs[1].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := b.readRecord(c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated := instanceFirewallRule{Zone: "public", Port: c.BedrockUDPEnd + 1, Protocol: "udp", Permanent: true}
+	d.f.firewall[unrelated] = true
+	if err = b.deleteInstance(context.Background(), c.ID, "JV Paper"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.readRecord(c.ID); err == nil {
+		t.Fatal("Bedrock identity not retired")
+	}
+	for _, rule := range before.Firewall {
+		normalized := rule
+		if normalized.Protocol == "tcp" {
+			normalized.Protocol = ""
+		}
+		if d.f.firewall[normalized] {
+			t.Fatal("owned Bedrock port left open", rule)
+		}
+	}
+	if !d.f.firewall[unrelated] {
+		t.Fatal("unrelated UDP port removed")
+	}
+	after, err := b.readRecord(sibling.Runtime.ID)
+	if err != nil || after.EnvironmentSHA256 != sibling.EnvironmentSHA256 {
+		t.Fatal("sibling changed", err)
 	}
 }

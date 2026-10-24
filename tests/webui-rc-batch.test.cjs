@@ -190,6 +190,7 @@ test('recommended memory warning boundary is 1536 MiB and hard reserve remains 1
       const context = vm.createContext({ Number, String, Math, Array,
         formatRemainingMemory: value => `${value} MiB`,
         document: {
+          querySelectorAll: () => [],
           querySelector: selector => selector === '[data-memory-settings]' ? { dataset: { systemMemoryMib: '4096' }, querySelectorAll: () => [] } : null,
           getElementById: id => ({ 'java-memory': game, 'container-memory': maximum, 'memory-status': status })[id] || null,
         }, window: { location: { hash: '' } },
@@ -545,7 +546,7 @@ test('Recommended memory tiers agree in both forms and do not grow with player c
       };
       const panel = { dataset: { systemMemoryMib: String(mib) }, querySelectorAll: () => [button] };
       const context = vm.createContext({
-        document: { querySelector: selector => selector === '[data-memory-settings]' ? panel : null,
+        document: { querySelectorAll: () => [], querySelector: selector => selector === '[data-memory-settings]' ? panel : null,
           getElementById: id => ({ 'java-memory': game, 'container-memory': max })[id] || null },
         window: { location: { hash: '' } },
         root: { dataset: { maxPlayers: '200' }, querySelectorAll: () => [button],
@@ -566,6 +567,7 @@ test('installed memory above simultaneous capacity is informational', () => {
   const max = { value: '6G', addEventListener() {} };
   const panel = { dataset: { systemMemoryMib: '7867', otherMemoryMib: '6144' }, querySelectorAll: () => [] };
   const context = vm.createContext({ document: {
+    querySelectorAll: () => [],
     querySelector: selector => selector === '[data-memory-settings]' ? panel : null,
     getElementById: id => ({ 'java-memory': game, 'container-memory': max, 'memory-status': status })[id] || null,
   }, window: { location: { hash: '' } } });

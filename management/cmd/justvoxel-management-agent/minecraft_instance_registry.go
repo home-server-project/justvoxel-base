@@ -62,6 +62,9 @@ func validateInstanceName(name string) (string, error) {
 }
 
 func instanceDefaultName(software string) string {
+	if software == "bedrock" {
+		return "JV Bedrock"
+	}
 	if c, ok := javaServerSoftware(software); ok {
 		return "JV " + c.Name
 	}

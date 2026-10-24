@@ -92,6 +92,45 @@ class IndependentRestore(unittest.TestCase):
         m['size']=path.stat().st_size;m['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
         self.private(folder/(self.archive+'.meta.json'),json.dumps(m))
 
+    def bedrock_backup(self):
+        import shutil
+        shutil.rmtree(self.data/'world')
+        (self.data/'level.dat').unlink()
+        world=self.data/'worlds/Bedrock level';world.mkdir(parents=True)
+        payload=b'\x0a\x00\x00\x00'
+        (world/'level.dat').write_bytes(struct.pack('<II',10,len(payload))+payload)
+        (world/'db').mkdir();(world/'db/CURRENT').write_bytes(b'world database')
+        path=self.configs/'jv-aaaaaa/config.json';record=json.loads(path.read_text())
+        record['runtime'].update(software='bedrock',version='1.26.50.1')
+        self.private(path,json.dumps(record));self.run_helper('create')
+        item=next(m for m in self.inventory() if m['software']=='bedrock')
+        self.archive=item['archive']
+        return world,path,record
+
+    def test_bedrock_exact_same_instance_restore_and_rollback(self):
+        world,path,record=self.bedrock_backup()
+        original=(world/'db/CURRENT').read_bytes()
+        (world/'db/CURRENT').write_bytes(b'newer original data')
+        plan=self.prepare()
+        self.assertEqual(plan['metadata']['software'],'bedrock')
+        self.assertEqual(plan['metadata']['version'],'1.26.50.1')
+        self.restore('shutdown');self.restore('activate')
+        self.assertEqual((world/'db/CURRENT').read_bytes(),original)
+        self.restore('rollback');self.restore('rollback-verifying');self.restore('rolled-back')
+        self.assertEqual((world/'db/CURRENT').read_bytes(),b'newer original data')
+        self.assertEqual(json.loads(path.read_text())['runtime']['id'],'jv-aaaaaa')
+
+    def test_bedrock_restore_rejects_java_and_wrong_exact_version(self):
+        world,path,record=self.bedrock_backup()
+        for software,version in [('paper','1.26.50.1'),('bedrock','1.26.51.1')]:
+            record['runtime'].update(software=software,version=version)
+            self.private(path,json.dumps(record));self.restore('plan',ok=False)
+        record['runtime'].update(software='bedrock',version='1.26.50.1')
+        self.private(path,json.dumps(record))
+        self.assertEqual(self.plan()['integrity'],'verified')
+        # A Java archive can never become a Bedrock archive via destination selection.
+        self.archive=self.item['archive'];self.restore('plan',ok=False)
+
     def test_mod_loader_pin_required_for_restore(self):
         config=self.configs/'jv-aaaaaa/config.json'
         record=json.loads(config.read_text())

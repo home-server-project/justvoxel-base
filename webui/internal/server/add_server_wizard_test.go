@@ -101,7 +101,15 @@ func requireAddRedirect(t *testing.T, response *httptest.ResponseRecorder) {
 }
 func recommendedAddReview(t *testing.T, app *App, software string) setupReviewState {
 	t.Helper()
-	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/recommended", url.Values{"display_name": {"Family Survival"}, "server_type": {software}}))
+	family := "plugins"
+	if software == "vanilla" {
+		family = "vanilla"
+	} else if setupNeedsExactRuntime(software) && software != "spigot" {
+		family = "mods"
+	}
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/recommended", url.Values{"family": {family}}))
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"server_type": {software}}))
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"display_name": {"Family Survival"}, "game_mode": {"survival"}}))
 	page := addWizardRequest(app, http.MethodGet, "/review", nil)
 	if page.Code != http.StatusOK {
 		t.Fatalf("review: %d %s", page.Code, page.Body.String())
@@ -203,7 +211,7 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	firstRunSetupDrafts.save(app, "session-token", legacy)
 	before, _ := firstRunSetupDrafts.get(app, "session-token")
 	landing := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
-	for _, want := range []string{"Simple setup", "Use simple setup", "JustVoxel chooses the defaults for you.", "Advanced setup", `name="display_name"`, `value="paper" checked`, "server-software-card", `action="/minecraft/servers/add/recommended"`} {
+	for _, want := range []string{"Simple setup", "Use simple setup", "JustVoxel chooses the defaults for you.", "Advanced setup", `name="family"`, `value="plugins"`, "server-software-card", `action="/minecraft/servers/add/simple"`} {
 		if !strings.Contains(landing, want) {
 			t.Fatalf("shared landing missing %q", want)
 		}
@@ -215,8 +223,8 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	if !separatedBackupTimes(state.Plan.Normalized.Backups.DailyTime, "04:30") || !separatedBackupTimes(state.Plan.Normalized.Backups.DailyTime, "05:00") {
 		t.Fatal("backup default overlaps an existing schedule")
 	}
-	if state.Plan.Normalized.Minecraft.ImageTag != "stable" || state.Plan.Normalized.Minecraft.Version != "1.21.8" || state.Plan.Normalized.Server.Timezone != client.defaults.Timezone {
-		t.Fatal("recommended version/channel/timezone mapping")
+	if state.Plan.Normalized.Minecraft.ImageTag != "stable" || state.Plan.Normalized.Minecraft.Version != "1.21.8" || state.Plan.Normalized.Server.Timezone != "" {
+		t.Fatal("recommended version/channel or timezone isolation")
 	}
 	if state.Plan.Normalized.Server.MOTD == "Family Survival" || !strings.Contains(state.Plan.Normalized.Server.MOTD, "Paper Minecraft") {
 		t.Fatal("friendly name used as MOTD")
@@ -458,7 +466,9 @@ func TestAddServerNamesRejectedBeforeCreation(t *testing.T) {
 	for _, name := range []string{"", "Original", "original", "..", "Bad/name", "Bad\nname", "Bad\u200bname", strings.Repeat("x", 65)} {
 		t.Run(name, func(t *testing.T) {
 			app, client := newAddServerTestApp(t)
-			response := addWizardRequest(app, http.MethodPost, "/recommended", url.Values{"display_name": {name}, "server_type": {"paper"}})
+			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"family": {"plugins"}}))
+			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"server_type": {"paper"}}))
+			response := addWizardRequest(app, http.MethodPost, "/simple", url.Values{"display_name": {name}, "game_mode": {"survival"}})
 			if response.Code != http.StatusBadRequest || len(client.created) != 0 {
 				t.Fatalf("unsafe/duplicate name accepted: %d", response.Code)
 			}
@@ -644,10 +654,15 @@ func (f *addServerTestAPI) AdminSetupPlan(_ context.Context, _ string, r api.Adm
 	}
 	return api.AdminSetupPlanResponse{OK: true, SchemaVersion: "v1", PlanFingerprint: setupReviewFingerprint, Requirements: api.AdminSetupPlanRequirements{}, Normalized: api.AdminSetupNormalizedPlan{
 		AddServer: r.AddServer, StartOnBoot: r.StartOnBoot, StartAfterSetup: r.StartAfterSetup, MountedOnly: r.MountedOnly,
-		Server:    api.AdminSetupPlanServer{DisplayName: r.Server.DisplayName, MOTD: r.Server.MOTD, MaxPlayers: r.Server.MaxPlayers, BedrockEnabled: r.Server.BedrockEnabled, Timezone: r.Server.Timezone},
-		Minecraft: api.AdminSetupPlanMinecraft{ServerType: r.Minecraft.ServerType, GameMode: r.Minecraft.GameMode, JavaMemory: r.Minecraft.JavaMemory, ContainerMemory: r.Minecraft.ContainerMemory, JavaPort: r.Minecraft.JavaPort, BedrockPort: r.Minecraft.BedrockPort, ImageTag: r.Minecraft.ImageTag, Version: "1.21.8", RequestedVersionPolicy: r.Minecraft.VersionPolicy},
-		Storage:   api.AdminSetupPlanStorage{Type: r.Storage.Type, Path: r.Storage.Path, Device: r.Storage.Device, MountPoint: r.Storage.MountPoint},
-		Backups:   api.AdminSetupPlanBackups{Type: r.Backups.Type, Path: r.Backups.Path, Device: r.Backups.Device, MountPoint: r.Backups.MountPoint, Source: r.Backups.Source, Automatic: r.Backups.Automatic, DailyTime: r.Backups.DailyTime, Keep: r.Backups.Keep},
+		Server: api.AdminSetupPlanServer{DisplayName: r.Server.DisplayName, MOTD: r.Server.MOTD, MaxPlayers: r.Server.MaxPlayers, BedrockEnabled: r.Server.BedrockEnabled, Timezone: r.Server.Timezone},
+		Minecraft: api.AdminSetupPlanMinecraft{LoaderVersion: r.Minecraft.LoaderVersion, VersionPolicy: r.Minecraft.VersionPolicy, ServerType: r.Minecraft.ServerType, GameMode: r.Minecraft.GameMode, JavaMemory: r.Minecraft.JavaMemory, ContainerMemory: r.Minecraft.ContainerMemory, JavaPort: r.Minecraft.JavaPort, BedrockPort: r.Minecraft.BedrockPort, ImageTag: r.Minecraft.ImageTag, Version: func() string {
+			if r.Minecraft.ServerType == "bedrock" {
+				return r.Minecraft.Version
+			}
+			return "1.21.8"
+		}(), BedrockTCPPort: r.Minecraft.BedrockTCPPort, BedrockUDPStart: r.Minecraft.BedrockUDPStart, BedrockUDPEnd: r.Minecraft.BedrockUDPEnd, RequestedVersionPolicy: r.Minecraft.VersionPolicy},
+		Storage: api.AdminSetupPlanStorage{Type: r.Storage.Type, Path: r.Storage.Path, Device: r.Storage.Device, MountPoint: r.Storage.MountPoint},
+		Backups: api.AdminSetupPlanBackups{Type: r.Backups.Type, Path: r.Backups.Path, Device: r.Backups.Device, MountPoint: r.Backups.MountPoint, Source: r.Backups.Source, Automatic: r.Backups.Automatic, DailyTime: r.Backups.DailyTime, Keep: r.Backups.Keep},
 	}}, nil
 }
 

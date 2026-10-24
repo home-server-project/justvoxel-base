@@ -8,7 +8,7 @@ mode="${1:-guard}"
 window=180s
 case "${mode}" in guard|status|check) window=8s ;; esac
 timeout "${window}" python3 - "$@" <<'PY'
-import concurrent.futures, hashlib, json, os, re, stat, subprocess, sys, time
+import datetime, concurrent.futures, hashlib, json, os, re, stat, subprocess, sys, time
 
 root = '/etc/justvoxel/instances'
 registry = '/var/lib/justvoxel/instances'
@@ -63,7 +63,22 @@ def validate(instance):
         if hashlib.sha256(read(path)).hexdigest() != record.get(key):
             raise ValueError('commitment')
 
+def native_bedrock(instance):
+    return json.loads(read(root + '/' + instance + '/config.json'))['runtime'].get('software','paper') == 'bedrock'
+
 def player_state(instance):
+    if native_bedrock(instance):
+        since = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')
+        run('podman','exec','minecraft-'+instance,'send-command','list')
+        for _ in range(5):
+            raw = run('podman','logs','--since',since,'--tail','40','minecraft-'+instance)
+            matches = re.findall(r'There are ([0-9]+)/([0-9]+) players online',raw)
+            if matches:
+                online, maximum = map(int,matches[-1])
+                if not 0 <= online <= maximum <= 1000 or maximum == 0: raise ValueError('players')
+                return online, []
+            time.sleep(0.1)
+        raise ValueError('Bedrock player status unavailable')
     raw = run('podman', 'exec', 'minecraft-' + instance, 'rcon-cli', 'list')
     match = players.fullmatch(raw)
     if not match:
@@ -83,6 +98,8 @@ def prepare(instance):
         online, names = player_state(instance)
         if online:
             return True
+        if native_bedrock(instance):
+            return True  # Preserve the Bedrock image's graceful announce/save path.
         # SIGUSR1 is itzg's graceful announcement-delay bypass, not a force kill.
         run('podman', 'kill', '--signal', 'SIGUSR1', container)
         return True
@@ -200,7 +217,7 @@ def stop(saved):
             for state in active:
                 if state['online']:
                     try:
-                        run('podman', 'exec', 'minecraft-' + state['id'], 'rcon-cli',
+                        run('podman', 'exec', 'minecraft-' + state['id'], 'send-command' if native_bedrock(state['id']) else 'rcon-cli',
                             'say Server shutting down in ' + str(point) + (' second' if point == 1 else ' seconds'))
                     except Exception:
                         pass  # A server may already have completed its graceful stop.

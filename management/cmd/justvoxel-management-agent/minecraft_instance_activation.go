@@ -460,6 +460,12 @@ func (b *instanceRuntimeBackend) storage(ctx context.Context, action string, rec
 	return nil
 }
 func (b *instanceRuntimeBackend) validateSoftware(ctx context.Context, c minecraftInstanceRuntimeConfig) error {
+	if c.Software == "bedrock" {
+		if !nativeBedrockValid(c) {
+			return instanceRuntimeFailure("Invalid Bedrock runtime")
+		}
+		return nil
+	}
 	args := []string{"version", c.Software, c.Version, c.PaperChannel}
 	if c.Software != "paper" && c.Software != "purpur" && c.Software != "vanilla" {
 		if err := validateJavaServerSelection(c.Software, c.VersionPolicy, c.Version, c.LoaderVersion, c.ImageTag, c.BedrockEnabled); err != nil {
@@ -601,6 +607,9 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 	if err = b.storage(ctx, "preflight", next); err != nil {
 		return err
 	}
+	if (previous.Runtime.Software == "bedrock" || next.Runtime.Software == "bedrock") && (previous.Runtime.Software != next.Runtime.Software || previous.Runtime.Version != next.Runtime.Version) {
+		return instanceRuntimeFailure("Bedrock software/version conversion is not supported")
+	}
 	// Full configuration changes are stopped-only; boot preference is independent.
 	state, err := b.observe(ctx, id)
 	if err != nil {
@@ -722,8 +731,15 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 		return instanceRuntimeFailure("Changing software on an existing instance is outside Phase 3A.")
 	}
 	var held []net.Listener
-	if state.State != "running" || next.Runtime.JavaPort != previous.Runtime.JavaPort {
-		held, err = instanceHoldPort(next.Runtime.JavaPort)
+	if next.Runtime.Software == "bedrock" && state.State != "running" {
+		ports, e := holdNativeBedrock(next.Runtime)
+		if e != nil {
+			return e
+		}
+		defer closeBedrockPorts(ports)
+	}
+	if next.Runtime.Software != "bedrock" && (state.State != "running" || next.Runtime.JavaPort != previous.Runtime.JavaPort) {
+		held, err = instanceHoldPort(instanceSignalingPort(next.Runtime))
 		if err != nil {
 			return err
 		}
@@ -734,7 +750,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 		}()
 	}
 	if next.Runtime.JavaPort != previous.Runtime.JavaPort && len(previous.Firewall) > 0 {
-		old, err := instanceHoldPort(previous.Runtime.JavaPort)
+		old, err := instanceHoldPort(instanceSignalingPort(previous.Runtime))
 		if err != nil {
 			return instanceRuntimeFailure("Previous Java port is in use; firewall access cannot safely be removed.")
 		}

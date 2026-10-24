@@ -152,7 +152,7 @@ func TestSetupRecommendedPaperCardWording(t *testing.T) {
 	if len(sections) != 2 {
 		t.Fatal("Recommended and Advanced setup sections must be present")
 	}
-	for sectionIndex, section := range sections {
+	for sectionIndex, section := range sections[:1] {
 		cards := cardPattern.FindAllStringSubmatch(section, -1)
 		if len(cards) != 3+sectionIndex {
 			t.Fatalf("setup section %d must contain three software cards", sectionIndex)

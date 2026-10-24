@@ -203,9 +203,6 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 		{"startup injection", "startup", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
 			c[0].MOTD = "hello\nRCON_PASSWORD=leak"
 		}},
-		{"unknown timezone", "timezone", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
-			c[0].Timezone = "Unknown/Timezone"
-		}},
 		{"invalid password", "startup", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
 			c[0].RCONPassword = "short"
 		}},

@@ -4,6 +4,11 @@ source /usr/libexec/justvoxel/mjust/common.sh
 require_root
 fail() { echo 'ERROR: instance runtime prerequisites could not be verified.' >&2; exit 1; }
 case "${1:-}" in
+    bedrock-release)
+        [[ $# == 2 && $2 =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || fail
+        release="$(resolve_bedrock_release)" || fail
+        [[ $2 == "${release}" ]] || fail
+        ;;
     placement-candidate)
         [[ $# == 4 ]] || fail
         point=$2 uuid=$3 expected_source=$4
@@ -86,7 +91,9 @@ case "${1:-}" in
         MINECRAFT_LOADER_VERSION=${5:-}
         validate_server_type "${MINECRAFT_SERVER_TYPE}" || fail
         [[ ${channel} == default || ${channel} == experimental ]] || fail
-        if [[ ${version} == LATEST ]]; then
+        if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
+            [[ ${version} =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ && ${channel} == default ]] || fail
+        elif [[ ${version} == LATEST ]]; then
             [[ ${MINECRAFT_SERVER_TYPE} != paper || ${channel} == experimental ]] || fail
             resolve_latest_server_version >/dev/null || fail
         else

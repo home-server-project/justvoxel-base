@@ -89,14 +89,13 @@ validate_request_shape() {
       (.storage|type == "object") and
       (.backups|type == "object") and
       ((.server|keys) - ["motd","max_players","bedrock_enabled","timezone"] | length == 0) and
-      ((.minecraft|keys) - ["server_type","loader_version","java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode"] | length == 0) and
+      ((.minecraft|keys) - ["bedrock_tcp_port","bedrock_udp_start","bedrock_udp_end","server_type","loader_version","java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode"] | length == 0) and
       ((.storage|keys) - ["type","path","device","mount_point"] | length == 0) and
       ((.backups|keys) - ["automatic","daily_time","keep","type","path","device","mount_point","source","username","domain"] | length == 0) and
       (.server.motd|type == "string") and
       (.server.max_players|type == "number") and
       (.server.bedrock_enabled|type == "boolean") and
-      (.server.timezone|type == "string") and
-      (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla" or . == "spigot" or . == "forge" or . == "neoforge" or . == "fabric" or . == "quilt"))) and
+      (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla" or . == "spigot" or . == "forge" or . == "neoforge" or . == "fabric" or . == "quilt" or . == "bedrock"))) and
       ((.minecraft.loader_version // "")|type == "string") and
       (.minecraft.java_memory|type == "string") and
       (.minecraft.container_memory|type == "string") and
@@ -275,7 +274,6 @@ MINECRAFT_LOADER_VERSION="$(jq -r '.minecraft.loader_version // ""' <<< "${reque
 motd="$(jq -r '.server.motd' <<< "${request}")"
 max_players="$(jq -r '.server.max_players' <<< "${request}")"
 bedrock_enabled="$(jq -r '.server.bedrock_enabled' <<< "${request}")"
-timezone="$(jq -r '.server.timezone' <<< "${request}")"
 java_memory="$(jq -r '.minecraft.java_memory' <<< "${request}")"
 container_memory="$(jq -r '.minecraft.container_memory' <<< "${request}")"
 java_port="$(jq -r '.minecraft.java_port' <<< "${request}")"
@@ -299,7 +297,7 @@ backup_source="$(jq -r '.backups.source // ""' <<< "${request}")"
 backup_username="$(jq -r '.backups.username // ""' <<< "${request}")"
 backup_domain="$(jq -r '.backups.domain // ""' <<< "${request}")"
 
-if ! validate_java_server_selection "${MINECRAFT_SERVER_TYPE}" "${version_policy}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${image_tag}"; then
+if [[ ${MINECRAFT_SERVER_TYPE} != bedrock ]] && ! validate_java_server_selection "${MINECRAFT_SERVER_TYPE}" "${version_policy}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${image_tag}"; then
     json_error 'Unsupported server/version/loader/image combination. New types require a pinned Minecraft 1.20.5–1.21.11 release with java21 or 26.x with java25, an exact loader version for mod loaders, and the matching -jdk image for Spigot.' invalid_minecraft
     exit 0
 fi
@@ -314,9 +312,17 @@ validate_nonroot_id "${minecraft_uid}" && validate_nonroot_id "${minecraft_gid}"
 
 validate_simple_text "${motd}" || { json_error 'Server welcome message must be a single line.' invalid_server; exit 0; }
 validate_positive_int "${max_players}" || { json_error 'Maximum players must be a positive integer.' invalid_server; exit 0; }
-[[ -n ${timezone} && ${timezone} != /* && ${timezone} != *..* && -e /usr/share/zoneinfo/${timezone} ]] || { json_error 'Timezone was not found on this JustVoxel system.' invalid_server; exit 0; }
 
 validate_game_mode "${game_mode}" || { json_error 'Choose a valid game mode.' invalid_minecraft; exit 0; }
+if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
+    [[ ${game_mode} != spectator && ${bedrock_enabled} == false && ${max_players} -le 1000 && ${version_policy} == pinned && ${image_tag} == stable && -z ${MINECRAFT_LOADER_VERSION} ]] || { json_error 'Invalid native Bedrock settings.' invalid_minecraft; exit 0; }
+    release="$(resolve_bedrock_release || true)"
+    [[ -n ${release} && ${version} == "${release}" ]] || { json_error 'The exact official Bedrock release could not be verified. Review setup again.' upstream_unavailable; exit 0; }
+    validate_memory "${container_memory}" || { json_error 'Invalid container memory.' invalid_minecraft; exit 0; }
+    container_memory="${container_memory^^}"
+    container_mib="$(memory_to_mib "${container_memory}")"
+    java_memory='' java_port=0 bedrock_port=0 resolved_version_policy=pinned
+else
 validate_memory "${java_memory}" && validate_memory "${container_memory}" || { json_error 'Memory values must use a size such as 4G or 4096M.' invalid_minecraft; exit 0; }
 java_memory="${java_memory^^}"
 container_memory="${container_memory^^}"
@@ -324,6 +330,7 @@ java_mib="$(memory_to_mib "${java_memory}")"
 container_mib="$(memory_to_mib "${container_memory}")"
 (( container_mib > java_mib )) || { json_error 'Maximum Minecraft memory must be larger than Minecraft game memory.' invalid_minecraft; exit 0; }
 (( container_mib - java_mib >= 512 )) || { json_error 'Maximum Minecraft memory must leave at least 512 MiB above Minecraft game memory.' invalid_minecraft; exit 0; }
+fi
 total_mib="$(system_memory_mib)"
 remaining_mib=$(( total_mib - container_mib ))
 if (( total_mib > 0 && remaining_mib < SETUP_MIN_SYSTEM_RESERVE_MIB )); then
@@ -334,6 +341,7 @@ if (( total_mib > 0 && remaining_mib < SETUP_RECOMMENDED_SYSTEM_RESERVE_MIB )); 
     warnings="$(warning_add "${warnings}" low_system_reserve 'Less than the recommended 1.5 GiB remains for JustVoxel and system services.')"
 fi
 
+if [[ ${MINECRAFT_SERVER_TYPE} != bedrock ]]; then
 validate_port "${java_port}" || { json_error 'Minecraft Java port must be between 1 and 65535.' invalid_minecraft; exit 0; }
 validate_port "${bedrock_port}" || { json_error 'Bedrock TCP/UDP port must be between 1 and 65535.' invalid_minecraft; exit 0; }
 if port_in_use tcp "${java_port}"; then
@@ -424,6 +432,8 @@ fi
 if [[ ${bedrock_enabled} == true ]] && { [[ ${java_port} == "${bedrock_port}" ]] || port_in_use tcp "${bedrock_port}" || port_in_use udp "${bedrock_port}"; }; then
     json_error "Bedrock TCP/UDP port ${bedrock_port} is already in use on this appliance." port_conflict
     exit 0
+fi
+
 fi
 
 storage_json=''
@@ -543,8 +553,7 @@ server_json="$(jq -n \
     --arg motd "${motd}" \
     --argjson max_players "${max_players}" \
     --argjson bedrock_enabled "${bedrock_enabled}" \
-    --arg timezone "${timezone}" \
-    '{motd:$motd,max_players:$max_players,bedrock_enabled:$bedrock_enabled,timezone:$timezone}')"
+    '{motd:$motd,max_players:$max_players,bedrock_enabled:$bedrock_enabled}')"
 
 minecraft_json="$(jq -n \
     --arg server_type "${MINECRAFT_SERVER_TYPE}" \

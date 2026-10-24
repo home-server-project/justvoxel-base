@@ -67,7 +67,8 @@ func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
 	routes := map[string]http.HandlerFunc{
 		"GET ":                 a.addServerWizardPage,
 		"POST /start":          a.addServerWizardStart,
-		"POST /recommended":    a.addServerWizardStart,
+		"POST /recommended":    a.addServerSimple,
+		"POST /simple":         a.addServerSimple,
 		"POST /server":         a.setupWizardSaveServer,
 		"POST /connections":    a.setupWizardSaveConnections,
 		"POST /resources":      a.setupWizardSaveResources,
@@ -300,6 +301,12 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 		if err != nil {
 			return setupDraft{}, errors.New("Existing server settings could not be checked. Resolve the existing server's configuration before adding another.")
 		}
+		if runtime.Software == "bedrock" {
+			javaUsed[runtime.BedrockTCPPort], bedrockUsed[runtime.BedrockTCPPort] = true, true
+			for port := runtime.BedrockUDPStart; port <= runtime.BedrockUDPEnd; port++ {
+				javaUsed[port], bedrockUsed[port] = true, true
+			}
+		}
 		javaUsed[runtime.JavaPort] = true
 		if runtime.BedrockEnabled {
 			bedrockUsed[runtime.BedrockPort] = true
@@ -397,7 +404,7 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 }
 
 func (a *App) addServerWizardStart(w http.ResponseWriter, r *http.Request) {
-	session, client, identity, ok := a.setupWizardRequest(w, r, true)
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
 		return
 	}
@@ -411,32 +418,7 @@ func (a *App) addServerWizardStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft.Mode = "advanced"
-	if strings.HasSuffix(r.URL.Path, "/recommended") {
-		draft.Mode = "recommended"
-		if err := a.resolveRecommendedSetupStorage(r.Context(), session, &draft); err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		draft.Storage.Complete, draft.Backups.Complete = true, true
-		draft.DisplayName = r.FormValue("display_name")
-		draft.Minecraft.ServerType = strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
-		if !validSetupServerType(draft.Minecraft.ServerType) || draft.Minecraft.ServerType == "spigot" {
-			http.Error(w, "Choose Paper, Purpur or Vanilla.", http.StatusBadRequest)
-			return
-		}
-		if err := a.validateAddServerName(r.Context(), session, draft.DisplayName); err != nil {
-			draft.Started = false
-			w.WriteHeader(http.StatusBadRequest)
-			a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
-			return
-		}
-		draft.DisplayName = strings.TrimSpace(draft.DisplayName)
-		draft.Server.BedrockEnabled = recommendedServerSupportsBedrock(draft.Minecraft.ServerType)
-		draft.Server.Complete = true
-		draft.Minecraft.ConnectionsComplete, draft.Minecraft.VersionComplete = true, true
-		draft.Minecraft.ResourcesComplete, draft.Minecraft.Complete = true, true
-		draft.CurrentStep = setupReviewStep
-	}
+
 	addServerReviews.delete(a, session)
 	addServerDrafts.save(a, session, draft)
 	http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
@@ -487,6 +469,7 @@ func (a *App) addServerWizardReviewBack(w http.ResponseWriter, r *http.Request) 
 	if exists {
 		if draft.Mode == "recommended" && !draft.CoreCreated {
 			draft.Started = false
+			draft.SimpleState = 3
 			draft.CurrentStep = setupServerStep
 		} else {
 			draft.CurrentStep = setupBackupsStep

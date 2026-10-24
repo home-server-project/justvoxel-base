@@ -36,7 +36,19 @@ func TestJavaServerCapabilities(t *testing.T) {
 			}
 		}
 	}
-	for _, unknown := range []string{"", "SPIGOT", "bedrock", "bukkit", "future"} {
+	if !validSetupServerType("bedrock") {
+		t.Fatal("Bedrock must be a valid JustVoxel server type")
+	}
+	if _, ok := javaServerSoftware("bedrock"); ok {
+		t.Fatal("Bedrock must not have Java server capabilities")
+	}
+	if !javaServerAllowsSwitch("bedrock", "bedrock") {
+		t.Fatal("Bedrock must allow retaining its server type")
+	}
+	if javaServerAllowsSwitch("bedrock", "paper") || javaServerAllowsSwitch("paper", "bedrock") {
+		t.Fatal("Bedrock and Java server types must not allow switching between each other")
+	}
+	for _, unknown := range []string{"", "SPIGOT", "bukkit", "future"} {
 		if validSetupServerType(unknown) || javaServerAllowsSwitch(unknown, unknown) {
 			t.Fatalf("accepted unknown software %q", unknown)
 		}
@@ -178,9 +190,57 @@ func TestNewJavaRuntimeIsolationAndIntegrations(t *testing.T) {
 				} else if !strings.Contains(env, capability.LoaderEnvironment+"="+c.LoaderVersion+"\n") {
 					t.Fatal("missing loader pin")
 				}
+				// Deployed runtime records may still decode an independent timezone.
+				if err := json.Unmarshal([]byte(`{"timezone":"UTC"}`), c); err != nil {
+					t.Fatal(err)
+				}
+				if c.Timezone != "UTC" {
+					t.Fatal("legacy runtime timezone did not decode")
+				}
 				settings := instancePublicSettings(*c)
-				if !reflect.DeepEqual(settings.runtime(c.ID, c.UID, c.GID, c.RCONPassword), *c) {
-					t.Fatal("public settings lost loader selection")
+				roundTrip := settings.runtime(c.ID, c.UID, c.GID, c.RCONPassword)
+				if settings.LoaderVersion != c.LoaderVersion || roundTrip.LoaderVersion != c.LoaderVersion {
+					t.Fatalf("loader pin changed: public %q, round trip %q, want %q", settings.LoaderVersion, roundTrip.LoaderVersion, c.LoaderVersion)
+				}
+				if settings.Timezone != "" || roundTrip.Timezone != "" {
+					t.Fatal("legacy timezone carried forward as an independent per-server setting")
+				}
+				publicJSON, err := json.Marshal(settings)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(publicJSON), `"timezone"`) {
+					t.Fatal("public settings expose an independent timezone")
+				}
+				for _, field := range []struct {
+					name                   string
+					public, restored, want any
+				}{
+					{"Software", settings.Software, roundTrip.Software, c.Software},
+					{"Version", settings.Version, roundTrip.Version, c.Version},
+					{"ImageTag", settings.ImageTag, roundTrip.ImageTag, c.ImageTag},
+					{"JavaPort", settings.JavaPort, roundTrip.JavaPort, c.JavaPort},
+					{"JavaMemory", settings.JavaMemory, roundTrip.JavaMemory, c.JavaMemory},
+					{"ContainerMemory", settings.ContainerMemory, roundTrip.ContainerMemory, c.ContainerMemory},
+					{"VersionPolicy", settings.VersionPolicy, roundTrip.VersionPolicy, c.VersionPolicy},
+					{"PaperChannel", settings.PaperChannel, roundTrip.PaperChannel, c.PaperChannel},
+					{"StartOnBoot", settings.StartOnBoot, roundTrip.StartOnBoot, c.StartOnBoot},
+					{"EULAAccepted", settings.EULAAccepted, roundTrip.EULAAccepted, c.EULAAccepted},
+					{"BedrockEnabled", settings.BedrockEnabled, roundTrip.BedrockEnabled, c.BedrockEnabled},
+					{"BedrockPort", settings.BedrockPort, roundTrip.BedrockPort, c.BedrockPort},
+					{"BedrockTCPPort", settings.BedrockTCPPort, roundTrip.BedrockTCPPort, c.BedrockTCPPort},
+					{"BedrockUDPStart", settings.BedrockUDPStart, roundTrip.BedrockUDPStart, c.BedrockUDPStart},
+					{"BedrockUDPEnd", settings.BedrockUDPEnd, roundTrip.BedrockUDPEnd, c.BedrockUDPEnd},
+					{"GameMode", settings.GameMode, roundTrip.GameMode, c.GameMode},
+					{"Difficulty", settings.Difficulty, roundTrip.Difficulty, c.Difficulty},
+					{"MaxPlayers", settings.MaxPlayers, roundTrip.MaxPlayers, c.MaxPlayers},
+					{"Whitelist", settings.Whitelist, roundTrip.Whitelist, c.Whitelist},
+					{"EnforceWhitelist", settings.EnforceWhitelist, roundTrip.EnforceWhitelist, c.EnforceWhitelist},
+					{"MOTD", settings.MOTD, roundTrip.MOTD, c.MOTD},
+				} {
+					if field.public != field.want || field.restored != field.want {
+						t.Errorf("%s changed: public %v, round trip %v, want %v", field.name, field.public, field.restored, field.want)
+					}
 				}
 				c.BedrockEnabled, c.BedrockPort = true, 19132
 				if _, err := store.renderInstanceRuntimes(ctx, configs); (err == nil) != javaServerCrossplay(software) {

@@ -565,7 +565,6 @@ func TestSetupReviewKeepsCompatibleRecommendedBedrockEnabled(t *testing.T) {
 	for _, want := range []string{
 		"<dt>Maximum players</dt><dd>20</dd>",
 		"<dt>Bedrock cross-play</dt><dd>Enabled, port 19132</dd>",
-		"<dt>Timezone</dt><dd>America/Toronto</dd>",
 		"<dt>Minecraft version</dt><dd>1.21.8</dd>",
 		"<dt>Version policy</dt><dd>Recommended</dd>",
 	} {

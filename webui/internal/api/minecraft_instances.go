@@ -16,6 +16,9 @@ type InstanceRuntimeSettings struct {
 	JavaPort         int    `json:"java_port"`
 	BedrockEnabled   bool   `json:"bedrock_enabled"`
 	BedrockPort      int    `json:"bedrock_port"`
+	BedrockTCPPort   int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart  int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd    int    `json:"bedrock_udp_end,omitempty"`
 	JavaMemory       string `json:"java_memory"`
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
@@ -26,7 +29,7 @@ type InstanceRuntimeSettings struct {
 	ImageTag         string `json:"image_tag"`
 	StartOnBoot      bool   `json:"start_on_boot"`
 	EULAAccepted     bool   `json:"eula_accepted"`
-	Timezone         string `json:"timezone"`
+	Timezone         string `json:"timezone,omitempty"`
 	GameMode         string `json:"game_mode"`
 	Difficulty       string `json:"difficulty"`
 	MaxPlayers       int    `json:"max_players"`

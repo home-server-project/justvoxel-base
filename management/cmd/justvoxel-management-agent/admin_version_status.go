@@ -6,10 +6,15 @@ import (
 	"net/http"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"time"
 )
 
 type adminVersionStatus struct {
+	BedrockTCPPort            int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart           int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd             int    `json:"bedrock_udp_end,omitempty"`
+	LoaderVersion             string `json:"loader_version,omitempty"`
 	InstanceID                string `json:"instance_id,omitempty"`
 	ServerType                string `json:"server_type"`
 	ServerSupported           bool   `json:"server_supported"`
@@ -111,6 +116,19 @@ func (s *server) adminSetupVersionPreview(w http.ResponseWriter, r *http.Request
 	if err := json.Unmarshal(output, &out); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Version information is unavailable")
 		return
+	}
+	if serverType == "bedrock" && out.SelectedCandidate != "" {
+		players, err := strconv.Atoi(r.URL.Query().Get("max_players"))
+		if err != nil || players < 1 || players > 1000 {
+			writeError(w, 400, "Bedrock maximum players must be between 1 and 1000")
+			return
+		}
+		m := adminSetupPlanMinecraft{}
+		if err = instanceRuntimes.planNativeBedrock(ctx, &m, players); err != nil {
+			writeError(w, 409, "Bedrock connection ports could not be allocated")
+			return
+		}
+		out.BedrockTCPPort, out.BedrockUDPStart, out.BedrockUDPEnd = m.BedrockTCPPort, m.BedrockUDPStart, m.BedrockUDPEnd
 	}
 	writeJSON(w, http.StatusOK, out)
 }

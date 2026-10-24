@@ -58,6 +58,40 @@ if (( $# != 3 )); then
         installed="$(grep -Eo 'Starting minecraft server version [0-9A-Za-z._-]+' "${latest_log}" 2>/dev/null | tail -n1 | awk '{print $5}' || true)"
     fi
 fi
+if (( $# == 3 )) && [[ ${target_type} == bedrock ]]; then
+    candidate="$(resolve_bedrock_release || true)"
+    [[ $1 != pinned || $2 == "${candidate}" ]] || candidate=''
+    [[ $1 == recommended || $1 == pinned ]] || candidate=''
+    jq -n --arg candidate "${candidate}" '{server_type:"bedrock",selected_candidate:$candidate,candidate_channel:"RELEASE",image_tag:"stable",server_supported:($candidate != ""),crossplay_enabled:false,managed_crossplay_available:false}'
+    exit 0
+fi
+# New Java types have setup-time exact resolution, never a moving update policy.
+if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${target_type} != vanilla ]]; then
+    resolved="$(resolve_setup_java_runtime "${target_type}" "$1" "$2" || true)"
+    [[ -n ${resolved} ]] || resolved='{}'
+    candidate="$(jq -r '.game // empty' <<< "${resolved}")"
+    loader="$(jq -r '.loader // empty' <<< "${resolved}")"
+    image="$(jq -r '.image // empty' <<< "${resolved}")"
+    compatible=false
+    available=false
+    reason=''
+    if [[ -n ${candidate} ]]; then
+        if [[ ${target_type} == spigot ]]; then
+            available=true
+            geyser="$(resolve_geyser_supported_java_version || true)"
+            if [[ -n ${geyser} ]] && server_crossplay_version_compatible "${candidate}" "${geyser}"; then compatible=true; fi
+        elif [[ ${target_type} == fabric || ${target_type} == neoforge ]]; then
+            if jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${loader}"; then
+                available=true
+                compatible=true
+            else reason='Managed cross-play compatibility could not be proven for this exact Minecraft and loader version. Java setup is available.'; fi
+        fi
+    else reason='An exact stable Minecraft release and compatible runtime could not be verified. Try again or choose a supported Specific version.'; fi
+    jq -n --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" \
+        --argjson compatible "${compatible}" --argjson available "${available}" --argjson enabled "$([[ $3 == yes ]] && printf true || printf false)" \
+        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:"RELEASE",loader_version:$loader,image_tag:$image,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled}'
+    exit 0
+fi
 available="$(resolve_latest_server_version || true)"
 available_channel=''
 [[ -z ${available} ]] || available_channel="$(server_version_channel "${available}" || true)"
