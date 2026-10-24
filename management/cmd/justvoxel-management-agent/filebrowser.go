@@ -10,6 +10,7 @@ import (
 
 const fileBrowserUnit = "justvoxel-filebrowser.service"
 const fileBrowserURL = "http://127.0.0.1:61209"
+const fileBrowserHealthURL = fileBrowserURL + "/files/health"
 
 type fileBrowserStatus struct {
 	Availability string `json:"availability"`
@@ -19,7 +20,7 @@ type fileBrowserStatus struct {
 
 var fileBrowserCommand = instanceRuntimeCommand
 var fileBrowserHealth = func(ctx context.Context) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileBrowserURL+"/health", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileBrowserHealthURL, nil)
 	if err != nil {
 		return false
 	}

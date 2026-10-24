@@ -23,9 +23,22 @@ test('Files uses shared workspace header controls in approved order', () => {
   assert.match(workspace, /system-monitor-header-button[^>]*data-files-settings-toggle[^>]*>Settings<\/button>/);
   assert.match(workspace, /workspace-header-refresh[^>]*data-files-refresh/);
   assert.match(workspace, /workspace-header-close[^>]*data-files-close[^>]*aria-label="Close Files"><svg[^>]*[\s\S]*?aria-hidden="true"/);
-  assert.equal((workspace.match(/type="radio" name="filebrowser-availability"/g)||[]).length,2);
-  assert.equal((workspace.match(/data-files-mode checked/g)||[]).length,1);
-  assert.match(workspace,/class="date-time-switch"/);
+  assert.doesNotMatch(workspace,/system-monitor-profile|date-time-automatic|date-time-switch|data-files-mode|data-files-settings-dialog/);
+  assert.match(workspace,/data-files-frame/);
+  assert.equal((header.match(/data-files-csrf/g)||[]).length,1);
+});
+test('File Browser settings is a separate compact dialog with one ordered availability enum', () => {
+  const settings = header.match(/<dialog class="system-action-dialog"[^>]*data-files-settings-dialog[\s\S]*?<\/dialog>/)[0];
+  assert.match(settings,/class="system-action-dialog-content"/);
+  assert.doesNotMatch(settings,/data-workspace-window|<dialog[\s\S]*<dialog|system-monitor-profile|date-time-automatic|date-time-switch/);
+  for (const text of ['Files','File Browser settings','Availability','On demand','Starts when Files is opened and stops when Files is closed.','Always available','Starts with JustVoxel and remains available in the background.','Close']) assert.ok(settings.includes(text));
+  assert.deepEqual([...settings.matchAll(/type="radio" name="([^"]+)" value="([^"]+)"/g)].map(m=>[m[1],m[2]]),[['filebrowser-availability','on-demand'],['filebrowser-availability','always']]);
+  assert.equal((header.match(/data-files-mode\b/g)||[]).length,2);
+  assert.match(settings,/value="on-demand" data-files-mode checked/);
+  assert.equal((settings.match(/<button\b/g)||[]).length,1);
+  assert.match(settings,/class="action-row"[\s\S]*class="secondary"[^>]*data-files-settings-dismiss>Close/);
+  // The modal follows the complete workspace, rather than nesting in it.
+  assert.match(header, /data-workspace-window="files"(?:(?!<\/dialog>)[\s\S])*<\/dialog>\s*<dialog[^>]*data-files-settings-dialog/);
 });
 test('one persisted enum defaults to on-demand; lifecycle preserves open workspace', () => {
   const store = read('management/cmd/justvoxel-management-agent/webui_store.go');
@@ -86,35 +99,40 @@ test('supported proxy auth disables second login and internal settings', () => {
 });
 
 class Element {
-  constructor() { this.events={}; this.hidden=false; this.checked=false; this.value=''; this.textContent=''; }
+  constructor() { this.events={}; this.hidden=false; this.checked=false; this.value=''; this.textContent=''; this.srcWrites=0; this.srcRemovals=0; this.open=false; }
+  set src(value) { this.frameSrc=value; this.srcWrites++; }
+  get src() { return this.frameSrc; }
+  showModal() { this.open=true; }
+  close() { this.open=false; }
   addEventListener(type,fn) { (this.events[type] ||= []).push(fn); }
   setAttribute(name,value) { this[name]=value; }
-  removeAttribute(name) { delete this[name]; }
+  removeAttribute(name) { if(name==='src'){this.frameSrc=undefined;this.srcRemovals++;}else delete this[name]; }
   dispatchEvent(event) { return Promise.all((this.events[event.type]||[]).map(fn=>fn(event))); }
   click() { return this.dispatchEvent({type:'click'}); }
 }
-function browser({availability='on-demand', ready=true, failed=false}={}) {
-  const selectors=['frame','state','retry','settings','settings-toggle','settings-status','csrf','close','refresh'];
+function browser({availability='on-demand', ready=true, failed=false, failedAvailability=false}={}) {
+  const selectors=['frame','state','retry','settings-dialog','settings-toggle','settings-dismiss','settings-status','csrf','close','refresh'];
   const elements=Object.fromEntries(selectors.map(key=>[key,new Element()]));
-  elements.settings.hidden=true;elements.csrf.value='csrf';
-  const modes=['always','on-demand'].map(value=>Object.assign(new Element(),{value,checked:value==='on-demand'}));
+  elements.csrf.value='csrf';
+  const modes=['on-demand','always'].map(value=>Object.assign(new Element(),{value,checked:value==='on-demand'}));
   const dialog=new Element();dialog.open=false;
   dialog.querySelector=selector=>elements[selector.match(/data-files-(.+)\]/)[1]];
-  dialog.querySelectorAll=()=>modes;
+  elements['settings-dialog'].querySelector=selector=>elements[selector.match(/data-files-(.+)\]/)[1]];
+  elements['settings-dialog'].querySelectorAll=()=>modes;
   const launcher=new Element();const calls=[];let callbacks;
   const context={URLSearchParams, Date, Event:class{constructor(type){this.type=type;}},
     setTimeout:fn=>{fn();return 0;},
-    document:{querySelector:selector=>selector==='[data-files-dialog]'?dialog:launcher,body:{classList:{contains:role=>role==='primary-administrator'}}},
+    document:{querySelector:selector=>selector==='[data-files-dialog]'?dialog:selector==='[data-files-settings-dialog]'?elements['settings-dialog']:launcher,body:{classList:{contains:role=>role==='primary-administrator'}}},
     controlCenter:{open:true},readWorkspaceWindowState:()=>({open:false}),
     setupWorkspaceWindow:(_,options)=>{callbacks=options;return {open(){dialog.open=true;options.onOpen();},close(){dialog.open=false;options.onClose();}};},
     fetch:async (url, options)=>{
       calls.push({url,options});
       if(url==='/api/files/availability')availability=options.body.get('availability');
-      return {ok:!failed,json:async()=>url==='/api/files'?{availability,ready,state:ready?'active':'activating'}:{ok:true}};
+      return {ok:!failed && !(failedAvailability && url==='/api/files/availability'),json:async()=>url==='/api/files'?{availability,ready,state:ready?'active':'activating'}:{ok:true}};
     },
   };
   vm.runInNewContext(filesJS,context);
-  return {elements,modes,dialog,launcher,calls,setReady(value){ready=value;},setFailed(value){failed=value;},async flush(){for(let i=0;i<40;i++)await Promise.resolve();}};
+  return {elements,modes,dialog,launcher,calls,setReady(value){ready=value;},setFailed(value){failed=value;},setAvailability(value){availability=value;},setFailedAvailability(value){failedAvailability=value;},async flush(){for(let i=0;i<40;i++)await Promise.resolve();}};
 }
 test('opening waits for health, refresh reloads iframe without restarting, X requests managed stop',async()=>{
   const b=browser();await b.launcher.click();await b.flush();
@@ -129,12 +147,54 @@ test('opening waits for health, refresh reloads iframe without restarting, X req
 test('settings select one enum and save one authoritative value',async()=>{
   const b=browser();await b.launcher.click();await b.flush();
   await b.elements['settings-toggle'].click();await b.flush();
-  assert.equal(b.elements.settings.hidden,false);
-  await b.modes[0].dispatchEvent({type:'change'});await b.flush();
-  assert.deepEqual(b.modes.map(m=>m.checked),[true,false]);
+  assert.equal(b.elements['settings-dialog'].open,true);
+  const saving=b.modes[1].dispatchEvent({type:'change'});
+  assert.equal(b.elements['settings-status'].textContent,'Saving…');
+  assert.ok(b.modes.every(m=>m.disabled));
+  await saving;await b.flush();
+  assert.deepEqual(b.modes.map(m=>m.checked),[false,true]);
+  assert.equal(b.elements['settings-status'].textContent,'Saved.');
+  assert.ok(b.modes.every(m=>!m.disabled));
   const saved=b.calls.find(c=>c.url==='/api/files/availability');
   assert.equal(saved.options.body.get('availability'),'always');
   assert.equal(saved.options.body.get('csrf'),'csrf');
+  assert.equal(saved.options.method,'POST');
+});
+test('opening settings rereads authoritative mode and closing only dismisses the modal',async()=>{
+  const b=browser();await b.launcher.click();await b.flush();
+  const frame=b.elements.frame;
+  const writes=frame.srcWrites,removals=frame.srcRemovals;
+  const actions=b.calls.filter(c=>c.options.method==='POST').length;
+  for(const mode of ['always','on-demand']){
+    b.setAvailability(mode);
+    b.elements['settings-status'].textContent='Saved.';
+    const reads=b.calls.filter(c=>c.url==='/api/files').length;
+    await b.elements['settings-toggle'].click();await b.flush();
+    assert.equal(b.elements['settings-dialog'].open,true);
+    assert.equal(b.elements['settings-status'].textContent,'');
+    assert.equal(b.calls.filter(c=>c.url==='/api/files').length,reads+1);
+    assert.deepEqual(b.modes.map(m=>m.checked),[mode==='on-demand',mode==='always']);
+    await b.elements['settings-dismiss'].click();await b.flush();
+    assert.equal(b.elements['settings-dialog'].open,false);
+    assert.equal(b.dialog.open,true);
+    assert.equal(frame.src,'/files/');assert.equal(frame.hidden,false);
+    assert.equal(frame.srcWrites,writes);assert.equal(frame.srcRemovals,removals);
+    assert.equal(b.calls.filter(c=>c.options.method==='POST').length,actions);
+  }
+});
+test('availability failure rereads persisted mode and the selected radio can retry',async()=>{
+  const b=browser({failedAvailability:true});await b.launcher.click();await b.flush();
+  await b.elements['settings-toggle'].click();await b.flush();
+  await b.modes[1].dispatchEvent({type:'change'});await b.flush();
+  assert.equal(b.calls.at(-1).url,'/api/files');
+  assert.deepEqual(b.modes.map(m=>m.checked),[false,true]);
+  assert.equal(b.elements['settings-status'].textContent,'Availability could not be applied. Select the mode again to retry.');
+  assert.ok(b.modes.every(m=>!m.disabled));
+  b.setFailedAvailability(false);await b.modes[1].click();await b.flush();
+  assert.equal(b.calls.filter(c=>c.url==='/api/files/availability').length,2);
+  assert.equal(b.elements['settings-status'].textContent,'Saved.');
+  assert.equal(b.elements.frame.src,'/files/');
+  assert.equal(b.dialog.open,true);
 });
 test('starting never embeds the browser until health succeeds',async()=>{
   const b=browser({ready:false});await b.launcher.click();

@@ -7592,10 +7592,10 @@ if (filesDialog) {
   const frame = filesDialog.querySelector("[data-files-frame]");
   const state = filesDialog.querySelector("[data-files-state]");
   const retry = filesDialog.querySelector("[data-files-retry]");
-  const settings = filesDialog.querySelector("[data-files-settings]");
+  const settings = document.querySelector("[data-files-settings-dialog]");
   const settingsToggle = filesDialog.querySelector("[data-files-settings-toggle]");
-  const settingsStatus = filesDialog.querySelector("[data-files-settings-status]");
-  const modes = [...filesDialog.querySelectorAll("[data-files-mode]")];
+  const settingsStatus = settings.querySelector("[data-files-settings-status]");
+  const modes = [...settings.querySelectorAll("[data-files-mode]")];
   let mode = "on-demand";
   let generation = 0;
   let pending = Promise.resolve();
@@ -7678,13 +7678,16 @@ if (filesDialog) {
     else void openFiles();
   });
   retry.addEventListener("click", () => void openFiles());
+  settings.querySelector("[data-files-settings-dismiss]").addEventListener("click", () => settings.close());
   settingsToggle.addEventListener("click", async () => {
-    settings.hidden = !settings.hidden;
-    settingsToggle.setAttribute("aria-expanded", String(!settings.hidden));
-    if (!settings.hidden) {
-      try { selectMode((await request()).availability); }
-      catch (error) { settingsStatus.textContent = error.message; }
-    }
+    settingsStatus.textContent = "";
+    modes.forEach(control => { control.disabled = true; });
+    settings.showModal();
+    try {
+      await pending;
+      selectMode((await request()).availability);
+    } catch (error) { settingsStatus.textContent = error.message; }
+    finally { modes.forEach(control => { control.disabled = false; }); }
   });
   modes.forEach(input => input.addEventListener("change", async () => {
     const previous = mode;

@@ -365,26 +365,31 @@
       <div class="storage-workspace-header" data-workspace-drag-handle>
         <div><p class="eyebrow">JustVoxel</p><h2 id="files-workspace-title">Files</h2></div>
         <div class="storage-workspace-header-actions">
-          <button class="system-monitor-header-button system-monitor-settings-button" type="button" data-files-settings-toggle aria-expanded="false">Settings</button>
+          <button class="system-monitor-header-button system-monitor-settings-button" type="button" data-files-settings-toggle aria-haspopup="dialog">Settings</button>
           <button class="system-monitor-header-button workspace-header-refresh" type="button" data-files-refresh aria-label="Refresh Files" title="Refresh Files">Refresh</button>
           <button class="system-monitor-header-button workspace-header-close" type="button" data-files-close aria-label="Close Files"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
         </div>
       </div>
-      <section class="system-monitor-profile" data-files-settings hidden aria-label="File Browser settings">
-        <strong>File Browser</strong>
-        <p>Availability</p>
-        <div role="radiogroup" aria-label="File Browser availability">
-          <label class="date-time-automatic"><span>Always available</span><input class="date-time-switch" type="radio" name="filebrowser-availability" value="always" data-files-mode></label>
-          <label class="date-time-automatic"><span>On demand</span><input class="date-time-switch" type="radio" name="filebrowser-availability" value="on-demand" data-files-mode checked></label>
-        </div>
-        <input type="hidden" data-files-csrf value="{{.CSRF}}">
-        <p class="system-monitor-profile-status" data-files-settings-status role="status"></p>
-      </section>
+      <input type="hidden" data-files-csrf value="{{.CSRF}}">
       <div class="files-workspace-body">
         <p class="storage-workspace-state" data-files-state role="status"></p>
         <button class="secondary" type="button" data-files-retry hidden>Retry</button>
         <iframe class="files-workspace-frame" data-files-frame title="File Browser" hidden></iframe>
       </div>
+    </div>
+  </dialog>
+
+  <dialog class="system-action-dialog" data-files-settings-dialog aria-labelledby="files-settings-title">
+    <div class="system-action-dialog-content">
+      <p class="eyebrow">Files</p>
+      <h2 id="files-settings-title">File Browser settings</h2>
+      <p id="files-availability-title">Availability</p>
+      <div class="files-settings-choices" role="radiogroup" aria-labelledby="files-availability-title">
+        <label><input type="radio" name="filebrowser-availability" value="on-demand" data-files-mode checked><span><strong>On demand</strong><small class="muted">Starts when Files is opened and stops when Files is closed.</small></span></label>
+        <label><input type="radio" name="filebrowser-availability" value="always" data-files-mode><span><strong>Always available</strong><small class="muted">Starts with JustVoxel and remains available in the background.</small></span></label>
+      </div>
+      <p data-files-settings-status role="status"></p>
+      <div class="action-row"><button class="secondary" type="button" data-files-settings-dismiss>Close</button></div>
     </div>
   </dialog>
 

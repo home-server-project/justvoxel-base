@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,45 @@ import (
 	"testing"
 	"time"
 )
+
+type fileBrowserHealthTransport func(*http.Request) (*http.Response, error)
+
+func (transport fileBrowserHealthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return transport(req)
+}
+
+func TestFileBrowserHealthUsesBaseURLAndRejectsRedirects(t *testing.T) {
+	oldTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+	for _, status := range []int{http.StatusOK, http.StatusMovedPermanently, http.StatusNoContent, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var paths []string
+			http.DefaultTransport = fileBrowserHealthTransport(func(req *http.Request) (*http.Response, error) {
+				paths = append(paths, req.URL.RequestURI())
+				code := status
+				// Quantum redirects the old root probe instead of reporting health.
+				if req.URL.Path == "/health" {
+					code = http.StatusMovedPermanently
+				}
+				if req.URL.String() != "http://127.0.0.1:61209/files/health" || req.Method != http.MethodGet {
+					t.Errorf("unexpected health request: %s %s", req.Method, req.URL)
+				}
+				return &http.Response{
+					StatusCode: code,
+					Header:     http.Header{"Location": []string{"/files/"}},
+					Body:       io.NopCloser(strings.NewReader(`{"message":"ok"}`)),
+					Request:    req,
+				}, nil
+			})
+			if ready := fileBrowserHealth(context.Background()); ready != (status == http.StatusOK) {
+				t.Fatalf("health for HTTP %d = %v", status, ready)
+			}
+			if !reflect.DeepEqual(paths, []string{"/files/health"}) {
+				t.Fatalf("health must directly probe /files/health without following redirects: %v", paths)
+			}
+		})
+	}
+}
 
 func TestFileBrowserAvailabilityAndLifecycle(t *testing.T) {
 	s, store := systemMonitorProfileTestServer(t, roleAdministrator)

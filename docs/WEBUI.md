@@ -216,7 +216,7 @@ The WebUI keeps session expiration, login throttling, logout, CSRF protection, t
 
 Only the primary `voxel` account with the `administrator` role can open **Control Center → Storage & Data → Files** to manage Minecraft server data and available configured backups. FileBrowser is embedded at `/files/` through the authenticated JustVoxel proxy, with no second login or FileBrowser administration screen. Sources are private, exclude symlink traversal, and permit viewing, downloading, creating, modifying, and deleting files only within those data roots.
 
-**Settings → File Browser → Availability** selects one mode. **On demand** is the fresh-install default: opening Files starts FileBrowser, waits for `/health`, and offers Retry if startup fails; closing the window stops it. **Always available** enables boot startup and starts it immediately; closing Files leaves it running. Switching to On demand leaves an open Files window running until it closes. Refresh reloads the embedded browser without restarting the service.
+**Settings → File Browser → Availability** selects one mode. **On demand** is the fresh-install default: opening Files starts FileBrowser, waits for `/files/health`, and offers Retry if startup fails; closing the window stops it. **Always available** enables boot startup and starts it immediately; closing Files leaves it running. Switching to On demand leaves an open Files window running until it closes. Refresh reloads the embedded browser without restarting the service.
 
 
 ## Terminal

@@ -1710,10 +1710,14 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .minecraft-workspace-tabs a{display:inline-flex;align-items:center;box-sizing:border-box;text-decoration:none}
 .minecraft-server-arrange-toolbar [hidden]{display:none!important}
 
-/* Files reuses shared window/header/toggle geometry; only its embed needs sizing. */
+/* Files reuses shared window/header geometry; only its embed needs sizing. */
 [data-files-dialog] .files-workspace-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
 [data-files-dialog] .files-workspace-frame{flex:1;min-height:0;width:100%;height:100%;border:0}
 [data-files-dialog] [hidden]{display:none}
+[data-files-settings-dialog] .files-settings-choices{display:grid;gap:1rem}
+[data-files-settings-dialog] .files-settings-choices label{display:flex;align-items:flex-start;gap:.65rem;margin:0;color:inherit;cursor:pointer}
+[data-files-settings-dialog] input[type=radio]{width:auto;flex:none;margin:.25rem 0 0;padding:0}
+[data-files-settings-dialog] .files-settings-choices span{display:grid;gap:.2rem;min-width:0}
 
 /* Primary administrator visibility and the approved embedded Terminal tab. */
 body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{display:none!important}
