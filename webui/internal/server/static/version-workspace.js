@@ -700,10 +700,12 @@ if (versionLauncher && versionDialog) {
     content.replaceChildren();
     if (versionDialog.open) void render();
   });
-  const windowControl = setupWorkspaceWindow(versionDialog, { onOpen: () => { globalThis.justVoxelServerSelection(versionDialog.querySelector("[data-server-selector-slot]")).catch(error => { state.textContent = error.message; }); return render(); } });
+  const refreshWorkspace = () => globalThis.justVoxelServerSelection(versionDialog.querySelector("[data-server-selector-slot]"), true)
+    .then(() => render()).catch(error => { state.textContent = error.message; });
+  const windowControl = setupWorkspaceWindow(versionDialog, { onOpen: refreshWorkspace });
   versionLauncher.addEventListener("click", () => { document.querySelector("[data-control-center]")?.removeAttribute("open"); windowControl?.open(); });
   versionDialog.querySelector("[data-version-close]").addEventListener("click", () => windowControl?.close());
-  versionDialog.querySelector("[data-version-refresh]").addEventListener("click", () => render());
+  versionDialog.querySelector("[data-version-refresh]").addEventListener("click", refreshWorkspace);
   tabs.forEach((tab) => tab.addEventListener("click", () => { currentTab = tab.dataset.versionTab; tabs.forEach((item) => item.setAttribute("aria-selected", String(item === tab))); render(); }));
   if (readWorkspaceWindowState("version").open) windowControl?.open();
 }

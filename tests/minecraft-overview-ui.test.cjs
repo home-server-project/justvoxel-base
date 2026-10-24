@@ -336,6 +336,7 @@ for (const runtimeState of ['running', 'stopped', 'starting', 'stopping', 'unava
     const running = r.content.querySelector('[name="server_running"]');
     assert.equal(running.checked, runtimeState === 'running');
     assert.equal(running.disabled, !['running', 'stopped'].includes(runtimeState));
+    assert.equal(r.content.querySelector('[name="start_on_boot"]').disabled, !['running', 'stopped'].includes(runtimeState));
     running.checked = !running.checked;
     await running.events.change();
     const mutations = r.calls.filter(call => call.body);
@@ -418,4 +419,19 @@ test('Recent logs reuses the System Health inline baseline heading geometry', ()
   assert.match(css, /\.system-workspace-content \.panel>\.section-heading>div:first-child,\.minecraft-recent-logs-view>\.panel>\.section-heading>div:first-child\{display:flex;align-items:baseline;gap:\.4rem;flex-wrap:wrap\}/);
   assert.match(css, /\.minecraft-recent-logs-view>\.panel>\.section-heading\{margin-bottom:\.35rem\}/);
   assert.match(css, /\.minecraft-recent-logs-view>\.panel>\.section-heading :is\(h2,\.eyebrow\)\{margin:0\}/);
+});
+
+test('Running Overview Start on Boot stays enabled and uses reviewed apply without lifecycle changes', async () => {
+  const r = harness({runtimeState:'running', plan:{review:'running-boot-review', warnings:["Only Start on Boot changes. The server's current running or stopped state is preserved."]}});
+  await r.context.render(1);
+  const boot = r.content.querySelector('[name="start_on_boot"]');
+  assert.equal(boot.disabled, false);
+  boot.checked = false; await boot.events.change();
+  const mutations = r.calls.filter(call=>call.body);
+  assert.deepEqual(mutations.map(call=>call.url), ['plan','apply'].map(action=>`/api/minecraft/workspace/settings/${action}?server=jv-family1`));
+  assert.equal(mutations[1].body.get('review'),'running-boot-review');
+  assert.equal(r.refreshes,1);
+  assert.equal(r.reviews.length,0);
+  assert.doesNotMatch(r.state.textContent || '', /stays stopped|restart|restarted/i);
+  assert.equal(r.content.querySelector('[name="server_running"]').checked,true);
 });

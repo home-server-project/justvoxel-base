@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -162,8 +163,12 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 		writeMinecraftWorkspaceError(w, 409, "Settings changed since Review. Review this server again.")
 		return true
 	}
+	// Compare the entire definition so running changes cannot include other settings.
+	bootComparison := current
+	bootComparison.StartOnBoot = next.StartOnBoot
+	bootOnly := current.StartOnBoot != next.StartOnBoot && reflect.DeepEqual(bootComparison, next)
 	state, err := client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
-	if err != nil || state.ID != selected.ID || state.State != "stopped" {
+	if err != nil || state.ID != selected.ID || (state.State != "stopped" && !(bootOnly && state.State == "running")) {
 		writeMinecraftWorkspaceError(w, 409, "Stop this server normally before applying settings.")
 		return true
 	}
@@ -182,7 +187,11 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 			return true
 		}
 	}
-	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "applied": apply, "review": review, "changes": changes, "warnings": []string{"The server stays stopped. Start it normally when ready."}, "message": "Server settings saved."})
+	warnings := []string{"The server stays stopped. Start it normally when ready."}
+	if bootOnly {
+		warnings = []string{"Only Start on Boot changes. The server's current running or stopped state is preserved."}
+	}
+	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "applied": apply, "review": review, "changes": changes, "warnings": warnings, "message": "Server settings saved."})
 	return true
 }
 func selectedSettingsOverlay(r *http.Request, current api.InstanceRuntimeSettings) (api.InstanceRuntimeSettings, error) {

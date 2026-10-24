@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -436,5 +437,138 @@ func TestBackupNowRequiresSelectedImmutableInstance(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSelectedMinecraftRunningStartOnBootReviewedChanges(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			app, f := phase7App(t)
+			before := f.runtimes["jv-family1"]
+			before.StartOnBoot = !enabled
+			f.runtimes["jv-family1"] = before
+			f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running"}
+			body := "csrf=csrf-token&tab=overview&start_on_boot=" + fmt.Sprint(enabled)
+			plan := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", body)
+			var review struct {
+				Review string `json:"review"`
+			}
+			if plan.Code != 200 || json.Unmarshal(plan.Body.Bytes(), &review) != nil || review.Review == "" || len(f.writes) != 0 {
+				t.Fatal(plan.Code, plan.Body.String())
+			}
+			if strings.Contains(plan.Body.String(), "stays stopped") || !strings.Contains(plan.Body.String(), "state is preserved") {
+				t.Fatal("misleading boot-only review", plan.Body.String())
+			}
+			for _, token := range []string{"", "stale"} {
+				w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body+"&review="+token)
+				if w.Code != 409 || len(f.writes) != 0 {
+					t.Fatal("unreviewed apply accepted", w.Code)
+				}
+			}
+			w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body+"&review="+review.Review)
+			want := before
+			want.StartOnBoot = enabled
+			if w.Code != 200 || !reflect.DeepEqual(f.writes, []string{"jv-family1"}) || f.runtimes["jv-family1"] != want || len(f.actions) != 0 || f.states["jv-family1"].State != "running" {
+				t.Fatal(w.Code, w.Body.String(), f.writes, f.actions)
+			}
+			if strings.Contains(w.Body.String(), "stays stopped") {
+				t.Fatal(w.Body.String())
+			}
+		})
+	}
+}
+
+func TestSelectedMinecraftRunningOtherSettingsStayStoppedOnly(t *testing.T) {
+	for _, body := range []string{
+		"tab=memory&java_memory=5G&container_memory=7G",
+		"tab=gameplay&motd=Changed&max_players=12&game_mode=creative",
+		"tab=crossplay&java_port=25578&bedrock_port=19146&bedrock_enabled=on",
+	} {
+		t.Run(body, func(t *testing.T) {
+			app, f := phase7App(t)
+			body += "&csrf=csrf-token"
+			// Obtain a real review while stopped, then exercise both running gates.
+			w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", body)
+			var plan struct {
+				Review string `json:"review"`
+			}
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.Review == "" {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running"}
+			for _, action := range []string{"plan", "apply"} {
+				w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/"+action+"?server=jv-family1", body+"&review="+plan.Review)
+				if w.Code != 409 || !strings.Contains(w.Body.String(), "Stop this server normally") || len(f.writes) != 0 || len(f.actions) != 0 {
+					t.Fatal(w.Code, w.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestSelectedMinecraftStartOnBootUnsafeStatesAndCapacityRefusal(t *testing.T) {
+	for _, state := range []string{"starting", "stopping", "recovery_required", "invalid_configuration", "degraded", "unavailable"} {
+		t.Run(state, func(t *testing.T) {
+			app, f := phase7App(t)
+			f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: state}
+			w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", "csrf=csrf-token&tab=overview&start_on_boot=false")
+			if w.Code != 409 || len(f.writes) != 0 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		})
+	}
+	app, f := phase7App(t)
+	c := f.runtimes["jv-family1"]
+	c.StartOnBoot = false
+	f.runtimes["jv-family1"] = c
+	f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running"}
+	body := "csrf=csrf-token&tab=overview&start_on_boot=true"
+	w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", body)
+	var plan struct {
+		Review string `json:"review"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.Review == "" {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	f.putError = &api.ResponseError{StatusCode: 409, Message: "Boot-enabled configured memory exceeds capacity."}
+	w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body+"&review="+plan.Review)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "memory exceeds capacity") || !reflect.DeepEqual(f.writes, []string{"jv-family1"}) || f.runtimes["jv-family1"].StartOnBoot || len(f.actions) != 0 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestSelectedMinecraftStartOnBootStaleDefinitionReview(t *testing.T) {
+	app, f := phase7App(t)
+	f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running"}
+	body := "csrf=csrf-token&tab=overview&start_on_boot=false"
+	w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", body)
+	var plan struct {
+		Review string `json:"review"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.Review == "" {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	c := f.runtimes["jv-family1"]
+	c.MOTD = "Changed after review"
+	f.runtimes["jv-family1"] = c
+	w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body+"&review="+plan.Review)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "Settings changed since Review") || len(f.writes) != 0 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestSelectedMinecraftStoppedStartOnBootMessage(t *testing.T) {
+	app, _ := phase7App(t)
+	body := "csrf=csrf-token&tab=overview&start_on_boot=false"
+	w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", body)
+	var plan struct {
+		Review string `json:"review"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.Review == "" {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body+"&review="+plan.Review)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "state is preserved") || strings.Contains(w.Body.String(), "restarted") {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }

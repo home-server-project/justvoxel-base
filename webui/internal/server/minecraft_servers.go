@@ -84,7 +84,7 @@ func (s *minecraftServerSummary) setState(state string) {
 	case "running":
 		s.State = "Running"
 		s.StateClass = "success"
-		s.Running, s.CanSwitch = true, true
+		s.Running, s.CanSwitch, s.CanConfigureBoot = true, true, true
 		s.CanStop = true
 		s.CanRestart = true
 	case "stopped":

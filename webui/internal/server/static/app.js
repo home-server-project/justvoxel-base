@@ -116,8 +116,8 @@ globalThis.justVoxelSelectServer = (id, workspace, tabName) => {
   }
   return true;
 };
-globalThis.justVoxelServerSelection = async (slot) => {
-  if (!slot || slot.dataset.selectionLoading || slot.querySelector("[data-selected-server]")) return;
+globalThis.justVoxelServerSelection = async (slot, refresh = false) => {
+  if (!slot || slot.dataset.selectionLoading || (!refresh && slot.querySelector("[data-selected-server]"))) return;
   slot.dataset.selectionLoading = "true";
   const inventoryGeneration = slot.dataset.inventoryGeneration;
   try {
@@ -2422,7 +2422,9 @@ if (backupsOpen && backupsDialog) {
     if (backupsDialog.open) void loadBackups();
   });
 
-  const workspaceWindow = setupWorkspaceWindow(backupsDialog, { onOpen: () => loadBackups(currentURL) });
+  const refreshWorkspace = () => globalThis.justVoxelServerSelection(backupsDialog.querySelector("[data-server-selector-slot]"), true)
+    .then(() => loadBackups(currentURL)).catch(error => { if (state) state.textContent = error.message; });
+  const workspaceWindow = setupWorkspaceWindow(backupsDialog, { onOpen: refreshWorkspace });
 
   window.JustVoxelBackupsWorkspace = {
     reload: async (url = "/workspace/backups") => {
@@ -2436,7 +2438,7 @@ if (backupsOpen && backupsDialog) {
     workspaceWindow?.open();
   });
   closeButton?.addEventListener("click", () => workspaceWindow?.close());
-  refreshButton?.addEventListener("click", () => loadBackups(currentURL));
+  refreshButton?.addEventListener("click", refreshWorkspace);
 
   const restoreBackupsWhenRoleKnown = () => {
     if (!readWorkspaceWindowState("backups").open) return;
@@ -3037,8 +3039,9 @@ if (migrationOpen && migrationDialog) {
     if (migrationDialog.open) void loadMigration(currentURL, true);
   });
 
+  const refreshSelection = () => globalThis.justVoxelServerSelection(migrationDialog.querySelector("[data-server-selector-slot]"), true);
   const workspaceWindow = setupWorkspaceWindow(migrationDialog, {
-    onOpen: () => {
+    onOpen: () => refreshSelection().then(() => {
       const destination = new URLSearchParams(window.location.search);
       const migrationRequested = destination.get("workspace") === "migration";
       const requestedMigrationOperation = migrationRequested ? destination.get("operation") : "";
@@ -3050,7 +3053,7 @@ if (migrationOpen && migrationDialog) {
       }
       if (Object.hasOwn(tabURLs, requestedMigrationTab)) currentTab = requestedMigrationTab;
       return loadMigrationEntry();
-    },
+    }).catch(error => { if (state) state.textContent = error.message; }),
     onClose: () => {
       abortMigrationRequests();
       migrationSourceSMBPassword = "";
@@ -3063,7 +3066,7 @@ if (migrationOpen && migrationDialog) {
     workspaceWindow?.open();
   });
   closeButton?.addEventListener("click", () => workspaceWindow?.close());
-  refreshButton?.addEventListener("click", () => loadMigration(currentURL));
+  refreshButton?.addEventListener("click", () => refreshSelection().then(() => loadMigration(currentURL)).catch(error => { if (state) state.textContent = error.message; }));
   tabs.forEach((button) => {
     button.addEventListener("click", async () => {
       abortMigrationRequests();
@@ -4311,14 +4314,16 @@ if (minecraftOpen && minecraftDialog) {
     }
     if (minecraftDialog.open) void loadCurrentTab();
   });
-  const workspaceWindow = setupWorkspaceWindow(minecraftDialog, { onOpen: () => loadCurrentTab() });
+  const refreshWorkspace = () => globalThis.justVoxelServerSelection(minecraftDialog.querySelector("[data-server-selector-slot]"), true)
+    .then(() => loadCurrentTab()).catch(error => { if (state) state.textContent = error.message; });
+  const workspaceWindow = setupWorkspaceWindow(minecraftDialog, { onOpen: refreshWorkspace });
 
   minecraftOpen.addEventListener("click", () => {
     if (controlCenter) controlCenter.open = false;
     workspaceWindow?.open();
   });
   closeButton?.addEventListener("click", () => workspaceWindow?.close());
-  refreshButton?.addEventListener("click", () => loadCurrentTab());
+  refreshButton?.addEventListener("click", refreshWorkspace);
   tabs.forEach((button) => button.addEventListener("click", () => selectTab(button.dataset.minecraftTab)));
 
   if (readWorkspaceWindowState("minecraft").open) workspaceWindow?.open();
@@ -7645,7 +7650,9 @@ if (pluginsDialog && pluginsOpen) {
     results.replaceChildren();
     if (pluginsDialog.open) { load(); resumePluginInstall(); }
   });
-  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { refreshCurseForgeStatus(); resetCursors(); updateCapacity(false); load(); resumePluginInstall(); }, onClose: () => { dismissCurseForgeNotice(); curseForgeSwitch.checked = false; syncCurseForgeInfo(); clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); resetCursors(); closePanel(); } });
+  const refreshWorkspace = () => globalThis.justVoxelServerSelection(pluginsDialog.querySelector("[data-server-selector-slot]"), true)
+    .then(() => { refreshCurseForgeStatus(); resetCursors(); load(); }).catch(error => { if (state) state.textContent = error.message; });
+  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { updateCapacity(false); refreshWorkspace(); resumePluginInstall(); }, onClose: () => { dismissCurseForgeNotice(); curseForgeSwitch.checked = false; syncCurseForgeInfo(); clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); resetCursors(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const controlCenter = document.querySelector("[data-control-center]");
@@ -7653,7 +7660,7 @@ if (pluginsDialog && pluginsOpen) {
     workspaceWindow?.open();
   });
   pluginsDialog.querySelector("[data-plugins-close]").addEventListener("click", () => workspaceWindow?.close());
-  pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", () => { refreshCurseForgeStatus(); resetCursors(); load(); });
+  pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", refreshWorkspace);
   pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener("click", () => {
     clearTimeout(searchTimer);
     clearInventoryTimer();

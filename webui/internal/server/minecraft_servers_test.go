@@ -272,12 +272,23 @@ func TestMinecraftServerCardsUnavailableLifecycle(t *testing.T) {
 func TestMinecraftServerStatePresentation(t *testing.T) {
 	for state, want := range map[string]string{"running": "Running", "stopped": "Stopped", "starting": "Starting", "stopping": "Stopping", "configured": "Configured", "failed": "Failed", "recovery_required": "Recovery required", "invalid_configuration": "Configuration needs attention", "degraded": "Degraded", "unknown": "Status unavailable", "unavailable": "Status unavailable"} {
 		t.Run(state, func(t *testing.T) {
+			var summary minecraftServerSummary
+			summary.setState(state)
+			if summary.CanConfigureBoot != (state == "running" || state == "stopped") {
+				t.Fatal("incorrect boot control", state, summary.CanConfigureBoot)
+			}
 			app, f := newServerInventoryApp(t)
 			f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: state}
 			response := inventoryRequest(app, "GET", "/view/jv-family1", "")
 			body := response.Body.String()
 			if response.Code != 200 || !strings.Contains(body, "<strong>"+want+"</strong>") {
 				t.Fatalf("wrong state %s", body)
+			}
+			cards := inventoryRequest(app, "GET", "", "").Body.String()
+			card := regexp.MustCompile(`(?s)<article[^>]*data-server-id="jv-family1".*?</article>`).FindString(cards)
+			boot := regexp.MustCompile(`<input[^>]*data-server-boot[^>]*>`).FindString(card)
+			if boot == "" || strings.Contains(boot, " disabled") != (state != "running" && state != "stopped") {
+				t.Fatal("incorrect rendered boot control", state, boot)
 			}
 			if state != "stopped" && strings.Contains(body, ">Stopped<") {
 				t.Fatal("false stopped")

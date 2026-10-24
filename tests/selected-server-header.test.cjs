@@ -309,3 +309,94 @@ for (const workspace of ['backups', 'migration']) {
     assert.deepEqual(renders, ['clear', '<new-server-content>'], 'late old response must not replace the selected server');
   });
 }
+
+const oldServers = [{id:'jv-paper01', name:'Paper1'}, {id:'jv-spigot1', name:'Spigot'}];
+const newServers = [{id:'jv-paper01', name:'Paper1'}, {id:'jv-vanilla', name:'Vanilla'}];
+for (const selected of ['jv-paper01', 'jv-spigot1']) {
+  test(`explicit refresh replaces existing options and validates selected ${selected}`, async () => {
+    const servers = [...oldServers];
+    const p = page({servers}); await p.init();
+    p.change('minecraft', selected);
+    servers.splice(0, servers.length, ...newServers);
+    const before = p.requests.length;
+    await p.context.justVoxelServerSelection(p.slots.minecraft);
+    assert.equal(p.requests.length, before, 'normal initialization remains idempotent');
+    await p.context.justVoxelServerSelection(p.slots.minecraft, true);
+    assert.equal(p.requests.length, before + 1);
+    assert.equal(p.slots.minecraft.children.length, 1);
+    assert.deepEqual(p.select('minecraft').children.filter(o=>o.value).map(o=>o.textContent), ['Paper1','Vanilla']);
+    assert.equal(p.select('minecraft').children.find(o=>o.selected).value, selected === 'jv-paper01' ? selected : '');
+    assert.equal(p.saved('minecraft').selectedServer, selected === 'jv-paper01' ? selected : '');
+    assert.doesNotMatch(p.context.justVoxelSelectedURL('/api/minecraft/workspace/settings'), /jv-spigot1/);
+    p.change('minecraft', 'jv-vanilla');
+    assert.match(p.context.justVoxelSelectedURL('/api/minecraft/workspace/settings'), /server=jv-vanilla/);
+  });
+}
+test('refresh retains existing single-server auto-selection after deletion', async () => {
+  const servers = [...oldServers]; const p = page({servers}); await p.init();
+  p.change('minecraft', 'jv-spigot1'); servers.pop();
+  await p.context.justVoxelServerSelection(p.slots.minecraft, true);
+  assert.equal(p.select('minecraft').children.find(o=>o.selected).value, 'jv-paper01');
+  assert.equal(p.saved('minecraft').selectedServer, 'jv-paper01');
+});
+
+test('late inventory response cannot overwrite a newer inventory generation', async () => {
+  const p = page({servers:oldServers}); await p.init();
+  p.change('minecraft','jv-spigot1');
+  let finishOld;
+  p.context.fetch = () => new Promise(resolve => { finishOld = resolve; });
+  const old = p.context.justVoxelServerSelection(p.slots.minecraft, true);
+  // Existing inventory invalidation paths invalidate selection and slot tickets together.
+  p.context.justVoxelSelectionGeneration.minecraft++;
+  p.slots.minecraft.dataset.inventoryGeneration = 'new';
+  delete p.slots.minecraft.dataset.selectionLoading;
+  p.context.justVoxelSelectionReady = null;
+  p.context.fetch = async () => ({ok:true,json:async()=>({servers:newServers})});
+  await p.context.justVoxelServerSelection(p.slots.minecraft, true);
+  p.change('minecraft','jv-vanilla');
+  finishOld({ok:true,json:async()=>({servers:oldServers})}); await old;
+  assert.deepEqual(p.select('minecraft').children.filter(o=>o.value).map(o=>o.textContent), ['Paper1','Vanilla']);
+  assert.equal(p.saved('minecraft').selectedServer,'jv-vanilla');
+  assert.match(p.context.justVoxelSelectedURL('/api/minecraft/workspace/settings'), /server=jv-vanilla/);
+});
+
+for (const workspace of workspaces) {
+  for (const trigger of ['open', 'refresh']) {
+    test(`${workspace} ${trigger} refreshes shared inventory before normal content`, async () => {
+      const script = workspace === 'version' ? versionSource : source;
+      const dialogName = `${workspace}Dialog`;
+      const definitionName = workspace === 'migration' ? 'refreshSelection' : 'refreshWorkspace';
+      const anchor = script.indexOf(`  const ${definitionName} = () => globalThis.justVoxelServerSelection(${dialogName}`);
+      assert.ok(anchor >= 0, 'workspace uses shared selector refresh');
+      const setupEnd = workspace === 'migration' ? script.indexOf('\n  });', anchor) + 6 : script.indexOf('\n', script.indexOf('setupWorkspaceWindow(', anchor));
+      const refreshLine = script.split('\n').find(line => line.includes('addEventListener("click"') && (workspace === 'version' || workspace === 'plugins' ? line.includes(`[data-${workspace}-refresh]`) : line === script.slice(script.indexOf('  refreshButton?.addEventListener("click",', setupEnd)).split('\n')[0]));
+      assert.ok(refreshLine);
+      const calls = [], servers = [...oldServers];
+      const p = page({servers}); await p.init(); p.change(workspace, 'jv-spigot1');
+      servers.splice(0, servers.length, ...newServers);
+      let opened, clicked;
+      const button = {addEventListener: (_, callback) => { clicked = callback; }};
+      const dialog = {querySelector: selector => selector === '[data-server-selector-slot]' ? p.slots[workspace] : button};
+      const load = () => {
+        assert.doesNotMatch(p.context.justVoxelSelectedURL('/api/content', workspace), /jv-spigot1/);
+        assert.deepEqual(p.select(workspace).children.filter(o=>o.value).map(o=>o.textContent), ['Paper1','Vanilla']);
+        calls.push('content');
+      };
+      const ctx = vm.createContext({
+        URLSearchParams, window:{location:{search:''}}, state:{}, [dialogName]:dialog, refreshButton:button,
+        setupWorkspaceWindow: (_, options) => { opened = options.onOpen; },
+        justVoxelServerSelection: (slot, refresh) => { assert.equal(refresh,true); return p.context.justVoxelServerSelection(slot,refresh); },
+        currentURL:'/content',tabURLs:{}, currentTab:'export',
+        loadCurrentTab:load,loadBackups:load,loadMigration:load,loadMigrationEntry:load,render:load,load,
+        refreshCurseForgeStatus() {},resetCursors() {},updateCapacity() {},resumePluginInstall() {},
+      });
+      vm.runInContext(script.slice(anchor, setupEnd) + '\n' + refreshLine, ctx);
+      const count = p.requests.length;
+      await (trigger === 'open' ? opened() : clicked());
+      await new Promise(resolve=>setImmediate(resolve));
+      assert.equal(p.requests.length, count + 1);
+      assert.deepEqual(calls, ['content']);
+      assert.equal(p.saved(workspace).selectedServer, '');
+    });
+  }
+}

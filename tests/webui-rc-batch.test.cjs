@@ -77,7 +77,8 @@ test('Export Done clears operation navigation, selects Export, and reopening loa
   let windowOptions;
   const context = vm.createContext({
     URL, URLSearchParams, Object, justVoxelSelectedURL: selectedMigrationURL, root, currentTab: 'export', currentURL: '/workspace/migration/progress/old-operation',
-    migrationDialog: {}, migrationSourceSMBPassword: '', migrationExportSMBPassword: '', migrationSubmitController: null,
+    justVoxelServerSelection: async (_, refresh) => { assert.equal(refresh, true); },
+    migrationDialog: {querySelector: () => ({})}, migrationSourceSMBPassword: '', migrationExportSMBPassword: '', migrationSubmitController: null,
     tabURLs: { export: '/workspace/migration/export', import: '/workspace/migration/import', recovery: '/workspace/migration/recovery' },
     window: { location, history: { state: {}, replaceState(_, __, next) { const url = new URL(next, location.href); location.href = url.href; location.search = url.search; } } },
     setupWorkspaceWindow: (_, options) => { windowOptions = options; return { close: options.onClose }; },
@@ -87,7 +88,7 @@ test('Export Done clears operation navigation, selects Export, and reopening loa
   const update = app.slice(app.indexOf('  const updateMigrationLocation ='), app.indexOf('  const setMigrationBusy ='));
   const start = app.indexOf('    root.addEventListener("click", async (event) => {', app.indexOf('const renderMigrationMarkup ='));
   const click = app.slice(start, app.indexOf('    initializeMigrationRoot(root);', start));
-  const windowStart = app.indexOf('  const workspaceWindow = setupWorkspaceWindow(migrationDialog, {');
+  const windowStart = app.indexOf('  const refreshSelection = () => globalThis.justVoxelServerSelection(migrationDialog');
   const windowSource = app.slice(windowStart, app.indexOf('  migrationOpen.addEventListener', windowStart));
   vm.runInContext(update + windowSource + click, context);
   const link = { getAttribute: () => selectedMigrationURL('/?workspace=migration&tab=export') };

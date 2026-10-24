@@ -1056,9 +1056,11 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", () => { refreshCurseForgeStatus(); resetCursors(); load(); })`,
+		`const refreshWorkspace = () => globalThis.justVoxelServerSelection(pluginsDialog.querySelector("[data-server-selector-slot]"), true)
+    .then(() => { refreshCurseForgeStatus(); resetCursors(); load(); }).catch(error => { if (state) state.textContent = error.message; });`,
+		`pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", refreshWorkspace)`,
 		`pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener("click"`,
-		`load(); resumePluginInstall();`,
+		`setupWorkspaceWindow(pluginsDialog, { onOpen: () => { updateCapacity(false); refreshWorkspace(); resumePluginInstall(); }`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatal("inventory gate removed refresh, tabs or install resume", want)
@@ -2085,7 +2087,7 @@ func TestPluginsPageCursorInvalidationEvents(t *testing.T) {
 	script := pluginWorkspaceScript(t)
 	cursors := pluginScriptSection(t, script, "  const firstCursor =", "  const text =")
 	capacity := pluginScriptSection(t, script, "  const updateCapacity =", "  const capacityObserver =")
-	workspace := pluginScriptSection(t, script, "  const workspaceWindow = setupWorkspaceWindow(pluginsDialog,", "  // Role discovery")
+	workspace := pluginScriptSection(t, script, "  const refreshWorkspace = () => globalThis.justVoxelServerSelection(pluginsDialog", "  // Role discovery")
 	program := `
 const assert=require("node:assert/strict");
 const eventNode=()=>({events:{},addEventListener(event,fn){this.events[event]=fn}});
@@ -2095,9 +2097,11 @@ const controls=["compatible_only","release_only","modrinth","hangar"].map(name=>
 const form={...eventNode(),elements:{q:eventNode()},querySelectorAll:()=>controls};
 const previous=eventNode(),next=eventNode(),pluginsOpen=eventNode(),refresh=eventNode(),close=eventNode();
 const tabs=[{...eventNode(),dataset:{pluginsTab:"discover"},setAttribute:()=>{}},{...eventNode(),dataset:{pluginsTab:"installed"},setAttribute:()=>{}}];
-const pluginsDialog={open:true,querySelector:s=>s.includes("refresh")?refresh:close,querySelectorAll:()=>tabs};
+const selectorSlot={};let selectionRefreshes=0,curseForgeRefreshes=0;
+const pluginsDialog={open:true,querySelector:s=>s==="[data-server-selector-slot]"?selectorSlot:s.includes("refresh")?refresh:close,querySelectorAll:()=>tabs};
+globalThis.justVoxelServerSelection=(slot,refresh)=>{assert.equal(slot,selectorSlot);assert.equal(refresh,true);selectionRefreshes++;return Promise.resolve()};
 const state={};const document={body:{classList:{contains:()=>true}},querySelector:()=>null};
-const refreshCurseForgeStatus=()=>{},dismissCurseForgeNotice=()=>{},curseForgeSwitch={},syncCurseForgeInfo=()=>{};
+const refreshCurseForgeStatus=()=>curseForgeRefreshes++,dismissCurseForgeNotice=()=>{},curseForgeSwitch={},syncCurseForgeInfo=()=>{};
 const setupWorkspaceWindow=(dialog,callbacks)=>{options=callbacks;return {open:callbacks.onOpen,close:callbacks.onClose}};
 const clearTimeout=()=>{},setTimeout=(fn)=>{searchTimer=fn;return fn},clearInventoryTimer=()=>{},closePanel=()=>closes++,resumePluginInstall=()=>resumes++;
 ` + cursors + `
@@ -2108,19 +2112,22 @@ let discoverServerKey=null;
 const second={modrinth_offset:7,hangar_offset:4,hangar_first:true};
 const dirty=()=>{pageCursors=[firstCursor(),second];pageIndex=1;cursor=second;nextCursor=second;totalPages=85;pageLabel.textContent="Page 2 of 85";controller=new AbortController()};
 const clean=()=>{assert.equal(pageIndex,0);assert.deepEqual(cursor,firstCursor());assert.deepEqual(pageCursors,[firstCursor()]);assert.equal(nextCursor,null);assert.equal(pageLabel.textContent,"Page 1 of 1")};
+(async()=>{
 assert(acceptDiscoverContext({server_software:"Paper",minecraft_version:"1"}));
 dirty();assert(!acceptDiscoverContext({server_software:"Future",minecraft_version:"2"}));clean();
-dirty();refresh.events.click();clean();assert.equal(loads,1);
+dirty();const refreshing=refresh.events.click();assert.equal(selectionRefreshes,1);assert.equal(curseForgeRefreshes,0);assert.equal(loads,0);assert.equal(pageIndex,1);
+await refreshing;clean();assert.equal(curseForgeRefreshes,1);assert.equal(loads,1);
 for(const control of controls){dirty();const signal=controller.signal;control.events.change();clean();assert(signal.aborted)}
 dirty();const searchSignal=controller.signal;form.elements.q.events.input();clean();assert(searchSignal.aborted);searchTimer();
 dirty();let prevented=false;form.events.submit({preventDefault:()=>prevented=true});clean();assert(prevented);
 dirty();wantedCapacity=12;updateCapacity();clean();assert.equal(pageLimit,12);
 dirty();const closeSignal=controller.signal;options.onClose();clean();assert(closeSignal.aborted);assert.equal(closes,1);
-dirty();options.onOpen();clean();assert.equal(resumes,1);
+dirty();options.onOpen();assert.equal(resumes,1);await Promise.resolve();clean();assert.equal(selectionRefreshes,2);assert.equal(curseForgeRefreshes,2);
 dirty();tabs[1].events.click();clean();assert.equal(tab,"installed");tabs[0].events.click();clean();assert.equal(tab,"discover");
 // Normal Previous/Next still navigate the composite cursor history.
 nextCursor=second;next.events.click();assert.deepEqual(cursor,second);assert.equal(pageIndex,1);
 previous.events.click();assert.deepEqual(cursor,firstCursor());assert.equal(pageIndex,0);
+})().catch(error=>{console.error(error);process.exitCode=1});
 `
 	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("cursor invalidation: %v\n%s", err, out)
