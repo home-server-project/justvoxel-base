@@ -7502,3 +7502,137 @@ document.querySelectorAll("[data-selected-presentation]").forEach((form)=>{
  catch(error){if(status)status.textContent=error.message;button.disabled=input ? input.value!==form.dataset.deleteName : false;}
  });
 });
+
+// Files owns only its lifecycle; shared window close/drag/resize stays unchanged.
+const filesDialog = document.querySelector("[data-files-dialog]");
+if (filesDialog) {
+  const frame = filesDialog.querySelector("[data-files-frame]");
+  const state = filesDialog.querySelector("[data-files-state]");
+  const retry = filesDialog.querySelector("[data-files-retry]");
+  const settings = filesDialog.querySelector("[data-files-settings]");
+  const settingsToggle = filesDialog.querySelector("[data-files-settings-toggle]");
+  const settingsStatus = filesDialog.querySelector("[data-files-settings-status]");
+  const modes = [...filesDialog.querySelectorAll("[data-files-mode]")];
+  let mode = "on-demand";
+  let generation = 0;
+  let pending = Promise.resolve();
+  const request = async (action, availability) => {
+    const response = await fetch(action ? `/api/files/${action}` : "/api/files", {
+      method: action ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
+      ...(action ? { body: new URLSearchParams({ csrf: filesDialog.querySelector("[data-files-csrf]").value, availability: availability || "" }) } : {}),
+    });
+    if (!response.ok) throw new Error("File Browser is unavailable. Retry.");
+    return response.json();
+  };
+  // Serialize lifecycle and setting requests, including rapid close/reopen.
+  const mutate = (action, availability) => {
+    const result = pending.then(() => request(action, availability));
+    pending = result.catch(() => {});
+    return result;
+  };
+  const selectMode = value => {
+    mode = value;
+    modes.forEach(input => { input.checked = input.value === mode; });
+  };
+  const displayError = message => {
+    frame.hidden = true;
+    frame.removeAttribute("src");
+    state.textContent = message;
+    retry.hidden = false;
+  };
+  const openFiles = async () => {
+    const ticket = ++generation;
+    frame.hidden = true;
+    frame.removeAttribute("src");
+    retry.hidden = true;
+    state.textContent = "Starting File Browser…";
+    try {
+      await pending;
+      let status = await request();
+      if (ticket !== generation || !filesDialog.open) return;
+      selectMode(status.availability);
+      if (!status.ready) await mutate("start");
+      // Poll only during this explicit open, at a bounded two-second interval.
+      const deadline = Date.now() + 180000;
+      while (!status.ready) {
+        if (ticket !== generation || !filesDialog.open) return;
+        if (Date.now() >= deadline) throw new Error("File Browser could not start. Retry.");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        if (ticket !== generation || !filesDialog.open) return;
+        status = await request();
+        if (!status.ready && status.state === "failed") throw new Error("File Browser could not start. Retry.");
+      }
+      if (ticket !== generation || !filesDialog.open) return;
+      state.textContent = "";
+      frame.src = "/files/";
+      frame.hidden = false;
+    } catch (error) {
+      if (ticket === generation && filesDialog.open) displayError(error.message);
+    }
+  };
+  const workspace = setupWorkspaceWindow(filesDialog, {
+    onOpen: () => { void openFiles(); },
+    onClose: () => {
+      ++generation;
+      frame.hidden = true;
+      frame.removeAttribute("src");
+      // Agent rereads the authoritative mode. It stops only in on-demand mode,
+      // even if another Administrator changed availability in another tab.
+      void mutate("stop").catch(() => {
+        state.textContent = "File Browser could not stop. Open Files and close it to retry.";
+        settingsStatus.textContent = state.textContent;
+      });
+    },
+  });
+  document.querySelector("[data-files-open]")?.addEventListener("click", () => {
+    if (!document.body.classList.contains("role-administrator")) return;
+    if (controlCenter) controlCenter.open = false;
+    workspace.open();
+  });
+  filesDialog.querySelector("[data-files-close]").addEventListener("click", () => workspace.close());
+  filesDialog.querySelector("[data-files-refresh]").addEventListener("click", () => {
+    if (!frame.hidden) frame.src = "/files/";
+    else void openFiles();
+  });
+  retry.addEventListener("click", () => void openFiles());
+  settingsToggle.addEventListener("click", async () => {
+    settings.hidden = !settings.hidden;
+    settingsToggle.setAttribute("aria-expanded", String(!settings.hidden));
+    if (!settings.hidden) {
+      try { selectMode((await request()).availability); }
+      catch (error) { settingsStatus.textContent = error.message; }
+    }
+  });
+  modes.forEach(input => input.addEventListener("change", async () => {
+    const previous = mode;
+    selectMode(input.value);
+    modes.forEach(control => { control.disabled = true; });
+    settingsStatus.textContent = "Saving…";
+    try {
+      await mutate("availability", input.value);
+      settingsStatus.textContent = "Saved.";
+    } catch (error) {
+      // A systemd failure may follow a durable setting save. Read it back
+      // instead of inventing a second local authoritative preference.
+      try { selectMode((await request()).availability); }
+      catch { selectMode(previous); }
+      settingsStatus.textContent = "Availability could not be applied. Select the mode again to retry.";
+    } finally { modes.forEach(control => { control.disabled = false; }); }
+  }));
+  // A selected radio remains active; clicking it again safely reapplies a
+  // preference after an earlier service-control failure.
+  modes.forEach(input => input.addEventListener("click", () => {
+    if (input.checked && input.value === mode && settingsStatus.textContent.includes("could not be applied")) input.dispatchEvent(new Event("change"));
+  }));
+  const restoreFiles = () => {
+    if (readWorkspaceWindowState("files").open && document.body.classList.contains("role-administrator")) workspace.open();
+  };
+  if (document.body.classList.contains("role-pending")) {
+    const observer = new MutationObserver(() => {
+      if (document.body.classList.contains("role-pending")) return;
+      observer.disconnect();
+      restoreFiles();
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  } else restoreFiles();
+}

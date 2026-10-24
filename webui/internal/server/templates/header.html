@@ -90,6 +90,7 @@
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-migration-open title="Export, import and recover a JustVoxel server"><strong>Migration</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-files-open title="Manage Minecraft server files and backups"><strong>Files</strong></button>
           </div>
         </section>
       </nav>
@@ -349,6 +350,34 @@
           <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="sensors"><span>Sensors</span><div class="system-monitor-table" data-monitor-sensors></div></section>
           <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="alerts"><span>Alerts</span><div class="system-monitor-table" data-monitor-alerts></div></section>
         </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window storage-workspace-dialog" data-workspace-window="files" data-files-dialog aria-labelledby="files-workspace-title">
+    <div class="storage-workspace-shell">
+      <div class="storage-workspace-header" data-workspace-drag-handle>
+        <div><p class="eyebrow">JustVoxel</p><h2 id="files-workspace-title">Files</h2></div>
+        <div class="storage-workspace-header-actions">
+          <button class="system-monitor-header-button system-monitor-settings-button" type="button" data-files-settings-toggle aria-expanded="false">Settings</button>
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-files-refresh aria-label="Refresh Files" title="Refresh Files">Refresh</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-files-close aria-label="Close Files"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <section class="system-monitor-profile" data-files-settings hidden aria-label="File Browser settings">
+        <strong>File Browser</strong>
+        <p>Availability</p>
+        <div role="radiogroup" aria-label="File Browser availability">
+          <label class="date-time-automatic"><span>Always available</span><input class="date-time-switch" type="radio" name="filebrowser-availability" value="always" data-files-mode></label>
+          <label class="date-time-automatic"><span>On demand</span><input class="date-time-switch" type="radio" name="filebrowser-availability" value="on-demand" data-files-mode checked></label>
+        </div>
+        <input type="hidden" data-files-csrf value="{{.CSRF}}">
+        <p class="system-monitor-profile-status" data-files-settings-status role="status"></p>
+      </section>
+      <div class="files-workspace-body">
+        <p class="storage-workspace-state" data-files-state role="status"></p>
+        <button class="secondary" type="button" data-files-retry hidden>Retry</button>
+        <iframe class="files-workspace-frame" data-files-frame title="File Browser" hidden></iframe>
       </div>
     </div>
   </dialog>

@@ -61,6 +61,7 @@ type server struct {
 	operations *operationStore
 
 	systemUpdateMu sync.Mutex
+	fileBrowserMu  sync.Mutex
 
 	networkMu           sync.Mutex
 	networkTransactions map[string]networkCheckpointTransaction
@@ -82,6 +83,13 @@ func main() {
 	}
 
 	switch args[0] {
+	case "filebrowser-run":
+		if len(args) != 1 {
+			fatal("usage: justvoxel-management-agent filebrowser-run")
+		}
+		if err := runFileBrowserContainer(); err != nil {
+			fatal("File Browser could not start: %v", err)
+		}
 	case "bootstrap":
 		password, created, err := bootstrap()
 		if err != nil {
@@ -244,6 +252,7 @@ func serve(socket string) error {
 	registerAdminSystemUpdateRoutes(mux, s)
 	registerAdminSystemUpdateRebootRoutes(mux, s)
 	registerSystemMonitorProfileRoutes(mux, s)
+	registerFileBrowserRoutes(mux, s)
 	registerUPSRoutes(mux, s)
 	registerNetworkRoutes(mux, s)
 

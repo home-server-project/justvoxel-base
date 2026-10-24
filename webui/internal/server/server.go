@@ -153,6 +153,7 @@ func (a *App) Handler() http.Handler {
 	a.registerAdminSystemActionPages(mux)
 	a.registerAdminSystemUpdatePages(mux)
 	a.registerSystemMonitorRoutes(mux)
+	a.registerFileBrowserRoutes(mux)
 	a.registerUPSRoutes(mux)
 	a.registerNetworkWorkspaceRoutes(mux)
 	a.registerMinecraftWorkspaceRoutes(mux)
@@ -167,7 +168,14 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /minecraft/stop", a.minecraftAction("stop"))
 	mux.HandleFunc("POST /minecraft/restart", a.minecraftAction("restart"))
 	mux.HandleFunc("GET /", a.dashboard)
-	return securityHeaders(mux)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/files/") {
+			a.fileBrowserProxy(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+	return securityHeaders(handler)
 }
 
 func (a *App) ListenAndServe(addr string) error {

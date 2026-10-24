@@ -258,3 +258,16 @@ reuse the instance registry/runtime implementation inside the storage transactio
 operation using private immutable participant evidence. Legacy identity-less
 journals remain read-only. [Storage](STORAGE.md#minecraft-data-migration) describes
 state restoration, startup protection, and recovery behavior.
+
+
+## File Browser service
+
+The Administrator-only `/v1/admin/filebrowser` API reads availability and runtime readiness. POST actions `/availability`, `/start`, and `/stop` use the existing privileged Unix-socket boundary. Availability is one SQLite enum (`always` or `on-demand`) in the existing Management Agent WebUI store. Saves are idempotent; retrying a failed save reapplies service enable/start or disable. Stop rereads the setting and leaves Always available running.
+
+`justvoxel-filebrowser.service` runs the application container `ghcr.io/gtsteffaniak/filebrowser:stable-slim` directly by its moving channel tag. Its port is published only at `127.0.0.1:61209`; no firewall rule is added. Every `/files/` request requires a valid JustVoxel Administrator session. The reverse proxy replaces trusted identity/forwarding headers and injects the authenticated username as `X-JustVoxel-User`. FileBrowser uses supported proxy authentication, with password login disabled. Current Quantum configuration places login method and settings restrictions under `userDefaults.account`, equivalent to the former frontend options. Only authenticated `/files/` responses permit same-origin framing; other routes retain their framing denial.
+
+Packaged configuration lives under `/usr/share/justvoxel/filebrowser/`; the service generates source entries from validated instance placements and available backup roots into `/run/justvoxel-filebrowser/config.yaml`. It mounts individual Minecraft data directories and available configured backup roots, without recursive host submounts. No host root, instance configuration, credentials, or Management database is mounted. The named Podman volume `justvoxel-filebrowser-state` preserves FileBrowser's database and cache across stop/start and container recreation, separately from packaged configuration.
+
+The image's non-root account (1000:1000) runs with no-new-privileges and all capabilities dropped except `DAC_OVERRIDE`: JustVoxel backup directories and archives are root-owned with modes 0700 and 0600. SELinux label separation is disabled only for this FileBrowser container to access approved data already privately labeled for Minecraft. No host labels, contexts, policy, ownership, or modes are changed.
+
+Schema reference: [Quantum stable configuration](https://github.com/gtsteffaniak/filebrowser/blob/v2.0.0-stable/frontend/public/config.generated.yaml), [proxy authentication](https://filebrowserquantum.com/en/docs/configuration/authentication/proxy/).

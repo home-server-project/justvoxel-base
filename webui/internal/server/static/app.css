@@ -1709,3 +1709,8 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .minecraft-overview-lifecycle>.minecraft-overview-boot-card{flex:1 1 260px}
 .minecraft-workspace-tabs a{display:inline-flex;align-items:center;box-sizing:border-box;text-decoration:none}
 .minecraft-server-arrange-toolbar [hidden]{display:none!important}
+
+/* Files reuses shared window/header/toggle geometry; only its embed needs sizing. */
+[data-files-dialog] .files-workspace-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
+[data-files-dialog] .files-workspace-frame{flex:1;min-height:0;width:100%;height:100%;border:0}
+[data-files-dialog] [hidden]{display:none}

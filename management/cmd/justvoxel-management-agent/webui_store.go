@@ -145,6 +145,14 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			)`,
 		},
 	},
+	{
+		version: 4,
+		name:    "filebrowser_availability",
+		statements: []string{
+			`CREATE TABLE filebrowser_settings (id INTEGER PRIMARY KEY CHECK (id = 1), availability TEXT NOT NULL CHECK (availability IN ('always', 'on-demand')))`,
+			`INSERT INTO filebrowser_settings(id, availability) VALUES(1, 'on-demand')`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {

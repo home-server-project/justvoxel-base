@@ -1,0 +1,30 @@
+{
+  "http": {
+    "listen": "0.0.0.0",
+    "port": 8080,
+    "baseURL": "/files/",
+    "trustProxyHeaders": true,
+    "disableWebDAV": true
+  },
+  "auth": {
+    "methods": {
+      "proxy": {"enabled": true, "header": "X-JustVoxel-User"},
+      "password": {"enabled": false}
+    }
+  },
+  "frontend": {"disableDefaultLinks": true},
+  "userDefaults": {
+    "account": {
+      "loginMethod": "proxy",
+      "disableSettings": true,
+      "disableUpdateNotifications": true,
+      "permissions": {"admin": false, "share": false, "api": false}
+    }
+  },
+  "server": {
+    "disableUpdateCheck": true,
+    "database": {"path": "/home/filebrowser/data/database.sqlite"},
+    "cacheDir": "/home/filebrowser/data/cache",
+    "sources": []
+  }
+}
