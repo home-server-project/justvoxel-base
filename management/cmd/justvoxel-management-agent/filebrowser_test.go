@@ -134,7 +134,7 @@ func TestFileBrowserAdministratorOnly(t *testing.T) {
 		s, _ := systemMonitorProfileTestServer(t, role)
 		mux := http.NewServeMux()
 		registerFileBrowserRoutes(mux, s)
-		for _, action := range []string{"", "/start", "/stop", "/availability"} {
+		for _, action := range []string{"", "/start", "/stop", "/refresh", "/availability"} {
 			method := http.MethodPost
 			if action == "" {
 				method = http.MethodGet
@@ -148,17 +148,13 @@ func TestFileBrowserAdministratorOnly(t *testing.T) {
 	}
 }
 
-// Expected policy is independent of automatic source discovery and mount rendering.
+// Expected bind policy is independent of discovery and rendering.
 func representativeFileBrowserSources() []fileBrowserSource {
 	return []fileBrowserSource{
 		{Host: "/approved/minecraft", Path: "/data/minecraft/jv-abc123", Name: "Minecraft Servers", NonRecursive: true},
 		{Host: "/approved/backups", Path: "/data/backups/1", Name: "Backups", NonRecursive: true},
-		{Host: "/var/mnt", Path: "/data/mounted/var-mnt", Name: "Mounted storage", Propagation: "rslave"},
-		{Host: "/mnt", Path: "/data/mounted/mnt", Name: "Mounts", Propagation: "rslave"},
-		{Host: "/media", Path: "/data/mounted/media", Name: "Media", Propagation: "rslave"},
-		{Host: "/run/media", Path: "/data/mounted/run-media", Name: "Removable media", Propagation: "rslave"},
-		{Host: "/usr", Path: "/data/system/usr", Name: "System /usr (read-only)", ReadOnly: true},
-		{Host: "/boot", Path: "/data/system/boot", Name: "System /boot (read-only)", ReadOnly: true},
+		{Host: "/srv/archive", Path: "/data/filesystems/abcdef0123456789abcdef01", Name: "BACKUP (vdb1)", NonRecursive: true},
+		{Host: "/home/voxel/family", Path: "/data/filesystems/abcdef0123456789abcdef02", Name: "family (SMB)", NonRecursive: true, ReadOnly: true},
 	}
 }
 
@@ -189,12 +185,8 @@ func TestFileBrowserContainerContract(t *testing.T) {
 		"type=bind,source=" + fileBrowserRuntimeConfig + ",target=/etc/filebrowser/config.yaml,ro=true",
 		"type=bind,source=/approved/minecraft,target=/data/minecraft/jv-abc123,bind-nonrecursive=true",
 		"type=bind,source=/approved/backups,target=/data/backups/1,bind-nonrecursive=true",
-		"type=bind,source=/var/mnt,target=/data/mounted/var-mnt,bind-propagation=rslave",
-		"type=bind,source=/mnt,target=/data/mounted/mnt,bind-propagation=rslave",
-		"type=bind,source=/media,target=/data/mounted/media,bind-propagation=rslave",
-		"type=bind,source=/run/media,target=/data/mounted/run-media,bind-propagation=rslave",
-		"type=bind,source=/usr,target=/data/system/usr,ro=true",
-		"type=bind,source=/boot,target=/data/system/boot,ro=true",
+		"type=bind,source=/srv/archive,target=/data/filesystems/abcdef0123456789abcdef01,bind-nonrecursive=true",
+		"type=bind,source=/home/voxel/family,target=/data/filesystems/abcdef0123456789abcdef02,bind-nonrecursive=true,ro=true",
 	}
 	if !reflect.DeepEqual(mounts, wantMounts) {
 		t.Fatalf("mount policy changed: got %v, want %v", mounts, wantMounts)
@@ -216,6 +208,9 @@ func TestFileBrowserContainerContract(t *testing.T) {
 	if err = json.Unmarshal(out, &config); err != nil {
 		t.Fatal(err)
 	}
+	if config["frontend"].(map[string]any)["disableUsedPercentage"] != true {
+		t.Fatal("misleading usage bars remain enabled")
+	}
 	server := config["server"].(map[string]any)
 	entries := server["sources"].([]any)
 	if len(entries) != len(sources) {
@@ -227,7 +222,7 @@ func TestFileBrowserContainerContract(t *testing.T) {
 			t.Fatalf("source identity changed: %v", entry)
 		}
 		source := entry["config"].(map[string]any)
-		readOnly := i >= 6
+		readOnly := sources[i].ReadOnly
 		if source["readOnly"] != readOnly || source["private"] != true || source["defaultEnabled"] != true || source["defaultUserScope"] != "/" {
 			t.Fatalf("incorrect source policy: %v", source)
 		}
@@ -238,77 +233,6 @@ func TestFileBrowserContainerContract(t *testing.T) {
 		if !reflect.DeepEqual(source["defaultPermissions"], wantPermissions) {
 			t.Fatalf("incorrect permissions for %s: %v", sources[i].Host, source["defaultPermissions"])
 		}
-	}
-}
-
-func TestAutomaticFileBrowserSources(t *testing.T) {
-	root := t.TempDir()
-	directory, err := os.Lstat(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(root, "link")
-	if err := os.Symlink(root, link); err != nil {
-		t.Fatal(err)
-	}
-	symlink, err := os.Lstat(link)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(root, "file")
-	if err := os.WriteFile(file, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	regular, err := os.Lstat(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := representativeFileBrowserSources()[2:]
-	for _, scenario := range []string{"all directories", "symlink", "missing", "regular file", "inaccessible"} {
-		t.Run(scenario, func(t *testing.T) {
-			var visited []string
-			sources, err := automaticFileBrowserSources(func(path string) (os.FileInfo, error) {
-				visited = append(visited, path)
-				switch scenario {
-				case "symlink":
-					return symlink, nil
-				case "missing":
-					return nil, &os.PathError{Op: "lstat", Path: path, Err: os.ErrNotExist}
-				case "regular file":
-					return regular, nil
-				case "inaccessible":
-					return nil, &os.PathError{Op: "lstat", Path: path, Err: os.ErrPermission}
-				default:
-					return directory, nil
-				}
-			})
-			if scenario == "inaccessible" {
-				if !errors.Is(err, os.ErrPermission) {
-					t.Fatalf("lost inspection error: %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(visited, []string{"/var/mnt", "/mnt", "/media", "/run/media", "/usr", "/boot"}) {
-				t.Fatalf("automatic root allowlist changed: %v", visited)
-			}
-			if scenario == "all directories" {
-				if !reflect.DeepEqual(sources, want) {
-					t.Fatalf("automatic source policy: got %#v, want %#v", sources, want)
-				}
-			} else if len(sources) != 0 {
-				t.Fatalf("accepted %s roots: %#v", scenario, sources)
-			}
-			for _, source := range sources {
-				for _, forbidden := range []string{"/", "/etc", "/root", "/home", "/proc", "/sys", "/dev", "/run", "/var", "/var/lib", "/var/lib/containers", "/var/lib/justvoxel", "/var/lib/justvoxel-web", "/var/lib/justvoxel-instance-runtime"} {
-					if source.Host == forbidden {
-						t.Fatalf("exposed forbidden root: %s", source.Host)
-					}
-				}
-			}
-		})
 	}
 }
 
@@ -347,15 +271,15 @@ func TestFileBrowserSourcesWithoutMinecraft(t *testing.T) {
 		root:     filepath.Join(t.TempDir(), "private"),
 		quadlets: t.TempDir(),
 	}
-	oldBackend, oldDiscovery := instanceRuntimes, discoverAutomaticFileBrowserSources
+	oldBackend, oldDiscovery := instanceRuntimes, discoverFileBrowserFilesystems
 	t.Cleanup(func() {
-		instanceRuntimes, discoverAutomaticFileBrowserSources = oldBackend, oldDiscovery
+		instanceRuntimes, discoverFileBrowserFilesystems = oldBackend, oldDiscovery
 	})
 	instanceRuntimes = b
 	want := []fileBrowserSource{
-		{Host: "/mnt", Path: "/data/mounted/mnt", Name: "Mounts", Propagation: "rslave"},
+		{Host: "/srv/disk", Path: "/data/filesystems/abcdef0123456789abcdef01", Name: "disk (vdb1)", NonRecursive: true, Mount: &fileBrowserMount{Mountpoint: "/srv/disk"}},
 	}
-	discoverAutomaticFileBrowserSources = func() ([]fileBrowserSource, error) {
+	discoverFileBrowserFilesystems = func(context.Context) ([]fileBrowserSource, error) {
 		return want, nil
 	}
 	if records, err := b.records(); err != nil || len(records) != 0 {
@@ -364,19 +288,23 @@ func TestFileBrowserSourcesWithoutMinecraft(t *testing.T) {
 	sources, err := fileBrowserSources(context.Background())
 	if err != nil {
 		if strings.Contains(err.Error(), "No configured Minecraft data is available") {
-			t.Fatalf("automatic sources still require Minecraft: %v", err)
+			t.Fatalf("filesystem sources still require Minecraft: %v", err)
 		}
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(sources, want) {
-		t.Fatalf("automatic sources = %#v, want %#v", sources, want)
+		t.Fatalf("filesystem sources = %#v, want %#v", sources, want)
 	}
 }
 
 func TestFileBrowserSourcesUseAuthoritativePaths(t *testing.T) {
 	t.Setenv("TMPDIR", "/tmp")
-	for _, scenario := range []string{"legacy backups", "configured backups", "broad data root", "broad backup root", "private backup root"} {
+	for _, scenario := range []string{"legacy backups", "configured backups", "covered application roots", "broad data root", "broad backup root", "private backup root"} {
 		t.Run(scenario, func(t *testing.T) {
+			oldDiscovery := discoverFileBrowserFilesystems
+			t.Cleanup(func() { discoverFileBrowserFilesystems = oldDiscovery })
+			discovered := []fileBrowserSource{}
+			discoverFileBrowserFilesystems = func(context.Context) ([]fileBrowserSource, error) { return discovered, nil }
 			f := newInstanceActivationFixture(t)
 			b := f.backend
 			oldBackend, oldBackupCommand := instanceRuntimes, instanceBackupStorageCommand
@@ -416,8 +344,13 @@ func TestFileBrowserSourcesUseAuthoritativePaths(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if scenario == "covered application roots" {
+				for _, root := range []string{f.snapshot.StorageRoot, backupRoot} {
+					discovered = append(discovered, fileBrowserSource{Host: root, Path: "/data/filesystems/" + filepath.Base(root), Name: filepath.Base(root), NonRecursive: true, Mount: &fileBrowserMount{Mountpoint: root}})
+				}
+			}
 			sources, err := fileBrowserSources(context.Background())
-			if strings.Contains(scenario, "root") {
+			if strings.HasSuffix(scenario, "root") {
 				if err == nil {
 					t.Fatalf("accepted unsafe sources: %#v", sources)
 				}
@@ -426,15 +359,22 @@ func TestFileBrowserSourcesUseAuthoritativePaths(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			automatic, err := automaticFileBrowserSources(os.Lstat)
-			if err != nil {
-				t.Fatal(err)
+			if scenario == "covered application roots" {
+				if len(sources) != len(discovered) {
+					t.Fatalf("duplicate curated application sources: %#v", sources)
+				}
+				for _, source := range sources {
+					if source.Mount == nil {
+						t.Fatalf("unexpected curated source: %#v", source)
+					}
+				}
+				return
 			}
-			if len(sources) != len(f.configs)+1+len(automatic) {
+			if len(sources) != len(f.configs)+1 {
 				t.Fatalf("unexpected sources: %#v", sources)
 			}
 			for _, source := range sources[:len(f.configs)] {
-				if !source.NonRecursive || source.ReadOnly || source.Propagation != "" {
+				if !source.NonRecursive || source.ReadOnly {
 					t.Fatalf("curated source policy changed: %#v", source)
 				}
 				id := filepath.Base(source.Path)
@@ -442,12 +382,10 @@ func TestFileBrowserSourcesUseAuthoritativePaths(t *testing.T) {
 					t.Fatalf("exposed storage outside exact instance data: %#v", source)
 				}
 			}
-			if source := sources[len(f.configs)]; source.Host != backupRoot || !source.NonRecursive || source.ReadOnly || source.Propagation != "" {
+			if source := sources[len(f.configs)]; source.Host != backupRoot || !source.NonRecursive || source.ReadOnly {
 				t.Fatalf("backup source = %#v, want %s", source, backupRoot)
 			}
-			if !reflect.DeepEqual(sources[len(f.configs)+1:], automatic) {
-				t.Fatal("automatic sources were not appended to curated sources")
-			}
+
 		})
 	}
 }
@@ -537,7 +475,7 @@ func TestFileBrowserPrimaryAdministratorEndpointsAccepted(t *testing.T) {
 	fileBrowserHealth = func(context.Context) bool { return true }
 	mux := http.NewServeMux()
 	registerFileBrowserRoutes(mux, s)
-	for _, action := range []string{"", "/start", "/stop", "/availability"} {
+	for _, action := range []string{"", "/start", "/stop", "/refresh", "/availability"} {
 		method := "POST"
 		if action == "" {
 			method = "GET"
@@ -547,5 +485,61 @@ func TestFileBrowserPrimaryAdministratorEndpointsAccepted(t *testing.T) {
 		if rr.Code != 200 {
 			t.Fatalf("%s: %d %s", action, rr.Code, rr.Body.String())
 		}
+	}
+}
+
+func TestFileBrowserRefreshIsBoundedAndIndependentOfAvailability(t *testing.T) {
+	s, store := systemMonitorProfileTestServer(t, roleAdministrator)
+	session := s.sessions["token"]
+	session.Username = systemAdminUsername
+	s.sessions["token"] = session
+	old := fileBrowserCommand
+	t.Cleanup(func() { fileBrowserCommand = old })
+	calls := 0
+	fail := false
+	fileBrowserCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		calls++
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("unbounded refresh")
+		}
+		if command != "systemctl" || !reflect.DeepEqual(args, []string{"restart", "justvoxel-filebrowser.service"}) {
+			t.Fatalf("unbounded command %s %v", command, args)
+		}
+		if fail {
+			return nil, errors.New("restart failed")
+		}
+		return nil, nil
+	}
+	mux := http.NewServeMux()
+	registerFileBrowserRoutes(mux, s)
+	for _, mode := range []string{"always", "on-demand"} {
+		if _, err := store.db.Exec(`UPDATE filebrowser_settings SET availability = ? WHERE id = 1`, mode); err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, systemMonitorProfileRequest("POST", "/v1/admin/filebrowser/refresh", nil))
+		if rr.Code != 200 {
+			t.Fatalf("%s refresh: %d", mode, rr.Code)
+		}
+		if got, err := store.readFileBrowserAvailability(); err != nil || got != mode {
+			t.Fatalf("refresh changed availability: %q %v", got, err)
+		}
+	}
+	fail = true
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, systemMonitorProfileRequest("POST", "/v1/admin/filebrowser/refresh", nil))
+	if rr.Code != 503 {
+		t.Fatal("restart failure hidden", rr.Code)
+	}
+	before := calls
+	for _, action := range []string{"restart", "refresh/other.service", "mount"} {
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, systemMonitorProfileRequest("POST", "/v1/admin/filebrowser/"+action, nil))
+		if rr.Code != 404 {
+			t.Fatal("unexpected action accepted", action, rr.Code)
+		}
+	}
+	if calls != before {
+		t.Fatal("unsupported action ran command")
 	}
 }

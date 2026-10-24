@@ -128,6 +128,9 @@ func (s *server) fileBrowserChange(w http.ResponseWriter, r *http.Request) {
 		err = s.setFileBrowserAvailability(ctx, request.Availability)
 	case "start":
 		err = startFileBrowser(ctx)
+	case "refresh":
+		// Wait for the restart job so readiness cannot accept the old backend.
+		_, err = fileBrowserCommand(ctx, "systemctl", "restart", fileBrowserUnit)
 	case "stop":
 		err = s.stopFileBrowser(ctx)
 	default:

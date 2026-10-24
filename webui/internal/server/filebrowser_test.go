@@ -16,6 +16,7 @@ type filesTestAPI struct {
 	role       string
 	username   string
 	mustChange bool
+	actions    []string
 }
 
 func (f *filesTestAPI) Session(_ context.Context, token string) (api.SessionInfo, error) {
@@ -31,7 +32,8 @@ func (f *filesTestAPI) Session(_ context.Context, token string) (api.SessionInfo
 func (f *filesTestAPI) AdminFileBrowser(context.Context, string) (api.FileBrowserStatus, error) {
 	return api.FileBrowserStatus{Availability: "on-demand", Ready: true, State: "active"}, nil
 }
-func (f *filesTestAPI) AdminFileBrowserAction(context.Context, string, string, string) error {
+func (f *filesTestAPI) AdminFileBrowserAction(_ context.Context, _ string, action string, _ string) error {
+	f.actions = append(f.actions, action)
 	return nil
 }
 
@@ -154,7 +156,7 @@ func TestFilesAdministratorAndSessionBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, path := range []string{"/files/", "/files/api/login", "/api/files", "/api/files/start", "/api/files/stop", "/api/files/availability"} {
+		for _, path := range []string{"/files/", "/files/api/login", "/api/files", "/api/files/start", "/api/files/stop", "/api/files/refresh", "/api/files/availability"} {
 			method := "GET"
 			if strings.HasPrefix(path, "/api/files/") {
 				method = "POST"
@@ -191,7 +193,7 @@ func TestFilesSecondaryAdministratorDenied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/files/", "/files/api/resources", "/api/files", "/api/files/start", "/api/files/stop", "/api/files/availability"} {
+	for _, path := range []string{"/files/", "/files/api/resources", "/api/files", "/api/files/start", "/api/files/stop", "/api/files/refresh", "/api/files/availability"} {
 		method := "GET"
 		if strings.HasPrefix(path, "/api/files/") {
 			method = "POST"
@@ -201,6 +203,37 @@ func TestFilesSecondaryAdministratorDenied(t *testing.T) {
 		app.Handler().ServeHTTP(rr, req)
 		if rr.Code != http.StatusForbidden {
 			t.Fatalf("%s = %d", path, rr.Code)
+		}
+	}
+}
+
+func TestFilesRefreshActionBoundary(t *testing.T) {
+	client := &filesTestAPI{role: "administrator"}
+	app, err := New(client, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		action, body string
+		want         int
+	}{
+		{"refresh", "csrf=token", 200},
+		{"refresh", "", 403},
+		{"restart", "csrf=token", 404},
+		{"other.service", "csrf=token", 404},
+	} {
+		before := len(client.actions)
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedSystemActionRequest("POST", "/api/files/"+tc.action, tc.body))
+		if rr.Code != tc.want {
+			t.Fatalf("%s = %d, want %d", tc.action, rr.Code, tc.want)
+		}
+		if tc.want == 200 {
+			if len(client.actions) != before+1 || client.actions[before] != "refresh" {
+				t.Fatal(client.actions)
+			}
+		} else if len(client.actions) != before {
+			t.Fatal("rejected action forwarded")
 		}
 	}
 }

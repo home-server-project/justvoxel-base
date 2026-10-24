@@ -8,6 +8,7 @@ const app = read('webui/internal/server/static/app.js');
 const filesJS = app.slice(app.indexOf('// Files owns only its lifecycle;'));
 const manager = read('management/cmd/justvoxel-management-agent/filebrowser.go');
 const container = read('management/cmd/justvoxel-management-agent/filebrowser_container.go');
+const mounts = read('management/cmd/justvoxel-management-agent/filebrowser_mounts.go');
 const proxy = read('webui/internal/server/filebrowser.go');
 const config = JSON.parse(read('system_files/usr/share/justvoxel/filebrowser/config.yaml'));
 
@@ -71,49 +72,65 @@ test('container image, persistence, isolated listener and mounts follow the cont
   assert.match(unit,/management-agent filebrowser-run/);
   assert.equal(config.server.database.path,'/home/filebrowser/data/database.sqlite');
 });
-test('automatic Files roots have the exact mounted-storage and system inspection policies', () => {
-  const discovery = container.slice(container.indexOf('func automaticFileBrowserSources('), container.indexOf('// Preserve registered committed'));
-  // Read each complete named policy record, rather than accepting unrelated path strings.
-  const records = [...discovery.matchAll(/\{Host: "([^"]+)", Path: "([^"]+)", Name: "([^"]+)"([^{}]*)\}/g)]
-    .map(([,host,path,name,policy]) => ({host,path,name,policy:policy.trim()}));
-  assert.deepEqual(records, [
-    {host:'/var/mnt',path:'/data/mounted/var-mnt',name:'Mounted storage',policy:', Propagation: "rslave"'},
-    {host:'/mnt',path:'/data/mounted/mnt',name:'Mounts',policy:', Propagation: "rslave"'},
-    {host:'/media',path:'/data/mounted/media',name:'Media',policy:', Propagation: "rslave"'},
-    {host:'/run/media',path:'/data/mounted/run-media',name:'Removable media',policy:', Propagation: "rslave"'},
-    {host:'/usr',path:'/data/system/usr',name:'System /usr (read-only)',policy:', ReadOnly: true'},
-    {host:'/boot',path:'/data/system/boot',name:'System /boot (read-only)',policy:', ReadOnly: true'},
-  ]);
-  assert.match(discovery, /info, err := lstat\(source.Host\)/);
-  assert.match(discovery, /if os.IsNotExist\(err\) \{\s*continue/);
-  assert.match(discovery, /if info.Mode\(\)&os.ModeSymlink != 0 \|\| !info.IsDir\(\) \{\s*continue/);
-  assert.doesNotMatch(discovery, /Mkdir|MkdirAll/);
-  const sources = container.slice(container.indexOf('func fileBrowserSources('), container.indexOf('func fileBrowserContainerArgs('));
-  assert.match(sources, /fileBrowserSource\{Host: record.Storage.DataPath, Path: "\/data\/minecraft\/" \+ record.Runtime.ID, Name: name, NonRecursive: true\}/);
-  assert.match(sources, /fileBrowserSource\{Host: root, Path: fmt.Sprintf\("\/data\/backups\/%d", i\+1\), Name: name, NonRecursive: true\}/);
-  assert.match(container, /var discoverAutomaticFileBrowserSources = func\(\) \(\[\]fileBrowserSource, error\) \{\s*return automaticFileBrowserSources\(os.Lstat\)\s*\}/);
-  assert.match(sources, /automatic, err := discoverAutomaticFileBrowserSources\(\)/);
-  assert.match(sources, /sources = append\(sources, automatic\.\.\.\)\s*if len\(sources\) == 0 \{\s*return nil, errors.New\("No File Browser sources are available"\)\s*\}\s*return sources, nil/);
-  assert.equal((sources.match(/if len\(sources\) == 0/g) || []).length, 1);
-  assert.doesNotMatch(container, /No configured Minecraft data is available/);
-  const mounts = container.slice(container.indexOf('for _, source := range sources {', container.indexOf('func fileBrowserContainerArgs(')), container.indexOf('return append(args, fileBrowserImage)'));
-  assert.match(mounts, /mount := "type=bind,source=" \+ source.Host \+ ",target=" \+ source.Path/);
-  assert.match(mounts, /if source.NonRecursive \{\s*mount \+= ",bind-nonrecursive=true"\s*\}/);
-  assert.match(mounts, /if source.Propagation != "" \{\s*mount \+= ",bind-propagation=" \+ source.Propagation\s*\}/);
-  assert.match(mounts, /if source.ReadOnly \{\s*mount \+= ",ro=true"\s*\}/);
+test('Files discovers actual mounted filesystems through Storage and mountinfo', () => {
+  const discovery = read('management/cmd/justvoxel-management-agent/admin_discovery.go');
+  const helper = read('mjust/libexec/admin-discovery-json');
+  assert.match(discovery, /MajorMinor\s+string\s+`json:"major_minor,omitempty"`/);
+  const lsblkCalls = helper.match(/\blsblk\s+[^\n]+/g) || [];
+  assert.equal(lsblkCalls.length, 1, 'extend the existing lsblk call only');
+  assert.match(lsblkCalls[0], /-o [A-Z,:]*\bMAJ:MIN\b/);
+  assert.match(helper, /major_minor:\(\.\["maj:min"\] \/\/ ""\)/);
+  assert.match(mounts, /runAdminDiscoveryHelper\(ctx, "storage"\)/);
+  assert.match(mounts, /os.ReadFile\("\/proc\/self\/mountinfo"\)/);
+  assert.match(mounts, /device.System/);
+  assert.match(mounts, /byPath\[point\]/);
+  assert.match(mounts, /mount.Filesystem == device.Filesystem/);
+  assert.match(mounts, /device.MajorMinor == ""/);
+  assert.match(mounts, /mount.MajorMinor == device.MajorMinor/);
+  assert.match(mounts, /mount.Root == "\/"/);
+  assert.match(mounts, /point == "\/" \|\| counts\[point\] > 1\s*\{\s*continue/);
+  assert.match(mounts, /protocol == "" \|\| mount.Mountpoint == "\/"/);
+  assert.match(mounts, /counts\[mount.Mountpoint\] > 1\s*\{\s*continue/);
+  assert.doesNotMatch(mounts, /ambiguous File Browser mountpoint/);
+  assert.match(mounts, /device.ReadOnly \|\| mount.ReadOnly/);
+  assert.match(mounts, /case "nfs", "nfs4"/);
+  assert.match(mounts, /case "cifs", "smb3"/);
+  assert.match(mounts, /sha256.Sum256/);
+  assert.match(mounts, /"\/data\/filesystems\/"/);
+  assert.match(container, /discoverFileBrowserFilesystems\(ctx\)/);
+  assert.match(container, /fileBrowserPathCovered\(record.Storage.DataPath, filesystems\)/);
+  assert.match(container, /fileBrowserPathCovered\(root, filesystems\)/);
+  assert.match(container, /revalidateFileBrowserMounts\(sources, readFileBrowserMountInfo, os.Lstat\)/);
+  assert.ok(container.indexOf('revalidateFileBrowserMounts(sources') < container.indexOf('return syscall.Exec('));
+  for (const forbidden of ['automaticFileBrowserSources', 'discoverAutomaticFileBrowserSources', 'Mounted storage', 'Removable media', 'System /usr', 'System /boot', 'rslave', '/data/mounted/', '/data/system/']) {
+    assert.ok(!(mounts + container).includes(forbidden), forbidden);
+  }
+  // Discovery uses device/mount identity, with no mountpoint directory allowlist.
+  for (const forbidden of ['/var/mnt', '/media', '/run/media', '/mnt', '/usr', '/boot']) assert.ok(!mounts.includes(`"${forbidden}"`));
+  assert.doesNotMatch(mounts, /(?:HasPrefix|HasSuffix|instanceRuntimeInside)\((?:mount\.Mountpoint|point),/);
+  assert.doesNotMatch(mounts, /(?:allowed|approved|supported)(?:Mountpoints|MountRoots|Directories)|mountpointAllowlist/i);
+  assert.doesNotMatch(mounts, /exec\.|findmnt|lsblk|systemctl|udev|NewTicker|time\.Tick/);
+  assert.match(container, /"bind-nonrecursive=true"/);
+  assert.match(container, /if source.ReadOnly/);
   const render = container.slice(container.indexOf('func renderFileBrowserConfig('), container.indexOf('func runFileBrowserContainer('));
   assert.match(render, /"readOnly":\s*source.ReadOnly/);
-  for (const permission of ['create','modify','delete']) {
-    assert.ok(new RegExp(`"${permission}":\\s*!source.ReadOnly`).test(render));
-  }
-  for (const permission of ['view','download','configured']) {
-    assert.ok(new RegExp(`"${permission}":\\s*true`).test(render));
-  }
+  for (const permission of ['create','modify','delete']) assert.ok(new RegExp(`"${permission}":\\s*!source.ReadOnly`).test(render));
+  for (const permission of ['view','download','configured']) assert.ok(new RegExp(`"${permission}":\\s*true`).test(render));
   assert.match(render, /"defaultUserScope":\s*"\/"/);
+  assert.equal(config.frontend.disableUsedPercentage, true);
+  assert.equal(config.frontend.disableNavButtons, undefined);
+  assert.equal(config.userDefaults.account.permissions.admin, false);
+});
+
+test('Refresh is a fixed primary-admin action, without mount watchers', () => {
+  const client = read('webui/internal/api/filebrowser.go');
+  for (const source of [client, proxy]) assert.match(source, /case "start", "stop", "refresh", "availability":/);
+  assert.match(manager, /case "refresh":[\s\S]*?fileBrowserCommand\(ctx, "systemctl", "restart", fileBrowserUnit\)/);
+  assert.match(manager, /const fileBrowserUnit = "justvoxel-filebrowser.service"/);
+  assert.match(manager, /requirePrimaryAdministrator/);
   const unit = read('system_files/usr/lib/systemd/system/justvoxel-filebrowser.service');
-  for (const forbidden of [/--make-(?:rshared|shared|rslave|slave)/, /\bMS_(?:SHARED|SLAVE)\b/, /--device/, /--privileged/, /--network=host/, /:[zZ]\b/]) {
-    assert.doesNotMatch(container + manager + unit, forbidden);
-  }
+  for (const forbidden of [/--make-(?:rshared|shared|rslave|slave)/, /\bMS_(?:SHARED|SLAVE)\b/, /--device/, /--privileged/, /--network=host/, /:[zZ]\b/]) assert.doesNotMatch(container + mounts + manager + unit, forbidden);
+  assert.doesNotMatch(mounts + manager, /udev|NewTicker|time\.Tick|mount-watcher/);
 });
 
 test('supported proxy auth disables second login and internal settings', () => {
@@ -182,12 +199,14 @@ function browser({availability='on-demand', ready=true, failed=false, failedAvai
   vm.runInNewContext(filesJS,context);
   return {elements,modes,dialog,launcher,calls,setReady(value){ready=value;},setFailed(value){failed=value;},setAvailability(value){availability=value;},setFailedAvailability(value){failedAvailability=value;},async flush(){for(let i=0;i<40;i++)await Promise.resolve();}};
 }
-test('opening waits for health, refresh reloads iframe without restarting, X requests managed stop',async()=>{
+test('opening waits for health, refresh restarts and reconnects, X requests managed stop',async()=>{
   const b=browser();await b.launcher.click();await b.flush();
   assert.equal(b.elements.frame.src,'/files/');assert.equal(b.elements.frame.hidden,false);
   await b.elements.refresh.click();await b.flush();
   assert.equal(b.elements.frame.src,'/files/');
   assert.equal(b.calls.filter(c=>c.url.endsWith('/start')).length,0);
+  assert.equal(b.calls.filter(c=>c.url.endsWith('/refresh')).length,1);
+  assert.equal(b.calls.find(c=>c.url.endsWith('/refresh')).options.method,'POST');
   await b.elements.close.click();await b.flush();
   assert.equal(b.dialog.open,false);assert.equal(b.elements.frame.src,undefined);
   assert.equal(b.calls.at(-1).url,'/api/files/stop');
@@ -281,4 +300,45 @@ test('Files visibility and both security boundaries require the primary administ
   const authorization = read('management/cmd/justvoxel-management-agent/authorization.go');
   assert.match(authorization, /sess.Username != systemAdminUsername/);
   assert.match(authorization, /s.requireAdministrator\(w, r\)/);
+});
+
+test('refresh detaches the old iframe and waits for new readiness in both modes', async()=>{
+  for (const availability of ['always','on-demand']) {
+    const b=browser({availability});await b.launcher.click();await b.flush();
+    b.setReady(false);
+    await b.elements.refresh.click();
+    assert.equal(b.elements.frame.src,undefined);
+    assert.equal(b.elements.frame.hidden,true);
+    assert.equal(b.elements.state.textContent,'Refreshing File Browser…');
+    for(let i=0;i<20&&!b.calls.some(c=>c.url.endsWith('/refresh'));i++)await Promise.resolve();
+    assert.equal(b.calls.filter(c=>c.url.endsWith('/refresh')).length,1);
+    assert.equal(b.elements.frame.src,undefined);
+    b.setReady(true);await b.flush();
+    assert.equal(b.elements.frame.src,'/files/');assert.equal(b.elements.frame.hidden,false);
+  }
+});
+test('refresh failure keeps the iframe detached and Retry repeats managed refresh',async()=>{
+  const b=browser();await b.launcher.click();await b.flush();
+  b.setFailed(true);await b.elements.refresh.click();await b.flush();
+  assert.equal(b.elements.frame.src,undefined);assert.equal(b.elements.frame.hidden,true);
+  assert.equal(b.elements.retry.hidden,false);
+  b.setFailed(false);await b.elements.retry.click();await b.flush();
+  assert.equal(b.calls.filter(c=>c.url.endsWith('/refresh')).length,2);
+  assert.equal(b.elements.frame.src,'/files/');assert.equal(b.elements.retry.hidden,true);
+});
+test('closing during refresh prevents reconnecting a stale iframe',async()=>{
+  const b=browser();await b.launcher.click();await b.flush();
+  b.setReady(false);await b.elements.refresh.click();
+  for(let i=0;i<20&&!b.calls.some(c=>c.url.endsWith('/refresh'));i++)await Promise.resolve();
+  await b.elements.close.click();b.setReady(true);await b.flush();
+  assert.equal(b.elements.frame.src,undefined);
+  assert.equal(b.calls.at(-1).url,'/api/files/stop');
+});
+
+test('closing immediately after refresh does not restart after the managed stop',async()=>{
+  const b=browser();await b.launcher.click();await b.flush();
+  b.elements.refresh.click();await b.elements.close.click();await b.flush();
+  assert.equal(b.elements.frame.src,undefined);
+  assert.equal(b.calls.at(-1).url,'/api/files/stop');
+  assert.equal(b.calls.filter(c=>c.url.endsWith('/refresh')).length,0);
 });

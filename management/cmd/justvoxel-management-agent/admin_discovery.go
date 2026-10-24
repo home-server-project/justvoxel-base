@@ -64,6 +64,7 @@ type adminConfigurationDiscovery struct {
 type adminStorageDevice struct {
 	Name                 string   `json:"name"`
 	Path                 string   `json:"path"`
+	MajorMinor           string   `json:"major_minor,omitempty"`
 	Parent               string   `json:"parent"`
 	Type                 string   `json:"type"`
 	SizeBytes            uint64   `json:"size_bytes"`

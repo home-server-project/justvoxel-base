@@ -7975,19 +7975,24 @@ if (filesDialog) {
     state.textContent = message;
     retry.hidden = false;
   };
-  const openFiles = async () => {
+  let retryRefresh = false;
+  const openFiles = async (refresh = false) => {
+    retryRefresh = refresh;
     const ticket = ++generation;
     frame.hidden = true;
     frame.removeAttribute("src");
     retry.hidden = true;
-    state.textContent = "Starting File Browser…";
+    state.textContent = refresh ? "Refreshing File Browser…" : "Starting File Browser…";
     try {
       await pending;
+      if (ticket !== generation || !filesDialog.open) return;
+      if (refresh) await mutate("refresh");
+      if (ticket !== generation || !filesDialog.open) return;
       let status = await request();
       if (ticket !== generation || !filesDialog.open) return;
       selectMode(status.availability);
-      if (!status.ready) await mutate("start");
-      // Poll only during this explicit open, at a bounded two-second interval.
+      if (!status.ready && !refresh) await mutate("start");
+      // Poll only during this explicit open/refresh, at a bounded two-second interval.
       const deadline = Date.now() + 180000;
       while (!status.ready) {
         if (ticket !== generation || !filesDialog.open) return;
@@ -8026,10 +8031,9 @@ if (filesDialog) {
   });
   filesDialog.querySelector("[data-files-close]").addEventListener("click", () => workspace.close());
   filesDialog.querySelector("[data-files-refresh]").addEventListener("click", () => {
-    if (!frame.hidden) frame.src = "/files/";
-    else void openFiles();
+    void openFiles(true);
   });
-  retry.addEventListener("click", () => void openFiles());
+  retry.addEventListener("click", () => void openFiles(retryRefresh));
   settings.querySelector("[data-files-settings-dismiss]").addEventListener("click", () => settings.close());
   settingsToggle.addEventListener("click", async () => {
     settingsStatus.textContent = "";

@@ -70,7 +70,7 @@ func (a *App) fileBrowserAction(w http.ResponseWriter, r *http.Request) {
 	}
 	action := r.PathValue("action")
 	switch action {
-	case "start", "stop", "availability":
+	case "start", "stop", "refresh", "availability":
 	default:
 		http.NotFound(w, r)
 		return

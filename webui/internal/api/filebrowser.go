@@ -20,7 +20,7 @@ func (c *Client) AdminFileBrowser(ctx context.Context, session string) (FileBrow
 }
 func (c *Client) AdminFileBrowserAction(ctx context.Context, session, action, availability string) error {
 	switch action {
-	case "start", "stop", "availability":
+	case "start", "stop", "refresh", "availability":
 	default:
 		return fmt.Errorf("invalid File Browser action")
 	}

@@ -100,7 +100,7 @@ func TestAdminStorageDropsUnknownSensitiveFields(t *testing.T) {
 		if action != "storage" {
 			t.Fatalf("action = %q, want storage", action)
 		}
-		return []byte(`{"system_disks":["/dev/vda"],"credentials":"do-not-leak","devices":[{"name":"vdb1","path":"/dev/vdb1","parent":"vdb","type":"part","size_bytes":1073741824,"filesystem":"xfs","label":"BACKUP","uuid":"abc","mountpoints":["/var/mnt/backup"],"model":"Virtual Disk","transport":"virtio","read_only":false,"system":false,"password":"secret"}]}`), nil
+		return []byte(`{"system_disks":["/dev/vda"],"credentials":"do-not-leak","devices":[{"name":"vdb1","path":"/dev/vdb1","major_minor":"8:17","parent":"vdb","type":"part","size_bytes":1073741824,"filesystem":"xfs","label":"BACKUP","uuid":"abc","mountpoints":["/var/mnt/backup"],"model":"Virtual Disk","transport":"virtio","read_only":false,"system":false,"password":"secret"}]}`), nil
 	}
 
 	rr := httptest.NewRecorder()
@@ -114,7 +114,7 @@ func TestAdminStorageDropsUnknownSensitiveFields(t *testing.T) {
 			t.Fatalf("sanitized storage response leaked %q: %s", forbidden, body)
 		}
 	}
-	for _, want := range []string{"/dev/vda", "/dev/vdb1", "/var/mnt/backup", "Virtual Disk"} {
+	for _, want := range []string{"/dev/vda", "/dev/vdb1", "/var/mnt/backup", "Virtual Disk", `"major_minor":"8:17"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("storage response missing %q: %s", want, body)
 		}

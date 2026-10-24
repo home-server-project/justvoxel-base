@@ -101,7 +101,7 @@ storage_json() {
     local fs_size fs_used fs_free usage_known free_spaces disk table record
     local free_start free_end free_size free_size_mib free_size_bytes free_item
 
-    raw="$(nsenter --mount=/proc/1/ns/mnt -- lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO,PTTYPE)"
+    raw="$(nsenter --mount=/proc/1/ns/mnt -- lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO,PTTYPE,MAJ:MIN)"
     systems='[]'
     system_parts='[]'
     system_lines="$(storage_system_disks || true)"
@@ -115,6 +115,7 @@ storage_json() {
 
     devices="$(jq '[.blockdevices[] | select(((.name // "") | startswith("zram")) | not) | {
         name:(.name // ""), path:(.path // ""), parent:(.pkname // ""), type:(.type // ""),
+        major_minor:(.["maj:min"] // ""),
         size_bytes:(.size // 0), filesystem:(.fstype // ""), label:(.label // ""), uuid:(.uuid // ""),
         mountpoints:((.mountpoints // []) | map(select(. != null))),
         model:((.model // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")),

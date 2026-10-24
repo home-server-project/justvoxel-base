@@ -236,7 +236,7 @@ for command in \
         exit 1
     }
 done
-grep -Fq 'RO,PTTYPE)' "${discovery}" || {
+grep -Eq 'lsblk[[:space:]][^)]*[[:space:]]-o[[:space:]]+([[:alnum:]_:]+,)*PTTYPE(,|[[:space:]]|\))' "${discovery}" || {
     echo 'ERROR: discovery must read actual partition-table type from lsblk.' >&2
     exit 1
 }

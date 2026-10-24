@@ -12,7 +12,7 @@
       "password": {"enabled": false}
     }
   },
-  "frontend": {"disableDefaultLinks": true},
+  "frontend": {"disableDefaultLinks": true, "disableUsedPercentage": true},
   "userDefaults": {
     "account": {
       "loginMethod": "proxy",
