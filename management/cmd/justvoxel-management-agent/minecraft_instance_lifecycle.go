@@ -135,6 +135,9 @@ func (b *instanceRuntimeBackend) observe(ctx context.Context, id string) (instan
 	if err != nil || pending {
 		status.State = "recovery_required"
 		status.Message = errInstanceRecovery.Error()
+		if networkPending(b) != nil {
+			status.Message = "Minecraft Network needs recovery. Open Network and choose Retry recovery."
+		}
 		return status, nil
 	}
 	if record.EnvironmentSHA256 == "" {
@@ -312,12 +315,16 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 		}
 		closeBedrockPorts(ports)
 	}
-	if record.Runtime.BedrockEnabled {
+	if !record.NetworkMember && record.Runtime.BedrockEnabled {
 		heldUDP, e := instanceHoldCrossplayPort(record.Runtime.BedrockPort)
 		if e != nil {
 			return e
 		}
 		heldUDP.Close()
+	}
+	if record.NetworkMember {
+		_, err = b.command(ctx, "systemctl", "--no-block", "start", "--", unit)
+		return err
 	}
 	// A stopped instance's reservation does not prove the host port is still free.
 	held, err := instanceHoldPort(instanceSignalingPort(record.Runtime))
@@ -362,6 +369,9 @@ func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next ins
 	}
 	desired := []instanceFirewallRule{}
 	for _, permanent := range []bool{true, false} {
+		if next.NetworkMember {
+			continue
+		}
 		if next.Runtime.Software == "bedrock" {
 			desired = append(desired, nativeBedrockRules(next.Runtime, zone, permanent)...)
 		} else {
@@ -372,7 +382,7 @@ func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next ins
 		}
 	}
 	for _, rule := range old.Firewall {
-		if instanceRuleForRuntime(rule, next.Runtime) {
+		if !next.NetworkMember && instanceRuleForRuntime(rule, next.Runtime) {
 			owned = append(owned, rule)
 			continue
 		}

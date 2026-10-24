@@ -14,6 +14,12 @@ readarray -t values < <(jq -er '[.storage.data_path, (.runtime.uid|tostring), (.
 DATA_PATH=${values[0]} MINECRAFT_UID=${values[1]} MINECRAFT_GID=${values[2]}
 [[ ${DATA_PATH} == /*/minecraft-instances/"${id}"/data && -d ${DATA_PATH} && ! -L ${DATA_PATH} && $(realpath -e -- "${DATA_PATH}") == "${DATA_PATH}" ]] || fail
 [[ ${MINECRAFT_UID} =~ ^[1-9][0-9]*$ && ${MINECRAFT_GID} =~ ^[1-9][0-9]*$ && ! -L ${DATA_PATH}/plugins ]] || fail
+# Network mode has its own Floodgate-only backend preparation. Standalone
+# startup follows the existing path after restoring its saved configuration.
+if jq -e '.network_member == true' "${config}" >/dev/null || [[ -e /etc/justvoxel/instances/${id}/network-before.json || -e ${DATA_PATH}/.justvoxel-network-standalone.json ]]; then
+    /usr/libexec/justvoxel/mjust/minecraft-network-runtime backend "${id}" || fail
+    if jq -e '.network_member == true' "${config}" >/dev/null; then exit 0; fi
+fi
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 # Preserve independent volumes' established Podman :Z labeling model.
 jv_crossplay_label() { :; }

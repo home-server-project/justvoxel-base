@@ -1,0 +1,31 @@
+#!/usr/bin/bash
+set -euo pipefail
+# Frontend only. All validation, publication and recovery belong to the Agent.
+api=/usr/libexec/justvoxel/mjust/api-client
+path=/v1/minecraft/network
+usage() { echo 'Usage: mjust minecraft-network status|enable|disable|members|join jv-ID|leave jv-ID|recover|whitelist list|whitelist add|remove java|bedrock NAME' >&2; exit 2; }
+[[ $EUID == 0 ]] || { echo 'Run through mjust minecraft-network.' >&2; exit 1; }
+case "${1:-status}" in
+    status) (( $# <= 1 )) || usage; exec "${api}" GET "${path}" ;;
+    members) (( $# == 1 )) || usage; "${api}" GET "${path}" | jq '{enabled:.config.enabled,members:.config.members,servers:.servers}' ;;
+    enable|disable|join|leave)
+        action=$1
+        if [[ ${action} == join || ${action} == leave ]]; then
+            [[ $# == 2 && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || usage
+        else (( $# == 1 )) || usage; fi
+        current="$("${api}" GET "${path}")"
+        jq -ce --arg action "${action}" --arg id "${2:-}" '.config | if $action == "enable" then .enabled=true elif $action == "disable" then .enabled=false elif $action == "join" then .members=((.members+[$id])|unique) else .members=(.members|map(select(. != $id))) end' <<< "${current}" | "${api}" PUT "${path}" --data
+        ;;
+    recover) (( $# == 1 )) || usage; printf '{}' | "${api}" POST "${path}/recover" --data ;;
+    whitelist)
+        case "${2:-list}" in
+            list) (( $# <= 2 )) || usage; "${api}" GET "${path}/whitelist" | jq '{whitelist_enforced,whitelist}' ;;
+            add|remove)
+                [[ $# == 4 && ( $3 == java || $3 == bedrock ) ]] || usage
+                jq -nc --arg action "$2" --arg platform "$3" --arg name "$4" '{action:$action,platform:$platform,name:$name}' | "${api}" POST "${path}/whitelist" --data
+                ;;
+            *) usage ;;
+        esac
+        ;;
+    *) usage ;;
+esac

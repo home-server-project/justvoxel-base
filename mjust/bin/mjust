@@ -13,6 +13,7 @@ Additional command forms:
   mjust web enable
   mjust web disable
   mjust password-reset
+  mjust minecraft-network status
 TEXT
     exit 0
 fi
@@ -34,7 +35,7 @@ if [[ ${1:-} == status ]]; then
 fi
 
 case "${1:-}" in
-    configure|configure-max-players)
+    minecraft-network|configure|configure-max-players)
         command="$1"
         shift
         exec sudo "/usr/libexec/justvoxel/mjust/${command}" "$@"

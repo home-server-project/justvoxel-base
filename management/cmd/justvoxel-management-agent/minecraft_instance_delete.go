@@ -148,6 +148,13 @@ func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name st
 
 // Reset supplies a durable, separate data policy; ordinary Delete always removes data.
 func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id, name, resetPolicy string) error {
+	network, networkErr := networkRead(b)
+	if networkErr != nil {
+		return networkErr
+	}
+	if network.Config.Enabled && networkContains(network.Config.Members, id) {
+		return instanceRuntimeFailure("Remove this server from Minecraft Network before deleting or resetting it.")
+	}
 	if !instanceIDPattern.MatchString(id) || (resetPolicy != "" && resetPolicy != "delete" && resetPolicy != "preserve" && resetPolicy != "start_over") {
 		return errInstanceID
 	}

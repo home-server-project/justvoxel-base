@@ -56,6 +56,7 @@ type minecraftInstanceRuntimeConfig struct {
 }
 
 type minecraftInstanceRuntimeContext struct {
+	NetworkTransition bool // internal: batch network publication validates its complete target set
 	// Defaults for new instances; existing instances use their pinned placement.
 	Placements      map[string]instanceRuntimeRecord
 	BackupPlacement *instanceRuntimeBackupStorage

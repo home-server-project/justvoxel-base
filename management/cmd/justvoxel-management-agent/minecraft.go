@@ -25,6 +25,7 @@ type minecraftActionResponse struct {
 
 func registerMinecraftRoutes(mux *http.ServeMux, s *server) {
 	registerInstanceRuntimeRoutes(mux, s)
+	registerMinecraftNetworkRoutes(mux, s)
 	mux.HandleFunc("GET /v1/minecraft/instances", s.minecraftInstancesList)
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/name", s.minecraftInstanceRename)
 	mux.HandleFunc("GET /v1/minecraft/identity", s.minecraftInstanceRead)

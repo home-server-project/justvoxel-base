@@ -110,6 +110,11 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 		if ok {
 			configuration, configErr := client.MinecraftInstanceConfiguration(r.Context(), session, selected.ID)
 			if configErr == nil {
+				configuration, err = a.minecraftConnectionSettings(r.Context(), session, selected.ID, configuration)
+				if err != nil {
+					a.handleDashboardError(w, r, err)
+					return
+				}
 				status.Minecraft = instancePresentation(configuration).Minecraft
 			} else if errors.Is(configErr, api.ErrUnauthorized) || errors.Is(configErr, api.ErrPasswordChangeRequired) {
 				a.handleDashboardError(w, r, configErr)
@@ -341,6 +346,11 @@ func (a *App) minecraftServersInvitation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	status, err := a.api.Status(r.Context(), session)
+	if err != nil {
+		failure(err, "Connection information is unavailable.")
+		return
+	}
+	configuration, err = a.minecraftConnectionSettings(r.Context(), session, selected.ID, configuration)
 	if err != nil {
 		failure(err, "Connection information is unavailable.")
 		return

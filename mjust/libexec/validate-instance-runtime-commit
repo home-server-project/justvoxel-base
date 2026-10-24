@@ -4,6 +4,9 @@ set -euo pipefail
 # blocks startup until the administrator retries recovery through the Agent.
 fail() { echo 'ERROR: instance runtime is incomplete or requires recovery.' >&2; exit 1; }
 [[ $EUID == 0 && $# == 1 && $1 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+# An interrupted appliance-wide publication must recover before any backend
+# can start with a mixture of old and new public/private definitions.
+[[ ! -e /etc/justvoxel/minecraft-network/pending.json && ! -L /etc/justvoxel/minecraft-network/pending.json ]] || fail
 id=$1
 dir="/etc/justvoxel/instances/${id}"
 config="${dir}/config.json"

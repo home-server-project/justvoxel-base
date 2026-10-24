@@ -1,0 +1,410 @@
+#!/usr/bin/bash
+set -euo pipefail
+# Unit startup shares the existing maintenance lock. Agent publication already
+# holds it; backend startup inherits instance-crossplay-start's checked lock.
+if [[ ${1:-} == start-velocity || ${1:-} == start-picolobby ]]; then
+    exec 9>/run/justvoxel-minecraft-maintenance.lock
+    flock -w 5 9 || { echo 'ERROR: Minecraft Network is busy.' >&2; exit 1; }
+fi
+exec python3 - "$@" <<'PYTHON'
+"""Fixed Minecraft Network file preparation; called only by the root Agent/units.
+
+No relabel operations. Container volumes use their two dedicated private labels.
+All copying into existing instance data uses the existing private data mount.
+"""
+import base64
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+import tempfile
+import urllib.request
+import urllib.parse
+
+ROOT = '/etc/justvoxel/minecraft-network'
+INSTANCE_ROOT = '/etc/justvoxel/instances'
+PINNED_WHITELIST_SHA256 = '35c059c0913f2fa3cb75265edda4d84df84465c1ebebaefef3918e02be8bfbf5'
+MAX_JAR = 64 * 1024 * 1024
+
+
+def safe(path):
+    if not os.path.isabs(path) or os.path.realpath(path) != path:
+        raise ValueError('unsafe path')
+    part = '/'
+    for name in path.split('/')[1:]:
+        part = os.path.join(part, name)
+        if os.path.lexists(part) and os.path.islink(part):
+            raise ValueError('symlink')
+    return path
+
+
+def read(path, limit=1024*1024):
+    safe(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError('not a regular file')
+        data = stream.read(limit+1)
+    if len(data) > limit:
+        raise ValueError('file too large')
+    return data
+
+
+def private_json(path):
+    data = read(path)
+    info = os.stat(path)
+    if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+        raise ValueError('not private')
+    return json.loads(data)
+
+
+def directory(path, uid=0, gid=0):
+    safe(path)
+    if not os.path.exists(path):
+        parent = os.path.dirname(path)
+        if parent.startswith(ROOT):
+            directory(parent)
+        os.mkdir(path, 0o700)
+        os.chown(path, uid, gid)
+    if not os.path.isdir(path):
+        raise ValueError('not a directory')
+
+
+def atomic(path, data, uid=0, gid=0, mode=0o600):
+    safe(path)
+    if os.path.lexists(path) and not stat.S_ISREG(os.lstat(path).st_mode):
+        raise ValueError('not a regular file')
+    parent = os.path.dirname(path)
+    safe(parent)
+    fd, temporary = tempfile.mkstemp(prefix='.jv-network-', dir=parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            os.fchmod(stream.fileno(), mode)
+            os.fchown(stream.fileno(), uid, gid)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        sync = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(sync)
+        finally:
+            os.close(sync)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
+    max_redirections = 3
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        target = urllib.parse.urlsplit(newurl)
+        if target.scheme != 'https' or target.username is not None or target.password is not None:
+            raise ValueError('unsafe artifact redirect')
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+HTTP = urllib.request.build_opener(HTTPSRedirect)
+
+
+def fetch(url, limit):
+    if not url.startswith('https://'):
+        raise ValueError('HTTPS required')
+    request = urllib.request.Request(url, headers={'User-Agent': 'JustVoxel/MinecraftNetwork'})
+    with HTTP.open(request, timeout=30) as response:
+        if response.status != 200:
+            raise ValueError('bad response')
+        data = response.read(limit+1)
+    if len(data) > limit:
+        raise ValueError('download too large')
+    return data
+
+
+def prepare():
+    directory(ROOT)
+    directory(ROOT+'/velocity', 1000, 1000)
+    directory(ROOT+'/picolobby', 65532, 65532)
+    directory(ROOT+'/artifacts')
+    if os.path.exists(ROOT+'/artifacts.json'):
+        artifacts = private_json(ROOT+'/artifacts.json')
+        expected = {'global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar','floodgate-spigot.jar'}
+        if set(artifacts) != expected or artifacts['global-whitelist.jar'] != PINNED_WHITELIST_SHA256:
+            raise ValueError('invalid artifact evidence')
+        for name,expected_hash in artifacts.items():
+            if hashlib.sha256(read(ROOT+'/artifacts/'+name,MAX_JAR)).hexdigest() != expected_hash:
+                raise ValueError('installed artifact checksum mismatch')
+        return
+    artifacts = {}
+    # The reviewed Modrinth project/version, loader, primary JAR, metadata hash,
+    # published release hash and exact size all have to agree.
+    version = json.loads(fetch('https://api.modrinth.com/v2/project/aKrMZ5cC/version/1.2.1', 1024*1024))
+    if version['project_id'] != 'aKrMZ5cC' or version['version_number'] != '1.2.1' or 'velocity' not in version['loaders']:
+        raise ValueError('wrong whitelist version')
+    files = [f for f in version['files'] if f['primary'] and f['filename'].endswith('.jar')]
+    if len(files) != 1:
+        raise ValueError('ambiguous whitelist artifact')
+    f = files[0]
+    if not re.fullmatch(r'https://cdn\.modrinth\.com/data/aKrMZ5cC/versions/[A-Za-z0-9]+/[A-Za-z0-9._-]+\.jar', f['url']):
+        raise ValueError('untrusted whitelist artifact')
+    data = fetch(f['url'], MAX_JAR)
+    if len(data) != f['size'] or hashlib.sha512(data).hexdigest() != f['hashes']['sha512'] or hashlib.sha256(data).hexdigest() != PINNED_WHITELIST_SHA256:
+        raise ValueError('whitelist checksum mismatch')
+    artifacts['global-whitelist.jar'] = data
+    for project, platform, filename in [('geyser','velocity','Geyser-Velocity.jar'), ('floodgate','velocity','floodgate-velocity.jar'), ('floodgate','spigot','floodgate-spigot.jar')]:
+        metadata = json.loads(fetch('https://download.geysermc.org/v2/projects/'+project+'/versions/latest/builds/latest',1024*1024))
+        if metadata['project_id'] != project or metadata['channel'] != 'default' or not re.fullmatch(r'[0-9.]+(?:-SNAPSHOT)?',metadata['version']) or not isinstance(metadata['build'],int) or metadata['build'] <= 0:
+            raise ValueError('untrusted platform metadata')
+        expected = metadata['downloads'][platform]['sha256']
+        if not re.fullmatch('[a-f0-9]{64}',expected):
+            raise ValueError('missing platform checksum')
+        url = 'https://download.geysermc.org/v2/projects/{}/versions/{}/builds/{}/downloads/{}'.format(project,metadata['version'],metadata['build'],platform)
+        data = fetch(url,MAX_JAR)
+        if hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError('platform checksum mismatch')
+        artifacts[filename] = data
+    manifest = {}
+    # Publish the entire verified set only after all downloads are verified.
+    for name,data in artifacts.items():
+        atomic(ROOT+'/artifacts/'+name,data)
+        manifest[name] = hashlib.sha256(data).hexdigest()
+    atomic(ROOT+'/artifacts.json',json.dumps(manifest).encode())
+
+
+def publish(component=None):
+    state = private_json(ROOT+'/state.json')
+    if not state['config']['enabled']:
+        return
+    generated = private_json(ROOT+'/generated.json')
+    allowed = {'velocity/velocity.toml','velocity/forwarding.secret','velocity/plugins/global-whitelist/config.properties','velocity/plugins/global-whitelist/whitelist.json','velocity/plugins/floodgate/key.pem','velocity/plugins/floodgate/config.yml','velocity/plugins/Geyser-Velocity/config.yml','picolobby/server.toml'}
+    if set(generated) != allowed:
+        raise ValueError('unexpected generated files')
+    for name,encoded in generated.items():
+        if component is not None and not name.startswith(component+'/'):
+            continue
+        uid = 65532 if name.startswith('picolobby/') else 1000
+        directory(os.path.dirname(ROOT+'/'+name),uid,uid)
+        atomic(ROOT+'/'+name,base64.b64decode(encoded,validate=True),uid,uid)
+    artifacts = private_json(ROOT+'/artifacts.json')
+    if component == 'picolobby':
+        return
+    for name in ['global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar']:
+        data = read(ROOT+'/artifacts/'+name,MAX_JAR)
+        if hashlib.sha256(data).hexdigest() != artifacts[name]:
+            raise ValueError('artifact changed')
+        atomic(ROOT+'/velocity/plugins/'+name,data,1000,1000,0o644)
+
+
+# Back up only these exact configuration/managed artifact paths. Whitelist.json,
+# worlds, ports and server.properties are never replaced by this helper.
+BACKEND_FILES = ['config/paper-global.yml','paper.yml','plugins/floodgate/key.pem','plugins/floodgate/config.yml','plugins/floodgate-spigot.jar','plugins/Geyser-Spigot.jar','.justvoxel-network-patches.json']
+
+
+PORTABLE_CONFIGS = ['config/paper-global.yml','paper.yml','plugins/floodgate/key.pem','plugins/floodgate/config.yml']
+PORTABLE_NAME = '.justvoxel-network-standalone.json'
+
+
+def restore_portable(root,uid,gid):
+    path = safe(root+'/'+PORTABLE_NAME)
+    if not os.path.exists(path):
+        return
+    evidence = json.loads(read(path,2*1024*1024))
+    if evidence.get('schema') != 1 or set(evidence.get('configs',{})) != set(PORTABLE_CONFIGS):
+        raise ValueError('invalid portable standalone evidence')
+    decoded = {}
+    for name,entry in evidence['configs'].items():
+        if entry is None:
+            decoded[name] = None
+        else:
+            data = base64.b64decode(entry['data'],validate=True)
+            if len(data)>256*1024 or hashlib.sha256(data).hexdigest() != entry['sha256']:
+                raise ValueError('invalid portable standalone checksum')
+            decoded[name] = data
+    # Destination paths are fixed, relative to the validated selected data root.
+    # No identity, host path, runtime settings or whitelist is imported here.
+    for name,data in decoded.items():
+        target = safe(root+'/'+name)
+        if data is None:
+            if os.path.exists(target):
+                if not stat.S_ISREG(os.stat(target).st_mode):
+                    raise ValueError('invalid portable target')
+                os.unlink(target)
+        else:
+            safe(os.path.dirname(target))
+            os.makedirs(os.path.dirname(target),mode=0o755,exist_ok=True)
+            atomic(target,data,uid,gid,0o600 if name.endswith('key.pem') else 0o644)
+    patch = safe(root+'/.justvoxel-network-patches.json')
+    if os.path.exists(patch):
+        if not stat.S_ISREG(os.stat(patch).st_mode):
+            raise ValueError('invalid managed patch')
+        os.unlink(patch)
+    os.unlink(path)
+    sync = os.open(root,os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(sync)
+    finally:
+        os.close(sync)
+
+
+def backend(instance, publishing=False):
+    if not re.fullmatch(r'jv-[a-z0-9]{6,12}',instance):
+        raise ValueError('invalid instance')
+    record = private_json(INSTANCE_ROOT+'/'+instance+'/config.json')
+    root = safe(record['storage']['data_path'])
+    if not root.endswith('/minecraft-instances/'+instance+'/data'):
+        raise ValueError('wrong storage')
+    uid,gid = record['runtime']['uid'],record['runtime']['gid']
+    snapshot = INSTANCE_ROOT+'/'+instance+'/network-before.json'
+    blobdir = INSTANCE_ROOT+'/'+instance+'/network-before'
+    member = record.get('network_member',False)
+    if not os.path.exists(snapshot):
+        restore_portable(root,uid,gid)
+    if not member:
+        if os.path.exists(snapshot):
+            evidence = private_json(snapshot)
+            if evidence.get('id') != instance or set(evidence.get('files',{})) != set(BACKEND_FILES):
+                raise ValueError('invalid standalone evidence')
+            for name,hashvalue in evidence['files'].items():
+                target = safe(root+'/'+name)
+                if hashvalue is None:
+                    if os.path.exists(target):
+                        if not stat.S_ISREG(os.stat(target).st_mode):
+                            raise ValueError('not a file')
+                        os.unlink(target)
+                else:
+                    data = read(blobdir+'/'+str(BACKEND_FILES.index(name)),MAX_JAR)
+                    if hashlib.sha256(data).hexdigest() != hashvalue:
+                        raise ValueError('standalone evidence checksum mismatch')
+                    safe(os.path.dirname(target))
+                    os.makedirs(os.path.dirname(target),mode=0o755,exist_ok=True)
+                    atomic(target,data,uid,gid,0o600 if name.endswith('key.pem') else 0o644)
+            portable = safe(root+'/'+PORTABLE_NAME)
+            if os.path.exists(portable):
+                if not stat.S_ISREG(os.stat(portable).st_mode):
+                    raise ValueError('invalid portable evidence')
+                os.unlink(portable)
+            os.unlink(snapshot)
+            sync = os.open(INSTANCE_ROOT+'/'+instance,os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(sync)
+            finally:
+                os.close(sync)
+        if os.path.isdir(safe(blobdir)):
+            # Fixed private snapshot files only. Unknown contents are preserved.
+            for name in os.listdir(blobdir):
+                if name not in [str(i) for i in range(len(BACKEND_FILES))]:
+                    raise ValueError('unexpected standalone snapshot file')
+                path = safe(blobdir+'/'+name)
+                info = os.stat(path)
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+                    raise ValueError('unsafe standalone snapshot file')
+                os.unlink(path)
+            os.rmdir(blobdir)
+        return
+    if not publishing:
+        check()
+    state = private_json(ROOT+'/state.json')
+    if instance not in state['config']['members'] or record['runtime']['software'] not in ['paper','purpur']:
+        raise ValueError('invalid membership')
+    import subprocess
+    # Refuse duplicate/noncanonical managed artifacts before taking a snapshot;
+    # standalone restoration must never discard an unrecorded plugin filename.
+    for component, keep in [('geyser','Geyser-Spigot.jar'),('floodgate','floodgate-spigot.jar')]:
+        subprocess.run(['/usr/libexec/justvoxel/mjust/managed-plugin-files',root+'/plugins',component,keep,'--check'],check=True,stdout=subprocess.DEVNULL)
+    if not os.path.exists(snapshot):
+        directory(blobdir)
+        evidence = {'id':instance,'files':{}}
+        for index,name in enumerate(BACKEND_FILES):
+            path = safe(root+'/'+name)
+            if os.path.exists(path):
+                data = read(path,MAX_JAR)
+                atomic(blobdir+'/'+str(index),data)
+                evidence['files'][name] = hashlib.sha256(data).hexdigest()
+            else:
+                evidence['files'][name] = None
+        atomic(snapshot,json.dumps(evidence).encode())
+    # Backups/exports carry bounded standalone configuration evidence. A restored
+    # member can join this network; an imported standalone server can restore its
+    # original proxy/identity settings without copying appliance state or IDs.
+    evidence = private_json(snapshot)
+    portable = {'schema':1,'configs':{}}
+    for name in PORTABLE_CONFIGS:
+        hashvalue = evidence['files'][name]
+        if hashvalue is None:
+            portable['configs'][name] = None
+        else:
+            data = read(blobdir+'/'+str(BACKEND_FILES.index(name)),256*1024)
+            if hashlib.sha256(data).hexdigest() != hashvalue:
+                raise ValueError('standalone evidence changed')
+            portable['configs'][name] = {'sha256':hashvalue,'data':base64.b64encode(data).decode()}
+    atomic(root+'/'+PORTABLE_NAME,json.dumps(portable).encode())
+    # Stop the managed backend listener; identity handling stays in Floodgate.
+    geyser = safe(root+'/plugins/Geyser-Spigot.jar')
+    if os.path.exists(geyser):
+        os.unlink(geyser)
+    safe(root+'/plugins')
+    os.makedirs(root+'/plugins', mode=0o755, exist_ok=True)
+    os.chown(root+'/plugins', uid, gid)
+    safe(root+'/plugins/floodgate')
+    os.makedirs(root+'/plugins/floodgate',mode=0o755,exist_ok=True)
+    os.chown(root+'/plugins/floodgate',uid,gid)
+    secret = state['forwarding_secret']
+    version = record['runtime']['version']
+    match = re.match(r'^(\d+)\.(\d+)',version)
+    old_paper = bool(match) and tuple(map(int,match.groups())) < (1,19)
+    path, parent, field = ('/data/paper.yml','$.settings','velocity-support') if old_paper else ('/data/config/paper-global.yml','$.proxies','velocity')
+    patches = {'patches':[{'file':path,'ops':[{'$put':{'path':parent,'key':field,'value':{'enabled':True,'online-mode':True,'secret':secret}}}]}]}
+    atomic(root+'/.justvoxel-network-patches.json',json.dumps(patches).encode(),uid,gid)
+    atomic(root+'/plugins/floodgate/key.pem',base64.b64decode(state['floodgate_key'],validate=True),uid,gid)
+    atomic(root+'/plugins/floodgate/config.yml',b'key-file-name: key.pem\nusername-prefix: "."\nreplace-spaces: true\nconfig-version: 3\n',uid,gid)
+    artifacts = private_json(ROOT+'/artifacts.json')
+    data = read(ROOT+'/artifacts/floodgate-spigot.jar',MAX_JAR)
+    if hashlib.sha256(data).hexdigest() != artifacts['floodgate-spigot.jar']:
+        raise ValueError('backend artifact changed')
+    atomic(root+'/plugins/floodgate-spigot.jar',data,uid,gid,0o644)
+
+
+def check():
+    if os.path.lexists(ROOT+'/pending.json'):
+        raise ValueError('network recovery required')
+    state = private_json(ROOT+'/state.json')
+    if state['schema'] != 1 or not state['config']['enabled']:
+        raise ValueError('network disabled')
+    # Container configuration loaders may normalize their files. The root-owned
+    # state is authoritative: each unit republishes only its own configuration
+    # before startup instead of trusting container-written bytes on the next boot.
+    artifacts = private_json(ROOT+'/artifacts.json')
+    for name in ['global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar']:
+        if hashlib.sha256(read(ROOT+'/artifacts/'+name,MAX_JAR)).hexdigest() != artifacts[name]:
+            raise ValueError('network artifact changed')
+
+
+def main():
+    if os.geteuid() != 0:
+        raise ValueError('root required')
+    if sys.argv[1:] == ['prepare']:
+        prepare()
+    elif sys.argv[1:] == ['publish']:
+        publish()
+    elif sys.argv[1:] == ['check']:
+        check()
+    elif sys.argv[1:] in [['start-velocity'],['start-picolobby']]:
+        check()
+        publish(sys.argv[1].removeprefix('start-'))
+    elif len(sys.argv) == 3 and sys.argv[1] in ['backend','backend-publish']:
+        backend(sys.argv[2],publishing=sys.argv[1] == 'backend-publish')
+    else:
+        raise ValueError('invalid operation')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception:
+        # Never expose configuration, keys, URLs with player names or internals.
+        print('ERROR: Minecraft Network preparation failed; retry through Minecraft Network administration.',file=sys.stderr)
+        sys.exit(1)
+
+PYTHON

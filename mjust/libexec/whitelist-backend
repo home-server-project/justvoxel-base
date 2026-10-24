@@ -15,7 +15,7 @@ if [[ ${1:-} == --instance ]]; then
     done
     jq -e --arg id "${instance_id}" '.id == $id' "${registry}" >/dev/null || exit 1
     jq -e --arg id "${instance_id}" '.runtime.id == $id and (.runtime.bedrock_enabled | type == "boolean")' "${config}" >/dev/null || exit 1
-    BEDROCK_ENABLED=$(jq -r 'if .runtime.bedrock_enabled then "yes" else "no" end' "${config}")
+    BEDROCK_ENABLED=$(jq -r 'if (.runtime.bedrock_enabled or .network_member == true) then "yes" else "no" end' "${config}")
     container="minecraft-${instance_id}"
     unit="${container}.service"
 fi

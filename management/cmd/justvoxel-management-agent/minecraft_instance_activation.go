@@ -28,6 +28,7 @@ const instanceRuntimeHelper = "/usr/libexec/justvoxel/mjust/instance-runtime-pre
 // Hashes commit the two live files; pending.json inhibits startup even after reboot.
 type instanceRuntimeRecord struct {
 	SchemaVersion     int                            `json:"schema_version"`
+	NetworkMember     bool                           `json:"network_member,omitempty"`
 	Runtime           minecraftInstanceRuntimeConfig `json:"runtime"`
 	Backups           *instanceRuntimeBackupStorage  `json:"backups,omitempty"`
 	Storage           instanceRuntimeStorage         `json:"storage"`
@@ -64,6 +65,7 @@ type instanceActivationEvidence struct {
 }
 type instanceRuntimeBackend struct {
 	root, quadlets, staging string
+	networkRoot             string // tests may isolate private Minecraft Network state
 	store                   *minecraftInstanceStore
 	command                 func(context.Context, string, ...string) ([]byte, error)
 	pause                   func(context.Context, time.Duration) error
@@ -405,6 +407,13 @@ func (b *instanceRuntimeBackend) records() ([]instanceRuntimeRecord, error) {
 	return records, b.verifyRuntimeCoverage(records)
 }
 func (b *instanceRuntimeBackend) pending(id string) (bool, error) {
+	// The batch network journal is also activation evidence. Coverage checks must
+	// allow its intermediate committed-file hashes so the normal lock acquisition
+	// and administrator recovery route remain reachable after interruption.
+	if _, err := b.readPrivate(filepath.Join(b.networkDirectory(), "pending.json")); !errors.Is(err, os.ErrNotExist) {
+		return true, err
+	}
+
 	if _, err := b.readPrivate(b.deletePath(id)); !errors.Is(err, os.ErrNotExist) {
 		return true, errInstanceRecovery
 	}
@@ -416,6 +425,9 @@ func (b *instanceRuntimeBackend) pending(id string) (bool, error) {
 	return true, err
 }
 func (b *instanceRuntimeBackend) verifyLive(record instanceRuntimeRecord) error {
+	if err := networkPending(b); err != nil {
+		return err
+	}
 	pending, err := b.pending(record.Runtime.ID)
 	if err != nil || pending {
 		return errInstanceRecovery
@@ -438,6 +450,11 @@ func (b *instanceRuntimeBackend) render(ctx minecraftInstanceRuntimeContext, rec
 	return b.renderCandidate(ctx, records, "")
 }
 func (b *instanceRuntimeBackend) renderCandidate(ctx minecraftInstanceRuntimeContext, records []instanceRuntimeRecord, candidate string) ([]minecraftInstanceRuntimeFiles, error) {
+	if !ctx.NetworkTransition {
+		if err := networkCheckReservations(b, records); err != nil {
+			return nil, err
+		}
+	}
 	ctx.Placements = make(map[string]instanceRuntimeRecord, len(records))
 	configs := make([]minecraftInstanceRuntimeConfig, 0, len(records))
 	for _, r := range records {
@@ -447,7 +464,22 @@ func (b *instanceRuntimeBackend) renderCandidate(ctx minecraftInstanceRuntimeCon
 		ctx.Placements[r.Runtime.ID] = r
 		configs = append(configs, r.Runtime)
 	}
-	return b.identities().renderInstanceRuntimesCandidate(ctx, configs, candidate)
+	files, err := b.identities().renderInstanceRuntimesCandidate(ctx, configs, candidate)
+	if err != nil {
+		return nil, err
+	}
+	for i, f := range files {
+		for _, r := range records {
+			if r.Runtime.ID == f.ID {
+				files[i], err = networkOverlay(f, r)
+				if err != nil {
+					return nil, err
+				}
+				break
+			}
+		}
+	}
+	return files, nil
 }
 
 func (b *instanceRuntimeBackend) storage(ctx context.Context, action string, record instanceRuntimeRecord) error {
@@ -510,7 +542,12 @@ func instanceHoldPort(port int) ([]net.Listener, error) {
 
 // Reserve the same persistent-operation locks without changing journal schemas.
 // Holding mu prevents another Agent operation from borrowing our held descriptors.
-func (s *server) lockInstanceRuntime() (func() error, error) {
+func (s *server) lockInstanceRuntime(networkRecovery ...bool) (func() error, error) {
+	if len(networkRecovery) == 0 || !networkRecovery[0] {
+		if err := networkPending(instanceRuntimes); err != nil {
+			return nil, err
+		}
+	}
 	if instanceRestoreActive.Load() {
 		return nil, errInstanceBusy
 	}
@@ -713,14 +750,14 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			return instanceRuntimeFailure("Loader changes on existing data require separate compatibility support. No loader was changed.")
 		}
 	}
-	if !bootOnly && !channelOnly && !whitelistOnly && next.Runtime.BedrockEnabled {
+	if !next.NetworkMember && !bootOnly && !channelOnly && !whitelistOnly && next.Runtime.BedrockEnabled {
 		heldUDP, e := instanceHoldCrossplayPort(next.Runtime.BedrockPort)
 		if e != nil {
 			return e
 		}
 		defer heldUDP.Close()
 	}
-	if !bootOnly && previous.Runtime.BedrockEnabled && (!next.Runtime.BedrockEnabled || previous.Runtime.BedrockPort != next.Runtime.BedrockPort) {
+	if !previous.NetworkMember && !bootOnly && previous.Runtime.BedrockEnabled && (!next.Runtime.BedrockEnabled || previous.Runtime.BedrockPort != next.Runtime.BedrockPort) {
 		heldUDP, e := instanceHoldCrossplayPort(previous.Runtime.BedrockPort)
 		if e != nil {
 			return e
@@ -738,7 +775,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 		}
 		defer closeBedrockPorts(ports)
 	}
-	if next.Runtime.Software != "bedrock" && (state.State != "running" || next.Runtime.JavaPort != previous.Runtime.JavaPort) {
+	if !next.NetworkMember && next.Runtime.Software != "bedrock" && (state.State != "running" || next.Runtime.JavaPort != previous.Runtime.JavaPort) {
 		held, err = instanceHoldPort(instanceSignalingPort(next.Runtime))
 		if err != nil {
 			return err
@@ -749,7 +786,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			}
 		}()
 	}
-	if next.Runtime.JavaPort != previous.Runtime.JavaPort && len(previous.Firewall) > 0 {
+	if !previous.NetworkMember && next.Runtime.JavaPort != previous.Runtime.JavaPort && len(previous.Firewall) > 0 {
 		old, err := instanceHoldPort(instanceSignalingPort(previous.Runtime))
 		if err != nil {
 			return instanceRuntimeFailure("Previous Java port is in use; firewall access cannot safely be removed.")
@@ -927,6 +964,19 @@ func (b *instanceRuntimeBackend) verifyHashes(r instanceRuntimeRecord) error {
 	return nil
 }
 func (b *instanceRuntimeBackend) validateBundle(ctx context.Context, path string, files []minecraftInstanceRuntimeFiles) error {
+	for _, f := range files {
+		if bytes.Contains(f.Quadlet, []byte("Network="+minecraftNetworkName+".network")) {
+			data, err := b.readPrivate(filepath.Join(b.quadlets, minecraftNetworkName+".network"))
+			if err != nil {
+				return err
+			}
+			if err = b.writePrivate(filepath.Join(path, minecraftNetworkName+".network"), data, true); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
 	// env accepts only an internally generated, validated path, never client text.
 	output, err := b.command(ctx, "env", "QUADLET_UNIT_DIRS="+path, "/usr/lib/systemd/system-generators/podman-system-generator", "--dryrun")
 	if err != nil {
