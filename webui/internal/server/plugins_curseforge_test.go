@@ -122,9 +122,16 @@ func TestCurseForgeWorkspaceMarkupAndSecretBoundary(t *testing.T) {
 		}
 		last = index
 	}
-	for _, want := range []string{"data-plugins-curseforge", "data-plugins-curseforge-section", `data-curseforge-notice-dismiss aria-label="Dismiss CurseForge notice">×</button>`, "CurseForge API", "Apply for CurseForge API key", `rel="noopener noreferrer"`, "••••••••••••••••", `data-curseforge-key-form`, `type="password" data-curseforge-key autocomplete="new-password" maxlength="1024" required`, `data-curseforge-save>Save API key`, `data-curseforge-status`, `data-curseforge-mask hidden>Stored API key:`, `data-curseforge-remove hidden`} {
+	for _, want := range []string{"data-plugins-curseforge", "data-plugins-curseforge-section", `data-curseforge-notice-dismiss aria-label="Dismiss CurseForge notice">×</button>`, "CurseForge API", "Apply for CurseForge API key", `rel="noopener noreferrer"`, "••••••••••••••••", `data-curseforge-key-form`, `type="password" data-curseforge-key data-password-ui="off" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="1024" required`, `data-curseforge-save>Save API key`, `data-curseforge-status`, `data-curseforge-mask hidden>Stored API key:`, `data-curseforge-remove hidden`} {
 		if !strings.Contains(markup, want) {
 			t.Fatal("missing markup", want)
+		}
+	}
+	fieldStart := strings.Index(markup, `<input type="password" data-curseforge-key`)
+	field := strings.SplitN(markup[fieldStart:], ">", 2)[0]
+	for _, forbidden := range []string{`autocomplete="new-password"`, `value=`, `{{`} {
+		if strings.Contains(field, forbidden) {
+			t.Fatalf("credential input must not render a stored value or request a new password: %q", forbidden)
 		}
 	}
 	start := strings.Index(js, "  const curseForgeSwitch =")

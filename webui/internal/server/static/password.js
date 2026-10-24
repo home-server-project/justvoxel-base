@@ -1,4 +1,4 @@
-document.querySelectorAll('input[type="password"]').forEach((input) => {
+document.querySelectorAll('input[type="password"]:not([data-password-ui="off"])').forEach((input) => {
   const shell = document.createElement("span");
   shell.className = "password-field-shell";
   input.parentNode.insertBefore(shell, input);

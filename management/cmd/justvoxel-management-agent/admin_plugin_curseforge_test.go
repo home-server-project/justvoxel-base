@@ -131,7 +131,92 @@ func TestCurseForgeRejectsUnsafePaths(t *testing.T) {
 		t.Fatal("directory symlink accepted")
 	}
 }
+func TestCurseForgeServiceAndStorageContract(t *testing.T) {
+	unit, err := os.ReadFile("../../../system_files/usr/lib/systemd/system/justvoxel-management.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"User=root", "Group=justvoxel-web", "UMask=0007"} {
+		if !strings.Contains("\n"+string(unit), "\n"+line+"\n") {
+			t.Fatalf("management service contract missing %q", line)
+		}
+	}
+	tmpfiles, err := os.ReadFile("../../../system_files/usr/lib/tmpfiles.d/justvoxel.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains("\n"+string(tmpfiles), "\nd /var/lib/justvoxel/management/curseforge 0700 root root -\n") {
+		t.Fatal("tmpfiles must normalize the known CurseForge directory at boot")
+	}
+	// Lock the creation-only descriptor repair even when root fixtures cannot run.
+	source, err := os.ReadFile("admin_plugin_curseforge.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := -1
+	for _, step := range []string{
+		"created := false",
+		"unix.Mkdirat(fd, part, 0700)",
+		"created = err == nil",
+		"unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)",
+		"if created {\n\t\tif unix.Fchown(fd, 0, 0) != nil || unix.Fchmod(fd, 0700) != nil {",
+		"unix.Fstat(fd, &st) != nil || st.Uid != 0 || st.Gid != 0 || st.Mode&07777 != 0700",
+	} {
+		index := strings.Index(string(source), step)
+		if index <= last {
+			t.Fatalf("creation-only normalization before strict validation missing %q", step)
+		}
+		last = index
+	}
+}
+
+func TestCurseForgeDirectoryGroupOwnership(t *testing.T) {
+	path := curseForgeTestDirectory(t)
+	parent := filepath.Dir(path)
+	// A setgid parent reproduces non-root group inheritance without changing
+	// the test process identity or requiring the appliance's group database.
+	if err := os.Chown(parent, 0, 12345); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, os.ModeSetgid|0700); err != nil {
+		t.Fatal(err)
+	}
+	probe := filepath.Join(parent, "inherited-group")
+	if err := os.Mkdir(probe, 0700); err != nil {
+		t.Fatal(err)
+	}
+	var st unix.Stat_t
+	if unix.Stat(probe, &st) != nil || st.Gid != 12345 {
+		t.Fatal("fixture did not reproduce non-root group inheritance")
+	}
+	dir, err := openCurseForgeDirectory(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Fstat(int(dir.Fd()), &st); err != nil {
+		dir.Close()
+		t.Fatal(err)
+	}
+	dir.Close()
+	if st.Uid != 0 || st.Gid != 0 || st.Mode&07777 != 0700 {
+		t.Fatal("new directory was not normalized to root:root 0700")
+	}
+	if err := os.Chown(path, 0, 12345); err != nil {
+		t.Fatal(err)
+	}
+	if dir, err := openCurseForgeDirectory(path); err == nil {
+		dir.Close()
+		t.Fatal("existing directory with unsafe group accepted")
+	}
+	if unix.Stat(path, &st) != nil || st.Gid != 12345 {
+		t.Fatal("runtime repaired an existing directory")
+	}
+}
+
 func TestCurseForgeKeyValidation(t *testing.T) {
+	if !validCurseForgeKey("$2a$10$exampleExampleExampleExampleExampleExampleExampleExample") {
+		t.Fatal("synthetic bcrypt-looking API credential rejected")
+	}
 	for _, key := range []string{"", " \t ", strings.Repeat("x", 1025), "secret\nvalue", "secret\rvalue", "secret\x00value", "secret\u2028value"} {
 		if validCurseForgeKey(key) {
 			t.Fatal("invalid credential accepted")

@@ -50,12 +50,14 @@ func openCurseForgeDirectory(path string) (*os.File, error) {
 		return nil, errCurseForgeStorage
 	}
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	created := false
 	for i, part := range parts {
 		if i == len(parts)-1 {
 			if err = unix.Mkdirat(fd, part, 0700); err != nil && err != unix.EEXIST {
 				unix.Close(fd)
 				return nil, errCurseForgeStorage
 			}
+			created = err == nil
 		}
 		next, openErr := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		unix.Close(fd)
@@ -65,6 +67,14 @@ func openCurseForgeDirectory(path string) (*os.File, error) {
 		fd = next
 	}
 	dir := os.NewFile(uintptr(fd), path)
+	// The service runs with group justvoxel-web. Normalize only the directory
+	// we just created; tmpfiles owns boot repair of the known appliance path.
+	if created {
+		if unix.Fchown(fd, 0, 0) != nil || unix.Fchmod(fd, 0700) != nil {
+			dir.Close()
+			return nil, errCurseForgeStorage
+		}
+	}
 	var st unix.Stat_t
 	if unix.Fstat(fd, &st) != nil || st.Uid != 0 || st.Gid != 0 || st.Mode&07777 != 0700 {
 		dir.Close()
