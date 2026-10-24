@@ -304,17 +304,32 @@
         <div><p class="eyebrow">JustVoxel</p><h2 id="plugins-workspace-title">Plugins</h2></div>
         <div class="selected-server-header-actions"><span data-server-selector-slot data-server-workspace="plugins"></span><button class="system-monitor-header-button workspace-header-refresh" type="button" data-plugins-refresh aria-label="Refresh Plugins">Refresh</button><button class="system-monitor-header-button workspace-header-close" type="button" data-plugins-close aria-label="Close Plugins"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button></div>
       </div>
-      <nav class="plugins-workspace-tabs" aria-label="Plugins workspace"><button type="button" data-plugins-tab="discover" aria-selected="true">Discover</button><button type="button" data-plugins-tab="installed" aria-selected="false">Installed</button><button type="button" data-plugins-tab="addons" aria-selected="false">Add-ons</button></nav>
+      <nav class="plugins-workspace-tabs" aria-label="Plugins workspace"><button type="button" data-plugins-tab="discover" aria-selected="true">Discover</button><button type="button" data-plugins-tab="installed" aria-selected="false">Installed</button><button type="button" data-plugins-tab="addons" aria-selected="false">Add-ons</button><button type="button" data-plugins-tab="curseforge-api" aria-selected="false">CurseForge API</button></nav>
       <div class="plugins-workspace-body">
         <form class="plugins-search" data-plugins-search role="search">
           <label class="plugins-search-field"><input aria-label="Search plugins" name="q" type="search" maxlength="200" placeholder="Search plugins" autocomplete="off"></label>
           <div class="plugins-search-filters">
             <label class="plugins-filter"><input type="checkbox" role="switch" name="modrinth" data-plugins-modrinth checked>Modrinth</label>
             <label class="plugins-filter"><input type="checkbox" role="switch" name="hangar" data-plugins-hangar>Hangar</label>
+            <div class="plugins-curseforge-source">
+              <label class="plugins-filter"><input type="checkbox" role="switch" data-plugins-curseforge disabled>CurseForge</label>
+              <aside class="plugins-curseforge-notice" data-plugins-curseforge-notice role="status" hidden><button type="button" data-curseforge-notice-dismiss aria-label="Dismiss CurseForge notice">×</button><p>CurseForge needs an API key first.</p><button type="button" data-curseforge-notice-configure>Configure API</button></aside>
+            </div>
             <label class="plugins-filter"><input role="switch" name="compatible_only" type="checkbox" checked>Compatible only</label>
             <label class="plugins-filter"><input role="switch" name="release_only" type="checkbox" checked>Release only</label>
           </div>
         </form>
+        <p class="plugins-curseforge-info" data-plugins-curseforge-info role="status" hidden>CurseForge is configured. Catalog support will be enabled in the next integration step.</p>
+        <section data-plugins-curseforge-section hidden>
+          <h3>CurseForge API</h3>
+          <p>Configure the CurseForge API key for CurseForge plugin and mod discovery.</p>
+          <p>CurseForge requires an approved third-party API key.</p>
+          <p><a href="https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key" target="_blank" rel="noopener noreferrer">Apply for CurseForge API key</a></p>
+          <p data-curseforge-status role="status">Checking configuration…</p>
+          <p data-curseforge-mask hidden>API key <span>••••••••••••••••</span></p>
+          <button type="button" data-curseforge-configure disabled>Configure API</button>
+          <button type="button" data-curseforge-remove hidden>Remove API key</button>
+        </section>
         <p class="plugins-workspace-state" data-plugins-state role="status" aria-live="polite"></p>
         <div class="plugins-results" data-plugins-results></div>
         <div class="plugins-pagination" data-plugins-pagination><span data-plugins-page>Page 1 of 1</span><button type="button" data-plugins-previous disabled>Previous</button><button type="button" data-plugins-next>Next</button></div>

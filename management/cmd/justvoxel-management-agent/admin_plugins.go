@@ -126,6 +126,9 @@ type pluginCatalogPage struct {
 }
 
 func registerAdminPluginRoutes(mux *http.ServeMux, s *server) {
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		mux.HandleFunc(method+" /v1/admin/plugins/curseforge-api", s.adminCurseForgeAPI)
+	}
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/operations/{operation}", s.selectedPluginHandler(s.selectedPluginStatus))
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/addons", s.selectedPluginHandler(s.adminAddonInventory))
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/addons/plan", s.selectedPluginHandler(s.adminAddonPlan))

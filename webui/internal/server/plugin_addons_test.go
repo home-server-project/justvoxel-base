@@ -122,8 +122,14 @@ func TestAddonWorkspaceRenderingContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	header := string(raw)
-	if strings.Count(header, `data-plugins-tab=`) != 3 || !strings.Contains(header, `data-plugins-tab="addons"`) {
-		t.Fatal("third tab missing")
+	tabs := strings.Split(header, `data-plugins-tab=`)[1:]
+	if len(tabs) != 4 {
+		t.Fatalf("expected exactly four Plugins tabs, got %d", len(tabs))
+	}
+	for i, tab := range []string{"discover", "installed", "addons", "curseforge-api"} {
+		if !strings.HasPrefix(tabs[i], `"`+tab+`"`) {
+			t.Fatalf("Plugins tab %d must be %s", i+1, tab)
+		}
 	}
 	for _, want := range []string{`picker.type = "file"`, `picker.accept = section.accept`, `picker.disabled = !section.host.available`, `"Review / Install"`, `"Managed by Add-ons"`, `"Updates are not available yet"`, `rows("Destination", plan.destination)`, `rows("Type", section.name)`, `rows("File", plan.filename)`, `rows("Size", readableSize(plan.size))`, `rows("Restart required", plan.restart_required`, `body.append("file", file, file.name)`, `body.append("plan_fingerprint", plan.plan_fingerprint)`, `addonRequest("install", section.kind, file, plan`, `Plugins -> Add-ons -> BlueMap Add-ons`} {
 		if !strings.Contains(script, want) {

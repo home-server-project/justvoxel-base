@@ -719,3 +719,48 @@ Administrator-only Agent routes are `GET /v1/admin/plugins/addons`,
 cookie/origin policy before streaming. Polling reuses the existing Plugins operation
 surface with operation type `plugin_addon_install`. There are no changes to the
 existing Plugins ownership schema, runtime targets or SELinux policy.
+
+## CurseForge API configuration
+
+Plugins keeps its existing name and tabs, with **CurseForge API** following
+Discover, Installed and Add-ons. Administrators can configure, replace or remove
+an approved third-party API key there. The tab and configuration dialog link to
+[CurseForge's official application help](https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key);
+approval is required, and saving a key does not validate it against CurseForge.
+
+The Discover CurseForge switch starts off. Without a configured key, enabling
+it immediately returns it to off and opens a compact notice beside it. The
+notice closes after 15 seconds, with X or Escape; repeating the attempt restarts
+the timer. Configure API selects the API tab and opens the configuration dialog.
+With a key configured, the switch stays on while the workspace is open and shows
+that catalog support will arrive in the next integration step. This switch does
+not reload or change Modrinth/Hangar results or pagination.
+
+CurseForge catalog/search/download/install is not implemented in this cycle.
+No CurseForge parameter is sent to the existing catalog endpoint. Existing
+Modrinth, Hangar and plugin management behavior is unchanged.
+
+The Management Agent stores the key at
+`/var/lib/justvoxel/management/curseforge/api-key`. The containing directory must
+be root:root `0700`; the single-link regular key file must be root:root `0600`.
+All path components are opened without following symlinks. Unsafe paths or
+permissions fail closed. Replacement writes and syncs a private temporary file,
+then atomically renames it and syncs the directory. Removal unlinks the file and
+syncs the directory; this does not claim physical erasure from storage media.
+Keys must contain 1–1024 bytes, must not be whitespace-only, and must contain no
+control characters or line separators. No runtime/container configuration uses
+the key yet.
+
+Authenticated administrator-only `GET`, `PUT`, and `DELETE` requests to
+`/api/plugins/workspace/curseforge-api` proxy to the same methods at
+`/v1/admin/plugins/curseforge-api`. This is appliance configuration independent
+of the selected Minecraft server. WebUI writes require the existing session CSRF
+token. PUT accepts a form `key` (forwarded once as strict JSON `{"key":"…"}`);
+DELETE accepts only the CSRF form field. Query parameters are rejected.
+Every successful response contains only `{"configured":true}` or
+`{"configured":false}` and is marked `no-store`. Status does not read key
+contents. Inputs are never prefilled, are cleared after submission/dismissal,
+and replacements require a complete key. The UI displays only a fixed mask.
+The key is never returned, logged, included in diagnostic contents, placed in
+browser storage or URLs, or passed to Minecraft. Removing it turns the switch
+off without changing installed plugins or manifests.

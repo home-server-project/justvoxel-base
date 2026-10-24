@@ -518,8 +518,9 @@ test('Add-ons plan and apply send the same selected File with a reviewed fingerp
 
 test('Add-ons remain exactly five fixed kinds within the third Plugins tab', () => {
   const header = read('webui/internal/server/templates/header.html');
-  assert.equal((header.match(/data-plugins-tab=/g) || []).length, 3);
-  assert.ok(header.includes('data-plugins-tab="addons"'));
+  const tabs = [...header.matchAll(/data-plugins-tab="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(tabs.length, 4);
+  assert.deepEqual(tabs, ['discover', 'installed', 'addons', 'curseforge-api']);
   const agent = read('management/cmd/justvoxel-management-agent/admin_plugin_addons.go');
   const definitions = agent.slice(agent.indexOf('var addonDefinitions ='), agent.indexOf('func addonDefinitionFor'));
   const kinds = [...definitions.matchAll(/\{"([a-z_]+)"/g)].map(match => match[1]);

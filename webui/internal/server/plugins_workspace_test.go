@@ -1056,7 +1056,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", () => { resetCursors(); load(); })`,
+		`pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", () => { refreshCurseForgeStatus(); resetCursors(); load(); })`,
 		`pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener("click"`,
 		`load(); resumePluginInstall();`,
 	} {
@@ -1250,8 +1250,18 @@ func TestPluginsWorkspaceApprovedLiveSearchAndSharedTabs(t *testing.T) {
 	if !strings.Contains(submit, `"change", () => { clearTimeout(searchTimer); resetCursors(); load(); }`) {
 		t.Fatal("filters must reload immediately")
 	}
-	if !strings.Contains(script, `onClose: () => { clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer();`) {
-		t.Fatal("workspace close must clear timers")
+	workspace := pluginScriptSection(t, script, "  const workspaceWindow = setupWorkspaceWindow(pluginsDialog,", `  pluginsOpen.addEventListener`)
+	close := pluginScriptSection(t, workspace, `onClose: () => {`, `} });`)
+	for _, want := range []string{`dismissCurseForgeNotice()`, `curseForgeSwitch.checked = false`, `syncCurseForgeInfo()`, `clearTimeout(capacityTimer)`, `clearTimeout(searchTimer)`, `clearInventoryTimer()`, `++generation`, `controller?.abort()`, `resetCursors()`, `closePanel()`} {
+		if !strings.Contains(close, want) {
+			t.Fatal("workspace close cleanup missing", want)
+		}
+	}
+	dismiss := pluginScriptSection(t, script, "  const dismissCurseForgeNotice =", "  const syncCurseForgeInfo =")
+	for _, want := range []string{`clearTimeout(curseForgeNoticeTimer)`, `curseForgeNoticeTimer = null`, `curseForgeNotice.hidden = true`} {
+		if !strings.Contains(dismiss, want) {
+			t.Fatal("CurseForge notice dismiss cleanup missing", want)
+		}
 	}
 }
 
@@ -1671,7 +1681,7 @@ class Card {
 const cards=[new Card(),new Card()],results={querySelectorAll:()=>cards};
 const document={createElement:()=>({append(){}})},identityTile=()=>({});
 let activations=0,stops=0,operationViewID="one",overlayDismissible=true,returnFocus=null;
-const panel={hidden:false},workspaceShell={inert:true},pluginsDialog={querySelector:()=>null};
+const panel={hidden:false,dataset:{},classList:{contains:()=>false}},workspaceShell={inert:true},pluginsDialog={querySelector:()=>null};
 const stopPolling=()=>{stops++;};
 ` + card + close + `
 for(const c of cards) {interactiveCard(c,"Example",()=>{activations++;});assert.equal(c.attrs["aria-pressed"],"false");assert.equal(c.classList.contains("is-selected"),false);}
@@ -1838,7 +1848,8 @@ func TestPluginsDiscoverSourceControlsAndReadOnlyCards(t *testing.T) {
 		t.Fatal("fixed source handler remains")
 	}
 	helpers := pluginScriptSection(t, script, "  const text =", "  const renderInstalled =")
-	actions := pluginScriptSection(t, script, "  const panelAction =", "  const returnToInstalled =")
+	// Card rendering needs action helpers, without CurseForge control initialization.
+	actions := pluginScriptSection(t, script, "  const panelAction =", "  const curseForgeSwitch =")
 	program := `
 const assert = require("node:assert/strict");
 const imageRequests = [];
@@ -1982,6 +1993,7 @@ const pageLabel={};
 let pageCursors=[],totalPages=1,discoverServerKey=null;const resetCursors=()=>{throw new Error("unexpected context reset")};
 const document={body:{classList:{contains:()=>true}}};
 const pluginsDialog={};
+const curseForgeSection={},curseForgeSwitch={},curseForgeNotice={contains:()=>false},syncCurseForgeInfo=()=>{};
 const results={classList:{toggle:()=>{}},replaceChildren:()=>{},append:()=>{throw new Error("unexpected result")}};
 let generation=0,controller=null,tab="discover",pageLimit=1,pageIndex=0,nextCursor=null,total=0;
 let cursor={modrinth_offset:8,hangar_offset:3,hangar_first:true};
@@ -2085,6 +2097,7 @@ const previous=eventNode(),next=eventNode(),pluginsOpen=eventNode(),refresh=even
 const tabs=[{...eventNode(),dataset:{pluginsTab:"discover"},setAttribute:()=>{}},{...eventNode(),dataset:{pluginsTab:"installed"},setAttribute:()=>{}}];
 const pluginsDialog={open:true,querySelector:s=>s.includes("refresh")?refresh:close,querySelectorAll:()=>tabs};
 const state={};const document={body:{classList:{contains:()=>true}},querySelector:()=>null};
+const refreshCurseForgeStatus=()=>{},dismissCurseForgeNotice=()=>{},curseForgeSwitch={},syncCurseForgeInfo=()=>{};
 const setupWorkspaceWindow=(dialog,callbacks)=>{options=callbacks;return {open:callbacks.onOpen,close:callbacks.onClose}};
 const clearTimeout=()=>{},setTimeout=(fn)=>{searchTimer=fn;return fn},clearInventoryTimer=()=>{},closePanel=()=>closes++,resumePluginInstall=()=>resumes++;
 ` + cursors + `

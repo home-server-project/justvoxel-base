@@ -18,6 +18,9 @@ type pluginsWorkspaceAPI interface {
 }
 
 func (a *App) registerPluginsWorkspaceRoutes(mux *http.ServeMux) {
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		mux.HandleFunc(method+" /api/plugins/workspace/curseforge-api", a.pluginsCurseForgeAPI)
+	}
 	mux.HandleFunc("GET /api/plugins/workspace/addons", a.selectedPluginRequest(a.pluginsAddonInventory))
 	mux.HandleFunc("POST /api/plugins/workspace/addons/plan", a.selectedPluginRequest(a.pluginsAddonPlan))
 	mux.HandleFunc("POST /api/plugins/workspace/addons/install", a.selectedPluginRequest(a.pluginsAddonInstall))
