@@ -558,7 +558,7 @@ func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	action, callback := r.PostForm.Get("action"), r.PostForm.Get("callback")
 	if (action != "login" && action != "complete-login") || (action == "login" && callback != "") || (action == "complete-login" && !api.ValidNordCallback(callback)) {
-		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN Continue link")
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN login completion URL")
 		return
 	}
 	client, ok := a.api.(networkNordAPI)

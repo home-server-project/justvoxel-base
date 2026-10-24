@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const nordCallbackLimit = 2048
@@ -178,37 +179,50 @@ func validNordLoginURL(value string) string {
 
 var nordExchangePattern = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+={0,2}$`)
 
-func validNordCallback(value string) bool {
-	if len(value) == 0 || len(value) > nordCallbackLimit || strings.ContainsAny(value, " \t\r\n<>\"'\\") {
-		return false
+func normalizeNordLoginCompletion(value string) (string, bool) {
+	if len(value) == 0 || len(value) > nordCallbackLimit || strings.ContainsAny(value, "<>\"'\\#") || strings.ContainsFunc(value, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return "", false
 	}
 	u, err := url.Parse(value)
-	if err != nil || u.Scheme != "nordvpn" || u.Host != "login" || u.Path != "" || u.User != nil || u.Fragment != "" || u.Opaque != "" {
-		return false
+	if err != nil || u.User != nil || u.Fragment != "" || u.Opaque != "" {
+		return "", false
+	}
+	httpsSuccess := strings.HasPrefix(value, "https://nordaccount.com/product/nordvpn/login/success?") &&
+		u.Scheme == "https" && u.Host == "nordaccount.com" && u.Path == "/product/nordvpn/login/success" && u.RawPath == ""
+	customCallback := strings.HasPrefix(value, "nordvpn://") && u.Scheme == "nordvpn" && u.Host == "login" && u.Path == ""
+	if !httpsSuccess && !customCallback {
+		return "", false
 	}
 	q, err := url.ParseQuery(u.RawQuery)
-	if err != nil || len(q["exchange_token"]) != 1 || len(q.Get("exchange_token")) > 1024 || !nordExchangePattern.MatchString(q.Get("exchange_token")) {
-		return false
+	token := q.Get("exchange_token")
+	if err != nil || len(q["exchange_token"]) != 1 || len(token) > 1024 || !nordExchangePattern.MatchString(token) || (httpsSuccess && len(q) != 1) {
+		return "", false
 	}
 	for key, values := range q {
 		if len(values) != 1 {
-			return false
+			return "", false
 		}
 		switch key {
 		case "exchange_token":
 		case "action":
 			if values[0] != "login" {
-				return false
+				return "", false
 			}
 		case "status":
 			if values[0] != "done" {
-				return false
+				return "", false
 			}
 		default:
-			return false
+			return "", false
 		}
 	}
-	return true
+	callback := url.URL{Scheme: "nordvpn", Host: "login", RawQuery: url.Values{"exchange_token": {token}}.Encode()}
+	return callback.String(), true
+}
+
+func validNordCallback(value string) bool {
+	_, ok := normalizeNordLoginCompletion(value)
+	return ok
 }
 
 func nordEnableMeshnet(ctx context.Context) error {
@@ -251,8 +265,16 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 		writeError(w, http.StatusBadRequest, "invalid NordVPN action")
 		return
 	}
-	if (request.Action == "complete-login" && !validNordCallback(request.Callback)) || (request.Action != "complete-login" && request.Callback != "") {
-		writeError(w, http.StatusBadRequest, "invalid NordVPN Continue link")
+	var callback string
+	validCompletion := true
+	if request.Action == "complete-login" {
+		callback, validCompletion = normalizeNordLoginCompletion(request.Callback)
+	} else if request.Callback != "" {
+		validCompletion = false
+	}
+	request.Callback = "" // Discard the original completion URL before command/error/audit handling.
+	if !validCompletion {
+		writeError(w, http.StatusBadRequest, "invalid NordVPN login completion URL")
 		return
 	}
 	if !nordOperation.TryLock() {
@@ -299,8 +321,8 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 				}
 			}
 		case "complete-login":
-			_, err = runNordCommand(ctx, "login", "--callback", request.Callback)
-			request.Callback = "" // No persistence, error wrapping or auditing of callback/CLI output.
+			_, err = runNordCommand(ctx, "login", "--callback", callback)
+			callback = "" // No persistence, error wrapping or auditing of callback/CLI output.
 			if err == nil {
 				output, checkErr := runNordCommand(ctx, "account")
 				if nordAccount(output, checkErr) != "Logged in" {

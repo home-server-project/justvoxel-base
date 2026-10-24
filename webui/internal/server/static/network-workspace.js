@@ -1029,13 +1029,23 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     } catch (_) { return false; }
   };
   const validNordCallback = (value) => {
-    if (typeof value !== "string" || !value || value.length > 2048 || /[\s<>"'\\]/.test(value)) return false;
+    if (typeof value !== "string" || !value || value.length > 2048 || /[\s\x00-\x1f\x7f-\x9f<>"'\\#]/.test(value)) return false;
     try {
       const url = new URL(value);
-      if (url.protocol !== "nordvpn:" || url.host !== "login" || url.pathname || url.username || url.password || url.hash) return false;
-      if ((url.searchParams.get("exchange_token") || "").length > 1024 || url.searchParams.getAll("exchange_token").length !== 1 || !/^[A-Za-z0-9._~+\/-]{1,1024}={0,2}$/.test(url.searchParams.get("exchange_token") || "")) return false;
+      // Match the original authority/path before URL parsing can normalize ports or dot segments.
+      const httpsSuccess = value.startsWith("https://nordaccount.com/product/nordvpn/login/success?") &&
+        url.protocol === "https:" && url.host === "nordaccount.com" && url.pathname === "/product/nordvpn/login/success";
+      const customCallback = value.startsWith("nordvpn://login?") &&
+        url.protocol === "nordvpn:" && url.host === "login" && !url.pathname;
+      if ((!httpsSuccess && !customCallback) || url.username || url.password || url.hash) return false;
+      const query = value.slice(value.indexOf("?") + 1);
+      if (query.includes(";")) return false;
+      decodeURIComponent(query.replace(/\+/g, " ")); // Reject malformed escapes, as the API does.
+      const token = url.searchParams.get("exchange_token") || "";
+      if (token.length > 1024 || url.searchParams.getAll("exchange_token").length !== 1 || !/^[A-Za-z0-9._~+\/-]+={0,2}$/.test(token)) return false;
       for (const [key, item] of url.searchParams) {
         if (url.searchParams.getAll(key).length !== 1 ||
+            (httpsSuccess && key !== "exchange_token") ||
             !["exchange_token", "action", "status"].includes(key) ||
             (key === "action" && item !== "login") || (key === "status" && item !== "done")) return false;
       }
@@ -1098,10 +1108,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         title.textContent = "Complete NordVPN login";
         message.textContent = "Sign in on the NordVPN page that opened.";
         details.replaceChildren();
-        const instructions = document.createElement("p"); instructions.textContent = "On the Continue button, copy the link address and paste it below.";
-        const label = document.createElement("label"); label.textContent = "Continue link";
+        const instructions = document.createElement("p"); instructions.textContent = "After NordVPN shows “Great – you’re in!”, if your browser asks to open NordVPN or xdg-open, choose Cancel. Copy the URL from the browser address bar and paste it below. Do not select Continue.";
+        const label = document.createElement("label"); label.textContent = "NordVPN success URL";
         const input = document.createElement("input");
-        input.type = "text"; input.maxLength = 2048; input.placeholder = "nordvpn://...";
+        input.type = "text"; input.maxLength = 2048; input.placeholder = "https://nordaccount.com/product/nordvpn/login/success?exchange_token=...";
         input.autocomplete = "off"; input.spellcheck = false;
         label.appendChild(input);
         const reopen = document.createElement("a"); reopen.href = result.login_url;
@@ -1111,7 +1121,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         const complete = document.createElement("button"); complete.type = "button"; complete.textContent = "Complete login";
         actions.appendChild(complete);
         complete.addEventListener("click", async () => {
-          if (!validNordCallback(input.value)) { status.textContent = "Paste a valid NordVPN Continue link."; return; }
+          if (!validNordCallback(input.value)) { status.textContent = "Paste the NordVPN success URL from your browser address bar."; return; }
           complete.disabled = true;
           const callback = input.value; input.value = "";
           try {

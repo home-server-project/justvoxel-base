@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -157,14 +158,20 @@ func TestNordLoginRequiredAndCallbackAuditPrivacy(t *testing.T) {
 	s := adminServerForTest()
 	s.store = store
 	const sensitive = "never_log_this_exchange"
+	const completion = "https://nordaccount.com/product/nordvpn/login/success?exchange_token=" + sensitive
 	for _, failure := range []bool{false, true} {
 		runNordCommand = func(ctx context.Context, args ...string) (string, error) {
-			if failure && len(args) == 3 && args[1] == "--callback" {
-				return sensitive, errors.New(sensitive)
+			if len(args) == 3 && args[1] == "--callback" {
+				if args[2] != "nordvpn://login?exchange_token="+sensitive {
+					t.Fatal("noncanonical CLI callback")
+				}
+				if failure {
+					return completion, errors.New(completion)
+				}
 			}
 			return native(ctx, args...)
 		}
-		rr = networkAdminRequest(s, "/v1/admin/network/remote-access/nordvpn", `{"action":"complete-login","callback":"nordvpn://login?exchange_token=`+sensitive+`"}`)
+		rr = networkAdminRequest(s, "/v1/admin/network/remote-access/nordvpn", `{"action":"complete-login","callback":"`+completion+`"}`)
 		want := 200
 		if failure {
 			want = 503
@@ -178,12 +185,12 @@ func TestNordLoginRequiredAndCallbackAuditPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(events)
-	if len(events) != 2 || strings.Contains(string(encoded), sensitive) || strings.Contains(string(encoded), "nordvpn://") {
+	if len(events) != 2 || strings.Contains(string(encoded), sensitive) || strings.Contains(string(encoded), "nordvpn://") || strings.Contains(string(encoded), completion) {
 		t.Fatal("callback audit privacy")
 	}
 	before := len(*calls)
 	rr = networkAdminRequest(s, "/v1/admin/network/remote-access/nordvpn", `{"action":"complete-login","callback":"https://evil.test"}`)
-	if rr.Code != 400 || len(*calls) != before {
+	if rr.Code != 400 || len(*calls) != before || !strings.Contains(rr.Body.String(), "invalid NordVPN login completion URL") {
 		t.Fatal("invalid callback reached command")
 	}
 }
@@ -426,5 +433,85 @@ func TestNordActionFailuresAreSafeAndActionable(t *testing.T) {
 				t.Fatal(rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestNordHTTPSCompletionStrictValidation(t *testing.T) {
+	for _, good := range []string{
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=YWJj%2B%2F%3D",
+		"nordvpn://login?exchange_token=abc",
+		"nordvpn://login?action=login&exchange_token=abc&status=done",
+	} {
+		if !validNordCallback(good) {
+			t.Fatal("valid completion rejected")
+		}
+	}
+	for _, bad := range []string{
+		"http://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
+		"https://www.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
+		"https://my.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
+		"https://api.nordvpn.com/product/nordvpn/login/success?exchange_token=abc",
+		"https://nordaccount.com.evil.test/product/nordvpn/login/success?exchange_token=abc",
+		"https://evil.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
+		"https://nordaccount.com:443/product/nordvpn/login/success?exchange_token=abc",
+		"https://user:password@nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
+		"https://nordaccount.com/wrong?exchange_token=abc",
+		"https://nordaccount.com/product/nordvpn/login/%73uccess?exchange_token=abc",
+		"https://nordaccount.com/product/nordvpn/login/success/?exchange_token=abc",
+		"https://nordaccount.com/product/nordvpn/login/other/../success?exchange_token=abc",
+		"https://nordaccount.com/product/nordvpn/login%2fsuccess?exchange_token=abc",
+		"https://nordaccount.com/product/nordvpn/login/success",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&exchange_token=def",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&extra=value",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&action=login",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc#fragment",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc#",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%0a",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%20",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%3B",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%ZZ",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc+def",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc\r\n",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc def",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc\u0000",
+		"HTTPS://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
+		"//nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
+		"nordvpn:login?exchange_token=abc",
+		"nordvpn://login:443?exchange_token=abc",
+		"nordvpn://login?exchange_token=abc&status=bad",
+		"nordvpn://login?exchange_token=abc&action=login&action=login",
+		"nordvpn://login?exchange_token=abc&extra=value",
+		"nordvpn://login/path?exchange_token=abc",
+		"nordvpn://user@login?exchange_token=abc",
+		"nordvpn://login?exchange_token=abc#fragment",
+		"nordvpn://login?exchange_token=abc&exchange_token=def",
+		"nordvpn://login?exchange_token=abc%0a",
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=" + strings.Repeat("a", 1025),
+		"nordvpn://login?exchange_token=" + strings.Repeat("a", 1025),
+		strings.Repeat("a", 2049),
+	} {
+		if validNordCallback(bad) {
+			t.Fatal("unsafe completion accepted")
+		}
+	}
+}
+
+func TestNordCompletionCanonicalCallback(t *testing.T) {
+	const token = "YWJj+/="
+	const canonical = "nordvpn://login?exchange_token=YWJj%2B%2F%3D"
+	for _, input := range []string{
+		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=YWJj%2B%2F%3D",
+		"nordvpn://login?action=login&exchange_token=YWJj%2B%2F%3D&status=done",
+	} {
+		got, ok := normalizeNordLoginCompletion(input)
+		if !ok || got != canonical {
+			t.Fatal("completion was not canonicalized")
+		}
+		u, err := url.Parse(got)
+		if err != nil || len(u.Query()) != 1 || len(u.Query()["exchange_token"]) != 1 || u.Query().Get("exchange_token") != token {
+			t.Fatal("token changed during canonicalization")
+		}
 	}
 }
