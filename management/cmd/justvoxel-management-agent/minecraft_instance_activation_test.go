@@ -934,9 +934,17 @@ func TestInstanceCreationRegistersAndActivatesTwoNewWorlds(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := []string{}
+	usedPorts := map[int]bool{
+		25566: true,
+		25567: true,
+	}
 	for i, name := range []string{"Family Survival", "Creative World"} {
 		c := f.configs[i]
 		c.JavaPort = instanceTestPort(t)
+		for usedPorts[c.JavaPort] {
+			c.JavaPort = instanceTestPort(t)
+		}
+		usedPorts[c.JavaPort] = true
 		id, err := f.backend.create(context.Background(), c, name, f.snapshot)
 		if err != nil {
 			t.Fatal(id, err)
