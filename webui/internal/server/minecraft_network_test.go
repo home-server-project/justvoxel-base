@@ -95,10 +95,9 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 			`class="minecraft-whitelist-list"`, `No players on the network whitelist.`,
 			`name="action" value="add">Add player</button>`,
 			`name="members" value="jv-family1" checked>`,
-			`name="members" value="jv-kids001" disabled>`,
 			`src="/static/server-software/paper.svg" alt="">`,
 			`src="/static/server-software/vanilla.svg" alt="">`,
-			`minecraft-network-unavailable">Standalone — unavailable for Minecraft Network</span>`,
+			`minecraft-network-unavailable">Not supported by Minecraft Network</span>`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("missing compact network presentation %q", want)
@@ -106,6 +105,18 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 		}
 		for _, server := range f.network.Servers {
 			row := regexp.MustCompile(`(?s)name="members" value="` + regexp.QuoteMeta(server.ID) + `".*?</label>`).FindString(body)
+			if !server.Eligible {
+				if row != "" {
+					t.Error("unsupported server has a member checkbox")
+				}
+				details := regexp.MustCompile(`(?s)<details class="minecraft-network-unsupported">.*?</details>`).FindString(body)
+				for _, candidate := range regexp.MustCompile(`(?s)<div class="minecraft-network-server">.*?</div>`).FindAllString(details, -1) {
+					if strings.Contains(candidate, " · "+serverSoftware(server.Software)+" · "+server.State) {
+						row = candidate
+						break
+					}
+				}
+			}
 			icon := serverSoftwareIcon(server.Software)
 			if icon == "" {
 				if strings.Contains(row, "<img") {
@@ -186,6 +197,7 @@ func TestMinecraftNetworkCompactStylesAreScoped(t *testing.T) {
 	}
 	css := string(source)
 	for selector, properties := range map[string][]string{
+		".minecraft-network .minecraft-network-servers":                                                      {"display:grid", "repeat(auto-fit,minmax(min(100%,16rem),1fr))"},
 		".minecraft-network .minecraft-network-lane":                                                         {"display:flex", "flex-wrap:wrap", "align-items:center"},
 		".minecraft-network .minecraft-network-ports":                                                        {"display:flex", "flex-wrap:wrap"},
 		".minecraft-network .minecraft-network-ports input":                                                  {"width:6.5rem"},
@@ -278,5 +290,42 @@ func TestMinecraftNetworkHowToConnectAndInvitationUseProxy(t *testing.T) {
 		if strings.Contains(rr.Body.String(), "25567") || strings.Contains(rr.Body.String(), "19134") {
 			t.Fatal("invitation exposes private backend endpoint", path)
 		}
+	}
+}
+
+func TestMinecraftNetworkAutomaticLifecycleAndEligibilityPresentation(t *testing.T) {
+	app, f := newNetworkTestApp(t)
+	// Eligibility is authoritative even when the software label would suggest otherwise.
+	f.network.Servers[0].Eligible = false
+	f.network.Servers[1].Eligible = true
+	f.network.Config.Members = []string{f.network.Servers[1].ID}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-network", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, obsolete := range []string{"Stop selected servers before", "Start them again when", `name="members" value="jv-family1"`} {
+		if strings.Contains(body, obsolete) {
+			t.Errorf("obsolete instruction or unsupported toggle: %s", obsolete)
+		}
+	}
+	for _, want := range []string{
+		"Running selected servers are stopped automatically. Empty servers stop immediately; occupied servers receive the normal shutdown countdown. Servers that were running are started again after Apply.",
+		`name="members" value="jv-kids001" checked>`,
+		`<details class="minecraft-network-unsupported">`,
+		`<summary>Standalone / unsupported servers (1)</summary>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	details := regexp.MustCompile(`(?s)<details class="minecraft-network-unsupported">.*?</details>`).FindString(body)
+	if strings.Contains(details, `name="members"`) || !strings.Contains(details, `/static/server-software/paper.svg`) || !strings.Contains(details, "Not supported by Minecraft Network") {
+		t.Fatal("unsupported details must be informational and retain shared icons", details)
+	}
+	grid := regexp.MustCompile(`(?s)<div class="minecraft-network-servers">.*?</div>`).FindString(body)
+	if strings.Contains(grid, "paper.svg") || !strings.Contains(grid, "vanilla.svg") || !strings.Contains(grid, " · Vanilla · stopped") {
+		t.Fatal("grid classification did not follow Eligible", grid)
 	}
 }

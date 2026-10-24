@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestMinecraftNetworkOptionalAndStandaloneOverlay(t *testing.T) {
@@ -179,15 +181,31 @@ func TestMinecraftNetworkRecoveryCannotTargetUnrelatedFiles(t *testing.T) {
 
 // The existing activation fixture mocks all host commands. These tests never
 // start containers/services; running this suite still requires human direction.
-func networkTransactionFixture(t *testing.T) (*instanceActivationFixture, minecraftNetworkConfig) {
+func networkTransactionFixture(t *testing.T, twoSupported ...bool) (*instanceActivationFixture, minecraftNetworkConfig) {
 	t.Helper()
 	f := newInstanceActivationFixture(t)
+	if len(twoSupported) > 0 && twoSupported[0] {
+		id := f.configs[1].ID
+		r, err := f.backend.readRecord(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Runtime.Software = "purpur"
+		r.Runtime.Version = f.configs[0].Version
+		f.configs[1] = r.Runtime
+		if err = f.backend.writeJSON(filepath.Join(f.backend.root, id, "config.json"), r, true); err != nil {
+			t.Fatal(err)
+		}
+	}
 	f.activateBoth()
 	// Let production create the private network root with its required owner and
 	// mode; t.TempDir() itself uses 0777 subject to umask, which may not be 0700.
 	f.backend.networkRoot = filepath.Join(filepath.Dir(f.backend.root), "network")
 	original := f.backend.command
+	var commands sync.Mutex
 	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		commands.Lock()
+		defer commands.Unlock()
 		if command == minecraftNetworkHelper {
 			return nil, nil
 		}
@@ -356,5 +374,367 @@ func TestMinecraftNetworkLaterEnrollmentImportsExactlyOnce(t *testing.T) {
 	state, err = networkEnrollWhitelist(state, "jv-a1b2c3", load(a))
 	if err != nil || reads != 2 || len(state.Whitelist) != 1 || state.Whitelist[0] != b {
 		t.Fatal("re-enrollment resurrected a removed player", err)
+	}
+}
+
+// Serialize mock host state while allowing independent lifecycle countdowns.
+// No real timer or host service is used by these tests.
+type networkLifecycleFixture struct {
+	mu                     sync.Mutex
+	queued                 map[string]bool
+	lastWarning            map[string]bool
+	warnings               map[string][]string
+	stops, starts          []string
+	published              bool
+	failPrepare, failStart bool
+}
+
+func networkLifecycleControls(f *instanceActivationFixture) *networkLifecycleFixture {
+	h := &networkLifecycleFixture{queued: map[string]bool{}, lastWarning: map[string]bool{}, warnings: map[string][]string{}}
+	original := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if command == minecraftNetworkHelper {
+			if args[0] == "prepare" && h.failPrepare {
+				return nil, errors.New("mock prepare failure")
+			}
+			if args[0] == "publish" {
+				h.published = true
+			}
+		}
+		if command == "podman" && len(args) == 4 && args[0] == "exec" && strings.HasPrefix(args[3], "say ") {
+			id := strings.TrimPrefix(args[1], "minecraft-")
+			h.warnings[id] = append(h.warnings[id], args[3])
+			if args[3] == "say Server shutting down in 1 second" {
+				h.lastWarning[id] = true
+			}
+			return nil, nil
+		}
+		if command == "systemctl" {
+			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
+			if instanceIDPattern.MatchString(id) {
+				if args[0] == "show" && h.queued[id] && h.lastWarning[id] {
+					f.states[id], f.containers[id] = "inactive", "exited"
+				}
+				if args[0] == "stop" {
+					h.stops = append(h.stops, id)
+				}
+				if len(args) > 1 && args[0] == "--no-block" {
+					if args[1] == "stop" {
+						h.stops = append(h.stops, id)
+						h.queued[id] = true
+						return nil, nil // Stay running until the final normal warning.
+					}
+					if args[1] == "start" {
+						h.starts = append(h.starts, id)
+						delete(h.queued, id)
+						if h.failStart {
+							return nil, errors.New("mock start failure")
+						}
+					}
+				}
+			}
+		}
+		return original(ctx, command, args...)
+	}
+	return h
+}
+
+// Explicit regression: zero players == immediate stop, with no announcement or pause.
+func TestMinecraftNetworkZeroPlayersImmediateStopAndRestart(t *testing.T) {
+	f, c := networkTransactionFixture(t)
+	id, unrelated := f.configs[0].ID, f.configs[1].ID
+	f.states[id], f.containers[id] = "active", "running"
+	f.states[unrelated], f.containers[unrelated] = "active", "running"
+	h := networkLifecycleControls(f)
+	f.backend.pause = func(context.Context, time.Duration) error { t.Error("zero players must never pause"); return nil }
+	if err := networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(h.stops, []string{id}) || !reflect.DeepEqual(h.starts, []string{id}) || len(h.warnings[id]) != 0 {
+		t.Fatal("zero-player lifecycle or unrelated isolation changed", h.stops, h.starts, h.warnings)
+	}
+	if f.states[id] != "active" || f.states[unrelated] != "active" {
+		t.Fatal("running state not preserved")
+	}
+	r, err := f.backend.readRecord(id)
+	if err != nil || !r.NetworkMember {
+		t.Fatal("new member not published", err)
+	}
+}
+
+func TestMinecraftNetworkOccupiedNormalCountdownAndRestart(t *testing.T) {
+	f, c := networkTransactionFixture(t)
+	id := f.configs[0].ID
+	f.states[id], f.containers[id] = "active", "running"
+	f.players = "There are 1 of a max of 20 players online: Alex"
+	h := networkLifecycleControls(f)
+	var paused time.Duration
+	f.backend.pause = func(_ context.Context, d time.Duration) error { paused += d; return nil }
+	if err := networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, seconds := range []string{"60 seconds", "30 seconds", "15 seconds", "10 seconds", "5 seconds", "4 seconds", "3 seconds", "2 seconds", "1 second"} {
+		want = append(want, "say Server shutting down in "+seconds)
+	}
+	if !reflect.DeepEqual(h.warnings[id], want) || paused != time.Minute || !reflect.DeepEqual(h.starts, []string{id}) {
+		t.Fatal("normal countdown changed", h.warnings, paused, h.starts)
+	}
+}
+
+func TestMinecraftNetworkUnknownPlayersPreservesConfiguration(t *testing.T) {
+	for _, unavailable := range []bool{false, true} {
+		f, c := networkTransactionFixture(t)
+		id := f.configs[0].ID
+		f.states[id], f.containers[id] = "active", "running"
+		f.players, f.failPlayers = "unknown", unavailable
+		h := networkLifecycleControls(f)
+		before, err := f.backend.readRecord(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if networkApply(context.Background(), f.backend, c) == nil {
+			t.Fatal("unknown players interrupted")
+		}
+		after, err := f.backend.readRecord(id)
+		if err != nil || !reflect.DeepEqual(before, after) || h.published || len(h.stops) != 0 || len(h.starts) != 0 {
+			t.Fatal("unknown players mutated configuration or lifecycle", err)
+		}
+		if n, err := networkRead(f.backend); err != nil || n.Config.Enabled {
+			t.Fatal("network configuration mutated", err)
+		}
+	}
+}
+
+func TestMinecraftNetworkStoppedAndSafelyFailedMembersRemainNonRunning(t *testing.T) {
+	for _, state := range []string{"inactive", "failed"} {
+		f, c := networkTransactionFixture(t)
+		id := f.configs[0].ID
+		f.states[id], f.containers[id] = state, "exited"
+		h := networkLifecycleControls(f)
+		if err := networkApply(context.Background(), f.backend, c); err != nil {
+			t.Fatal(err)
+		}
+		if len(h.stops) != 0 || len(h.starts) != 0 || f.states[id] != state {
+			t.Fatal("non-running member was started")
+		}
+	}
+}
+
+func TestMinecraftNetworkRunningMemberLeavesAndRestartsStandalone(t *testing.T) {
+	f, c := networkTransactionFixture(t)
+	id := f.configs[0].ID
+	standalone, err := f.backend.readRecord(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	f.states[id], f.containers[id] = "active", "running"
+	h := networkLifecycleControls(f)
+	c.Members = nil
+	// Keep the front gate off the returning standalone server's reserved port.
+	for c.JavaPort == f.configs[0].JavaPort || c.JavaPort == f.configs[1].JavaPort || c.JavaPort == c.BedrockPort {
+		c.JavaPort = instanceTestPort(t)
+	}
+	if err = networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.backend.readRecord(id)
+	if err != nil || r.NetworkMember || r.EnvironmentSHA256 != standalone.EnvironmentSHA256 || r.QuadletSHA256 != standalone.QuadletSHA256 || !reflect.DeepEqual(h.stops, []string{id}) || !reflect.DeepEqual(h.starts, []string{id}) {
+		t.Fatal("leaving member did not resume standalone", err)
+	}
+}
+
+func TestMinecraftNetworkFailureRestoresOnlyWhenRecoverySafe(t *testing.T) {
+	for _, mode := range []string{"prepare", "rollback", "pending"} {
+		t.Run(mode, func(t *testing.T) {
+			f, c := networkTransactionFixture(t)
+			id := f.configs[0].ID
+			f.states[id], f.containers[id] = "active", "running"
+			h := networkLifecycleControls(f)
+			switch mode {
+			case "prepare":
+				h.failPrepare = true
+			case "rollback":
+				f.failReload = 1
+			case "pending":
+				f.failReload = 2
+			}
+			if networkApply(context.Background(), f.backend, c) == nil {
+				t.Fatal("failed transaction claimed success")
+			}
+			if mode == "pending" {
+				if networkPending(f.backend) == nil || len(h.starts) != 0 {
+					t.Fatal("pending recovery restarted a backend")
+				}
+				if err := networkRecover(context.Background(), f.backend); err != nil {
+					t.Fatal("existing retry recovery failed", err)
+				}
+			} else {
+				if networkPending(f.backend) != nil || !reflect.DeepEqual(h.starts, []string{id}) {
+					t.Fatal("safe failure did not restore running backend")
+				}
+				r, err := f.backend.readRecord(id)
+				if err != nil || r.NetworkMember {
+					t.Fatal("old runtime not restored", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMinecraftNetworkConcurrentOccupiedStopWave(t *testing.T) {
+	f, c := networkTransactionFixture(t, true)
+	c.Members = []string{f.configs[0].ID, f.configs[1].ID}
+	for _, id := range c.Members {
+		f.states[id], f.containers[id] = "active", "running"
+	}
+	f.players = "There are 1 of a max of 20 players online: Alex"
+	h := networkLifecycleControls(f)
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	f.backend.pause = func(ctx context.Context, d time.Duration) error {
+		if d == 30*time.Second {
+			entered <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- networkApply(ctx, f.backend, c) }()
+	for range c.Members {
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			cancel()
+			<-done
+			t.Fatal("occupied countdowns serialized")
+		}
+	}
+	h.mu.Lock()
+	published := h.published
+	h.mu.Unlock()
+	close(release)
+	err := <-done
+	if published {
+		t.Fatal("publication preceded safe stops")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.stops) != 2 || !reflect.DeepEqual(h.starts, c.Members) {
+		t.Fatal("stop wave did not resume all members", h.stops, h.starts)
+	}
+	for _, id := range c.Members {
+		if len(h.warnings[id]) != 9 {
+			t.Fatal("occupied warnings lost", id, h.warnings[id])
+		}
+	}
+}
+
+func TestMinecraftNetworkCommittedStartFailuresDoNotRollbackAndAttemptAll(t *testing.T) {
+	f, c := networkTransactionFixture(t, true)
+	c.Members = []string{f.configs[0].ID, f.configs[1].ID}
+	for _, id := range c.Members {
+		f.states[id], f.containers[id] = "active", "running"
+	}
+	h := networkLifecycleControls(f)
+	h.failStart = true
+	err := networkApply(context.Background(), f.backend, c)
+	if err == nil || !strings.Contains(err.Error(), "configuration was saved") || !reflect.DeepEqual(h.starts, c.Members) {
+		t.Fatal("missing actionable committed start failure", err, h.starts)
+	}
+	if networkPending(f.backend) != nil {
+		t.Fatal("start failure created configuration recovery")
+	}
+	for _, id := range c.Members {
+		r, err := f.backend.readRecord(id)
+		if err != nil || !r.NetworkMember {
+			t.Fatal("committed configuration rolled back", err)
+		}
+	}
+}
+
+func TestMinecraftNetworkUnsafeAffectedStateDoesNotInterrupt(t *testing.T) {
+	for _, state := range []string{"activating", "deactivating", "unknown", "failed"} {
+		f, c := networkTransactionFixture(t)
+		id := f.configs[0].ID
+		f.states[id], f.containers[id] = state, "running"
+		h := networkLifecycleControls(f)
+		if networkApply(context.Background(), f.backend, c) == nil {
+			t.Fatal("unsafe state accepted", state)
+		}
+		if h.published || len(h.stops) != 0 || len(h.starts) != 0 {
+			t.Fatal("unsafe state interrupted or published", state)
+		}
+	}
+}
+
+func TestMinecraftNetworkIncompleteStopNeverStartsConflictingLifecycle(t *testing.T) {
+	f, c := networkTransactionFixture(t)
+	id := f.configs[0].ID
+	f.states[id], f.containers[id] = "active", "running"
+	f.players = "There are 1 of a max of 20 players online: Alex"
+	h := networkLifecycleControls(f)
+	f.backend.pause = func(context.Context, time.Duration) error {
+		h.mu.Lock()
+		f.states[id], f.containers[id] = "deactivating", "stopping"
+		h.mu.Unlock()
+		return context.DeadlineExceeded
+	}
+	if networkApply(context.Background(), f.backend, c) == nil {
+		t.Fatal("incomplete shutdown accepted")
+	}
+	if h.published || len(h.starts) != 0 {
+		t.Fatal("incomplete stop published or issued conflicting start")
+	}
+}
+
+func TestMinecraftNetworkPartialStopFailureRestoresSafePeer(t *testing.T) {
+	f, c := networkTransactionFixture(t, true)
+	c.Members = []string{f.configs[0].ID, f.configs[1].ID}
+	for _, id := range c.Members {
+		f.states[id], f.containers[id] = "active", "running"
+	}
+	h := networkLifecycleControls(f)
+	original := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "podman" && len(args) == 4 && args[0] == "exec" && args[1] == "minecraft-"+c.Members[1] && args[3] == "list" {
+			return nil, errors.New("unverifiable players")
+		}
+		return original(ctx, command, args...)
+	}
+	if networkApply(context.Background(), f.backend, c) == nil {
+		t.Fatal("failed stop wave published")
+	}
+	if h.published || !reflect.DeepEqual(h.starts, c.Members[:1]) || !reflect.DeepEqual(h.stops, c.Members[:1]) {
+		t.Fatal("safe stopped peer was not restored", h.stops, h.starts)
+	}
+}
+
+func TestMinecraftNetworkRunningExistingMemberResumesAfterConfigurationChange(t *testing.T) {
+	f, c := networkTransactionFixture(t)
+	if err := networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	id := f.configs[0].ID
+	f.states[id], f.containers[id] = "active", "running"
+	h := networkLifecycleControls(f)
+	c.WelcomeMessage = "Updated welcome"
+	if err := networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	n, err := networkRead(f.backend)
+	if err != nil || n.Config.WelcomeMessage != c.WelcomeMessage || !reflect.DeepEqual(h.stops, []string{id}) || !reflect.DeepEqual(h.starts, []string{id}) {
+		t.Fatal("existing running member did not resume with committed configuration", err, h.stops, h.starts)
 	}
 }

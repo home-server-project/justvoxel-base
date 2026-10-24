@@ -21,14 +21,21 @@
     <p class="muted minecraft-network-summary">Lobby: PicoLobby · Network whitelist: Enforced</p>
     <section class="minecraft-network-section">
       <h2>Servers</h2>
-      <p class="muted minecraft-network-help">Stop selected servers before applying network changes. Their standalone ports and individual whitelists are kept. Start them again when the change is complete.</p>
+      <p class="muted minecraft-network-help">Running selected servers are stopped automatically. Empty servers stop immediately; occupied servers receive the normal shutdown countdown. Servers that were running are started again after Apply.</p>
       <div class="minecraft-network-servers">
-        {{range .Servers}}<label class="minecraft-network-server">
-          <input type="checkbox" name="members" value="{{.ID}}"{{if .Selected}} checked{{end}}{{if not .Eligible}} disabled{{end}}>
+        {{range .SupportedServers}}<label class="minecraft-network-server">
+          <input type="checkbox" name="members" value="{{.ID}}"{{if .Selected}} checked{{end}}>
           {{if .SoftwareIcon}}<img class="minecraft-network-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}
-          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} · {{.State}}</span>{{if not .Eligible}}<span class="muted minecraft-network-unavailable">Standalone — unavailable for Minecraft Network</span>{{end}}</span>
+          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} · {{.State}}</span></span>
         </label>{{end}}
       </div>
+      {{if .UnsupportedServers}}<details class="minecraft-network-unsupported">
+        <summary>Standalone / unsupported servers ({{len .UnsupportedServers}})</summary>
+        {{range .UnsupportedServers}}<div class="minecraft-network-server">
+          {{if .SoftwareIcon}}<img class="minecraft-network-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}
+          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} · {{.State}}</span><span class="muted minecraft-network-unavailable">Not supported by Minecraft Network</span></span>
+        </div>{{end}}
+      </details>{{end}}
     </section>
     <section class="minecraft-network-section">
       <h2>Lobby</h2>

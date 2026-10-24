@@ -22,7 +22,7 @@ type minecraftNetworkRow struct {
 type minecraftNetworkPage struct {
 	Title, Version, ManagementAPI, CSRF, Error, Message string
 	Network                                             api.MinecraftNetworkStatus
-	Servers                                             []minecraftNetworkRow
+	SupportedServers, UnsupportedServers                []minecraftNetworkRow
 }
 
 func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +98,12 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 				selected = true
 			}
 		}
-		data.Servers = append(data.Servers, minecraftNetworkRow{ID: server.ID, Name: names[server.ID], Software: serverSoftware(server.Software), SoftwareIcon: serverSoftwareIcon(server.Software), State: server.State, Eligible: server.Eligible, Selected: selected})
+		row := minecraftNetworkRow{ID: server.ID, Name: names[server.ID], Software: serverSoftware(server.Software), SoftwareIcon: serverSoftwareIcon(server.Software), State: server.State, Eligible: server.Eligible, Selected: selected}
+		if server.Eligible {
+			data.SupportedServers = append(data.SupportedServers, row)
+		} else {
+			data.UnsupportedServers = append(data.UnsupportedServers, row)
+		}
 	}
 	a.renderAdminDiscovery(w, "minecraft_network.html", data)
 }

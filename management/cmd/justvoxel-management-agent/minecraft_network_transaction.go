@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -26,7 +27,16 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 		return err
 	}
 	journalPublished := false
+	committed := false
+	var stopped []string
 	defer func() {
+		if result != nil && !committed && networkPending(b) == nil {
+			restoreCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			defer cancel()
+			if networkRestartStopped(restoreCtx, b, stopped) != nil {
+				result = errors.Join(result, instanceRuntimeFailure("One or more previously running servers could not be restored. Check server status and use their normal Start controls."))
+			}
+		}
 		if result != nil && !journalPublished && before.Config.Enabled {
 			restartCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -57,6 +67,7 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 	selected := map[string]bool{}
 	nextRecords := append([]instanceRuntimeRecord{}, records...)
 	affected := map[string]bool{}
+	var running []string
 	for i, record := range records {
 		id := record.Runtime.ID
 		member := c.Enabled && networkContains(c.Members, id)
@@ -72,8 +83,11 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 				return err
 			}
 			observed, e := b.observeRaw(ctx, id)
-			if e != nil || (observed.State != "stopped" && observed.State != "failed") {
-				return instanceRuntimeFailure("Stop the selected Minecraft Network servers before applying changes. Use their normal Stop controls to notify players.")
+			if e != nil || (observed.State != "running" && observed.State != "stopped" && observed.State != "failed") {
+				return instanceRuntimeFailure("Minecraft Network cannot safely change a selected server in its current state. Check server status and retry Apply.")
+			}
+			if observed.State == "running" {
+				running = append(running, id)
 			}
 			if err = b.storage(ctx, "preflight", record); err != nil {
 				return err
@@ -118,6 +132,33 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 		return err
 	}
 	dir.Close()
+	// Each independent normal lifecycle retains its own player check and bounded
+	// countdown. Indexed results keep bookkeeping deterministic without shared writes.
+	sort.Strings(running)
+	stopErrors := make([]error, len(running))
+	var wave sync.WaitGroup
+	for i, id := range running {
+		wave.Add(1)
+		go func(i int, id string) {
+			defer wave.Done()
+			stopErrors[i] = b.actionWithWarnings(ctx, id, "stop", true)
+		}(i, id)
+	}
+	wave.Wait()
+	// Even a failed stop request may have completed shutdown. Only confirmed
+	// stopped servers belong to this operation's best-effort restoration set. A
+	// successful normal Stop already confirmed shutdown itself.
+	verifyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	for i, id := range running {
+		state, e := b.observeRaw(verifyCtx, id)
+		if stopErrors[i] == nil || (e == nil && state.State == "stopped") {
+			stopped = append(stopped, id)
+		}
+	}
+	cancel()
+	if err = errors.Join(stopErrors...); err != nil {
+		return err
+	}
 	// Stop the front gate before changing any member or plugin configuration.
 	// systemd's checked stop is bounded by the request context; no force kill.
 	if before.Config.Enabled {
@@ -254,6 +295,15 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 	if encoded, e := json.Marshal(journal); e != nil || len(encoded) > 1024*1024 {
 		return instanceRuntimeFailure("Minecraft Network publication exceeds the private recovery evidence limit.")
 	}
+	for _, record := range records {
+		if !affected[record.Runtime.ID] {
+			continue
+		}
+		state, e := b.observeRaw(ctx, record.Runtime.ID)
+		if e != nil || (state.State != "stopped" && state.State != "failed") {
+			return instanceRuntimeFailure("Minecraft Network could not confirm that every selected server stopped safely.")
+		}
+	}
 	journalPublished = true
 	if err = b.writeJSON(filepath.Join(b.networkDirectory(), "pending.json"), journal, false); err != nil {
 		return errInstanceRecovery
@@ -303,6 +353,7 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 	if err = b.clearPending(filepath.Join(b.networkDirectory(), "pending.json")); err != nil {
 		return errInstanceRecovery
 	}
+	committed = true
 	// Infrastructure is optional and only started following an enabled commit.
 	for _, h := range held {
 		h.Close()
@@ -310,10 +361,32 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 	held = nil
 	if c.Enabled {
 		if _, err = b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service"); err != nil {
-			return instanceRuntimeFailure("Minecraft Network configuration was saved; starting the network failed. Retry Apply.")
+			result = instanceRuntimeFailure("Minecraft Network configuration was saved; starting the network failed. Retry Apply.")
 		}
 	}
-	return nil
+	if networkRestartStopped(ctx, b, stopped) != nil {
+		result = errors.Join(result, instanceRuntimeFailure("Minecraft Network configuration was saved, but one or more previously running servers could not be started. Use their normal Start controls after checking server status."))
+	}
+	return result
+}
+
+// Never issue a conflicting start or bypass the durable configuration guard.
+// The normal Start lifecycle verifies the currently committed runtime again.
+func networkRestartStopped(ctx context.Context, b *instanceRuntimeBackend, ids []string) error {
+	var failures []error
+	for _, id := range ids {
+		if err := networkPending(b); err != nil {
+			return err
+		}
+		state, err := b.observeRaw(ctx, id)
+		if err == nil && state.State == "stopped" {
+			err = b.action(ctx, id, "start")
+		} else if err == nil {
+			err = instanceRuntimeFailure("Previously running server is not safely stopped.")
+		}
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
 }
 func instanceReservedPorts(c minecraftInstanceRuntimeConfig) []int {
 	if c.Software == "bedrock" {

@@ -1766,10 +1766,13 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .minecraft-network .minecraft-network-status-enabled{display:none;color:#8ad4a9}
 .minecraft-network .minecraft-network-toggle:has(input:checked) .minecraft-network-status-disabled{display:none}
 .minecraft-network .minecraft-network-toggle:has(input:checked) .minecraft-network-status-enabled{display:inline}
-.minecraft-network .minecraft-network-servers{display:grid;gap:.15rem}
-.minecraft-network .minecraft-network-server{display:flex;align-items:center;gap:.6rem;margin:0;padding:.35rem 0;min-width:0}
+.minecraft-network .minecraft-network-servers{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:.4rem}
+.minecraft-network .minecraft-network-server{display:flex;align-items:center;gap:.6rem;margin:0;padding:.35rem .5rem;min-width:0;border:1px solid #303942;border-radius:.4rem;background:rgba(255,255,255,.025)}
 .minecraft-network .minecraft-network-software-icon{flex:none;width:1.6rem;height:1.6rem;object-fit:contain}
 .minecraft-network .minecraft-network-server-details{display:grid;gap:.1rem;min-width:0;overflow-wrap:anywhere}
+.minecraft-network .minecraft-network-unsupported{margin-top:.5rem}
+.minecraft-network .minecraft-network-unsupported summary{cursor:pointer;margin-bottom:.35rem}
+.minecraft-network .minecraft-network-unsupported .minecraft-network-server{margin-top:.3rem}
 .minecraft-network .minecraft-network-unavailable{font-size:.85rem}
 .minecraft-network .minecraft-network-welcome-lane{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
 .minecraft-network .minecraft-network-welcome-lane label{margin:0}
