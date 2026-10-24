@@ -1714,3 +1714,10 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 [data-files-dialog] .files-workspace-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
 [data-files-dialog] .files-workspace-frame{flex:1;min-height:0;width:100%;height:100%;border:0}
 [data-files-dialog] [hidden]{display:none}
+
+/* Primary administrator visibility and the approved embedded Terminal tab. */
+body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{display:none!important}
+.system-terminal-pane{flex:1;min-height:0;display:flex;flex-direction:column}
+.system-terminal-pane[hidden]{display:none}
+.system-terminal-pane iframe{flex:1;min-height:0;width:100%;height:100%;border:0}
+.system-terminal-pane [data-terminal-retry]{align-self:flex-start}

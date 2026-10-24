@@ -83,7 +83,7 @@ func registerFileBrowserRoutes(mux *http.ServeMux, s *server) {
 }
 
 func (s *server) fileBrowserGet(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireAdministrator(w, r); !ok {
+	if _, ok := s.requirePrimaryAdministrator(w, r); !ok {
 		return
 	}
 	s.fileBrowserMu.Lock()
@@ -104,7 +104,7 @@ func (s *server) fileBrowserGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) fileBrowserChange(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireAdministrator(w, r); !ok {
+	if _, ok := s.requirePrimaryAdministrator(w, r); !ok {
 		return
 	}
 	s.fileBrowserMu.Lock()

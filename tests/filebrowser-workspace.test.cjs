@@ -36,7 +36,7 @@ test('one persisted enum defaults to on-demand; lifecycle preserves open workspa
   assert.match(manager,/mode == "always"[\s\S]*?startFileBrowser\(ctx\)/);
   assert.match(manager,/if err != nil \|\| mode == "always"/);
   assert.match(manager,/fileBrowserCommand\(ctx, "systemctl", "stop", fileBrowserUnit\)/);
-  assert.match(manager,/requireAdministrator/);
+  assert.match(manager,/requirePrimaryAdministrator/);
 });
 test('container image, persistence, isolated listener and mounts follow the contract', () => {
   assert.match(container,/"ghcr.io\/gtsteffaniak\/filebrowser:stable-slim"/);
@@ -104,7 +104,7 @@ function browser({availability='on-demand', ready=true, failed=false}={}) {
   const launcher=new Element();const calls=[];let callbacks;
   const context={URLSearchParams, Date, Event:class{constructor(type){this.type=type;}},
     setTimeout:fn=>{fn();return 0;},
-    document:{querySelector:selector=>selector==='[data-files-dialog]'?dialog:launcher,body:{classList:{contains:role=>role==='role-administrator'}}},
+    document:{querySelector:selector=>selector==='[data-files-dialog]'?dialog:launcher,body:{classList:{contains:role=>role==='primary-administrator'}}},
     controlCenter:{open:true},readWorkspaceWindowState:()=>({open:false}),
     setupWorkspaceWindow:(_,options)=>{callbacks=options;return {open(){dialog.open=true;options.onOpen();},close(){dialog.open=false;options.onClose();}};},
     fetch:async (url, options)=>{
@@ -164,4 +164,13 @@ test('closing during startup prevents a stale iframe and queues stop after start
   assert.equal(b.elements.frame.hidden,true);
   const actions=b.calls.filter(c=>c.options.method==='POST').map(c=>c.url);
   assert.deepEqual(actions,['/api/files/start','/api/files/stop']);
+});
+
+test('Files visibility and both security boundaries require the primary administrator', () => {
+  assert.match(header, /data-primary-admin-only data-files-open/);
+  assert.match(filesJS, /contains\("primary-administrator"\)/);
+  assert.match(proxy, /identity.Username != "voxel"/);
+  const authorization = read('management/cmd/justvoxel-management-agent/authorization.go');
+  assert.match(authorization, /sess.Username != systemAdminUsername/);
+  assert.match(authorization, /s.requireAdministrator\(w, r\)/);
 });

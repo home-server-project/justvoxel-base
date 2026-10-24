@@ -90,7 +90,7 @@ func TestFileBrowserModeSaveFailureCanBeRetried(t *testing.T) {
 }
 
 func TestFileBrowserAdministratorOnly(t *testing.T) {
-	for _, role := range []principalRole{roleViewer, roleOperator} {
+	for _, role := range []principalRole{roleViewer, roleOperator, roleAdministrator} {
 		s, _ := systemMonitorProfileTestServer(t, role)
 		mux := http.NewServeMux()
 		registerFileBrowserRoutes(mux, s)
@@ -311,6 +311,9 @@ func TestFileBrowserMigrationPreservesDeployedStore(t *testing.T) {
 
 func TestFileBrowserStatusReportsHealth(t *testing.T) {
 	s, _ := systemMonitorProfileTestServer(t, roleAdministrator)
+	sess := s.sessions["token"]
+	sess.Username = systemAdminUsername
+	s.sessions["token"] = sess
 	oldCommand, oldHealth := fileBrowserCommand, fileBrowserHealth
 	t.Cleanup(func() { fileBrowserCommand, fileBrowserHealth = oldCommand, oldHealth })
 	fileBrowserCommand = func(context.Context, string, ...string) ([]byte, error) { return []byte("active\n"), nil }
@@ -321,6 +324,30 @@ func TestFileBrowserStatusReportsHealth(t *testing.T) {
 		var status fileBrowserStatus
 		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &status) != nil || status.Ready != ready || status.State != "active" || status.Availability != "on-demand" {
 			t.Fatalf("unexpected readiness: %d %s", rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestFileBrowserPrimaryAdministratorEndpointsAccepted(t *testing.T) {
+	s, _ := systemMonitorProfileTestServer(t, roleAdministrator)
+	sess := s.sessions["token"]
+	sess.Username = systemAdminUsername
+	s.sessions["token"] = sess
+	oldCommand, oldHealth := fileBrowserCommand, fileBrowserHealth
+	t.Cleanup(func() { fileBrowserCommand, fileBrowserHealth = oldCommand, oldHealth })
+	fileBrowserCommand = func(context.Context, string, ...string) ([]byte, error) { return []byte("active\n"), nil }
+	fileBrowserHealth = func(context.Context) bool { return true }
+	mux := http.NewServeMux()
+	registerFileBrowserRoutes(mux, s)
+	for _, action := range []string{"", "/start", "/stop", "/availability"} {
+		method := "POST"
+		if action == "" {
+			method = "GET"
+		}
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, systemMonitorProfileRequest(method, "/v1/admin/filebrowser"+action, map[string]string{"availability": "on-demand"}))
+		if rr.Code != 200 {
+			t.Fatalf("%s: %d %s", action, rr.Code, rr.Body.String())
 		}
 	}
 }

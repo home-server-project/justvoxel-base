@@ -1,0 +1,15 @@
+[Unit]
+Description=JustVoxel on-demand Web Terminal
+After=network.target
+
+[Service]
+Type=simple
+User=voxel
+Group=voxel
+WorkingDirectory=/home/voxel
+UMask=0077
+RuntimeDirectory=justvoxel-terminal
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/ttyd --writable --check-origin --exit-no-conn --interface /run/justvoxel-terminal/ttyd.sock --base-path /terminal --auth-header X-JustVoxel-Terminal /bin/bash --login
+KillMode=control-group
+TimeoutStopSec=15s

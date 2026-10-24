@@ -90,7 +90,7 @@
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-migration-open title="Export, import and recover a JustVoxel server"><strong>Migration</strong></button>
-            <button class="control-tile nav-admin-only" type="button" data-files-open title="Manage Minecraft server files and backups"><strong>Files</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-files-open title="Manage Minecraft server files and backups"><strong>Files</strong></button>
           </div>
         </section>
       </nav>
@@ -184,6 +184,7 @@
         <button class="nav-admin-only" type="button" data-system-tab="users" aria-selected="false">Users</button>
         <button class="nav-admin-only" type="button" data-system-tab="security" aria-selected="false">Security</button>
         <button class="nav-admin-only" type="button" data-system-tab="logs" aria-selected="false">Logs</button>
+        <button class="nav-admin-only" type="button" data-primary-admin-only data-system-tab="terminal" aria-selected="false">Terminal</button>
         <button class="nav-admin-only" type="button" data-system-tab="date-time" aria-selected="false">Date &amp; Time</button>
         <button type="button" data-system-tab="wallpaper" aria-selected="false">Wallpaper</button>
         <button class="nav-admin-only" type="button" data-system-tab="reset" aria-selected="false">Factory Reset</button>
@@ -193,6 +194,11 @@
       <div class="system-workspace-body">
         <p class="system-workspace-state" data-system-state>Choose a section.</p>
         <div class="system-workspace-content" data-system-workspace-content></div>
+        <div class="system-terminal-pane" data-system-terminal hidden>
+          <p class="system-workspace-state" data-terminal-state></p>
+          <button class="secondary" type="button" data-terminal-retry hidden>Retry</button>
+          <iframe title="JustVoxel Terminal" data-terminal-frame hidden></iframe>
+        </div>
       </div>
     </div>
   </dialog>

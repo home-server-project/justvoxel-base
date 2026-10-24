@@ -97,6 +97,7 @@ type systemWorkspaceErrorResponse struct {
 }
 
 func (a *App) registerSystemWorkspaceRoutes(mux *http.ServeMux) {
+	a.registerTerminalRoutes(mux)
 	mux.HandleFunc("GET /api/system/workspace/date-time", a.systemWorkspaceDateTime)
 	mux.HandleFunc("POST /api/system/workspace/date-time", a.systemWorkspaceDateTimeApply)
 	mux.HandleFunc("GET /api/system/workspace/health", a.systemWorkspaceHealth)

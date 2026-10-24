@@ -129,6 +129,8 @@ command -v rsvg-convert
 command -v sgitopnm
 command -v pnmtopng
 command -v glances
+command -v ttyd
+rpm -q ttyd
 
 rpm -q superfile glances
 spf --version

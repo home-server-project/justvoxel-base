@@ -414,8 +414,10 @@ if (dashboard) {
       if (!response.ok) return;
       const identity = await response.json();
       const role = String(identity.role || "").toLowerCase();
+      const username = String(identity.username || "");
       if (!["administrator", "operator", "viewer"].includes(role)) return;
       document.body.classList.remove("role-pending");
+      document.body.classList.toggle("primary-administrator", username === "voxel" && role === "administrator");
       document.body.classList.add(`role-${role}`);
       text("session-role", role);
     } catch (_) {
@@ -793,6 +795,7 @@ if (quickLook && quickLookToggle) {
 
       identity = { username, role };
       document.body.classList.remove("role-pending");
+      document.body.classList.toggle("primary-administrator", username === "voxel" && role === "administrator");
       document.body.classList.add(`role-${role}`);
 
       if (role === "viewer" || role === "operator") {
@@ -4322,6 +4325,75 @@ if (minecraftOpen && minecraftDialog) {
 }
 
 
+// Terminal lifecycle is confined to the existing System workspace.
+function createSystemTerminal(dialog, csrf) {
+  const pane = dialog.querySelector('[data-system-terminal]');
+  const frame = pane.querySelector('iframe');
+  const state = pane.querySelector('[data-terminal-state]');
+  const retry = pane.querySelector('[data-terminal-retry]');
+  let generation = 0, pending = Promise.resolve(), touched = false;
+  const request = async (action) => {
+    const response = await fetch('/api/system/workspace/terminal' + (action ? '/' + action : ''), {
+      method: action ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
+      ...(action ? {body: new URLSearchParams({csrf})} : {}),
+    });
+    if (!response.ok) throw new Error('Terminal is unavailable. Retry.');
+    return response.json();
+  };
+  const mutate = action => {
+    const result = pending.then(() => request(action));
+    pending = result.catch(() => {});
+    return result;
+  };
+  const clearFrame = () => { frame.hidden = true; frame.removeAttribute('src'); };
+  const show = async (refresh = false) => {
+    pane.hidden = false;
+    if (!refresh && frame.getAttribute('src')) return;
+    const ticket = ++generation;
+    touched = true;
+    clearFrame();
+    state.textContent = 'Starting Terminal…';
+    retry.hidden = true;
+    const current = () => ticket === generation && dialog.open;
+    try {
+      // A refresh disconnects the old shell and waits for its managed stop
+      // before reconnecting; close/reopen uses the same serialized queue.
+      if (refresh) await mutate('stop');
+      await pending;
+      if (!current()) return;
+      let status = await request();
+      if (!current()) return;
+      if (!status.ready) await mutate('start');
+      const deadline = Date.now() + 30000;
+      while (!status.ready) {
+        if (!current()) return;
+        if (Date.now() >= deadline) throw new Error('Terminal could not start. Retry.');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (!current()) return;
+        status = await request();
+        if (!status.ready && status.state === 'failed') throw new Error('Terminal could not start. Retry.');
+      }
+      if (!current()) return;
+      state.textContent = '';
+      frame.src = '/terminal/';
+      frame.hidden = false;
+    } catch (error) {
+      if (current()) { clearFrame(); state.textContent = error.message; retry.hidden = false; }
+    }
+  };
+  retry.addEventListener('click', () => void show(true));
+  return {
+    show,
+    hide: () => { pane.hidden = true; },
+    close: () => {
+      ++generation;
+      pane.hidden = true;
+      clearFrame();
+      if (touched) void mutate('stop').catch(() => { state.textContent = 'Terminal could not stop. Open Terminal and retry.'; });
+    },
+  };
+}
+
 const systemWorkspaceOpen = document.querySelector("[data-system-open]");
 const systemWorkspaceDialog = document.querySelector("[data-system-workspace-dialog]");
 if (systemWorkspaceOpen && systemWorkspaceDialog) {
@@ -4330,10 +4402,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const state = systemWorkspaceDialog.querySelector("[data-system-state]");
   const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
   const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
-  const administratorTabs = new Set(["health", "users", "security", "logs", "date-time", "reset"]);
+  const administratorTabs = new Set(["health", "users", "security", "logs", "terminal", "date-time", "reset"]);
   const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
   const systemWorkspaceCSRF = document.querySelector("[data-system-workspace-csrf]")?.value || "";
+  const terminal = createSystemTerminal(systemWorkspaceDialog, systemWorkspaceCSRF);
+  const primaryAdmin = user => user?.username === "voxel" && user?.role === "administrator";
   let identity = null;
   let upsAvailable = false;
   let securityPane = "authentication";
@@ -4434,6 +4508,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     }
     identity = { username, role };
     document.body.classList.remove("role-pending");
+    document.body.classList.toggle("primary-administrator", username === "voxel" && role === "administrator");
     document.body.classList.add(`role-${role}`);
     return identity;
   };
@@ -6301,10 +6376,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     });
   };
 
-  const loadCurrentSystemTab = async () => {
+  const loadCurrentSystemTab = async (refreshTerminal = false) => {
     if (window.JustVoxelWallpaper?.canLeave() === false) return;
     window.JustVoxelWallpaper?.leave();
     parkSettingsPanels();
+    terminal.hide();
+    content.hidden = false;
     const sequence = ++loadSequence;
     if (state) state.textContent = "Loading…";
     if (refreshButton) refreshButton.disabled = true;
@@ -6314,11 +6391,15 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const user = await loadIdentity();
       if (!user) return;
       if (sequence !== loadSequence) return;
-      if (administratorTabs.has(currentTab) && user.role !== "administrator") {
+      if ((administratorTabs.has(currentTab) && user.role !== "administrator") || (currentTab === "terminal" && !primaryAdmin(user))) {
         currentTab = "history";
         syncSystemTabs();
       }
-      if (currentTab === "health") await renderHealth(sequence);
+      if (currentTab === "terminal") {
+        content.hidden = true;
+        await terminal.show(refreshTerminal);
+      }
+      else if (currentTab === "health") await renderHealth(sequence);
       else if (currentTab === "history") await renderHistory(sequence);
       else if (currentTab === "users") await renderUsers(sequence);
       else if (currentTab === "security") await renderSecurity(sequence);
@@ -6348,6 +6429,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (window.JustVoxelWallpaper?.canLeave() === false) return;
     const user = await loadIdentity();
     if (!user) return;
+    if (tab === "terminal" && !primaryAdmin(user)) tab = "history";
     if (administratorTabs.has(tab) && user.role !== "administrator") return;
     if (tab === "ups" && !upsAvailable) return;
     if (currentTab === "reset" && tab !== "reset") clearResetPoll();
@@ -6367,7 +6449,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   });
 
   const workspaceWindow = setupWorkspaceWindow(systemWorkspaceDialog, {
-    onClose: () => { failedUnitsSelected = false; window.JustVoxelWallpaper?.leave(); clearResetPoll(); },
+    onClose: () => { ++loadSequence; terminal.close(); failedUnitsSelected = false; window.JustVoxelWallpaper?.leave(); clearResetPoll(); },
     onOpen: async () => {
       try {
         const user = await loadIdentity();
@@ -6378,8 +6460,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const target = new URLSearchParams(window.location.search);
           const requested = target.get("workspace") === "system" ? target.get("tab") : "";
           currentTab = user.role === "administrator" ? "health" : "history";
-          if (["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "about"].includes(requested) &&
-              (!administratorTabs.has(requested) || user.role === "administrator")) currentTab = requested;
+          if (["health", "history", "users", "security", "logs", "terminal", "date-time", "wallpaper", "reset", "about"].includes(requested) &&
+              (!administratorTabs.has(requested) || user.role === "administrator") &&
+              (requested !== "terminal" || primaryAdmin(user))) currentTab = requested;
           syncSystemTabs();
         }
         loadCurrentSystemTab();
@@ -6418,7 +6501,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     clearResetPoll();
     workspaceWindow?.close();
   });
-  refreshButton?.addEventListener("click", loadCurrentSystemTab);
+  refreshButton?.addEventListener("click", () => loadCurrentSystemTab(currentTab === "terminal"));
   tabs.forEach((button) => button.addEventListener("click", () => selectSystemTab(button.dataset.systemTab)));
 
   if (readWorkspaceWindowState("system").open) workspaceWindow?.open();
@@ -7585,7 +7668,7 @@ if (filesDialog) {
     },
   });
   document.querySelector("[data-files-open]")?.addEventListener("click", () => {
-    if (!document.body.classList.contains("role-administrator")) return;
+    if (!document.body.classList.contains("primary-administrator")) return;
     if (controlCenter) controlCenter.open = false;
     workspace.open();
   });
@@ -7625,7 +7708,7 @@ if (filesDialog) {
     if (input.checked && input.value === mode && settingsStatus.textContent.includes("could not be applied")) input.dispatchEvent(new Event("change"));
   }));
   const restoreFiles = () => {
-    if (readWorkspaceWindowState("files").open && document.body.classList.contains("role-administrator")) workspace.open();
+    if (readWorkspaceWindowState("files").open && document.body.classList.contains("primary-administrator")) workspace.open();
   };
   if (document.body.classList.contains("role-pending")) {
     const observer = new MutationObserver(() => {

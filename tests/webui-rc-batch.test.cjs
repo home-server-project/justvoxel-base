@@ -289,7 +289,7 @@ test('Failed unit enumeration and journal errors show unavailable without hiding
 test('Failed-unit browser view has no privileged command execution and Agent client requests 60 lines', () => {
   assert.doesNotMatch(app, /\b(?:systemctl|journalctl|child_process)\b|exec\.Command|\b(?:execSync|spawnSync)\s*\(/);
   assert.ok(read('webui/internal/api/failed_units.go').includes('/journal?limit=60'));
-  assert.ok(app.includes('refreshButton?.addEventListener("click", loadCurrentSystemTab)'));
+  assert.ok(app.includes('refreshButton?.addEventListener("click", () => loadCurrentSystemTab(currentTab === "terminal"))'));
   assert.ok(app.includes('failedUnitsSelected = false;'));
 });
 

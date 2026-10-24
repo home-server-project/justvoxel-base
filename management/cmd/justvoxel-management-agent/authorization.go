@@ -61,3 +61,16 @@ func (s *server) requireAdministratorCredentialPath(w http.ResponseWriter, r *ht
 func (s *server) requireReadAccess(w http.ResponseWriter, r *http.Request) (session, bool) {
 	return s.requireRoles(w, r, roleAdministrator, roleOperator, roleViewer)
 }
+
+// Primary system capabilities belong to the authoritative voxel account only.
+func (s *server) requirePrimaryAdministrator(w http.ResponseWriter, r *http.Request) (session, bool) {
+	sess, ok := s.requireAdministrator(w, r)
+	if !ok {
+		return session{}, false
+	}
+	if sess.Username != systemAdminUsername {
+		writeError(w, http.StatusForbidden, "primary administrator access required")
+		return session{}, false
+	}
+	return sess, true
+}

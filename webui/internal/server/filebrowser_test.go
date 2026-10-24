@@ -14,6 +14,7 @@ import (
 type filesTestAPI struct {
 	fakeAPI
 	role       string
+	username   string
 	mustChange bool
 }
 
@@ -21,7 +22,11 @@ func (f *filesTestAPI) Session(_ context.Context, token string) (api.SessionInfo
 	if token != "session-token" {
 		return api.SessionInfo{}, api.ErrUnauthorized
 	}
-	return api.SessionInfo{Username: "voxel", Role: f.role, MustChange: f.mustChange}, nil
+	username := f.username
+	if username == "" {
+		username = "voxel"
+	}
+	return api.SessionInfo{Username: username, Role: f.role, MustChange: f.mustChange}, nil
 }
 func (f *filesTestAPI) AdminFileBrowser(context.Context, string) (api.FileBrowserStatus, error) {
 	return api.FileBrowserStatus{Availability: "on-demand", Ready: true, State: "active"}, nil
@@ -178,5 +183,24 @@ func TestFilesMutationRequiresCSRF(t *testing.T) {
 	app.Handler().ServeHTTP(rr, req)
 	if rr.Code != 403 {
 		t.Fatalf("CSRF missing: %d", rr.Code)
+	}
+}
+
+func TestFilesSecondaryAdministratorDenied(t *testing.T) {
+	app, err := New(&filesTestAPI{role: "administrator", username: "second-admin"}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/files/", "/files/api/resources", "/api/files", "/api/files/start", "/api/files/stop", "/api/files/availability"} {
+		method := "GET"
+		if strings.HasPrefix(path, "/api/files/") {
+			method = "POST"
+		}
+		req := authenticatedSystemActionRequest(method, path, "csrf=token")
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("%s = %d", path, rr.Code)
+		}
 	}
 }

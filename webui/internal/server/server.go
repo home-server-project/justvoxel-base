@@ -173,6 +173,10 @@ func (a *App) Handler() http.Handler {
 			a.fileBrowserProxy(w, r)
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/terminal/") {
+			a.terminalProxy(w, r)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
 	return securityHeaders(handler)

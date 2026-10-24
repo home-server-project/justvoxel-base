@@ -28,7 +28,7 @@ func (a *App) fileBrowserIdentity(w http.ResponseWriter, r *http.Request) (strin
 	if !ok {
 		return "", api.SessionInfo{}, false
 	}
-	if identity.MustChange || identity.Role != "administrator" {
+	if identity.MustChange || identity.Role != "administrator" || identity.Username != "voxel" {
 		http.Error(w, "Administrator access required", http.StatusForbidden)
 		return "", api.SessionInfo{}, false
 	}

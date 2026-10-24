@@ -62,6 +62,7 @@ type server struct {
 
 	systemUpdateMu sync.Mutex
 	fileBrowserMu  sync.Mutex
+	terminalMu     sync.Mutex
 
 	networkMu           sync.Mutex
 	networkTransactions map[string]networkCheckpointTransaction
@@ -253,6 +254,7 @@ func serve(socket string) error {
 	registerAdminSystemUpdateRebootRoutes(mux, s)
 	registerSystemMonitorProfileRoutes(mux, s)
 	registerFileBrowserRoutes(mux, s)
+	registerTerminalRoutes(mux, s)
 	registerUPSRoutes(mux, s)
 	registerNetworkRoutes(mux, s)
 
