@@ -18,7 +18,7 @@ func TestAdvancedServerExpansionCards(t *testing.T) {
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
 	body := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
 	previous := -1
-	for _, group := range setupSoftwareGroups() {
+	for _, group := range addServerSoftwareGroups() {
 		at := strings.Index(html.UnescapeString(body), "<legend>"+group.Name+"</legend>")
 		if at <= previous {
 			t.Fatalf("group missing or reordered: %s", group.Name)

@@ -35,16 +35,16 @@ func TestSimpleSetupStatesAndReview(t *testing.T) {
 			}
 			initial := page()
 			inputs := regexp.MustCompile(`<input[^>]+name="family"[^>]*>`).FindAllString(initial, -1)
-			if len(inputs) != 4 || strings.Contains(inputs[3], "disabled") {
-				t.Fatal("four enabled families missing")
+			if len(inputs) != 3 || strings.Contains(inputs[2], "disabled") {
+				t.Fatal("three enabled families missing")
 			}
 			if strings.Contains(initial, `name="display_name"`) {
 				t.Fatal("name in State 1")
 			}
-			for _, family := range []string{"plugins", "mods", "vanilla"} {
+			for _, family := range []string{"plugins", "mods", "original"} {
 				requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"family": {family}}))
 				softwarePage := page()
-				for _, software := range []string{"paper", "purpur", "spigot", "fabric", "neoforge", "forge", "quilt", "vanilla"} {
+				for _, software := range []string{"paper", "purpur", "spigot", "fabric", "neoforge", "forge", "quilt", "vanilla", "bedrock"} {
 					allowed := false
 					for _, choice := range simpleSoftware(family) {
 						if choice.ID == software {
@@ -81,8 +81,8 @@ func TestSimpleSetupStatesAndReview(t *testing.T) {
 				t.Fatal("Review Back did not return to State 3")
 			}
 			rr := addWizardRequest(app, http.MethodPost, "/cancel", nil)
-			if rr.Header().Get("Location") != "/?workspace=minecraft-servers" {
-				t.Fatal("cancel destination")
+			if rr.Code != http.StatusOK || rr.Header().Get("Location") != "" {
+				t.Fatal("cancel must render completion in wizard tab")
 			}
 			if _, exists := addServerDrafts.get(app, "session-token"); exists {
 				t.Fatal("cancel retained draft")

@@ -507,3 +507,28 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-software-groups .server-software-copy{overflow-wrap:anywhere}
 @media(max-width:850px){.setup-software-groups{grid-template-columns:1fr}}
 @media(max-width:430px){.setup-simple-choices,.setup-software-groups .setup-server-types{grid-template-columns:1fr}}
+
+/* Add Server family lanes and a reserved desktop Simple content area. */
+.setup-entry-add-server .setup-simple-families{grid-template-columns:1fr}
+.setup-entry-add-server .setup-family-items{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem}
+.setup-entry-add-server .setup-family-items>span{display:inline-flex;align-items:center;gap:.25rem}
+.setup-family-items img{width:20px;height:20px;object-fit:contain}
+.setup-entry-add-server [data-simple-setup]{display:flex;flex:1;flex-direction:column;gap:.5rem;margin-top:0}
+.setup-entry-add-server .setup-simple-content{min-height:21rem}
+.setup-entry-add-server .setup-simple-actions,.setup-entry-add-server [data-simple-setup]>button{margin-top:auto}
+.setup-entry-add-server .setup-terminal-note form{margin:0}
+
+/* Only Add Server Step 1 uses the approved three full-width software lanes. */
+.setup-add-server-software-lanes{grid-template-columns:1fr}
+.setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr));min-width:0;margin:0}
+.setup-wizard-panel .setup-add-server-software-lanes .server-software-card{min-height:104px;box-sizing:border-box;align-items:start;align-content:start}
+@media(max-width:1000px){
+  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+  .setup-entry-add-server .setup-simple-content{min-height:0}
+  .setup-entry-add-server [data-simple-setup]{flex:none}
+}
+@media(max-width:430px){
+  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:1fr}
+}

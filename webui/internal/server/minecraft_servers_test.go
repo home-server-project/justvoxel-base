@@ -117,7 +117,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 		}
 		previous = index
 	}
-	for _, want := range []string{`href="/minecraft/servers/add"`, "Paper · 1.21.8", "Purpur · 1.21.8", "25567", ">19134</strong>", "Disabled", "Running", "Stopped", "<span>RAM</span>", "<span>Java port</span>", "<span>Bedrock port</span>"} {
+	for _, want := range []string{`href="/minecraft/servers/add?new=1"`, `target="justvoxel-add-server"`, "Paper · 1.21.8", "Purpur · 1.21.8", "25567", ">19134</strong>", "Disabled", "Running", "Stopped", "<span>RAM</span>", "<span>Java port</span>", "<span>Bedrock port</span>"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
 		}

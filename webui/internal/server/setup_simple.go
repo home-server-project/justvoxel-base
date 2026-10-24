@@ -18,6 +18,8 @@ func simpleSoftware(family string) []setupSoftwareChoice {
 		return []setupSoftwareChoice{{"paper", "Paper", "Plugins · Cross-play"}, {"purpur", "Purpur", "Plugins · Cross-play"}, {"spigot", "Spigot", "Plugins · Cross-play"}}
 	case "mods":
 		return []setupSoftwareChoice{{"fabric", "Fabric", "Mod loader · Cross-play supported when compatible"}, {"neoforge", "NeoForge", "Mod loader · Cross-play supported when compatible"}, {"forge", "Forge", "Mod loader · Java only"}, {"quilt", "Quilt", "Mod loader · Java only"}}
+	case "original":
+		return []setupSoftwareChoice{{"vanilla", "Vanilla", "Original Minecraft · no plugins or mods"}, {"bedrock", "Bedrock", "Native Bedrock server · no plugins or mods"}}
 	case "bedrock":
 		return []setupSoftwareChoice{{"bedrock", "Bedrock", "Native Bedrock · no plugins or mods"}}
 	case "vanilla":
@@ -234,5 +236,14 @@ func setupSoftwareGroups() []setupSoftwareGroup {
 		{Name: "Mod loaders + managed cross-play", Description: "Managed cross-play requires proven compatibility for the exact Minecraft and loader versions.", Software: mods[:2]},
 		{Name: "Java / mod loaders without managed cross-play", Software: append(simpleSoftware("vanilla"), mods[2:]...)},
 		{Name: "Native Bedrock server", Software: simpleSoftware("bedrock")},
+	}
+}
+
+// Keep the first-run software presentation unchanged.
+func addServerSoftwareGroups() []setupSoftwareGroup {
+	return []setupSoftwareGroup{
+		{Name: "Plugins + managed cross-play", Software: simpleSoftware("plugins")},
+		{Name: "Mods", Description: "Mod loaders · Cross-play: Fabric · NeoForge", Software: simpleSoftware("mods")},
+		{Name: "Vanilla Java · Bedrock", Software: simpleSoftware("original")},
 	}
 }

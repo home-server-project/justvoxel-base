@@ -18,13 +18,13 @@ func (f *addServerTestAPI) AdminSetupNativeBedrockPreview(_ context.Context, _ s
 func TestSimpleNativeBedrockStatesAndReview(t *testing.T) {
 	app, _ := newAddServerTestApp(t)
 	body := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
-	input := regexp.MustCompile(`<input[^>]+name="family"[^>]+value="bedrock"[^>]*>`).FindString(body)
+	input := regexp.MustCompile(`<input[^>]+name="family"[^>]+value="original"[^>]*>`).FindString(body)
 	if input == "" || strings.Contains(input, "disabled") || strings.Contains(body, "Not implemented") {
 		t.Fatal("Bedrock family unavailable")
 	}
-	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"family": {"bedrock"}}))
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"family": {"original"}}))
 	body = addWizardRequest(app, http.MethodGet, "", nil).Body.String()
-	if strings.Count(body, `name="server_type"`) != 1 || !strings.Contains(body, "Native Bedrock · no plugins or mods") {
+	if strings.Count(body, `name="server_type"`) != 2 || !strings.Contains(body, "Native Bedrock server · no plugins or mods") {
 		t.Fatal("native software card missing")
 	}
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/simple", url.Values{"server_type": {"bedrock"}}))

@@ -5,6 +5,17 @@ then server name and game mode. It leads to the shared Review page. Advanced Set
 retains Server, Cross-play, Memory, Storage, Backups and Review, with software
 grouped by capability. All eight Java server types and native Bedrock are selectable.
 
+Add Server offers three family lanes: Plugins (Paper, Purpur, Spigot), Mods
+(Fabric, NeoForge, Forge, Quilt), and Vanilla Java · Bedrock. Advanced Setup uses
+these same three software lanes in its Server step.
+
+The Minecraft Servers Add Server action opens or reuses one dedicated wizard tab
+and starts fresh. Refreshing that wizard preserves the current step. A submitted
+or partially completed creation retains its existing Review/recovery path.
+Cancel and Review's Return to Minecraft Servers clear the Add Server draft and
+review, focus the original tab when available, and try to close the wizard tab.
+If the browser prevents closing, the wizard shows a message and Close tab button.
+
 Setup resolves an exact stable Minecraft release. Spigot derives its JDK image
 from that release: java21-jdk for 1.20.5–1.21.11 and java25-jdk for 26.x. Mod loaders
 resolve a stable exact loader/build from their publisher metadata and verify the

@@ -167,6 +167,17 @@ func (a *App) addServerWizardPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft, exists := addServerDrafts.get(a, session)
+	if r.URL.Query().Get("new") == "1" {
+		// A fresh launch must not discard an uncertain or partially created server.
+		if exists && (draft.CreationAttempted || draft.CoreCreated) {
+			http.Redirect(w, r, addServerBasePath+"/review", http.StatusSeeOther)
+			return
+		}
+		addServerReviews.delete(a, session)
+		addServerDrafts.delete(a, session)
+		http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
+		return
+	}
 	if !exists {
 		draft = setupDraft{AddServer: true}
 	}

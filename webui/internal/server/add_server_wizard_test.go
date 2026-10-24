@@ -162,7 +162,7 @@ func TestAddServerReviewGridRows(t *testing.T) {
 	}
 }
 
-func TestAddServerReviewCancelClearsStateAndReturnsDirectlyToWorkspace(t *testing.T) {
+func TestAddServerCancelClearsStateAndCompletesInWizardTab(t *testing.T) {
 	for _, suffix := range []string{"/review/cancel", "/cancel"} {
 		t.Run(suffix, func(t *testing.T) {
 			app, _ := newAddServerTestApp(t)
@@ -177,9 +177,13 @@ func TestAddServerReviewCancelClearsStateAndReturnsDirectlyToWorkspace(t *testin
 			firstRunReview, _ := firstRunSetupReviews.get(app, "session-token")
 
 			response := addWizardRequest(app, http.MethodPost, suffix, nil)
-			requireAddRedirect(t, response)
-			if location := response.Header().Get("Location"); location != "/?workspace=minecraft-servers" {
-				t.Fatalf("cancel Location = %q; want direct workspace destination", location)
+			if response.Code != http.StatusOK || response.Header().Get("Location") != "" {
+				t.Fatalf("cancel must complete in this tab: %d %q", response.Code, response.Header().Get("Location"))
+			}
+			for _, want := range []string{"Setup cancelled.", "/static/add-server-cancelled.js", "You can close this tab."} {
+				if !strings.Contains(response.Body.String(), want) {
+					t.Fatalf("cancel completion missing %q", want)
+				}
 			}
 			if _, exists := addServerDrafts.get(app, "session-token"); exists {
 				t.Fatal("cancel retained the Add Server draft")
@@ -193,6 +197,14 @@ func TestAddServerReviewCancelClearsStateAndReturnsDirectlyToWorkspace(t *testin
 			if got, exists := firstRunSetupReviews.get(app, "session-token"); !exists || !reflect.DeepEqual(got, firstRunReview) {
 				t.Fatal("Add Server cancel changed the first-run review")
 			}
+			reopened := addWizardRequest(app, http.MethodGet, "?new=1", nil)
+			if reopened.Code != http.StatusSeeOther || reopened.Header().Get("Location") != addServerBasePath {
+				t.Fatal("reopen did not redirect to clean URL")
+			}
+			body := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
+			if !strings.Contains(body, "Choose family") || strings.Contains(body, `name="display_name"`) {
+				t.Fatal("reopen after cancellation did not start fresh")
+			}
 		})
 	}
 }
@@ -201,7 +213,7 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	app, client := newAddServerTestApp(t)
 	workspace := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))
 	body := workspace.Body.String()
-	if workspace.Code != http.StatusOK || !strings.Contains(body, `href="/minecraft/servers/add" target="_blank" rel="noopener">Add Server</a>`) {
+	if workspace.Code != http.StatusOK || !strings.Contains(body, `href="/minecraft/servers/add?new=1" target="justvoxel-add-server">Add Server</a>`) {
 		t.Fatalf("entry missing: %d %s", workspace.Code, body)
 	}
 	if strings.Contains(body, "minecraft-add-server-card") || strings.Contains(body, "data-minecraft-action") {
@@ -240,14 +252,15 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"Family Survival", "Create Server", "<dt>Data location</dt><dd>System storage · ", "<dt>Backup location</dt><dd>System storage · ", "Start on Boot", "setup-review-summary",
-		`<form method="post" action="/minecraft/servers/add/review/cancel" data-add-server-review-cancel><input type="hidden" name="csrf" value="csrf-token">`,
-		`data-add-server-cancel-error hidden`,
+		`<form method="post" action="/minecraft/servers/add/review/cancel"><input type="hidden" name="csrf" value="csrf-token">`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("review missing %s", want)
 		}
 	}
-	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/cancel", nil))
+	if response := addWizardRequest(app, http.MethodPost, "/cancel", nil); response.Code != http.StatusOK {
+		t.Fatalf("cancel: %d", response.Code)
+	}
 	after, _ = firstRunSetupDrafts.get(app, "session-token")
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("Cancel changed the first-run draft")
@@ -598,7 +611,7 @@ func TestMinecraftServersAddActionUsesApplianceConfiguration(t *testing.T) {
 	for _, configured := range []bool{false, true} {
 		label, want := "first-setup", `<a href="/setup">Add Server</a>`
 		if configured {
-			label, want = "configured", `<a href="/minecraft/servers/add" target="_blank" rel="noopener">Add Server</a>`
+			label, want = "configured", `<a href="/minecraft/servers/add?new=1" target="justvoxel-add-server">Add Server</a>`
 		}
 		t.Run(label, func(t *testing.T) {
 			app, client := newAddServerTestApp(t)

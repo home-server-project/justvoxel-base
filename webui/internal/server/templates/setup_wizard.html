@@ -73,7 +73,7 @@
       </section>
     </div>
 
-    {{if .AddServer}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/?workspace=minecraft-servers" data-add-server-cancel>Cancel</a></div>{{else}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a><div class="setup-terminal-help"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div></div>{{end}}
+    {{if .AddServer}}<div class="setup-terminal-note"><form method="post" action="{{$wizard.BasePath}}/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary setup-dashboard-exit" type="submit">Cancel</button></form></div>{{else}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a><div class="setup-terminal-help"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div></div>{{end}}
   </section>
   {{else}}
   <div class="setup-stage-header">
@@ -89,7 +89,7 @@
     <form method="post" action="{{$wizard.BasePath}}/server" class="setup-form">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="setup-software-groups">
+      <div class="setup-software-groups{{if .AddServer}} setup-add-server-software-lanes{{end}}">
       {{range .SoftwareGroups}}
       <fieldset class="setup-server-types setup-server-types-compact">
         <legend>{{.Name}}</legend>{{if .Description}}<small>{{.Description}}</small>{{end}}
@@ -317,22 +317,27 @@
 <form method="post" action="{{.BasePath}}/simple" class="setup-recommended-form" data-simple-setup>
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 {{if eq .SimpleState 1}}
-<fieldset class="setup-simple-choices"><legend>Choose family</legend>
-<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="plugins" required {{if eq .SimpleFamily "plugins"}}checked{{end}}><span class="server-software-copy"><strong>Plugins</strong><span>Paper · Purpur · Spigot</span><small>Plugins · Managed Bedrock cross-play</small></span></label>
-<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="mods" required {{if eq .SimpleFamily "mods"}}checked{{end}}><span class="server-software-copy"><strong>Mods</strong><span>Fabric · NeoForge · Forge · Quilt</span><small>Mod loaders</small><small>Cross-play: Fabric · NeoForge</small></span></label>
-<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="vanilla" required {{if eq .SimpleFamily "vanilla"}}checked{{end}}><span class="server-software-copy"><strong>Vanilla Java</strong><span>Vanilla</span><small>Original Minecraft · no plugins or mods</small></span></label>
-<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="bedrock" required {{if eq .SimpleFamily "bedrock"}}checked{{end}}><span class="server-software-copy"><strong>Bedrock</strong><small>Native Bedrock server</small></span></label>
+<div class="setup-simple-content">
+<fieldset class="setup-simple-choices setup-simple-families"><legend>Choose family</legend>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="plugins" required {{if eq .SimpleFamily "plugins"}}checked{{end}}><span class="server-software-copy"><strong>Plugins</strong><span class="setup-family-items"><span><img src="/static/server-software/paper.svg" alt="" width="20" height="20">Paper</span> · <span><img src="/static/server-software/purpur.svg" alt="" width="20" height="20">Purpur</span> · <span><img src="/static/server-software/spigot.svg" alt="" width="20" height="20">Spigot</span></span><small>Plugins · Managed Bedrock cross-play</small></span></label>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="mods" required {{if eq .SimpleFamily "mods"}}checked{{end}}><span class="server-software-copy"><strong>Mods</strong><span class="setup-family-items"><span><img src="/static/server-software/fabric.svg" alt="" width="20" height="20">Fabric</span> · <span><img src="/static/server-software/neoforge.svg" alt="" width="20" height="20">NeoForge</span> · <span><img src="/static/server-software/forge.svg" alt="" width="20" height="20">Forge</span> · <span><img src="/static/server-software/quilt.svg" alt="" width="20" height="20">Quilt</span></span><small>Mod loaders</small><small>Cross-play: Fabric · NeoForge</small></span></label>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="original" required {{if or (eq .SimpleFamily "original") (eq .SimpleFamily "vanilla") (eq .SimpleFamily "bedrock")}}checked{{end}}><span class="server-software-copy"><strong>Vanilla Java · Bedrock</strong><span class="setup-family-items"><span><img src="/static/server-software/vanilla.svg" alt="" width="20" height="20">Vanilla</span><span><img src="/static/server-software/bedrock.svg" alt="" width="20" height="20">Bedrock</span></span><small>Original Minecraft · no plugins or mods</small><small>Native Bedrock server</small></span></label>
 </fieldset>
+</div>
 <button type="submit" data-simple-next {{if eq .SimpleFamily ""}}disabled{{end}}>Use simple setup</button>
 {{else if eq .SimpleState 2}}
+<div class="setup-simple-content">
 <fieldset class="setup-simple-choices"><legend>Choose software</legend>
 {{range .SimpleSoftware}}<label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="{{.ID}}" required {{if eq .ID $.Minecraft.ServerType}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>{{.Name}}</strong><small>{{.Description}}</small></span></label>{{end}}
 </fieldset>
-<div class="setup-simple-actions"><button class="secondary" type="submit" formaction="{{.BasePath}}/cancel" formnovalidate>Cancel</button><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" data-simple-next {{if eq .Minecraft.ServerType ""}}disabled{{end}}>Next</button></div>
+</div>
+<div class="setup-simple-actions"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" data-simple-next {{if eq .Minecraft.ServerType ""}}disabled{{end}}>Next</button></div>
 {{else}}
+<div class="setup-simple-content">
 {{template "setup-instance-name" .}}
 <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option>{{if ne .Minecraft.ServerType "bedrock"}}<option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option>{{end}}</select></label>
-<div class="setup-simple-actions"><button class="secondary" type="submit" formaction="{{.BasePath}}/cancel" formnovalidate>Cancel</button><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit">Next</button></div>
+</div>
+<div class="setup-simple-actions"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit">Next</button></div>
 {{end}}
 </form>
 {{end}}

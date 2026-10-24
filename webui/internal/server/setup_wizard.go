@@ -621,11 +621,11 @@ func (a *App) setupWizardCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	setupReviewsFor(r).delete(a, session)
 	setupDraftsFor(r).delete(a, session)
-	destination := setupBasePath(r)
 	if isAddServerRequest(r) {
-		destination = "/?workspace=minecraft-servers"
+		a.renderAdminDiscovery(w, "add_server_cancelled.html", nil)
+		return
 	}
-	http.Redirect(w, r, destination, http.StatusSeeOther)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 }
 
 func (a *App) setupWizardRequest(w http.ResponseWriter, r *http.Request, requireCSRF bool) (string, adminDiscoveryAPI, api.SessionInfo, bool) {
@@ -706,8 +706,12 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 	if draft.AddServer {
 		basePath = addServerBasePath
 	}
+	softwareGroups := setupSoftwareGroups()
+	if draft.AddServer {
+		softwareGroups = addServerSoftwareGroups()
+	}
 	data := setupWizardPageData{
-		SoftwareGroups: setupSoftwareGroups(), SimpleState: draft.SimpleState, SimpleFamily: draft.SimpleFamily, SimpleSoftware: simpleSoftware(draft.SimpleFamily),
+		SoftwareGroups: softwareGroups, SimpleState: draft.SimpleState, SimpleFamily: draft.SimpleFamily, SimpleSoftware: simpleSoftware(draft.SimpleFamily),
 		AddServer: draft.AddServer, BasePath: basePath, DisplayName: draft.DisplayName, RunningMemory: runningMemory,
 		StartOnBoot: draft.StartOnBoot, StartAfterSetup: draft.StartAfterSetup, StartAfterUnavailable: draft.StartAfterUnavailable, StartBootUnavailable: draft.StartBootUnavailable, BackupAvailable: draft.BackupAvailable, OtherMemoryMiB: draft.OtherMemoryMiB,
 		Title: "First setup", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,

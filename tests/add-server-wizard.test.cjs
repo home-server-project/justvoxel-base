@@ -20,7 +20,7 @@ test('Add Server reuses the maintained wizard, software controls and six-step pr
 
 test('Add Server is a keyboard accessible native action outside the ordered cards', () => {
   const markup = read('templates/minecraft_servers.html');
-  assert.ok(markup.includes('<a href="{{if .Configured}}/minecraft/servers/add{{else}}/setup{{end}}"{{if .Configured}} target="_blank" rel="noopener"{{end}}>Add Server</a>'));
+  assert.ok(markup.includes('<a href="{{if .Configured}}/minecraft/servers/add?new=1{{else}}/setup{{end}}"{{if .Configured}} target="justvoxel-add-server"{{end}}>Add Server</a>'));
   assert.ok(!markup.includes('minecraft-add-server-card'));
   assert.ok(markup.indexOf('>Add Server</a>') < markup.indexOf('minecraft-server-entries'));
   assert.ok(read('static/minecraft-servers.css').includes(':focus-visible'));
@@ -53,136 +53,80 @@ test('Add Server Review retains the compact stretched grid without height sizing
   assert.ok(css.includes('.setup-body.setup-add-server-review{height:auto;min-height:100dvh;overflow:visible}'));
 });
 
-test('only Add Server exits have tab closing hooks and Review keeps the real POST and CSRF', () => {
+test('Add Server exits submit native POST forms with CSRF before loading the completion page', () => {
   const wizard = read('templates/setup_wizard.html');
-  assert.ok(wizard.includes('<script src="/static/setup-operation.js" defer></script>'));
-  assert.ok(wizard.includes('{{if .AddServer}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/?workspace=minecraft-servers" data-add-server-cancel>Cancel</a></div>{{else}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a>'));
+  assert.ok(wizard.includes('<form method="post" action="{{$wizard.BasePath}}/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary setup-dashboard-exit" type="submit">Cancel</button></form>'));
+  assert.ok(wizard.includes('formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button>'));
   const review = read('templates/setup_review.html');
-  assert.ok(review.includes('<form method="post" action="{{$wizard.BasePath}}/review/cancel"{{if .AddServer}} data-add-server-review-cancel{{end}}><input type="hidden" name="csrf" value="{{.CSRF}}">'));
-  assert.ok(review.includes('{{if .AddServer}}<p class="notice error" role="alert" data-add-server-cancel-error hidden></p>{{end}}'));
+  assert.ok(review.includes('<form method="post" action="{{$wizard.BasePath}}/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}">'));
+  assert.ok(!read('static/setup-operation.js').includes('closeWizard'));
+  assert.ok(!read('static/setup-operation.js').includes('data-add-server-review-cancel'));
+  const completion = read('templates/add_server_cancelled.html');
+  assert.ok(completion.includes('/static/add-server-cancelled.js'));
+  assert.ok(completion.includes('Setup cancelled.'));
+  assert.ok(completion.includes('You can close this tab.'));
+  assert.ok(!completion.includes('/?workspace=minecraft-servers'));
 });
 
-// Exercise the scoped browser handlers without loading unrelated dashboard code.
 const vm = require('node:vm');
-const setupSource = read('static/setup-operation.js');
-function loadSetupOperation(context) {
-  let onReady;
-  context.document.addEventListener = (name, handler) => {
-    assert.equal(name, 'DOMContentLoaded');
-    onReady = handler;
-  };
-  vm.runInNewContext(setupSource, context);
-  assert.equal(typeof onReady, 'function');
-  onReady();
-}
-function wizardTab({ review = false, closes = false, closeThrows = false, response, requestError } = {}) {
-  const events = {};
-  const timers = [];
-  const navigations = [];
-  const requests = [];
-  const error = { hidden: true, textContent: '' };
-  const control = {
-    href: 'https://example.test/?workspace=minecraft-servers',
-    action: 'https://example.test/minecraft/servers/add/review/cancel',
-    addEventListener: (name, handler) => { events[name] = handler; },
-  };
-  let closeCalls = 0;
+function completedTab({ opener = 'same-origin', closeThrows = false, focusThrows = false } = {}) {
+  const events = [];
+  let retry;
   const window = {
-    closed: false,
-    location: { origin: 'https://example.test', assign: value => navigations.push(value) },
-    close() {
-      closeCalls++;
-      if (closeThrows) throw new Error('Closing denied');
-      window.closed = closes;
-    },
+    location: { origin: 'https://example.test' },
+    close() { events.push('close'); if (closeThrows) throw new Error('Closing denied'); },
   };
-  class FormData {
-    constructor(form) { this.form = form; }
+  if (opener !== 'absent') {
+    window.opener = {
+      closed: opener === 'closed',
+      get location() {
+        if (opener === 'inaccessible') throw new Error('Access denied');
+        return { origin: opener === 'cross-origin' ? 'https://other.test' : 'https://example.test' };
+      },
+      focus() { events.push('focus'); if (focusThrows) throw new Error('Focus denied'); },
+    };
   }
-  loadSetupOperation({
-    document: { querySelector: selector => ({
-      '[data-add-server-cancel]': review ? null : control,
-      '[data-add-server-review-cancel]': review ? control : null,
-      '[data-add-server-cancel-error]': error,
-    })[selector] },
-    window, URL, FormData,
-    setTimeout: fn => timers.push(fn),
-    fetch: async (action, options) => {
-      requests.push({ action, options });
-      assert.equal(closeCalls, 0, 'must await cancellation before closing');
-      if (requestError) throw requestError;
-      return response || { ok: true, redirected: true, url: 'https://example.test/?workspace=minecraft-servers' };
-    },
+  vm.runInNewContext(read('static/add-server-cancelled.js'), {
+    window,
+    document: { querySelector(selector) {
+      assert.equal(selector, '[data-close-add-server]');
+      return { addEventListener(name, handler) { assert.equal(name, 'click'); retry = handler; } };
+    } },
   });
-  return { events, timers, navigations, requests, error, control, closeCalls: () => closeCalls };
-}
-function ordinaryEvent(overrides = {}) {
-  return { button: 0, prevented: false, preventDefault() { this.prevented = true; }, ...overrides };
+  return { events, retry };
 }
 
-test('intermediate Cancel closes only an ordinary click, with direct fallback if closing is denied', () => {
-  for (const closes of [true, false]) {
-    const tab = wizardTab({ closes });
-    const event = ordinaryEvent();
-    tab.events.click(event);
-    assert.equal(event.prevented, true);
-    assert.equal(tab.closeCalls(), 1);
-    tab.timers.forEach(fn => fn());
-    assert.deepEqual(tab.navigations, closes ? [] : [tab.control.href]);
-    assert.equal(tab.requests.length, 0);
-  }
-  const rejected = wizardTab({ closeThrows: true });
-  rejected.events.click(ordinaryEvent());
-  rejected.timers.forEach(fn => fn());
-  assert.deepEqual(rejected.navigations, [rejected.control.href]);
-  for (const overrides of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }, { defaultPrevented: true }]) {
-    const tab = wizardTab();
-    const event = ordinaryEvent(overrides);
-    tab.events.click(event);
-    assert.equal(event.prevented, false);
-    assert.equal(tab.closeCalls(), 0);
-  }
+test('completion focuses the same-origin opener before close and allows retry', () => {
+  const tab = completedTab();
+  assert.deepEqual(tab.events, ['focus', 'close']);
+  tab.retry();
+  assert.deepEqual(tab.events, ['focus', 'close', 'focus', 'close']);
 });
 
-test('Review Return POSTs actual FormData before closing, with direct fallback', async () => {
-  for (const closes of [true, false]) {
-    const tab = wizardTab({ review: true, closes });
-    const event = ordinaryEvent();
-    await tab.events.submit(event);
-    assert.equal(event.prevented, true);
-    assert.equal(tab.requests.length, 1);
-    const { action, options } = tab.requests[0];
-    assert.equal(action, tab.control.action);
-    assert.equal(options.method, 'POST');
-    assert.equal(options.credentials, 'same-origin');
-    assert.equal(options.redirect, 'follow');
-    assert.equal(options.body.form, tab.control);
-    assert.equal(tab.closeCalls(), 1);
-    assert.equal(tab.error.hidden, true);
-    tab.timers.forEach(fn => fn());
-    assert.deepEqual(tab.navigations, closes ? [] : ['/?workspace=minecraft-servers']);
+test('missing, closed or cross-origin opener and browser policy leave closing safe to retry', () => {
+  for (const opener of ['absent', 'closed', 'cross-origin', 'inaccessible']) {
+    const tab = completedTab({ opener, closeThrows: true });
+    assert.deepEqual(tab.events, ['close']);
+    tab.retry();
+    assert.deepEqual(tab.events, ['close', 'close']);
   }
+  assert.deepEqual(completedTab({ focusThrows: true }).events, ['focus', 'close']);
 });
 
-test('Review cancellation failure stays visible and retryable without closing or navigating', async () => {
-  for (const failure of [
-    { requestError: new TypeError('Network failure') },
-    { response: { ok: false, redirected: false, url: 'https://example.test/minecraft/servers/add/review/cancel' } },
-    { response: { ok: true, redirected: true, url: 'https://example.test/login' } },
-    { response: { ok: true, redirected: true, url: 'https://example.test/minecraft/servers/add/review' } },
-  ]) {
-    const tab = wizardTab({ review: true, ...failure });
-    await tab.events.submit(ordinaryEvent());
-    assert.equal(tab.closeCalls(), 0);
-    assert.equal(tab.timers.length, 0);
-    assert.deepEqual(tab.navigations, []);
-    assert.equal(tab.error.hidden, false);
-    assert.match(tab.error.textContent, /Could not cancel Add Server/);
-    await tab.events.submit(ordinaryEvent());
-    assert.equal(tab.requests.length, 2, 'failed cancellation must remain retryable');
-  }
+test('desktop Simple sizing is reserved without scroll and released at the paired-card breakpoint', () => {
+  const css = read('static/setup.css');
+  assert.ok(css.includes('.setup-entry-add-server .setup-simple-content{min-height:21rem}'));
+  assert.ok(css.includes('@media(max-width:760px){\n  .setup-entry-add-server .setup-simple-content{min-height:0}'));
+  assert.ok(css.includes('.setup-entry-add-server .setup-simple-actions,.setup-entry-add-server [data-simple-setup]>button{margin-top:auto}'));
+  const simpleRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /setup-simple|data-simple-setup/.test(selector));
+  for (const [, , declarations] of simpleRules) assert.doesNotMatch(declarations, /overflow\s*:\s*(auto|scroll|hidden)/);
 });
 
-test('first-run pages install no Add Server exit handlers', () => {
-  loadSetupOperation({ document: { querySelector: () => null } });
+test('Advanced Add Server uses full-width lanes with four, two, then one column', () => {
+  const css = read('static/setup.css');
+  assert.ok(css.includes('.setup-add-server-software-lanes{grid-template-columns:1fr}'));
+  assert.ok(css.includes('.setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr))'));
+  assert.ok(css.includes('@media(max-width:1000px){\n  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}'));
+  assert.ok(css.includes('@media(max-width:430px){\n  .setup-add-server-software-lanes .setup-server-types{grid-template-columns:1fr}'));
+  assert.ok(css.includes('min-height:104px;box-sizing:border-box;align-items:start;align-content:start'));
 });
