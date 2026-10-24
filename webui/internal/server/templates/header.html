@@ -81,6 +81,7 @@
             <button class="control-tile" type="button" data-network-open title="Ethernet, Wi-Fi and current network status"><strong>Network</strong></button>
             <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-system-update-open title="Update the JustVoxel operating system"><strong>System Update</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-terminal-open title="Open a command-line session on JustVoxel"><strong>Terminal</strong></button>
           </div>
         </section>
 
@@ -184,7 +185,6 @@
         <button class="nav-admin-only" type="button" data-system-tab="users" aria-selected="false">Users</button>
         <button class="nav-admin-only" type="button" data-system-tab="security" aria-selected="false">Security</button>
         <button class="nav-admin-only" type="button" data-system-tab="logs" aria-selected="false">Logs</button>
-        <button class="nav-admin-only" type="button" data-primary-admin-only data-system-tab="terminal" aria-selected="false">Terminal</button>
         <button class="nav-admin-only" type="button" data-system-tab="date-time" aria-selected="false">Date &amp; Time</button>
         <button type="button" data-system-tab="wallpaper" aria-selected="false">Wallpaper</button>
         <button class="nav-admin-only" type="button" data-system-tab="reset" aria-selected="false">Factory Reset</button>
@@ -194,11 +194,26 @@
       <div class="system-workspace-body">
         <p class="system-workspace-state" data-system-state>Choose a section.</p>
         <div class="system-workspace-content" data-system-workspace-content></div>
-        <div class="system-terminal-pane" data-system-terminal hidden>
-          <p class="system-workspace-state" data-terminal-state></p>
-          <button class="secondary" type="button" data-terminal-retry hidden>Retry</button>
-          <iframe title="JustVoxel Terminal" data-terminal-frame hidden></iframe>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window system-workspace-dialog" data-workspace-window="terminal" data-terminal-workspace-dialog aria-labelledby="terminal-workspace-title">
+    <div class="system-workspace-shell">
+      <div class="system-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="terminal-workspace-title">Terminal</h2>
         </div>
+        <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-terminal-refresh aria-label="Refresh Terminal" title="Refresh Terminal">Refresh</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-terminal-close aria-label="Close Terminal"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="system-workspace-body terminal-workspace-body">
+        <p class="system-workspace-state" data-terminal-state></p>
+        <button class="secondary" type="button" data-terminal-retry hidden>Retry</button>
+        <iframe title="JustVoxel Terminal" data-terminal-frame hidden></iframe>
       </div>
     </div>
   </dialog>

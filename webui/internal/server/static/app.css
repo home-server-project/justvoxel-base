@@ -1719,9 +1719,8 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 [data-files-settings-dialog] input[type=radio]{width:auto;flex:none;margin:.25rem 0 0;padding:0}
 [data-files-settings-dialog] .files-settings-choices span{display:grid;gap:.2rem;min-width:0}
 
-/* Primary administrator visibility and the approved embedded Terminal tab. */
+/* Primary administrator visibility and standalone Terminal embed sizing. */
 body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{display:none!important}
-.system-terminal-pane{flex:1;min-height:0;display:flex;flex-direction:column}
-.system-terminal-pane[hidden]{display:none}
-.system-terminal-pane iframe{flex:1;min-height:0;width:100%;height:100%;border:0}
-.system-terminal-pane [data-terminal-retry]{align-self:flex-start}
+[data-terminal-workspace-dialog] .terminal-workspace-body iframe{flex:1;min-height:0;width:100%;height:100%;border:0}
+[data-terminal-workspace-dialog] [hidden]{display:none}
+[data-terminal-workspace-dialog] [data-terminal-retry]{align-self:flex-start}

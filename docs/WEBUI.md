@@ -221,8 +221,8 @@ Only the primary `voxel` account with the `administrator` role can open **Contro
 
 ## Terminal
 
-The primary `voxel` administrator opens **Control Center → System → Terminal**. Other accounts, including other administrators, cannot see or access Terminal or Files. Terminal opens the real `voxel` login shell, with no second login. Opening the tab starts the native ttyd service on demand and waits for readiness; startup errors offer Retry.
+The primary `voxel` administrator opens **Control Center → System → Terminal**. Other accounts, including other administrators, cannot see or access Terminal or Files. Terminal opens the real `voxel` login shell, with no second login. Opening the standalone workspace starts the native ttyd service on demand and waits for readiness; startup errors offer Retry.
 
-Switching System tabs keeps the terminal connection alive. System Refresh reconnects Terminal by closing the current shell and stopping its service before starting it again. Closing the System workspace closes the connection and requests a managed stop. If the browser disappears, ttyd exits after its last WebSocket client disconnects. Terminal has no availability setting or boot startup.
+Terminal Refresh reconnects Terminal by closing the current shell and stopping its service before starting it again. Closing the Terminal workspace ends the on-demand Terminal session, closes the connection and requests a managed stop. If the browser disappears, ttyd exits after its last WebSocket client disconnects. Terminal has no availability setting or boot startup.
 
 Terminal HTTP and WebSocket traffic passes through the existing authenticated Management Agent Unix socket. Both WebUI and Agent enforce the primary `voxel` administrator requirement; the JustVoxel session remains the real authentication boundary. The Management Agent is the only ttyd proxy and alone injects `X-JustVoxel-Terminal: 1`. ttyd exposes no TCP listener: it uses `/run/justvoxel-terminal/ttyd.sock` inside a private `0700` runtime directory, which the WebUI cannot access directly.
