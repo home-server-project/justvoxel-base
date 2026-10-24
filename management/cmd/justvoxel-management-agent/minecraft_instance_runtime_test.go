@@ -81,7 +81,7 @@ func TestInstanceRuntimeDistinctAndDeterministic(t *testing.T) {
 	if files[0].EnvironmentPath == files[1].EnvironmentPath || files[0].DataPath == files[1].DataPath || files[0].ContainerName == files[1].ContainerName {
 		t.Fatal("shared instance runtime")
 	}
-	if !strings.Contains(string(files[0].Environment), "MODRINTH_PROJECTS=viaversion") || strings.Contains(string(files[1].Environment), "MODRINTH_PROJECTS=") || strings.Contains(string(files[1].Environment), "PAPER_CHANNEL=") {
+	if !strings.Contains(string(files[0].Environment), "MODRINTH_PROJECTS=paper:viaversion") || strings.Contains(string(files[1].Environment), "MODRINTH_PROJECTS=") || strings.Contains(string(files[1].Environment), "PAPER_CHANNEL=") {
 		t.Fatal("software capabilities changed")
 	}
 	reversed, err := store.renderInstanceRuntimes(ctx, []minecraftInstanceRuntimeConfig{configs[1], configs[0]})
@@ -97,6 +97,57 @@ func TestInstanceRuntimeDistinctAndDeterministic(t *testing.T) {
 	renamed, err := store.renderInstanceRuntimes(ctx, configs)
 	if err != nil || !reflect.DeepEqual(files, renamed) {
 		t.Fatal("pretty name changed runtime")
+	}
+}
+
+func TestInstanceRuntimeManagedViaVersion(t *testing.T) {
+	for _, tc := range []struct {
+		software string
+		managed  bool
+	}{
+		{"paper", true},
+		{"purpur", true},
+		{"spigot", true},
+		{"vanilla", false},
+		{"forge", false},
+		{"neoforge", false},
+		{"fabric", false},
+		{"quilt", false},
+		{"bedrock", false},
+	} {
+		t.Run(tc.software, func(t *testing.T) {
+			store, ctx, configs := instanceRuntimeFixture(t)
+			c := &configs[0]
+			c.Software, c.VersionPolicy, c.Version = tc.software, "pinned", "26.3"
+			switch tc.software {
+			case "spigot":
+				c.ImageTag = "java25-jdk"
+			case "forge", "neoforge", "fabric", "quilt":
+				c.ImageTag, c.LoaderVersion = "java25", "1.2.3"
+			case "bedrock":
+				*c = nativeBedrockFixture(*c)
+			}
+			files, err := store.renderInstanceRuntimes(ctx, configs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var projects []string
+			for _, line := range strings.Split(string(files[0].Environment), "\n") {
+				if strings.HasPrefix(line, "MODRINTH_PROJECTS=") {
+					projects = append(projects, line)
+				}
+			}
+			if tc.managed {
+				if len(projects) != 1 || projects[0] != "MODRINTH_PROJECTS=paper:viaversion" {
+					t.Fatalf("unexpected managed ViaVersion setting: %v", projects)
+				}
+			} else if len(projects) != 0 {
+				t.Fatalf("software gained managed ViaVersion: %v", projects)
+			}
+			if tc.software == "spigot" && !strings.Contains(string(files[0].Environment), "\nBUILD_FROM_SOURCE=TRUE\n") {
+				t.Fatal("Spigot must still build from source")
+			}
+		})
 	}
 }
 

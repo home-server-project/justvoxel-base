@@ -67,7 +67,7 @@ rm -f -- "${fixture_dir}/prepared/replacement-started"
 jv_crossplay_install "${fixture_dir}/prepared"
 jv_crossplay_verify "${fixture_dir}/prepared"
 [[ $(stat -c '%i' "${DATA_PATH}/plugins/floodgate-spigot.jar") == "${floodgate_inode}" ]]
-grep -Fqx 'MODRINTH_PROJECTS=viaversion' "${repo_root}/templates/config/minecraft.env.in"
+grep -Fqx 'MODRINTH_PROJECTS=paper:viaversion' "${repo_root}/templates/config/minecraft.env.in"
 # Real descriptor discovery recognizes renamed managed JARs, not substrings.
 python3 - "${DATA_PATH}/plugins" <<'PY'
 import os, sys, zipfile
