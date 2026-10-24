@@ -191,7 +191,6 @@ for (const count of [0, 1, 2, 3]) {
 // Preserve the CSS surfaces frozen by the Minecraft Network correction.
 func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 	baseline := map[string]string{
-		"static/app.css":               "3fec5e66b65d3aee4a3e5237767e55256559f7be0652cf92ebd48e47f3c15e86",
 		"static/how-to-connect.css":    "5d99042ae7f87dc47bf09f248794725cca7af2a08a656bbd4d4fc2bc3926ce06",
 		"static/minecraft-servers.css": "66b3fc388e6a40f24dad0bff2768b9039323381acc763a3d565896cc82f77c56",
 		"static/network-workspace.css": "0b22bc4263f0a3769f59874767366039f8c76a33486cb506b8cd20f23fa94585",

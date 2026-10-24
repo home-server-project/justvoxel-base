@@ -83,9 +83,26 @@ func (a *App) minecraftSelection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	choices := []selectedServerContext{}
+	type selectionChoice struct {
+		selectedServerContext
+		Software     string `json:"software,omitempty"`
+		SoftwareIcon string `json:"software_icon,omitempty"`
+	}
+	choices := []selectionChoice{}
+	client, canReadConfiguration := a.api.(interface {
+		MinecraftInstanceConfiguration(context.Context, string, string) (api.InstanceRuntimeSettings, error)
+	})
 	for _, i := range instances {
-		choices = append(choices, selectedServerContext{ID: i.ID, Name: i.DisplayName})
+		choice := selectionChoice{selectedServerContext: selectedServerContext{ID: i.ID, Name: i.DisplayName}}
+		if canReadConfiguration {
+			if config, err := client.MinecraftInstanceConfiguration(r.Context(), session, i.ID); err == nil {
+				choice.SoftwareIcon = serverSoftwareIcon(config.Software)
+				if choice.SoftwareIcon != "" {
+					choice.Software = serverSoftware(config.Software)
+				}
+			}
+		}
+		choices = append(choices, choice)
 	}
 	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"selected": selected, "servers": choices})
 }

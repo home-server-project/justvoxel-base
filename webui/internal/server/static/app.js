@@ -47,6 +47,7 @@ globalThis.justVoxelLoadServerSelections = (refresh = false) => {
   if (globalThis.justVoxelSelectionReady && (!refresh || serverSelectionInventoryLoading)) return globalThis.justVoxelSelectionReady;
   serverSelectionInventoryLoading = true;
   const inventoryTickets = {...globalThis.justVoxelSelectionGeneration};
+  const slotTickets = new Map(Array.from(document.querySelectorAll("[data-server-selector-slot][data-server-workspace]"), slot => [slot, slot.dataset.inventoryGeneration]));
   globalThis.justVoxelSelectionReady = (async () => {
     // Never send a saved or URL server ID to the inventory endpoint.
     const response = await fetch("/api/minecraft/workspace/selection?selection=none", {credentials:"same-origin",cache:"no-store"});
@@ -64,6 +65,9 @@ globalThis.justVoxelLoadServerSelections = (refresh = false) => {
       workspaceServerSelections[workspace] = selectedServer;
       if (selectedServer && workspaceRestoreAllowed()) writeWorkspaceWindowState(workspace, {selectedServer});
       if (workspace === "minecraft" && selectionDashboard) selectionDashboard.dataset.selectedMinecraftId = selectedServer;
+      document.querySelectorAll(`[data-server-selector-slot][data-server-workspace="${workspace}"]`).forEach(slot => {
+        if (slotTickets.get(slot) === slot.dataset.inventoryGeneration) renderServerSelector(slot, data.servers);
+      });
       if (previous !== undefined && previous !== selectedServer) {
         ++globalThis.justVoxelSelectionGeneration[workspace];
         window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", {detail: {serverId: selectedServer, workspace, inventoryEmpty: data.servers.length === 0}}));
@@ -94,18 +98,23 @@ globalThis.justVoxelSelectedURL = (value, workspace = "minecraft") => {
   }
   return target.pathname + target.search;
 };
-globalThis.justVoxelSelectServer = (id, workspace, tabName) => {
+globalThis.justVoxelSelectServer = (id, workspace, tabName, navigate = true) => {
   if (!validServerID(id) || !serverWorkspaces.includes(workspace)) return false;
   const target = new URL(window.location.href);
   const previousId = workspaceServerSelections[workspace];
-  target.searchParams.set("server", id);
-  target.searchParams.set("workspace", workspace);
-  if (tabName) target.searchParams.set("tab", tabName);
-  else target.searchParams.delete("tab");
-  target.searchParams.delete("operation");
-  window.history.replaceState(window.history.state, "", target);
-  document.querySelectorAll(`[data-server-workspace="${workspace}"] [data-selected-server] select`).forEach((control) => { control.value = id; });
+  if (navigate) {
+    target.searchParams.set("server", id);
+    target.searchParams.set("workspace", workspace);
+    if (tabName) target.searchParams.set("tab", tabName);
+    else target.searchParams.delete("tab");
+    target.searchParams.delete("operation");
+    window.history.replaceState(window.history.state, "", target);
+  } else if (target.searchParams.get("workspace") === "minecraft" || (!target.searchParams.has("workspace") && target.searchParams.has("server"))) {
+    target.searchParams.set("server", id);
+    window.history.replaceState(window.history.state, "", target);
+  }
   workspaceServerSelections[workspace] = id;
+  document.querySelectorAll(`[data-server-selector-slot][data-server-workspace="${workspace}"]`).forEach(slot => slot.syncServerSelection?.(id));
   if (workspaceRestoreAllowed()) writeWorkspaceWindowState(workspace, {selectedServer: id});
   if (workspace === "minecraft" && selectionDashboard) selectionDashboard.dataset.selectedMinecraftId = id;
   if (previousId !== id) {
@@ -116,44 +125,80 @@ globalThis.justVoxelSelectServer = (id, workspace, tabName) => {
   }
   return true;
 };
-globalThis.justVoxelServerSelection = async (slot, refresh = false) => {
-  if (!slot || slot.dataset.selectionLoading || (!refresh && slot.querySelector("[data-selected-server]"))) return;
-  slot.dataset.selectionLoading = "true";
-  const inventoryGeneration = slot.dataset.inventoryGeneration;
-  try {
-    const data = await globalThis.justVoxelLoadServerSelections(true);
-    if (inventoryGeneration !== slot.dataset.inventoryGeneration) return;
-    const selectedId = workspaceServerSelections[slot.dataset.serverWorkspace] || "";
-    const label = document.createElement("label");
-    label.dataset.selectedServer = "";
-    label.textContent = "Server: ";
-    const select = document.createElement("select");
-    select.setAttribute("aria-label", "Selected server");
-    if (!data.servers.some((server) => server.id === selectedId)) {
-      const placeholder = document.createElement("option");
-      placeholder.value = "";
-      placeholder.textContent = data.servers.length ? "Choose server" : "No servers";
-      placeholder.disabled = true;
-      placeholder.selected = true;
-      select.append(placeholder);
+// One presentation for every workspace and the compact Quick Look slot.
+const renderServerSelector = (slot, servers) => {
+  const details = document.createElement("details");
+  details.className = "server-selector";
+  details.dataset.selectedServer = "";
+  const summary = document.createElement("summary");
+  summary.setAttribute("aria-label", "Selected server");
+  const menu = document.createElement("div");
+  menu.className = "server-selector-menu";
+  // The top layer keeps the list outside scrolling workspace headers and dialogs.
+  menu.setAttribute("popover", "auto");
+  details.addEventListener("toggle", () => {
+    if (!details.isConnected) return;
+    if (details.open) {
+      menu.showPopover();
+      const bounds = summary.getBoundingClientRect();
+      menu.style.width = `${bounds.width}px`;
+      menu.style.left = `${Math.max(0, Math.min(bounds.left, window.innerWidth - bounds.width))}px`;
+      menu.style.top = `${bounds.bottom + 3}px`;
+      menu.style.maxHeight = `${Math.max(60, Math.min(240, window.innerHeight - bounds.bottom - 10))}px`;
+    } else menu.hidePopover();
+  });
+  menu.addEventListener("toggle", () => {
+    if (!menu.matches(":popover-open")) details.open = false;
+  });
+  const appendName = (element, server, fallback) => {
+    if (server?.software_icon) {
+      const icon = document.createElement("img");
+      icon.className = "server-selector-icon";
+      icon.src = server.software_icon;
+      icon.alt = "";
+      element.append(icon);
     }
-    select.disabled = data.servers.length === 0;
-    data.servers.forEach((server) => {
-      const option = document.createElement("option");
-      option.value = server.id;
-      option.textContent = server.name;
-      option.selected = server.id === selectedId;
-      select.append(option);
-    });
-    select.addEventListener("change", () => {
-      if (!data.servers.some((server) => server.id === select.value && /^jv-[a-z0-9]{6,12}$/.test(server.id))) return;
+    const name = document.createElement("span");
+    name.textContent = server ? server.name : fallback;
+    element.append(name);
+  };
+  const options = servers.map(server => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "server-selector-option";
+    option.dataset.serverId = server.id;
+    appendName(option, server);
+    option.addEventListener("click", () => {
+      if (!validServerID(server.id)) return;
       const dialog = slot.closest("[data-workspace-window]");
       const tab = dialog?.querySelector('[aria-selected="true"]');
       const tabName = tab?.getAttribute(`data-${slot.dataset.serverWorkspace}-tab`);
-      globalThis.justVoxelSelectServer(select.value, slot.dataset.serverWorkspace, tabName);
+      globalThis.justVoxelSelectServer(server.id, slot.dataset.serverWorkspace, tabName, !Object.hasOwn(slot.dataset, "serverSelectorCompact"));
+      details.open = false;
+      summary.focus();
     });
-    label.append(select);
-    slot.replaceChildren(label);
+    menu.append(option);
+    return option;
+  });
+  slot.syncServerSelection = (id) => {
+    summary.replaceChildren();
+    appendName(summary, servers.find(server => server.id === id), servers.length ? "Choose server" : "No servers");
+    options.forEach(option => option.setAttribute("aria-pressed", option.dataset.serverId === id ? "true" : "false"));
+  };
+  details.addEventListener("keydown", event => {
+    if (event.key === "Escape") { details.open = false; summary.focus(); }
+  });
+  details.append(summary);
+  details.append(menu);
+  slot.syncServerSelection(workspaceServerSelections[slot.dataset.serverWorkspace] || "");
+  slot.replaceChildren(details);
+};
+globalThis.justVoxelServerSelection = async (slot, refresh = false) => {
+  if (!slot || slot.dataset.selectionLoading || (!refresh && slot.querySelector("[data-selected-server]"))) return;
+  slot.dataset.selectionLoading = "true";
+  try {
+    await globalThis.justVoxelLoadServerSelections(true);
+    // Inventory loading renders all slots together, including duplicate Minecraft slots.
   } finally {
     delete slot.dataset.selectionLoading;
   }
@@ -637,7 +682,8 @@ if (quickLook && quickLookToggle) {
       }
     }
     if (open) {
-      refreshQuickLook();
+      void globalThis.justVoxelServerSelection(quickLook.querySelector("[data-server-selector-slot]"), true)
+        .then(() => refreshQuickLook()).catch(() => {});
       if (!refreshTimer) refreshTimer = window.setInterval(refreshQuickLook, 5000);
     } else if (refreshTimer) {
       window.clearInterval(refreshTimer);
@@ -1834,7 +1880,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
     dragHandle.addEventListener("pointerdown", (event) => {
       if (workspaceCompactQuery.matches) return;
       if (event.button !== 0) return;
-      if (event.target.closest("button,a,input,select,label")) return;
+      if (event.target.closest("button,a,input,select,label,.server-selector")) return;
 
       bringToFront();
       const rect = element.getBoundingClientRect();

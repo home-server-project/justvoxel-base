@@ -5,10 +5,18 @@ const vm = require('node:vm');
 const source = readFileSync(`${__dirname}/../webui/internal/server/static/app.js`, 'utf8');
 const helper = source.slice(0, source.indexOf('// Identity fallback'));
 class Element {
-  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.events = {}; }
+  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.events = {}; this.attributes = {}; this.style = {}; this.isConnected = true; }
   append(child) { this.children.push(child); }
-  replaceChildren(child) { this.children = [child]; }
-  setAttribute() {}
+  replaceChildren(...children) { this.children = children; }
+  setAttribute(key, value) { this.attributes[key] = value; }
+  focus() { this.focused = true; }
+  getBoundingClientRect() { return {left:10,bottom:40,width:180}; }
+  showPopover() { this.popoverOpen = true; }
+  hidePopover() { this.popoverOpen = false; }
+  matches() { return this.popoverOpen; }
+  get textContent() { return this.text || this.children.map(child => child.textContent).join(''); }
+  set textContent(value) { this.text = value; this.children = []; }
+  set innerHTML(_) { assert.fail('server names must never use innerHTML'); }
   querySelector() { return this.children.find(child => Object.hasOwn(child.dataset, 'selectedServer')); }
   closest() { return {querySelector: () => ({getAttribute: () => 'installed'})}; }
   addEventListener(event, handler) { this.events[event] = handler; }
@@ -20,12 +28,14 @@ function page({username = 'admin', storage = new Map(), servers = inventory, sea
   const slots = Object.fromEntries(workspaces.map(workspace => {
     const slot = new Element('span'); slot.dataset.serverWorkspace = workspace; return [workspace, slot];
   }));
+  const quickSlot = new Element('span'); quickSlot.dataset = {serverWorkspace:'minecraft', serverSelectorCompact:''};
+  const allSlots = [...Object.values(slots), quickSlot];
   const events = [], requests = [];
   const dashboard = {dataset:{workspaceUsername:username, selectedMinecraftId:''}};
   const location = {origin:'https://justvoxel.test', href:`https://justvoxel.test/${search}`, search, pathname};
   const context = vm.createContext({URL, URLSearchParams, location,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
-    window:{location, localStorage:{
+    window:{location, innerWidth:1024, innerHeight:768, localStorage:{
       getItem(k) { if (unavailable) throw Error('storage denied'); return storage.get(k); },
       setItem(k,v) { if (unavailable) throw Error('storage denied'); storage.set(k,v); },
     }, history:{state:{desktop:true},replaceState(state,_,target) { const u = new URL(target,location.href); location.search=u.search; location.href=u.href; }},dispatchEvent:event=>events.push(event)},
@@ -33,16 +43,19 @@ function page({username = 'admin', storage = new Map(), servers = inventory, sea
       querySelector:selector=>selector.startsWith('#dashboard') ? dashboard : boundary ? {} : null,
       querySelectorAll:selector=>{
         const workspace = selector.match(/data-server-workspace="([^"]+)"/)?.[1];
-        return workspace && slots[workspace].children.length ? [slots[workspace].children[0].children[0]] : [];
+        return workspace ? allSlots.filter(slot => slot.dataset.serverWorkspace === workspace) : allSlots;
       }},
     fetch:async url=>{ requests.push(url); return {ok:true,json:async()=>({servers,selected:{id:''}})}; },
   });
   vm.runInContext(helper,context);
-  return {context,slots,storage,events,requests,dashboard,location,
+  return {context,slots,quickSlot,storage,events,requests,dashboard,location,
     async init() { for (const workspace of workspaces) await context.justVoxelServerSelection(slots[workspace]); },
-    select(workspace) { return slots[workspace].children[0].children[0]; },
+    select(workspace) { return slots[workspace].children[0]; },
+    options(workspace) { return this.select(workspace).children[1].children; },
+    selected(workspace) { return this.options(workspace).find(option => option.attributes['aria-pressed'] === 'true')?.dataset.serverId || ''; },
+    summary(workspace) { return this.select(workspace).children[0]; },
     saved(workspace) { return JSON.parse(storage.get(key(username,workspace)) || '{}'); },
-    change(workspace,id) { const control=this.select(workspace); control.value=id; control.events.change(); },
+    change(workspace,id) { this.options(workspace).find(option=>option.dataset.serverId===id)?.events.click(); },
   };
 }
 for (const count of [0,1,2]) {
@@ -50,12 +63,12 @@ for (const count of [0,1,2]) {
     const p=page({servers:inventory.slice(0,count)}); await p.init();
     for (const workspace of workspaces) {
       const select=p.select(workspace);
-      assert.equal(select.disabled,count===0);
+      assert.equal(p.options(workspace).length,count);
       if (count!==1) {
-        assert.equal(select.children[0].textContent,count?'Choose server':'No servers');
-        assert.equal(select.children[0].value,''); assert.equal(select.children[0].selected,true);
-      } else assert.equal(select.children.find(option=>option.selected).value,inventory[0].id);
-      for (const server of inventory.slice(0,count)) assert.equal(select.children.find(option=>option.value===server.id).textContent,server.name);
+        assert.equal(p.summary(workspace).textContent,count?'Choose server':'No servers');
+        assert.equal(p.selected(workspace),'');
+      } else assert.equal(p.selected(workspace),inventory[0].id);
+      for (const server of inventory.slice(0,count)) assert.equal(p.options(workspace).find(option=>option.dataset.serverId===server.id).textContent,server.name);
     }
     assert.ok(p.requests.length > 0);
     assert.ok(p.requests.every(url=>url === '/api/minecraft/workspace/selection?selection=none'));
@@ -67,7 +80,7 @@ test('five independent selections persist by username and workspace across login
   workspaces.forEach((workspace,i)=>p.change(workspace,choices[i]));
   for (const [i,workspace] of workspaces.entries()) {
     assert.equal(p.saved(workspace).selectedServer,choices[i]);
-    assert.equal(p.select(workspace).value,choices[i]);
+    assert.equal(p.selected(workspace),choices[i]);
   }
   assert.equal(p.dashboard.dataset.selectedMinecraftId,'jv-family1');
   const before=p.events.length;
@@ -88,10 +101,10 @@ test('five independent selections persist by username and workspace across login
   assert.equal(p.saved('backups').selectedServer,'jv-family1');
   assert.equal(p.saved('migration').selectedServer,'jv-kids001');
   const next=page({storage:p.storage}); await next.init();
-  for (const workspace of workspaces) assert.equal(next.select(workspace).children.find(option=>option.selected).value,p.saved(workspace).selectedServer);
+  for (const workspace of workspaces) assert.equal(next.selected(workspace),p.saved(workspace).selectedServer);
   for (const username of ['operator','viewer']) {
     const other=page({username,storage:p.storage}); await other.init();
-    for (const workspace of workspaces) assert.equal(other.select(workspace).children[0].textContent,'Choose server');
+    for (const workspace of workspaces) assert.equal(other.summary(workspace).textContent,'Choose server');
   }
 });
 test('all five workspaces can hold five different immutable targets', async()=>{
@@ -100,7 +113,7 @@ test('all five workspaces can hold five different immutable targets', async()=>{
   workspaces.forEach((workspace,i)=>p.change(workspace,servers[i].id));
   for (const [i,workspace] of workspaces.entries()) {
     assert.equal(p.saved(workspace).selectedServer,servers[i].id);
-    assert.equal(p.select(workspace).value,servers[i].id);
+    assert.equal(p.selected(workspace),servers[i].id);
     assert.equal(new URL(p.context.justVoxelSelectedURL('/api/read',workspace),p.location.origin).searchParams.get('server'),servers[i].id);
   }
 });
@@ -125,7 +138,7 @@ test('deleted saved IDs clear only their workspace, with sole-server automatic f
     assert.equal(p.saved('plugins').selectedServer,servers.length===1?'jv-family1':'');
     assert.equal(p.saved('plugins').open,true);
     assert.equal(p.saved('minecraft').selectedServer,'jv-family1');
-    if (servers.length>1) assert.equal(p.select('plugins').children[0].textContent,'Choose server');
+    if (servers.length>1) assert.equal(p.summary('plugins').textContent,'Choose server');
     assert.equal(p.requests[0],'/api/minecraft/workspace/selection?selection=none');
   }
 });
@@ -156,7 +169,7 @@ test('selector rejects malformed and out-of-inventory IDs without events or pers
 test('all five workspaces target explicit slots and inventory opens through normal windows', () => {
  const header = readFileSync(`${__dirname}/../webui/internal/server/templates/header.html`, 'utf8');
  for (const name of ['minecraft','version','plugins','backups','migration']) assert.ok(header.includes(`data-server-selector-slot data-server-workspace="${name}"`));
- assert.equal((header.match(/data-server-selector-slot/g)||[]).length,5);
+ assert.equal((header.match(/data-server-selector-slot/g)||[]).length,6);
  assert.doesNotMatch(helper,/\.prepend\(/);
  assert.doesNotMatch(source,/querySelector\("\.workspace-window-header"\)/);
  assert.match(source,/"minecraft-servers": "\[data-minecraft-servers-open\]"/);
@@ -324,8 +337,8 @@ for (const selected of ['jv-paper01', 'jv-spigot1']) {
     await p.context.justVoxelServerSelection(p.slots.minecraft, true);
     assert.equal(p.requests.length, before + 1);
     assert.equal(p.slots.minecraft.children.length, 1);
-    assert.deepEqual(p.select('minecraft').children.filter(o=>o.value).map(o=>o.textContent), ['Paper1','Vanilla']);
-    assert.equal(p.select('minecraft').children.find(o=>o.selected).value, selected === 'jv-paper01' ? selected : '');
+    assert.deepEqual(p.options('minecraft').map(o=>o.textContent), ['Paper1','Vanilla']);
+    assert.equal(p.selected('minecraft'), selected === 'jv-paper01' ? selected : '');
     assert.equal(p.saved('minecraft').selectedServer, selected === 'jv-paper01' ? selected : '');
     assert.doesNotMatch(p.context.justVoxelSelectedURL('/api/minecraft/workspace/settings'), /jv-spigot1/);
     p.change('minecraft', 'jv-vanilla');
@@ -336,7 +349,7 @@ test('refresh retains existing single-server auto-selection after deletion', asy
   const servers = [...oldServers]; const p = page({servers}); await p.init();
   p.change('minecraft', 'jv-spigot1'); servers.pop();
   await p.context.justVoxelServerSelection(p.slots.minecraft, true);
-  assert.equal(p.select('minecraft').children.find(o=>o.selected).value, 'jv-paper01');
+  assert.equal(p.selected('minecraft'), 'jv-paper01');
   assert.equal(p.saved('minecraft').selectedServer, 'jv-paper01');
 });
 
@@ -355,7 +368,7 @@ test('late inventory response cannot overwrite a newer inventory generation', as
   await p.context.justVoxelServerSelection(p.slots.minecraft, true);
   p.change('minecraft','jv-vanilla');
   finishOld({ok:true,json:async()=>({servers:oldServers})}); await old;
-  assert.deepEqual(p.select('minecraft').children.filter(o=>o.value).map(o=>o.textContent), ['Paper1','Vanilla']);
+  assert.deepEqual(p.options('minecraft').map(o=>o.textContent), ['Paper1','Vanilla']);
   assert.equal(p.saved('minecraft').selectedServer,'jv-vanilla');
   assert.match(p.context.justVoxelSelectedURL('/api/minecraft/workspace/settings'), /server=jv-vanilla/);
 });
@@ -379,7 +392,7 @@ for (const workspace of workspaces) {
       const dialog = {querySelector: selector => selector === '[data-server-selector-slot]' ? p.slots[workspace] : button};
       const load = () => {
         assert.doesNotMatch(p.context.justVoxelSelectedURL('/api/content', workspace), /jv-spigot1/);
-        assert.deepEqual(p.select(workspace).children.filter(o=>o.value).map(o=>o.textContent), ['Paper1','Vanilla']);
+        assert.deepEqual(p.options(workspace).map(o=>o.textContent), ['Paper1','Vanilla']);
         calls.push('content');
       };
       const ctx = vm.createContext({
@@ -400,3 +413,111 @@ for (const workspace of workspaces) {
     });
   }
 }
+
+test('shared details selector renders safe icon/name summaries and every option, including missing icons', async () => {
+  const servers = [
+    {id:'jv-paper01',name:'Paper1',software_icon:'/static/server-software/paper.svg'},
+    {id:'jv-purpur1',name:'Kids',software_icon:'/static/server-software/purpur.svg'},
+    {id:'jv-unknown',name:'<img src=x onerror=alert(1)>'},
+  ];
+  const p = page({servers}); await p.init();
+  for (const workspace of workspaces) {
+    assert.equal(p.select(workspace).tag,'details');
+    for (const [i, option] of p.options(workspace).entries()) {
+      assert.equal(option.tag,'button');
+      assert.equal(option.textContent,servers[i].name);
+      const icon = option.children.find(child=>child.tag==='img');
+      assert.equal(icon?.src,servers[i].software_icon);
+      if (icon) assert.equal(icon.alt,'');
+    }
+    p.select(workspace).open = true;
+    p.change(workspace,'jv-paper01');
+    assert.equal(p.selected(workspace),'jv-paper01');
+    assert.equal(p.summary(workspace).textContent,'Paper1');
+    assert.equal(p.summary(workspace).children[0].src,servers[0].software_icon);
+    assert.equal(p.select(workspace).open,false);
+    assert.equal(p.summary(workspace).focused,true);
+    p.change(workspace,'jv-unknown');
+    assert.equal(p.summary(workspace).textContent,servers[2].name);
+    assert.equal(p.summary(workspace).children.length,1);
+  }
+});
+
+test('Quick Look and Settings synchronize without navigation, duplicate events, or stale deleted names', async () => {
+  const servers = [...oldServers];
+  const p = page({servers}); await p.init();
+  const clickQuick = id => p.quickSlot.children[0].children[1].children.find(option=>option.dataset.serverId===id).events.click();
+  const quickName = () => p.quickSlot.children[0].children[0].textContent;
+  const initialURL = p.location.href;
+  clickQuick('jv-spigot1');
+  assert.equal(p.location.href,initialURL);
+  assert.equal(p.selected('minecraft'),'jv-spigot1');
+  assert.equal(p.saved('minecraft').selectedServer,'jv-spigot1');
+  assert.equal(p.events.length,1);
+  assert.equal(quickName(),'Spigot');
+  p.change('minecraft','jv-paper01');
+  assert.equal(quickName(),'Paper1');
+  assert.equal(p.events.length,2);
+  p.change('minecraft','jv-spigot1');
+  servers.splice(0,servers.length,...newServers);
+  await p.context.justVoxelServerSelection(p.quickSlot,true);
+  assert.equal(quickName(),'Choose server');
+  assert.equal(p.selected('minecraft'),'');
+  assert.deepEqual(p.quickSlot.children[0].children[1].children.map(option=>option.textContent),['Paper1','Vanilla']);
+});
+
+test('Quick Look selection survives refresh without adding a Settings destination', async () => {
+  for (const search of ['', '?workspace=plugins&server=jv-kids001', '?workspace=minecraft&server=jv-kids001','?server=jv-kids001']) {
+    const p = page({search}); await p.init();
+    p.quickSlot.children[0].children[1].children[0].events.click();
+    assert.equal(new URL(p.location.href).searchParams.get('workspace'),new URLSearchParams(search).get('workspace'));
+    const next = page({search:p.location.search,storage:p.storage}); await next.init();
+    assert.equal(next.selected('minecraft'),'jv-family1');
+  }
+});
+
+test('Quick Look refresh uses Minecraft selection for its single status/version/players snapshot and existing timer', async () => {
+  const start = source.indexOf('  async function refreshQuickLook()');
+  const end = source.indexOf('\n  const loadQuickLookIdentity',start);
+  const events = [];
+  const p = page(); await p.init(); p.change('minecraft','jv-kids001');
+  const ctx = vm.createContext({
+    justVoxelSelectionReady:p.context.justVoxelSelectionReady,
+    justVoxelSelectionGeneration:p.context.justVoxelSelectionGeneration,
+    justVoxelSelectedURL:p.context.justVoxelSelectedURL,
+    statusURL:'/api/dashboard-status',
+    fetch:async url=>{events.push(url);return {ok:true,status:200,json:async()=>({status:{minecraft:{state:'running',version:'1.21'}},players:{online:3}})};},
+    renderQuickLook:snapshot=>events.push(snapshot),
+  });
+  vm.runInContext(source.slice(start,end)+'\nglobalThis.refresh = refreshQuickLook;',ctx);
+  await ctx.refresh();
+  assert.match(events[0],/server=jv-kids001/);
+  assert.equal(events[2].status.minecraft.version,'1.21');
+  assert.equal(events[2].players.online,3);
+  const quick = source.slice(source.indexOf('const quickLook ='),source.indexOf('  const loadQuickLookIdentity'));
+  assert.equal((quick.match(/setInterval/g)||[]).length,1);
+  assert.match(quick,/setInterval\(refreshQuickLook, 5000\)/);
+  assert.match(quick,/justVoxelServerSelection\(quickLook.querySelector\("\[data-server-selector-slot\]"\), true\)/);
+  const handler = selectionHandler(source,'const quickLook =');
+  let refreshes=0;
+  const handlerCtx = vm.createContext({window:{addEventListener:(_,fn)=>handlerCtx.change=fn},lastMonitorData:{},refreshQuickLook:()=>refreshes++});
+  vm.runInContext(handler,handlerCtx);
+  handlerCtx.change({detail:{workspace:'plugins'}}); assert.equal(refreshes,0);
+  handlerCtx.change({detail:{workspace:'minecraft'}}); assert.equal(refreshes,1);
+  assert.match(quick,/setValue\("\[data-quick-look-version\]", minecraft.version\)/);
+  assert.match(quick,/"\[data-quick-look-players\]"/);
+});
+
+test('shared menu uses top layer, follows native details, and closes on Escape and light dismissal', async () => {
+  const p = page(); await p.init();
+  const details = p.select('minecraft'), summary = p.summary('minecraft'), menu = details.children[1];
+  details.open = true; details.events.toggle();
+  assert.equal(menu.popoverOpen,true);
+  assert.equal(menu.style.width,'180px');
+  assert.equal(menu.style.top,'43px');
+  details.events.keydown({key:'Escape'}); details.events.toggle();
+  assert.equal(details.open,false); assert.equal(menu.popoverOpen,false); assert.equal(summary.focused,true);
+  details.open = true; details.events.toggle();
+  menu.hidePopover(); menu.events.toggle();
+  assert.equal(details.open,false);
+});

@@ -1665,8 +1665,19 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .workspace-window [data-workspace-drag-handle]:has([data-server-selector-slot]){overflow-x:auto;min-width:0}
 .workspace-window [data-workspace-drag-handle]:has([data-server-selector-slot])>div:first-child{flex:1 0 auto;min-width:0}
 .workspace-window .selected-server-header-actions{display:flex;align-items:center;gap:var(--jv-space-xs,.45rem);flex:none;flex-wrap:nowrap}
-[data-server-selector-slot] label{display:flex;align-items:center;gap:.35rem;white-space:nowrap;margin:0}
-[data-server-selector-slot] select{width:clamp(8rem,14vw,14rem);min-width:0;margin:0}
+.server-selector{position:relative;width:clamp(8rem,14vw,14rem);margin:0;color:#eef1f4}
+.server-selector>summary,.server-selector-option{display:flex;align-items:center;gap:.4rem;min-width:0;padding:.4rem .55rem;border:1px solid #303942;border-radius:7px;background:#171d22;color:inherit;font-size:.85rem;line-height:1.2;cursor:pointer;list-style:none}
+.server-selector>summary::-webkit-details-marker{display:none}
+.server-selector>summary::after{content:"▾";margin-left:auto}
+.server-selector span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit}
+.server-selector-icon{width:18px;height:18px;flex:none;object-fit:contain}
+.server-selector-menu{position:fixed;inset:auto;margin:0;z-index:170;max-width:calc(100vw - 8px);max-height:240px;color:#eef1f4;overflow:auto;padding:.25rem;border:1px solid #303942;border-radius:8px;background:#171d22;box-shadow:0 12px 28px #0007}
+.server-selector-option{width:100%;margin:0;text-align:left;border-color:transparent;background:transparent}
+.server-selector-option:hover,.server-selector-option[aria-pressed="true"]{background:#25382e;border-color:#4f8b69}
+.server-selector>summary:focus-visible,.server-selector-option:focus-visible{outline:2px solid #78c99d;outline-offset:1px}
+[data-server-selector-compact] .server-selector{width:100%}
+[data-server-selector-compact] .server-selector>summary{padding:.15rem .3rem;font-size:.75rem}
+[data-server-selector-compact] .server-selector-icon{width:16px;height:16px}
 
 /* Version / Container: the three approved compact rows. */
 .version-container-panel .version-container-row {

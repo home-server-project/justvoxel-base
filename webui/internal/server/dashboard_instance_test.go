@@ -146,6 +146,9 @@ func TestDashboardMultipleServersWithoutSelection(t *testing.T) {
 	if strings.Contains(response.Body.String(), "GLOBAL") || strings.Contains(response.Body.String(), "Not configured") || strings.Contains(response.Body.String(), "not_configured") {
 		t.Fatal("global or first-run presentation leaked", response.Body.String())
 	}
+	if len(f.reads) != 0 {
+		t.Fatal("unselected dashboard accessed an individual server", f.reads)
+	}
 	selection := dashboardInstanceRequest(app, "GET", "/api/minecraft/workspace/selection", "")
 	var choices struct {
 		Selected selectedServerContext   `json:"selected"`
@@ -154,7 +157,7 @@ func TestDashboardMultipleServersWithoutSelection(t *testing.T) {
 	if selection.Code != http.StatusOK || json.Unmarshal(selection.Body.Bytes(), &choices) != nil || choices.Selected.ID != "" || len(choices.Servers) != 2 {
 		t.Fatal("existing selector contract changed", selection.Code, selection.Body.String())
 	}
-	if len(f.reads) != 0 || len(f.actions) != 0 || len(f.backupReads) != 0 || len(f.backupCalls) != 0 {
+	if strings.Join(f.reads, ",") != "configuration:jv-family1,configuration:jv-kids001" || len(f.actions) != 0 || len(f.backupReads) != 0 || len(f.backupCalls) != 0 {
 		t.Fatal("unselected dashboard accessed an individual server", f.reads, f.actions, f.backupReads, f.backupCalls)
 	}
 	requireNoDashboardLegacy(t, f)
@@ -559,7 +562,11 @@ func TestDashboardClearedSelectionDoesNotChooseSoleReplacement(t *testing.T) {
 	f.instances = f.instances[:1]
 	for _, path := range []string{"/api/dashboard-status?selection=none", "/api/minecraft/workspace/selection?selection=none"} {
 		response := dashboardInstanceRequest(app, "GET", path, "")
-		if response.Code != http.StatusOK || len(f.reads) != 0 || len(f.backupReads) != 0 {
+		wantReads := ""
+		if strings.HasPrefix(path, "/api/minecraft/workspace/selection") {
+			wantReads = "configuration:jv-family1"
+		}
+		if response.Code != http.StatusOK || strings.Join(f.reads, ",") != wantReads || len(f.backupReads) != 0 {
 			t.Fatal(response.Code, response.Body.String(), f.reads)
 		}
 		if path == "/api/minecraft/workspace/selection?selection=none" && !strings.Contains(response.Body.String(), `"selected":{"id":"","name":""}`) {

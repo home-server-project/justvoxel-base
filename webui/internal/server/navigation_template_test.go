@@ -1138,3 +1138,24 @@ func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
 		}
 	}
 }
+
+func TestQuickLookMinecraftSharedSelectorPlacement(t *testing.T) {
+	content, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(content)
+	start := strings.Index(markup, `<section class="quick-look"`)
+	end := strings.Index(markup[start:], `</article>`)
+	tile := markup[start : start+end]
+	heading := strings.Index(tile, `class="quick-look-tile-heading"`)
+	actions := strings.Index(tile, `data-quick-look-actions`)
+	selector := strings.Index(tile, `data-server-selector-slot data-server-workspace="minecraft" data-server-selector-compact`)
+	state := strings.Index(tile, `data-quick-look-minecraft`)
+	if heading < 0 || actions < heading || selector < actions || state < selector {
+		t.Fatal("Minecraft selector or heading actions misplaced", tile)
+	}
+	if !strings.Contains(tile[actions:selector], `</details>`) {
+		t.Fatal("actions menu moved outside heading")
+	}
+}

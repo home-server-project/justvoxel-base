@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -389,7 +390,7 @@ func (f *phase7API) MinecraftInstanceAcknowledgeStackUpdate(_ context.Context, _
 	return api.PersistentOperationResponse{}, nil
 }
 
-func TestServerSelectorListsOnlyRealImmutableIdentities(t *testing.T) {
+func TestServerSelectorListsOnlyRealImmutableIdentitiesWithReadOnlyDisplayMetadata(t *testing.T) {
 	app, f := phase7App(t)
 	w := phase7Request(app, "GET", "/api/minecraft/workspace/selection", "")
 	var out struct {
@@ -404,8 +405,14 @@ func TestServerSelectorListsOnlyRealImmutableIdentities(t *testing.T) {
 			t.Fatal("synthetic selector identity", choice)
 		}
 	}
-	if len(f.reads) != 0 || len(f.writes) != 0 {
-		t.Fatal("selection changed or read server runtime")
+	if len(f.writes) != 0 {
+		t.Fatal("selection changed server runtime", f.writes)
+	}
+	reads := append([]string(nil), f.reads...)
+	sort.Strings(reads)
+	wantReads := []string{"configuration:jv-family1", "configuration:jv-kids001"}
+	if !reflect.DeepEqual(reads, wantReads) {
+		t.Fatalf("selection reads = %v, want only read-only display metadata lookups %v", reads, wantReads)
 	}
 }
 
@@ -570,5 +577,66 @@ func TestSelectedMinecraftStoppedStartOnBootMessage(t *testing.T) {
 	w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body+"&review="+plan.Review)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "state is preserved") || strings.Contains(w.Body.String(), "restarted") {
 		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestSelectedServerSelectionSoftwareMetadata(t *testing.T) {
+	for _, software := range []string{"paper", "purpur", "spigot", "vanilla", "fabric", "neoforge", "forge", "quilt", "bedrock", "unknown", "read-failure"} {
+		t.Run(software, func(t *testing.T) {
+			app, f := phase7App(t)
+			config := f.runtimes["jv-family1"]
+			config.Software = software
+			f.runtimes["jv-family1"] = config
+			if software == "read-failure" {
+				f.configurationErrors = map[string]bool{"jv-family1": true}
+			}
+			w := phase7Request(app, "GET", "/api/minecraft/workspace/selection?selection=none", "")
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			var response struct {
+				Servers []map[string]string `json:"servers"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if len(response.Servers) != 2 {
+				t.Fatal("inventory lost a server", w.Body.String())
+			}
+			found := false
+			for _, row := range response.Servers {
+				for field := range row {
+					if field != "id" && field != "name" && field != "software" && field != "software_icon" {
+						t.Fatalf("private field %q", field)
+					}
+				}
+				if row["id"] == "jv-kids001" && row["software_icon"] != "/static/server-software/purpur.svg" {
+					t.Fatal("sibling metadata lost", row)
+				}
+				if row["id"] != "jv-family1" {
+					continue
+				}
+				found = true
+				if row["name"] != "family Survival" {
+					t.Fatal("friendly name lost", row)
+				}
+				wantIcon := ""
+				if software != "unknown" && software != "read-failure" {
+					wantIcon = "/static/server-software/" + software + ".svg"
+				}
+				if row["software_icon"] != wantIcon {
+					t.Fatal(row)
+				}
+				if wantIcon == "" && row["software"] != "" {
+					t.Fatal("fabricated software", row)
+				}
+				if wantIcon != "" && row["software"] != serverSoftware(software) {
+					t.Fatal(row)
+				}
+			}
+			if !found || strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "/host/") {
+				t.Fatal(w.Body.String())
+			}
+		})
 	}
 }
