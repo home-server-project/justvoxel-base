@@ -67,7 +67,7 @@ for software in paper purpur vanilla; do
         BEDROCK_ENABLED=yes
         if write_main_config; then echo 'Vanilla Bedrock persisted' >&2; exit 1; fi
     else
-        grep -Fxq MODRINTH_PROJECTS=paper:viaversion "${JV_MC_ENV}"
+        grep -Fxq MODRINTH_PROJECTS=paper:viaversion,paper:viabackwards "${JV_MC_ENV}"
         grep -Fq managed-crossplay-start "${JV_QUADLET}"
         BEDROCK_ENABLED=yes
         write_main_config

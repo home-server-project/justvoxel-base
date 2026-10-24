@@ -81,7 +81,7 @@ func TestInstanceRuntimeDistinctAndDeterministic(t *testing.T) {
 	if files[0].EnvironmentPath == files[1].EnvironmentPath || files[0].DataPath == files[1].DataPath || files[0].ContainerName == files[1].ContainerName {
 		t.Fatal("shared instance runtime")
 	}
-	if !strings.Contains(string(files[0].Environment), "MODRINTH_PROJECTS=paper:viaversion") || strings.Contains(string(files[1].Environment), "MODRINTH_PROJECTS=") || strings.Contains(string(files[1].Environment), "PAPER_CHANNEL=") {
+	if !strings.Contains(string(files[0].Environment), "\nMODRINTH_PROJECTS=paper:viaversion,paper:viabackwards\n") || strings.Contains(string(files[1].Environment), "MODRINTH_PROJECTS=") || strings.Contains(string(files[1].Environment), "PAPER_CHANNEL=") {
 		t.Fatal("software capabilities changed")
 	}
 	reversed, err := store.renderInstanceRuntimes(ctx, []minecraftInstanceRuntimeConfig{configs[1], configs[0]})
@@ -100,7 +100,7 @@ func TestInstanceRuntimeDistinctAndDeterministic(t *testing.T) {
 	}
 }
 
-func TestInstanceRuntimeManagedViaVersion(t *testing.T) {
+func TestInstanceRuntimeManagedProtocolCompatibility(t *testing.T) {
 	for _, tc := range []struct {
 		software string
 		managed  bool
@@ -138,11 +138,11 @@ func TestInstanceRuntimeManagedViaVersion(t *testing.T) {
 				}
 			}
 			if tc.managed {
-				if len(projects) != 1 || projects[0] != "MODRINTH_PROJECTS=paper:viaversion" {
-					t.Fatalf("unexpected managed ViaVersion setting: %v", projects)
+				if len(projects) != 1 || projects[0] != "MODRINTH_PROJECTS=paper:viaversion,paper:viabackwards" {
+					t.Fatalf("unexpected managed protocol compatibility setting: %v", projects)
 				}
 			} else if len(projects) != 0 {
-				t.Fatalf("software gained managed ViaVersion: %v", projects)
+				t.Fatalf("software gained managed protocol compatibility: %v", projects)
 			}
 			if tc.software == "spigot" && !strings.Contains(string(files[0].Environment), "\nBUILD_FROM_SOURCE=TRUE\n") {
 				t.Fatal("Spigot must still build from source")
