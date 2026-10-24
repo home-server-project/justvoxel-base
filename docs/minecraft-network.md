@@ -4,8 +4,10 @@ Minecraft Network connects selected existing Minecraft servers through Velocity
 and a PicoLobby lobby. It is disabled by default. Multiple standalone servers do
 not require a proxy.
 
-Open **Minecraft Servers → Network** as an administrator. Choose Paper or Purpur
-servers, set the public Java and Bedrock ports and a lobby welcome message, and
+Open **Control Center → Minecraft → Network** or **Minecraft Servers → Network**
+as an administrator. Both open the Minecraft Network workspace on the dashboard.
+Choose Paper or Purpur servers, set the public Java and Bedrock ports and a lobby
+welcome message, and
 turn on Enabled. Modern forwarding requires Minecraft 1.13 or later. Fabric,
 NeoForge, Spigot, Vanilla, Forge, Quilt and native Bedrock stay standalone in this
 implementation. Velocity and PicoLobby are infrastructure, not Add Server choices.

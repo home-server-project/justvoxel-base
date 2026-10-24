@@ -7747,6 +7747,77 @@ if (minecraftServersDialog && minecraftServersOpen) {
   }
 }
 
+// Both Minecraft Network launchers share one appliance workspace.
+const minecraftNetworkDialog = document.querySelector("[data-minecraft-network-workspace-dialog]");
+if (minecraftNetworkDialog) {
+  const content = minecraftNetworkDialog.querySelector("[data-minecraft-network-content]");
+  const state = minecraftNetworkDialog.querySelector("[data-minecraft-network-state]");
+  let sequence = 0;
+  let saving = false;
+  const load = async (body = null) => {
+    if (saving) return;
+    const current = ++sequence;
+    saving = body !== null;
+    content.inert = saving;
+    state.textContent = saving ? "Updating Minecraft Network…" : "Loading Minecraft Network…";
+    try {
+      // POST returns freshly read authoritative status, including recovery state.
+      const response = await fetch("/workspace/minecraft-network", {
+        method: body === null ? "GET" : "POST",
+        credentials: "same-origin", cache: "no-store",
+        ...(body === null ? {} : { body }),
+      });
+      if (!response.ok || response.redirected) throw new Error("Minecraft Network could not be loaded. Refresh to try again.");
+      const html = await response.text();
+      if (current !== sequence) return;
+      const range = document.createRange();
+      range.selectNodeContents(content);
+      content.replaceChildren(range.createContextualFragment(html));
+      state.textContent = "";
+    } catch (error) {
+      if (current === sequence) state.textContent = error.message;
+    } finally {
+      if (current === sequence) {
+        saving = false;
+        content.inert = false;
+      }
+    }
+  };
+  const workspaceWindow = setupWorkspaceWindow(minecraftNetworkDialog, { onOpen: () => load() });
+  // Delegation also covers the dynamically loaded Minecraft Servers action bar.
+  document.addEventListener("click", (event) => {
+    const launcher = event.target.closest("[data-minecraft-network-open]");
+    if (!launcher || !document.body.classList.contains("role-administrator")) return;
+    event.preventDefault();
+    const destination = new URL(window.location.href);
+    destination.searchParams.set("workspace", "minecraft-network");
+    destination.searchParams.delete("tab");
+    destination.searchParams.delete("operation");
+    window.history.replaceState(window.history.state, "", destination);
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  minecraftNetworkDialog.querySelector("[data-minecraft-network-close]").addEventListener("click", () => workspaceWindow?.close());
+  minecraftNetworkDialog.querySelector("[data-minecraft-network-refresh]").addEventListener("click", () => load());
+  content.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    event.preventDefault();
+    const body = new URLSearchParams(new FormData(form));
+    if (event.submitter?.name) body.set(event.submitter.name, event.submitter.value);
+    load(body);
+  });
+  const restore = () => {
+    if (document.body.classList.contains("role-pending")) return false;
+    if (document.body.classList.contains("role-administrator") && readWorkspaceWindowState("minecraft-network").open) workspaceWindow?.open();
+    return true;
+  };
+  if (!restore()) {
+    const observer = new MutationObserver(() => { if (restore()) observer.disconnect(); });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  }
+}
+
 // Bookmarked standalone pages land on the matching dashboard workspace.
 if (dashboard) {
   const destination = new URLSearchParams(window.location.search);
@@ -7754,6 +7825,7 @@ if (dashboard) {
   if (workspace === "minecraft" && window.location.hash === "#manual-backup") workspace = "backups";
   const launchers = {
     "minecraft-servers": "[data-minecraft-servers-open]",
+    "minecraft-network": "[data-minecraft-network-open]",
     minecraft: "[data-minecraft-open]",
     system: "[data-system-open]",
     storage: "[data-storage-open]",

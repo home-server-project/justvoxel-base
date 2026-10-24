@@ -71,6 +71,7 @@
             <a class="control-tile" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener" title="Create a friends connection guide"><strong>How to connect</strong></a>
             <button class="control-tile nav-admin-only" type="button" data-version-open title="Server software and Minecraft version"><strong>Version</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-plugins-open title="Discover plugins and view installed plugins"><strong>Plugins</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-minecraft-network-open><strong>Network</strong></button>
           </div>
         </section>
 
@@ -266,6 +267,25 @@
       <div class="minecraft-workspace-body minecraft-servers-body">
         <p data-minecraft-servers-state role="status"></p>
         <div data-minecraft-servers-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window system-workspace-dialog" data-workspace-window="minecraft-network" data-minecraft-network-workspace-dialog aria-labelledby="minecraft-network-workspace-title">
+    <div class="system-workspace-shell">
+      <div class="system-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JUSTVOXEL</p>
+          <h2 id="minecraft-network-workspace-title">Minecraft Network</h2>
+        </div>
+        <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-minecraft-network-refresh aria-label="Refresh Minecraft Network" title="Refresh Minecraft Network">Refresh</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-minecraft-network-close aria-label="Close Minecraft Network"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="system-workspace-body">
+        <p class="system-workspace-state" data-minecraft-network-state role="status" aria-live="polite">Minecraft Network is loaded when this window opens.</p>
+        <div class="system-workspace-content" data-minecraft-network-content></div>
       </div>
     </div>
   </dialog>

@@ -110,7 +110,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 		t.Fatalf("status %d: %s", response.Code, body)
 	}
 	previous := -1
-	for _, label := range []string{`>Add Server</a>`, `>Rearrange</button>`, `>Import</a>`, "<h2>family Survival</h2>", "<h2>Kids Creative</h2>"} {
+	for _, label := range []string{`>Add Server</a>`, `>Rearrange</button>`, `>Done</button>`, `>Import</a>`, `>Network</button>`, "<h2>family Survival</h2>", "<h2>Kids Creative</h2>"} {
 		index := strings.Index(body, label)
 		if index <= previous {
 			t.Fatalf("wrong order/missing %s", label)

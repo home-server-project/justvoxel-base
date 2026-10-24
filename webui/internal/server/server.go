@@ -161,6 +161,8 @@ func (a *App) Handler() http.Handler {
 	a.registerSystemWorkspaceRoutes(mux)
 	mux.HandleFunc("GET /minecraft/how-to-connect", a.howToConnect)
 	mux.HandleFunc("GET /minecraft/network", a.minecraftNetwork)
+	mux.HandleFunc("GET /workspace/minecraft-network", a.minecraftNetwork)
+	mux.HandleFunc("POST /workspace/minecraft-network", a.minecraftNetwork)
 	mux.HandleFunc("POST /minecraft/network", a.minecraftNetwork)
 	mux.HandleFunc("GET /api/minecraft/servers/invitation", a.minecraftServersInvitation)
 	mux.HandleFunc("GET /api/minecraft/servers/live-memory", a.minecraftServersLiveMemory)

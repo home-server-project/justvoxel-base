@@ -1,11 +1,9 @@
-{{template "minecraft-servers-page-start" .}}
 <section class="panel control-panel">
-  <div class="title-row"><h1>Minecraft Network</h1></div>
   {{if .Error}}<p class="notice error" role="status">{{.Error}}</p>{{end}}
   {{if .Message}}<p class="notice success" role="status">{{.Message}}</p>{{end}}
   <p class="muted">Optionally connect selected servers through one shared entrance and lobby. Servers stay standalone unless you select them here and enable Minecraft Network.</p>
-  {{if .Network.RecoveryRequired}}<div class="notice warning"><p>Minecraft Network needs recovery before servers can start.</p><form method="post" action="/minecraft/network"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="recover" type="submit">Retry recovery</button></form></div>{{end}}
-  <form method="post" action="/minecraft/network">
+  {{if .Network.RecoveryRequired}}<div class="notice warning"><p>Minecraft Network needs recovery before servers can start.</p><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="recover" type="submit">Retry recovery</button></form></div>{{end}}
+  <form method="post" action="/workspace/minecraft-network">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <h2>Network</h2>
     <label><span>Enabled</span><input class="date-time-switch" role="switch" type="checkbox" name="enabled"{{if .Network.Config.Enabled}} checked{{end}}></label>
@@ -18,13 +16,12 @@
     <h2>Lobby</h2>
     <p>Server selector: Enabled · NPCs: Enabled</p>
     <label>Welcome message<input name="welcome_message" maxlength="512" value="{{.Network.Config.WelcomeMessage}}"></label>
-    <div class="action-row"><button type="submit" name="action" value="configure"{{if .Network.RecoveryRequired}} disabled{{end}}>Apply</button><a class="button-link secondary" href="/workspace/minecraft-servers">Back to Minecraft Servers</a></div>
+    <div class="action-row"><button type="submit" name="action" value="configure"{{if .Network.RecoveryRequired}} disabled{{end}}>Apply</button></div>
   </form>
 </section>
 <section class="panel control-panel">
   <h2>Network Whitelist</h2>
   <p class="muted">The network whitelist controls entry to the lobby. Each backend server keeps its own whitelist. Adding a player here does not add them to a server whitelist.</p>
-  <form method="post" action="/minecraft/network"><input type="hidden" name="csrf" value="{{.CSRF}}"><div class="grid"><label>Platform<select name="platform"><option value="java">Java Edition</option><option value="bedrock">Bedrock</option></select></label><label>Player<input name="name" maxlength="16" required></label></div><button type="submit" name="action" value="add">Add</button></form>
-  {{range .Network.Whitelist}}<form method="post" action="/minecraft/network"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="platform" value="{{.Platform}}"><div class="action-row"><span>{{.Name}} · {{if eq .Platform "java"}}Java Edition{{else}}Bedrock{{end}}</span><button class="secondary" type="submit" name="action" value="remove">Remove</button></div></form>{{else}}<p class="muted">No players on the network whitelist.</p>{{end}}
+  <form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{.CSRF}}"><div class="grid"><label>Platform<select name="platform"><option value="java">Java Edition</option><option value="bedrock">Bedrock</option></select></label><label>Player<input name="name" maxlength="16" required></label></div><button type="submit" name="action" value="add">Add</button></form>
+  {{range .Network.Whitelist}}<form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="platform" value="{{.Platform}}"><div class="action-row"><span>{{.Name}} · {{if eq .Platform "java"}}Java Edition{{else}}Bedrock{{end}}</span><button class="secondary" type="submit" name="action" value="remove">Remove</button></div></form>{{else}}<p class="muted">No players on the network whitelist.</p>{{end}}
 </section>
-{{template "minecraft-servers-page-end" .}}

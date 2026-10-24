@@ -16,11 +16,14 @@ type networkTestAPI struct {
 	*serverInventoryTestAPI
 	network       api.MinecraftNetworkStatus
 	writes        int
+	reads         int
+	whitelistArgs []string
 	connection    api.MinecraftConnection
 	connectionErr error
 }
 
 func (f *networkTestAPI) MinecraftNetwork(context.Context, string) (api.MinecraftNetworkStatus, error) {
+	f.reads++
 	return f.network, nil
 }
 func (f *networkTestAPI) ConfigureMinecraftNetwork(_ context.Context, _ string, c api.MinecraftNetworkConfig) error {
@@ -32,7 +35,8 @@ func (f *networkTestAPI) RecoverMinecraftNetwork(context.Context, string) error 
 	f.writes++
 	return nil
 }
-func (f *networkTestAPI) MinecraftNetworkWhitelist(context.Context, string, string, string, string) error {
+func (f *networkTestAPI) MinecraftNetworkWhitelist(_ context.Context, _ string, platform, action, name string) error {
+	f.whitelistArgs = []string{platform, action, name}
 	f.writes++
 	return nil
 }
@@ -49,23 +53,20 @@ func newNetworkTestApp(t *testing.T) (*App, *networkTestAPI) {
 	}
 	return app, f
 }
-func TestMinecraftNetworkPageAndCSRF(t *testing.T) {
+func TestMinecraftNetworkWorkspaceAndCSRF(t *testing.T) {
 	app, f := newNetworkTestApp(t)
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/minecraft/network", ""))
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-network", ""))
 	if rr.Code != 200 {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{"Minecraft Network", "Network Whitelist", "family Survival", "PicoLobby", "Retry recovery", "Standalone"} {
-		if want == "Retry recovery" {
-			continue
-		}
+	for _, want := range []string{"Network Whitelist", "family Survival", "PicoLobby", "Standalone", `name="members"`, `name="welcome_message"`, `value="configure"`, `value="add"`} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatal("missing network UI", want)
 		}
 	}
 	rr = httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/minecraft/network", "csrf=wrong&action=configure"))
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/minecraft-network", "csrf=wrong&action=configure"))
 	if rr.Code != 403 || f.writes != 0 {
 		t.Fatal("CSRF bypass")
 	}
@@ -103,11 +104,13 @@ func TestMinecraftNetworkRoutesRequireAdministrator(t *testing.T) {
 	for _, role := range []string{"viewer", "operator"} {
 		app, f := newNetworkTestApp(t)
 		f.role = role
-		for _, method := range []string{http.MethodGet, http.MethodPost} {
-			rr := httptest.NewRecorder()
-			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(method, "http://example/minecraft/network", "csrf=csrf-token&action=recover"))
-			if rr.Code != 403 || f.writes != 0 {
-				t.Fatal("non-administrator reached Minecraft Network", role, method, rr.Code)
+		for _, path := range []string{"/minecraft/network", "/workspace/minecraft-network"} {
+			for _, method := range []string{http.MethodGet, http.MethodPost} {
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, authenticatedAdminRequest(method, "http://example"+path, "csrf=csrf-token&action=recover"))
+				if rr.Code != 403 || f.writes != 0 {
+					t.Fatal("non-administrator reached Minecraft Network", role, path, method, rr.Code)
+				}
 			}
 		}
 	}

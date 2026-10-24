@@ -34,6 +34,10 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if r.Method == http.MethodGet && r.URL.Path == "/minecraft/network" {
+		http.Redirect(w, r, "/?workspace=minecraft-network", http.StatusSeeOther)
+		return
+	}
 	if r.Method == http.MethodPost && !a.validCSRF(r) {
 		http.Error(w, "Invalid CSRF token.", http.StatusForbidden)
 		return

@@ -25,10 +25,10 @@
   <section class="minecraft-server-inventory" data-server-csrf="{{.CSRF}}">
   <nav class="minecraft-workspace-tabs minecraft-server-arrange-toolbar" aria-label="Minecraft Servers actions">
     <a href="{{if .Configured}}/minecraft/servers/add?new=1{{else}}/setup{{end}}"{{if .Configured}} target="justvoxel-add-server"{{end}}>Add Server</a>
-    <a href="/minecraft/network">Network</a>
     <button type="button" data-server-arrange hidden>Rearrange</button>
     <button type="button" data-server-arrange-done hidden>Done</button>
     <a href="/?workspace=migration&amp;tab=import" data-server-import>Import</a>
+    <button type="button" data-minecraft-network-open>Network</button>
   </nav>
   <p class="notice error" role="status" data-server-feedback hidden></p>
   <div class="minecraft-server-entries">
