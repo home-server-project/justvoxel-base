@@ -212,6 +212,77 @@ func TestResetAllTwoServersStorageAndPreservation(t *testing.T) {
 		})
 	}
 }
+
+func TestResetAllInstanceCountsPlanApplyAndEmptyState(t *testing.T) {
+	for _, count := range []int{0, 1, 3} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			x := newResetAllFixture(t, count)
+			p := x.review(t)
+			if len(p.Participants) != count {
+				t.Fatal("wrong participant count", p.Participants)
+			}
+			op, err := x.execute(t, p, false)
+			if err != nil || op.State != operationSucceeded {
+				t.Fatal(op, err)
+			}
+			if empty := x.review(t); len(empty.Participants) != 0 || len(empty.entries) != 0 {
+				t.Fatal("final inventory not empty", empty.Participants)
+			}
+		})
+	}
+}
+
+func TestResetAllFactoryResetExclusionPreservesEvidence(t *testing.T) {
+	for _, state := range []operationState{operationQueued, operationNeedsAttention} {
+		t.Run(string(state), func(t *testing.T) {
+			x := newResetAllFixture(t, 2)
+			p := x.review(t)
+			op, _, err := x.s.operations.beginFactoryReset(testFactoryResetFingerprint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, _, err := x.f.x.b.factoryResetParticipants(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			evidence := factoryResetInstancesJournal{Schema: 1, OperationID: op.OperationID, Entries: entries}
+			path := factoryResetEvidencePath(x.s, op.OperationID)
+			if err = x.f.x.b.writeJSON(path, evidence, false); err != nil {
+				t.Fatal(err)
+			}
+			if state == operationNeedsAttention {
+				if _, err = x.s.operations.transition(op.OperationID, state, "interrupted", "Interrupted Factory Reset."); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(adminMinecraftResetApplyRequest{PlanFingerprint: p.PlanFingerprint, ConfirmPlayers: true})
+			rr := httptest.NewRecorder()
+			x.s.adminMinecraftResetAllApply(rr, surfaceRequest("POST", "/v1/admin/reset/minecraft/apply", string(body)))
+			if rr.Code != 409 || !strings.Contains(rr.Body.String(), "Minecraft reset recovery could not be verified") {
+				t.Fatal("competing Reset Minecraft accepted", rr.Code, rr.Body.String())
+			}
+			if current, e := x.s.operations.currentFactoryReset(); e != nil || current == nil || current.OperationID != op.OperationID || current.State != state {
+				t.Fatal("Factory Reset recovery changed", current, e)
+			}
+			if current, e := x.s.operations.currentMinecraftReset(); e != nil || current != nil {
+				t.Fatal("Reset Minecraft stole recovery", current, e)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("Factory Reset evidence changed", err)
+			}
+			for _, call := range x.f.x.calls {
+				if strings.Contains(call, "systemctl stop") || strings.Contains(call, "podman rm") || strings.Contains(call, "instance-delete remove") {
+					t.Fatal("competing reset mutated runtime", call)
+				}
+			}
+		})
+	}
+}
 func TestResetAllStaleReviewRefusesBeforeMutation(t *testing.T) {
 	for _, change := range []string{"config", "storage", "scope", "participant"} {
 		t.Run(change, func(t *testing.T) {

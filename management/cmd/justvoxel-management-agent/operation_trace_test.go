@@ -227,6 +227,47 @@ func TestOperationTraceTopLevelOrdering(t *testing.T) {
 	}
 }
 
+func TestOperationTraceChildEnvironment(t *testing.T) {
+	t.Setenv("JV_TRACE_PARENT_ONLY", "inherited")
+	for _, mode := range []string{"nil", "populated", "empty", "unavailable"} {
+		t.Run(mode, func(t *testing.T) {
+			store := openTestOperationStore(t)
+			id := traceTestOperation(t, store, operationTypeFactoryReset)
+			cmd := exec.Command("/bin/sh", "-c", `printf '%s|%s|%s' "${JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED:-}" "${JV_OPERATION_TRACE_FD:-}" "${JV_TRACE_PARENT_ONLY:-}"`)
+			want := "|3|inherited"
+			if mode != "nil" {
+				cmd.Env = []string{"JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED=1", "JV_OPERATION_TRACE_FD=99"}
+				want = "1|3|"
+			}
+			if mode == "empty" {
+				cmd.Env = []string{}
+				want = "|3|"
+			}
+			if mode == "unavailable" {
+				// An unsafe trace destination disables tracing, but must not
+				// discard the caller's environment when the command still runs.
+				if err := store.appendTrace(id, "fixture", nil); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(store.baseDir, "logs", "live-traces", id+".trace")
+				if err := os.Chmod(path, 0644); err != nil {
+					t.Fatal(err)
+				}
+				want = "1|99|"
+			}
+			finish, err := attachOperationTrace(withOperationTrace(context.Background(), store, id), cmd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, runErr := cmd.Output()
+			finish(runErr)
+			if runErr != nil || string(output) != want {
+				t.Fatalf("child environment = %q, want %q; error: %v", output, want, runErr)
+			}
+		})
+	}
+}
+
 func TestOperationTraceCredentialArguments(t *testing.T) {
 	store := openTestOperationStore(t)
 	id := traceTestOperation(t, store, operationTypeFactoryReset)

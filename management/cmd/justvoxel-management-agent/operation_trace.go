@@ -224,7 +224,18 @@ func attachOperationTrace(ctx context.Context, cmd *exec.Cmd) (func(error), erro
 		return func(error) {}, nil
 	}
 	cmd.ExtraFiles = []*os.File{write}
-	cmd.Env = append(os.Environ(), "JV_OPERATION_TRACE_FD=3")
+	originalEnv := cmd.Env
+	env := originalEnv
+	if env == nil {
+		env = os.Environ()
+	}
+	cmd.Env = make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, "JV_OPERATION_TRACE_FD=") {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	cmd.Env = append(cmd.Env, "JV_OPERATION_TRACE_FD=3")
 	command := "$ " + cmd.Path
 	hideNext := false
 	for _, arg := range cmd.Args[1:] {
@@ -247,7 +258,7 @@ func attachOperationTrace(ctx context.Context, cmd *exec.Cmd) (func(error), erro
 		read.Close()
 		write.Close()
 		cmd.ExtraFiles = nil
-		cmd.Env = nil
+		cmd.Env = originalEnv
 		log.Printf("operation %s execution trace is unavailable", trace.id)
 		return func(error) {}, nil
 	}

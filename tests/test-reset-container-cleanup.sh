@@ -84,6 +84,16 @@ BEDROCK_ENABLED=no
 BEDROCK_PORT=19132
 EOF
         export JV_TEST_REPO="${repo}" JV_TEST_ROOT="${root}" JV_TEST_EXISTS_RC="${exists_rc}"
+        # Even an empty runtime cannot authorize direct shared cleanup without
+        # the Agent's completed all-instance retirement contract.
+        if [[ ${exists_rc} == 1 ]]; then
+            if output="$(env -u JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED PATH="${scratch}/bin:${PATH}" bash "${scratch}/${mode}-reset" apply --confirm-players)"; then
+                echo 'ERROR: direct Factory Reset bypassed instance retirement.' >&2
+                exit 1
+            fi
+            jq -e '.ok == false and .code == "instance_cleanup_required"' <<<"${output}" >/dev/null
+            [[ -e ${root}/config/minecraft.conf ]] || { echo 'ERROR: direct Factory Reset removed configuration.' >&2; exit 1; }
+        fi
         if output="$(JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED=1 PATH="${scratch}/bin:${PATH}" bash "${scratch}/${mode}-reset" apply --confirm-players)"; then
             status=0
         else

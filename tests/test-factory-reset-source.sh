@@ -30,6 +30,15 @@ if rg 'minecraft\.service|podman.*minecraft|web-status-json|jv_reset_remove_mine
 fi
 grep -Fq 'factory-reset-runtime-empty' "${helper}"
 grep -Fq 'JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED' "${helper}"
+python3 - "${agent}" <<'PY'
+import pathlib
+import sys
+source = pathlib.Path(sys.argv[1]).read_text()
+helper = source.split('var runAdminFactoryResetHelper = ', 1)[1].split('\nvar ', 1)[0]
+assert 'if len(args) > 0 && args[0] == "apply" {' in helper
+flag = helper.index('cmd.Env = append(os.Environ(), "JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED=1")')
+assert flag < helper.index('attachOperationTrace(ctx, cmd)') < helper.index('cmd.Output()')
+PY
 grep -Fq 'Compatibility cleanup only' "${helper}"
 grep -Fq 'podman rm --force --ignore minecraft' "${common}"
 grep -Fq 'podman container exists minecraft' "${common}"
