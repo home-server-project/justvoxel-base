@@ -4,7 +4,7 @@ const {test} = require('node:test');
 const vm = require('node:vm');
 const read = path => readFileSync(`${__dirname}/../${path}`, 'utf8');
 const app = read('webui/internal/server/static/app.js');
-const lifecycle = app.slice(app.indexOf('function createTerminalWorkspace('), app.indexOf('const terminalDialog ='));
+const lifecycle = app.slice(app.indexOf('function validateTerminalAppearance('), app.indexOf('const terminalDialog ='));
 
 test('native package and fixed on-demand service contract', () => {
   assert.match(read('build_files/packages.env'), /JUSTVOXEL_COMMON_PACKAGES="\\\nttyd \\/);
@@ -56,20 +56,21 @@ test('System retains its other tabs and has no Terminal markup or lifecycle', ()
   assert.match(systemScript, /refreshButton\?\.addEventListener\("click", \(\) => loadCurrentSystemTab\(\)\)/);
   assert.doesNotMatch(read('webui/internal/server/static/app.css'), /system-terminal-pane/);
 });
-test('standalone Terminal uses the shared header, only Refresh and SVG Close, and state/retry/frame body', () => {
+test('standalone Terminal uses the shared header, Settings, Refresh and SVG Close, and state/retry/frame body', () => {
   assert.match(terminalMarkup, /data-workspace-window="terminal"/);
   assert.match(terminalMarkup, /class="system-workspace-shell"/);
   assert.match(terminalMarkup, /class="system-workspace-header" data-workspace-drag-handle/);
   assert.match(terminalMarkup, /<p class="eyebrow">JustVoxel<\/p>\s*<h2 id="terminal-workspace-title">Terminal<\/h2>/);
   const buttons = [...terminalMarkup.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map(match => match[0]);
-  assert.equal(buttons.length, 3);
-  assert.match(buttons[0], /workspace-header-refresh[^>]*data-terminal-refresh[^>]*>Refresh<\/button>/);
-  assert.match(buttons[1], /workspace-header-close[^>]*data-terminal-close aria-label="Close Terminal"><svg/);
-  assert.ok(buttons[1].includes('<path d="M5 5l14 14M19 5L5 19"/>'));
-  assert.match(buttons[2], /data-terminal-retry hidden>Retry/);
+  assert.equal(buttons.length, 4);
+  assert.match(buttons[0], /class="system-monitor-header-button system-monitor-settings-button"[^>]*data-terminal-settings-toggle aria-haspopup="dialog">Settings<\/button>/);
+  assert.match(buttons[1], /workspace-header-refresh[^>]*data-terminal-refresh[^>]*>Refresh<\/button>/);
+  assert.match(buttons[2], /workspace-header-close[^>]*data-terminal-close aria-label="Close Terminal"><svg/);
+  assert.ok(buttons[2].includes('<path d="M5 5l14 14M19 5L5 19"/>'));
+  assert.match(buttons[3], /data-terminal-retry hidden>Retry/);
   assert.match(terminalMarkup, /data-terminal-state/);
   assert.match(terminalMarkup, /<iframe title="JustVoxel Terminal" data-terminal-frame hidden><\/iframe>/);
-  assert.doesNotMatch(terminalMarkup, /Settings|<nav|data-system-tab/);
+  assert.doesNotMatch(terminalMarkup, /<nav|data-system-tab/);
 });
 test('Terminal keeps existing proxy routing and primary administrator backend authorization', () => {
   const server = read('webui/internal/server/server.go');
@@ -88,11 +89,32 @@ class Element {
   addEventListener(type,fn){this.events[type]=fn;}
   click(){this.events.click?.();}
 }
-function browser({ready=true,failed=false}={}) {
+function appearanceStorage({stored=null,readFails=false,writeFails=false}={}) {
+  return {
+    value:stored, writes:[],
+    getItem(key){
+      assert.equal(key,'justvoxel.terminal.appearance');
+      if(readFails) throw new Error('storage unavailable');
+      return this.value;
+    },
+    setItem(key,value){
+      assert.equal(key,'justvoxel.terminal.appearance');
+      if(writeFails) throw new Error('storage unavailable');
+      this.writes.push({key,value});this.value=value;
+    },
+    removeItem(key){
+      assert.equal(key,'justvoxel.terminal.appearance');
+      if(writeFails) throw new Error('storage unavailable');
+      this.writes.push({key,value:null});this.value=null;
+    },
+  };
+}
+function browser({ready=true,failed=false,stored=null,readFails=false,writeFails=false}={}) {
   const frame=new Element(),state=new Element(),retry=new Element();
   const dialog={open:true,querySelector:s=>s==='[data-terminal-frame]'?frame:s==='[data-terminal-state]'?state:retry};
   const calls=[];let now=0,release=null;
-  const context={URLSearchParams,Date:{now:()=>now},
+  const storage=appearanceStorage({stored,readFails,writeFails});
+  const context={URLSearchParams,localStorage:storage,Date:{now:()=>now},
     setTimeout:fn=>{now+=1000;fn();},
     fetch:async(url,options)=>{
       calls.push({url,options});
@@ -100,7 +122,7 @@ function browser({ready=true,failed=false}={}) {
       return {ok:!failed,json:async()=>({ready,state:ready?'active':'activating'})};
     }};
   vm.runInNewContext(lifecycle+'\nglobalThis.terminal=createTerminalWorkspace(dialog,"csrf");',Object.assign(context,{dialog}));
-  return {frame,state,retry,dialog,calls,terminal:context.terminal,
+  return {frame,state,retry,dialog,calls,storage,terminal:context.terminal,
     setReady:v=>ready=v,setFailed:v=>failed=v,
     holdStart:()=>{let resolve;release=new Promise(r=>resolve=r);return resolve;},
     async flush(){for(let i=0;i<100;i++)await Promise.resolve();}};
@@ -171,10 +193,13 @@ test('closing an untouched Terminal workspace does not stop a service', async ()
   assert.equal(b.calls.length, 0);
 });
 
-function workspaceBrowser({username='voxel',role='administrator',pending=false,savedOpen=false}={}) {
+function workspaceBrowser({username='voxel',role='administrator',pending=false,savedOpen=false,stored=null,readFails=false,writeFails=false,ready=true}={}) {
   const elements = new Map();
-  for (const name of ['frame','state','retry','open','close','refresh']) elements.set(`[data-terminal-${name}]`, new Element());
+  for (const name of ['frame','state','retry','open','close','refresh','settings-toggle','font-size','background','settings-error','settings-reset','settings-apply']) elements.set(`[data-terminal-${name}]`, new Element());
   const dialog = {open:false,querySelector:selector=>elements.get(selector)};
+  const settings = {open:false,querySelector:selector=>elements.get(selector),
+    showModal(){this.open=true;},close(){this.open=false;},cancel(){this.open=false;}};
+  const storage=appearanceStorage({stored,readFails,writeFails});
   const classes = new Set(pending ? ['role-pending'] : []);
   const applyIdentity = () => {
     classes.delete('role-pending');
@@ -185,16 +210,18 @@ function workspaceBrowser({username='voxel',role='administrator',pending=false,s
   let observer, queuedClose;
   const calls = [], controlCenter = {open:true};
   const context = {
-    URLSearchParams, Date, setTimeout,
+    URLSearchParams, Date, setTimeout:fn=>fn(), localStorage:storage,
     controlCenter,
     document: {
       body:{classList:{contains:name=>classes.has(name)}},
       querySelector:selector=>selector==='[data-terminal-workspace-dialog]' ? dialog :
+        selector==='[data-terminal-settings-dialog]' ? settings :
         selector==='[data-system-workspace-csrf]' ? {value:'csrf'} : elements.get(selector),
     },
     fetch:async(url,options)=>{
       calls.push({url,options});
-      return {ok:true,json:async()=>({ready:true,state:'active'})};
+      if(url.endsWith('/start')) ready=true;
+      return {ok:true,json:async()=>({ready,state:ready?'active':'activating'})};
     },
     setupWorkspaceWindow:(element,options)=>{
       assert.equal(element, dialog);
@@ -212,7 +239,8 @@ function workspaceBrowser({username='voxel',role='administrator',pending=false,s
   };
   vm.runInNewContext(lifecycle+workspaceScript,context);
   return {
-    elements,dialog,calls,controlCenter,
+    elements,dialog,settings,storage,calls,controlCenter,
+    setReady:value=>ready=value,
     resolveIdentity(){applyIdentity();observer?.();},
     dispatchClose(){const close=queuedClose;queuedClose=null;close?.();},
     async flush(){for(let i=0;i<100;i++)await Promise.resolve();},
@@ -269,5 +297,140 @@ test('restore waits for identity and only the primary voxel administrator can re
       assert.equal(b.dialog.open,allowed);
       if (!allowed) assert.equal(b.calls.length,0);
     }
+  }
+});
+
+
+test('Terminal appearance uses a separate compact dialog with exactly the approved options and actions', () => {
+  const markup=header.match(/<dialog[^>]*data-terminal-settings-dialog[\s\S]*?<\/dialog>/)[0];
+  assert.match(markup, /class="system-action-dialog"/);
+  assert.match(markup, /<p class="eyebrow">Terminal<\/p>/);
+  assert.match(markup, /<h2 id="terminal-settings-title">Terminal appearance<\/h2>/);
+  const selects=[...markup.matchAll(/<label>([^<]+)\s*<select[^>]*>([\s\S]*?)<\/select>\s*<\/label>/g)];
+  assert.deepEqual(selects.map(match=>match[1].trim()), ['Font size','Background']);
+  const options=select=>[...select.matchAll(/<option value="([^"]*)">([^<]+)<\/option>/g)].map(match=>[match[1],match[2]]);
+  assert.deepEqual(options(selects[0][2]), [['','Default'],['12','12'],['14','14'],['16','16'],['18','18'],['20','20'],['22','22']]);
+  assert.deepEqual(options(selects[1][2]), [['','Default'],['black','Black'],['dark-gray','Dark gray']]);
+  assert.equal([...markup.matchAll(/<select\b/g)].length,2);
+  assert.match(markup, /class="muted compact">Applying appearance settings reconnects the Terminal\.<\/p>/);
+  const buttons=[...markup.matchAll(/<button[^>]*>[\s\S]*?<\/button>/g)].map(match=>match[0]);
+  assert.equal(buttons.length,2);
+  assert.match(buttons[0], /class="secondary"[^>]*data-terminal-settings-reset>Reset defaults<\/button>/);
+  assert.match(buttons[1], /data-terminal-settings-apply>Apply<\/button>/);
+});
+
+test('validated browser appearance builds only the approved native ttyd query options', async () => {
+  for(const fontSize of ['', '12','14','16','18','20','22']) {
+    for(const background of ['', 'black','dark-gray']) {
+      const b=browser({stored:JSON.stringify({fontSize,background,command:'ignored',theme:{foreground:'red'}})});
+      await b.terminal.show();
+      if(!fontSize && !background) assert.equal(b.frame.src,'/terminal/');
+      const url=new URL(b.frame.src,'https://justvoxel.test');
+      assert.equal(url.pathname,'/terminal/');
+      assert.equal(url.searchParams.get('fontSize'),fontSize || null);
+      assert.equal(url.searchParams.get('theme'),background ? JSON.stringify({background:background==='black'?'#000000':'#202124'}) : null);
+      assert.deepEqual([...url.searchParams.keys()], [...(fontSize?['fontSize']:[]),...(background?['theme']:[])]);
+      if(background) assert.ok(b.frame.src.includes('theme=%7B%22background%22%3A%22%23'));
+    }
+  }
+});
+
+test('malformed, unknown or unreadable stored appearance falls back independently to defaults', async () => {
+  const cases=[
+    [null,'/terminal/'], ['{','/terminal/'], ['null','/terminal/'], ['[]','/terminal/'], ['42','/terminal/'],
+    [JSON.stringify({fontSize:18,background:'pink'}),'/terminal/'],
+    [JSON.stringify({fontSize:'99',background:'black'}),'/terminal/?theme=%7B%22background%22%3A%22%23000000%22%7D'],
+    [JSON.stringify({fontSize:'18',background:'unknown'}),'/terminal/?fontSize=18'],
+  ];
+  for(const [stored,expected] of cases) {
+    const b=browser({stored});await b.terminal.show();assert.equal(b.frame.src,expected);
+  }
+  const b=browser({stored:JSON.stringify({fontSize:'22',background:'black'}),readFails:true});
+  await b.terminal.show();assert.equal(b.frame.src,'/terminal/');
+});
+
+const terminalElement=(b,name)=>b.elements.get(`[data-terminal-${name}]`);
+async function openTerminalSettings(b) {
+  terminalElement(b,'open').click();await b.flush();
+  terminalElement(b,'settings-toggle').click();
+}
+
+test('opening, editing, cancelling and resetting appearance leave the existing session connected', async () => {
+  const stored=JSON.stringify({fontSize:'18',background:'dark-gray'});
+  const b=workspaceBrowser({stored});await openTerminalSettings(b);
+  assert.equal(b.settings.open,true);
+  assert.equal(terminalElement(b,'font-size').value,'18');
+  assert.equal(terminalElement(b,'background').value,'dark-gray');
+  const src=terminalElement(b,'frame').src, calls=b.calls.length;
+  assert.equal(calls,1);
+  assert.ok(src.includes('fontSize=18'));
+  terminalElement(b,'settings-reset').click();
+  assert.equal(terminalElement(b,'font-size').value,'');
+  assert.equal(terminalElement(b,'background').value,'');
+  assert.equal(b.storage.value,stored);
+  assert.equal(b.storage.writes.length,0);
+  assert.equal(terminalElement(b,'frame').src,src);
+  assert.equal(b.calls.length,calls);
+  b.settings.cancel();await b.flush();
+  assert.equal(terminalElement(b,'frame').src,src);
+  assert.equal(b.calls.length,calls);
+  assert.equal(b.storage.value,stored);
+  terminalElement(b,'settings-toggle').click();
+  assert.equal(terminalElement(b,'font-size').value,'18');
+  assert.equal(terminalElement(b,'background').value,'dark-gray');
+  terminalElement(b,'font-size').value='22';b.settings.close();
+  assert.equal(terminalElement(b,'frame').src,src);
+  assert.equal(b.storage.value,stored);
+  assert.equal(b.calls.length,calls);
+});
+
+test('Apply persists only approved enums, closes Settings and uses managed stop/start/readiness/reconnect', async () => {
+  const b=workspaceBrowser();await openTerminalSettings(b);
+  terminalElement(b,'font-size').value='18';terminalElement(b,'background').value='black';
+  // Force readiness/start after stop, using the same lifecycle as normal Refresh.
+  b.setReady(false);
+  const initialCalls=b.calls.length;
+  terminalElement(b,'settings-apply').click();
+  assert.deepEqual(JSON.parse(b.storage.value),{fontSize:'18',background:'black'});
+  assert.equal(b.settings.open,false);
+  assert.equal(terminalElement(b,'frame').src,undefined);
+  await b.flush();
+  assert.deepEqual(b.calls.slice(initialCalls).map(call=>call.url.split('/').at(-1)),['stop','terminal','start','terminal']);
+  assert.equal(terminalElement(b,'frame').src,'/terminal/?fontSize=18&theme=%7B%22background%22%3A%22%23000000%22%7D');
+  terminalElement(b,'refresh').click();assert.equal(terminalElement(b,'frame').src,undefined);
+  await b.flush();assert.ok(terminalElement(b,'frame').src.includes('fontSize=18'));
+  terminalElement(b,'settings-toggle').click();terminalElement(b,'settings-reset').click();
+  terminalElement(b,'settings-apply').click();await b.flush();
+  assert.equal(b.storage.value,null);
+  assert.deepEqual(b.storage.writes.at(-1),{key:'justvoxel.terminal.appearance',value:null});
+  assert.equal(terminalElement(b,'frame').src,'/terminal/');
+});
+
+test('Apply validates each field before persisting and ignores unknown options', async () => {
+  for(const [fontSize,background,expected] of [
+    ['bogus','black',{fontSize:'',background:'black'}],
+    ['20','bogus',{fontSize:'20',background:''}],
+    [18,{background:'#ff0000'},null],
+  ]) {
+    const b=workspaceBrowser();await openTerminalSettings(b);
+    terminalElement(b,'font-size').value=fontSize;terminalElement(b,'background').value=background;
+    terminalElement(b,'settings-apply').click();await b.flush();
+    assert.deepEqual(JSON.parse(b.storage.value),expected);
+  }
+});
+
+test('storage write or removal failures preserve the connected Terminal and allow retry', async () => {
+  for(const reset of [false,true]) {
+    const stored=JSON.stringify({fontSize:'14',background:'black'});
+    const b=workspaceBrowser({stored,writeFails:true});await openTerminalSettings(b);
+    const src=terminalElement(b,'frame').src,calls=b.calls.length;
+    if(reset) terminalElement(b,'settings-reset').click();
+    else terminalElement(b,'font-size').value='22';
+    terminalElement(b,'settings-apply').click();await b.flush();
+    assert.equal(b.settings.open,true);
+    assert.equal(terminalElement(b,'settings-error').hidden,false);
+    assert.equal(terminalElement(b,'frame').src,src);
+    assert.equal(b.calls.length,calls);
+    assert.equal(b.storage.value,stored);
   }
 });

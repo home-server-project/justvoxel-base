@@ -27,7 +27,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 			t.Errorf("%s close is not the shared accessible SVG control", match[1])
 		}
 	}
-	for _, name := range []string{"network", "system", "minecraft", "storage", "backups", "migration", "version", "system-update"} {
+	for _, name := range []string{"network", "system", "minecraft", "storage", "backups", "migration", "version", "system-update", "files", "terminal"} {
 		if refreshes[name] == "" || closes[name] == "" {
 			t.Errorf("%s workspace lost its header controls", name)
 		}
@@ -75,7 +75,21 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if !strings.Contains(string(css), ".control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor") {
 		t.Error("Control Center gear icon must use currentColor SVG sizing")
 	}
-	if !strings.Contains(string(css), ".system-monitor-header .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;") || strings.Contains(string(css), ".system-monitor-header-button .gear-icon{") {
-		t.Error("System Monitor settings must use text button geometry without gear styling")
+	settingsRule := ".workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;padding:0 .75rem;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}"
+	if !strings.Contains(string(css), settingsRule) {
+		t.Error("workspace Settings must retain the shared text button geometry")
+	}
+	if strings.Contains(string(css), ".system-monitor-header .system-monitor-header-button.system-monitor-settings-button") || strings.Contains(string(css), ".system-monitor-header-button .gear-icon{") {
+		t.Error("obsolete System Monitor-only Settings selector or gear styling")
+	}
+	for _, name := range []string{"system-monitor", "files", "terminal"} {
+		attribute := "data-" + name + "-settings-toggle"
+		if name == "system-monitor" {
+			attribute = "data-system-monitor-profile-toggle"
+		}
+		button := regexp.MustCompile(`<button[^>]*` + attribute + `\b[^>]*>Settings</button>`).FindString(string(header))
+		if !regexp.MustCompile(`class="[^"]*\bsystem-monitor-settings-button\b[^"]*"`).MatchString(button) {
+			t.Errorf("%s Settings must use the shared text button class", name)
+		}
 	}
 }

@@ -16,9 +16,12 @@ const fileBrowserConfig = "/usr/share/justvoxel/filebrowser/config.yaml"
 const fileBrowserRuntimeConfig = "/run/justvoxel-filebrowser/config.yaml"
 
 type fileBrowserSource struct {
-	Host string
-	Path string
-	Name string
+	Host         string
+	Path         string
+	Name         string
+	ReadOnly     bool
+	NonRecursive bool
+	Propagation  string
 }
 
 func safeFileBrowserRoot(path string) error {
@@ -46,8 +49,40 @@ func safeFileBrowserRoot(path string) error {
 	return nil
 }
 
-// Only registered committed data paths and authoritative backup roots enter
-// the container. Private instance records and credentials are never mounted.
+// Automatic roots are fixed appliance policy, never supplied by a caller.
+// Lstat prevents a symlink at an automatic root from redirecting the source.
+func automaticFileBrowserSources(lstat func(string) (os.FileInfo, error)) ([]fileBrowserSource, error) {
+	candidates := []fileBrowserSource{
+		{Host: "/var/mnt", Path: "/data/mounted/var-mnt", Name: "Mounted storage", Propagation: "rslave"},
+		{Host: "/mnt", Path: "/data/mounted/mnt", Name: "Mounts", Propagation: "rslave"},
+		{Host: "/media", Path: "/data/mounted/media", Name: "Media", Propagation: "rslave"},
+		{Host: "/run/media", Path: "/data/mounted/run-media", Name: "Removable media", Propagation: "rslave"},
+		{Host: "/usr", Path: "/data/system/usr", Name: "System /usr (read-only)", ReadOnly: true},
+		{Host: "/boot", Path: "/data/system/boot", Name: "System /boot (read-only)", ReadOnly: true},
+	}
+	sources := []fileBrowserSource{}
+	for _, source := range candidates {
+		info, err := lstat(source.Host)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			continue
+		}
+		sources = append(sources, source)
+	}
+	return sources, nil
+}
+
+var discoverAutomaticFileBrowserSources = func() ([]fileBrowserSource, error) {
+	return automaticFileBrowserSources(os.Lstat)
+}
+
+// Preserve registered committed data paths and authoritative backup roots as
+// exact nonrecursive sources, independently of the automatic parent sources.
 func fileBrowserSources(ctx context.Context) ([]fileBrowserSource, error) {
 	b := instanceRuntimes
 	records, err := b.records()
@@ -70,7 +105,7 @@ func fileBrowserSources(ctx context.Context) ([]fileBrowserSource, error) {
 		if len(records) > 1 {
 			name += " (" + record.Runtime.ID + ")"
 		}
-		sources = append(sources, fileBrowserSource{record.Storage.DataPath, "/data/minecraft/" + record.Runtime.ID, name})
+		sources = append(sources, fileBrowserSource{Host: record.Storage.DataPath, Path: "/data/minecraft/" + record.Runtime.ID, Name: name, NonRecursive: true})
 		// Inventory validates backup mount identity without creating/changing data.
 		// Unavailable optional backup storage must never expose a fallback directory.
 		if _, err := b.backupStorage(ctx, "inventory", record.Runtime.ID); err != nil {
@@ -102,10 +137,15 @@ func fileBrowserSources(ctx context.Context) ([]fileBrowserSource, error) {
 		if len(roots) > 1 {
 			name += fmt.Sprintf(" (%d)", i+1)
 		}
-		sources = append(sources, fileBrowserSource{root, fmt.Sprintf("/data/backups/%d", i+1), name})
+		sources = append(sources, fileBrowserSource{Host: root, Path: fmt.Sprintf("/data/backups/%d", i+1), Name: name, NonRecursive: true})
 	}
+	automatic, err := discoverAutomaticFileBrowserSources()
+	if err != nil {
+		return nil, err
+	}
+	sources = append(sources, automatic...)
 	if len(sources) == 0 {
-		return nil, errors.New("No configured Minecraft data is available")
+		return nil, errors.New("No File Browser sources are available")
 	}
 	return sources, nil
 }
@@ -122,7 +162,17 @@ func fileBrowserContainerArgs(sources []fileBrowserSource) []string {
 		"--mount", "type=volume,source=justvoxel-filebrowser-state,target=/home/filebrowser/data",
 		"--mount", "type=bind,source=" + fileBrowserRuntimeConfig + ",target=/etc/filebrowser/config.yaml,ro=true"}
 	for _, source := range sources {
-		args = append(args, "--mount", "type=bind,source="+source.Host+",target="+source.Path+",bind-nonrecursive=true")
+		mount := "type=bind,source=" + source.Host + ",target=" + source.Path
+		if source.NonRecursive {
+			mount += ",bind-nonrecursive=true"
+		}
+		if source.Propagation != "" {
+			mount += ",bind-propagation=" + source.Propagation
+		}
+		if source.ReadOnly {
+			mount += ",ro=true"
+		}
+		args = append(args, "--mount", mount)
 	}
 	return append(args, fileBrowserImage)
 }
@@ -141,9 +191,9 @@ func renderFileBrowserConfig(base []byte, sources []fileBrowserSource) ([]byte, 
 	entries := []any{}
 	for _, source := range sources {
 		entries = append(entries, map[string]any{"path": source.Path, "name": source.Name, "config": map[string]any{
-			"private": true, "defaultEnabled": true, "defaultUserScope": "/",
+			"readOnly": source.ReadOnly, "private": true, "defaultEnabled": true, "defaultUserScope": "/",
 			"rules":              []any{map[string]any{"ignoreSymlinks": true}},
-			"defaultPermissions": map[string]bool{"view": true, "download": true, "create": true, "modify": true, "delete": true, "configured": true},
+			"defaultPermissions": map[string]bool{"view": true, "download": true, "create": !source.ReadOnly, "modify": !source.ReadOnly, "delete": !source.ReadOnly, "configured": true},
 		}})
 	}
 	server["sources"] = entries

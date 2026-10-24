@@ -206,6 +206,7 @@
           <h2 id="terminal-workspace-title">Terminal</h2>
         </div>
         <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button system-monitor-settings-button" type="button" data-terminal-settings-toggle aria-haspopup="dialog">Settings</button>
           <button class="system-monitor-header-button workspace-header-refresh" type="button" data-terminal-refresh aria-label="Refresh Terminal" title="Refresh Terminal">Refresh</button>
           <button class="system-monitor-header-button workspace-header-close" type="button" data-terminal-close aria-label="Close Terminal"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
         </div>
@@ -214,6 +215,37 @@
         <p class="system-workspace-state" data-terminal-state></p>
         <button class="secondary" type="button" data-terminal-retry hidden>Retry</button>
         <iframe title="JustVoxel Terminal" data-terminal-frame hidden></iframe>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="system-action-dialog" data-terminal-settings-dialog aria-labelledby="terminal-settings-title">
+    <div class="system-action-dialog-content">
+      <p class="eyebrow">Terminal</p>
+      <h2 id="terminal-settings-title">Terminal appearance</h2>
+      <label>Font size
+        <select data-terminal-font-size>
+          <option value="">Default</option>
+          <option value="12">12</option>
+          <option value="14">14</option>
+          <option value="16">16</option>
+          <option value="18">18</option>
+          <option value="20">20</option>
+          <option value="22">22</option>
+        </select>
+      </label>
+      <label>Background
+        <select data-terminal-background>
+          <option value="">Default</option>
+          <option value="black">Black</option>
+          <option value="dark-gray">Dark gray</option>
+        </select>
+      </label>
+      <p class="muted compact">Applying appearance settings reconnects the Terminal.</p>
+      <p class="system-action-dialog-error" data-terminal-settings-error role="status" hidden></p>
+      <div class="action-row">
+        <button class="secondary" type="button" data-terminal-settings-reset>Reset defaults</button>
+        <button type="button" data-terminal-settings-apply>Apply</button>
       </div>
     </div>
   </dialog>

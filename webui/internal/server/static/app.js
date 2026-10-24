@@ -4325,6 +4325,66 @@ if (minecraftOpen && minecraftDialog) {
 }
 
 
+function validateTerminalAppearance(value) {
+  return {
+    fontSize: ["", "12", "14", "16", "18", "20", "22"].includes(value?.fontSize) ? value.fontSize : "",
+    background: ["", "black", "dark-gray"].includes(value?.background) ? value.background : "",
+  };
+}
+
+function readTerminalAppearance() {
+  try {
+    return validateTerminalAppearance(JSON.parse(localStorage.getItem("justvoxel.terminal.appearance")));
+  } catch {
+    return validateTerminalAppearance(null);
+  }
+}
+
+function terminalAppearanceURL() {
+  const appearance = readTerminalAppearance();
+  const query = new URLSearchParams();
+  if (appearance.fontSize) query.set("fontSize", appearance.fontSize);
+  if (appearance.background) {
+    const background = appearance.background === "black" ? "#000000" : "#202124";
+    query.set("theme", JSON.stringify({background}));
+  }
+  return query.size ? "/terminal/?" + query.toString() : "/terminal/";
+}
+
+function setupTerminalAppearanceSettings(workspace, settings, terminal) {
+  const fontSize = settings.querySelector("[data-terminal-font-size]");
+  const background = settings.querySelector("[data-terminal-background]");
+  const error = settings.querySelector("[data-terminal-settings-error]");
+  workspace.querySelector("[data-terminal-settings-toggle]").addEventListener("click", () => {
+    const appearance = readTerminalAppearance();
+    fontSize.value = appearance.fontSize;
+    background.value = appearance.background;
+    error.hidden = true;
+    settings.showModal();
+  });
+  settings.querySelector("[data-terminal-settings-reset]").addEventListener("click", () => {
+    fontSize.value = "";
+    background.value = "";
+    error.hidden = true;
+  });
+  settings.querySelector("[data-terminal-settings-apply]").addEventListener("click", () => {
+    const appearance = validateTerminalAppearance({fontSize: fontSize.value, background: background.value});
+    try {
+      if (appearance.fontSize || appearance.background) {
+        localStorage.setItem("justvoxel.terminal.appearance", JSON.stringify(appearance));
+      } else {
+        localStorage.removeItem("justvoxel.terminal.appearance");
+      }
+    } catch {
+      error.textContent = "Appearance settings could not be saved in this browser. Try again.";
+      error.hidden = false;
+      return;
+    }
+    settings.close();
+    void terminal.show(true);
+  });
+}
+
 // Terminal owns its on-demand lifecycle independently of System.
 function createTerminalWorkspace(dialog, csrf) {
   const frame = dialog.querySelector('[data-terminal-frame]');
@@ -4373,7 +4433,7 @@ function createTerminalWorkspace(dialog, csrf) {
       }
       if (!current()) return;
       state.textContent = '';
-      frame.src = '/terminal/';
+      frame.src = terminalAppearanceURL();
       frame.hidden = false;
     } catch (error) {
       if (current()) { clearFrame(); state.textContent = error.message; retry.hidden = false; }
@@ -4396,6 +4456,7 @@ function createTerminalWorkspace(dialog, csrf) {
 const terminalDialog = document.querySelector("[data-terminal-workspace-dialog]");
 if (terminalDialog) {
   const terminal = createTerminalWorkspace(terminalDialog, document.querySelector("[data-system-workspace-csrf]")?.value || "");
+  setupTerminalAppearanceSettings(terminalDialog, document.querySelector("[data-terminal-settings-dialog]"), terminal);
   const workspace = setupWorkspaceWindow(terminalDialog, {
     onOpen: () => { void terminal.show(); },
     // A queued native close event may arrive after a rapid reopen.

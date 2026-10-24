@@ -148,16 +148,58 @@ func TestFileBrowserAdministratorOnly(t *testing.T) {
 	}
 }
 
+// Expected policy is independent of automatic source discovery and mount rendering.
+func representativeFileBrowserSources() []fileBrowserSource {
+	return []fileBrowserSource{
+		{Host: "/approved/minecraft", Path: "/data/minecraft/jv-abc123", Name: "Minecraft Servers", NonRecursive: true},
+		{Host: "/approved/backups", Path: "/data/backups/1", Name: "Backups", NonRecursive: true},
+		{Host: "/var/mnt", Path: "/data/mounted/var-mnt", Name: "Mounted storage", Propagation: "rslave"},
+		{Host: "/mnt", Path: "/data/mounted/mnt", Name: "Mounts", Propagation: "rslave"},
+		{Host: "/media", Path: "/data/mounted/media", Name: "Media", Propagation: "rslave"},
+		{Host: "/run/media", Path: "/data/mounted/run-media", Name: "Removable media", Propagation: "rslave"},
+		{Host: "/usr", Path: "/data/system/usr", Name: "System /usr (read-only)", ReadOnly: true},
+		{Host: "/boot", Path: "/data/system/boot", Name: "System /boot (read-only)", ReadOnly: true},
+	}
+}
+
 func TestFileBrowserContainerContract(t *testing.T) {
-	sources := []fileBrowserSource{{"/approved/minecraft", "/data/minecraft/jv-abc123", "Minecraft Servers"}, {"/approved/backups", "/data/backups/1", "Backups"}}
+	sources := representativeFileBrowserSources()
 	args := fileBrowserContainerArgs(sources)
 	joined := strings.Join(args, " ")
-	for _, want := range []string{fileBrowserImage, "127.0.0.1:61209:8080", "label=disable", "no-new-privileges", "--cap-drop=ALL", "--cap-add=DAC_OVERRIDE", "--user 1000:1000", "source=justvoxel-filebrowser-state,target=/home/filebrowser/data", "source=/approved/minecraft,target=/data/minecraft/jv-abc123,bind-nonrecursive=true"} {
+	for _, want := range []string{fileBrowserImage, "127.0.0.1:61209:8080", "label=disable", "no-new-privileges", "--cap-drop=ALL", "--cap-add=DAC_OVERRIDE", "--user 1000:1000"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("missing %q in %s", want, joined)
 		}
 	}
-	for _, forbidden := range []string{":Z", ":z", "--privileged", "--network=host", "0.0.0.0:61209", "source=/,", "source=/etc,"} {
+	var mounts []string
+	var capabilities []string
+	for i, arg := range args {
+		if arg == "--mount" {
+			mounts = append(mounts, args[i+1])
+		}
+		if strings.HasPrefix(arg, "--cap-add") {
+			capabilities = append(capabilities, arg)
+		}
+	}
+	if !reflect.DeepEqual(capabilities, []string{"--cap-add=DAC_OVERRIDE"}) {
+		t.Fatalf("unexpected capabilities: %v", capabilities)
+	}
+	wantMounts := []string{
+		"type=volume,source=justvoxel-filebrowser-state,target=/home/filebrowser/data",
+		"type=bind,source=" + fileBrowserRuntimeConfig + ",target=/etc/filebrowser/config.yaml,ro=true",
+		"type=bind,source=/approved/minecraft,target=/data/minecraft/jv-abc123,bind-nonrecursive=true",
+		"type=bind,source=/approved/backups,target=/data/backups/1,bind-nonrecursive=true",
+		"type=bind,source=/var/mnt,target=/data/mounted/var-mnt,bind-propagation=rslave",
+		"type=bind,source=/mnt,target=/data/mounted/mnt,bind-propagation=rslave",
+		"type=bind,source=/media,target=/data/mounted/media,bind-propagation=rslave",
+		"type=bind,source=/run/media,target=/data/mounted/run-media,bind-propagation=rslave",
+		"type=bind,source=/usr,target=/data/system/usr,ro=true",
+		"type=bind,source=/boot,target=/data/system/boot,ro=true",
+	}
+	if !reflect.DeepEqual(mounts, wantMounts) {
+		t.Fatalf("mount policy changed: got %v, want %v", mounts, wantMounts)
+	}
+	for _, forbidden := range []string{":Z", ":z", "--privileged", "--network=host", "--device", "0.0.0.0:61209", "source=/,", "source=/etc,"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("unsafe container argument %q", forbidden)
 		}
@@ -176,22 +218,97 @@ func TestFileBrowserContainerContract(t *testing.T) {
 	}
 	server := config["server"].(map[string]any)
 	entries := server["sources"].([]any)
-	if len(entries) != 2 {
+	if len(entries) != len(sources) {
 		t.Fatal("wrong source count")
 	}
-	for _, raw := range entries {
-		source := raw.(map[string]any)["config"].(map[string]any)
-		if source["private"] != true || source["defaultEnabled"] != true {
-			t.Fatal("source is public or unavailable")
+	for i, raw := range entries {
+		entry := raw.(map[string]any)
+		if entry["path"] != sources[i].Path || entry["name"] != sources[i].Name {
+			t.Fatalf("source identity changed: %v", entry)
 		}
-		if source["rules"].([]any)[0].(map[string]any)["ignoreSymlinks"] != true {
-			t.Fatal("symlinks allowed")
+		source := entry["config"].(map[string]any)
+		readOnly := i >= 6
+		if source["readOnly"] != readOnly || source["private"] != true || source["defaultEnabled"] != true || source["defaultUserScope"] != "/" {
+			t.Fatalf("incorrect source policy: %v", source)
 		}
-		for _, permission := range []string{"view", "download", "create", "modify", "delete", "configured"} {
-			if source["defaultPermissions"].(map[string]any)[permission] != true {
-				t.Fatalf("missing %s", permission)
+		if !reflect.DeepEqual(source["rules"], []any{map[string]any{"ignoreSymlinks": true}}) {
+			t.Fatal("unexpected source rules")
+		}
+		wantPermissions := map[string]any{"view": true, "download": true, "configured": true, "create": !readOnly, "modify": !readOnly, "delete": !readOnly}
+		if !reflect.DeepEqual(source["defaultPermissions"], wantPermissions) {
+			t.Fatalf("incorrect permissions for %s: %v", sources[i].Host, source["defaultPermissions"])
+		}
+	}
+}
+
+func TestAutomaticFileBrowserSources(t *testing.T) {
+	root := t.TempDir()
+	directory, err := os.Lstat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	symlink, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "file")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	regular, err := os.Lstat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := representativeFileBrowserSources()[2:]
+	for _, scenario := range []string{"all directories", "symlink", "missing", "regular file", "inaccessible"} {
+		t.Run(scenario, func(t *testing.T) {
+			var visited []string
+			sources, err := automaticFileBrowserSources(func(path string) (os.FileInfo, error) {
+				visited = append(visited, path)
+				switch scenario {
+				case "symlink":
+					return symlink, nil
+				case "missing":
+					return nil, &os.PathError{Op: "lstat", Path: path, Err: os.ErrNotExist}
+				case "regular file":
+					return regular, nil
+				case "inaccessible":
+					return nil, &os.PathError{Op: "lstat", Path: path, Err: os.ErrPermission}
+				default:
+					return directory, nil
+				}
+			})
+			if scenario == "inaccessible" {
+				if !errors.Is(err, os.ErrPermission) {
+					t.Fatalf("lost inspection error: %v", err)
+				}
+				return
 			}
-		}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(visited, []string{"/var/mnt", "/mnt", "/media", "/run/media", "/usr", "/boot"}) {
+				t.Fatalf("automatic root allowlist changed: %v", visited)
+			}
+			if scenario == "all directories" {
+				if !reflect.DeepEqual(sources, want) {
+					t.Fatalf("automatic source policy: got %#v, want %#v", sources, want)
+				}
+			} else if len(sources) != 0 {
+				t.Fatalf("accepted %s roots: %#v", scenario, sources)
+			}
+			for _, source := range sources {
+				for _, forbidden := range []string{"/", "/etc", "/root", "/home", "/proc", "/sys", "/dev", "/run", "/var", "/var/lib", "/var/lib/containers", "/var/lib/justvoxel", "/var/lib/justvoxel-web", "/var/lib/justvoxel-instance-runtime"} {
+					if source.Host == forbidden {
+						t.Fatalf("exposed forbidden root: %s", source.Host)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -222,6 +339,37 @@ func TestFileBrowserRejectsPrivateAndSymlinkRoots(t *testing.T) {
 	}
 	if safeFileBrowserRoot(filepath.Join(link, "data")) == nil {
 		t.Fatal("accepted symlink source ancestor")
+	}
+}
+
+func TestFileBrowserSourcesWithoutMinecraft(t *testing.T) {
+	b := &instanceRuntimeBackend{
+		root:     filepath.Join(t.TempDir(), "private"),
+		quadlets: t.TempDir(),
+	}
+	oldBackend, oldDiscovery := instanceRuntimes, discoverAutomaticFileBrowserSources
+	t.Cleanup(func() {
+		instanceRuntimes, discoverAutomaticFileBrowserSources = oldBackend, oldDiscovery
+	})
+	instanceRuntimes = b
+	want := []fileBrowserSource{
+		{Host: "/mnt", Path: "/data/mounted/mnt", Name: "Mounts", Propagation: "rslave"},
+	}
+	discoverAutomaticFileBrowserSources = func() ([]fileBrowserSource, error) {
+		return want, nil
+	}
+	if records, err := b.records(); err != nil || len(records) != 0 {
+		t.Fatalf("expected no configured Minecraft sources: %#v, %v", records, err)
+	}
+	sources, err := fileBrowserSources(context.Background())
+	if err != nil {
+		if strings.Contains(err.Error(), "No configured Minecraft data is available") {
+			t.Fatalf("automatic sources still require Minecraft: %v", err)
+		}
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(sources, want) {
+		t.Fatalf("automatic sources = %#v, want %#v", sources, want)
 	}
 }
 
@@ -278,17 +426,27 @@ func TestFileBrowserSourcesUseAuthoritativePaths(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(sources) != len(f.configs)+1 {
+			automatic, err := automaticFileBrowserSources(os.Lstat)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sources) != len(f.configs)+1+len(automatic) {
 				t.Fatalf("unexpected sources: %#v", sources)
 			}
 			for _, source := range sources[:len(f.configs)] {
+				if !source.NonRecursive || source.ReadOnly || source.Propagation != "" {
+					t.Fatalf("curated source policy changed: %#v", source)
+				}
 				id := filepath.Base(source.Path)
 				if source.Host != filepath.Join(f.snapshot.StorageRoot, "minecraft-instances", id, "data") {
 					t.Fatalf("exposed storage outside exact instance data: %#v", source)
 				}
 			}
-			if source := sources[len(f.configs)]; source.Host != backupRoot {
+			if source := sources[len(f.configs)]; source.Host != backupRoot || !source.NonRecursive || source.ReadOnly || source.Propagation != "" {
 				t.Fatalf("backup source = %#v, want %s", source, backupRoot)
+			}
+			if !reflect.DeepEqual(sources[len(f.configs)+1:], automatic) {
+				t.Fatal("automatic sources were not appended to curated sources")
 			}
 		})
 	}

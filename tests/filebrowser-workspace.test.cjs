@@ -20,7 +20,7 @@ test('Files follows Migration in the existing two-column Storage & Data grid', (
 test('Files uses shared workspace header controls in approved order', () => {
   const workspace = header.match(/<dialog[^>]*data-workspace-window="files"[\s\S]*?<\/dialog>/)[0];
   assert.deepEqual([...workspace.matchAll(/data-files-(settings-toggle|refresh|close)/g)].map(m=>m[1]), ['settings-toggle','refresh','close']);
-  assert.match(workspace, /system-monitor-header-button[^>]*data-files-settings-toggle[^>]*>Settings<\/button>/);
+  assert.match(workspace, /system-monitor-header-button system-monitor-settings-button[^>]*data-files-settings-toggle[^>]*>Settings<\/button>/);
   assert.match(workspace, /workspace-header-refresh[^>]*data-files-refresh/);
   assert.match(workspace, /workspace-header-close[^>]*data-files-close[^>]*aria-label="Close Files"><svg[^>]*[\s\S]*?aria-hidden="true"/);
   assert.doesNotMatch(workspace,/system-monitor-profile|date-time-automatic|date-time-switch|data-files-mode|data-files-settings-dialog/);
@@ -56,6 +56,7 @@ test('container image, persistence, isolated listener and mounts follow the cont
   assert.match(container,/127\.0\.0\.1:61209:8080/);
   assert.match(container,/source=justvoxel-filebrowser-state,target=\/home\/filebrowser\/data/);
   assert.match(container,/--cap-drop=ALL/);
+  assert.match(container,/--cap-add=DAC_OVERRIDE/);
   assert.match(container,/--user", "1000:1000/);
   assert.match(container,/no-new-privileges/);
   assert.match(container,/label=disable/);
@@ -70,8 +71,55 @@ test('container image, persistence, isolated listener and mounts follow the cont
   assert.match(unit,/management-agent filebrowser-run/);
   assert.equal(config.server.database.path,'/home/filebrowser/data/database.sqlite');
 });
+test('automatic Files roots have the exact mounted-storage and system inspection policies', () => {
+  const discovery = container.slice(container.indexOf('func automaticFileBrowserSources('), container.indexOf('// Preserve registered committed'));
+  // Read each complete named policy record, rather than accepting unrelated path strings.
+  const records = [...discovery.matchAll(/\{Host: "([^"]+)", Path: "([^"]+)", Name: "([^"]+)"([^{}]*)\}/g)]
+    .map(([,host,path,name,policy]) => ({host,path,name,policy:policy.trim()}));
+  assert.deepEqual(records, [
+    {host:'/var/mnt',path:'/data/mounted/var-mnt',name:'Mounted storage',policy:', Propagation: "rslave"'},
+    {host:'/mnt',path:'/data/mounted/mnt',name:'Mounts',policy:', Propagation: "rslave"'},
+    {host:'/media',path:'/data/mounted/media',name:'Media',policy:', Propagation: "rslave"'},
+    {host:'/run/media',path:'/data/mounted/run-media',name:'Removable media',policy:', Propagation: "rslave"'},
+    {host:'/usr',path:'/data/system/usr',name:'System /usr (read-only)',policy:', ReadOnly: true'},
+    {host:'/boot',path:'/data/system/boot',name:'System /boot (read-only)',policy:', ReadOnly: true'},
+  ]);
+  assert.match(discovery, /info, err := lstat\(source.Host\)/);
+  assert.match(discovery, /if os.IsNotExist\(err\) \{\s*continue/);
+  assert.match(discovery, /if info.Mode\(\)&os.ModeSymlink != 0 \|\| !info.IsDir\(\) \{\s*continue/);
+  assert.doesNotMatch(discovery, /Mkdir|MkdirAll/);
+  const sources = container.slice(container.indexOf('func fileBrowserSources('), container.indexOf('func fileBrowserContainerArgs('));
+  assert.match(sources, /fileBrowserSource\{Host: record.Storage.DataPath, Path: "\/data\/minecraft\/" \+ record.Runtime.ID, Name: name, NonRecursive: true\}/);
+  assert.match(sources, /fileBrowserSource\{Host: root, Path: fmt.Sprintf\("\/data\/backups\/%d", i\+1\), Name: name, NonRecursive: true\}/);
+  assert.match(container, /var discoverAutomaticFileBrowserSources = func\(\) \(\[\]fileBrowserSource, error\) \{\s*return automaticFileBrowserSources\(os.Lstat\)\s*\}/);
+  assert.match(sources, /automatic, err := discoverAutomaticFileBrowserSources\(\)/);
+  assert.match(sources, /sources = append\(sources, automatic\.\.\.\)\s*if len\(sources\) == 0 \{\s*return nil, errors.New\("No File Browser sources are available"\)\s*\}\s*return sources, nil/);
+  assert.equal((sources.match(/if len\(sources\) == 0/g) || []).length, 1);
+  assert.doesNotMatch(container, /No configured Minecraft data is available/);
+  const mounts = container.slice(container.indexOf('for _, source := range sources {', container.indexOf('func fileBrowserContainerArgs(')), container.indexOf('return append(args, fileBrowserImage)'));
+  assert.match(mounts, /mount := "type=bind,source=" \+ source.Host \+ ",target=" \+ source.Path/);
+  assert.match(mounts, /if source.NonRecursive \{\s*mount \+= ",bind-nonrecursive=true"\s*\}/);
+  assert.match(mounts, /if source.Propagation != "" \{\s*mount \+= ",bind-propagation=" \+ source.Propagation\s*\}/);
+  assert.match(mounts, /if source.ReadOnly \{\s*mount \+= ",ro=true"\s*\}/);
+  const render = container.slice(container.indexOf('func renderFileBrowserConfig('), container.indexOf('func runFileBrowserContainer('));
+  assert.match(render, /"readOnly":\s*source.ReadOnly/);
+  for (const permission of ['create','modify','delete']) {
+    assert.ok(new RegExp(`"${permission}":\\s*!source.ReadOnly`).test(render));
+  }
+  for (const permission of ['view','download','configured']) {
+    assert.ok(new RegExp(`"${permission}":\\s*true`).test(render));
+  }
+  assert.match(render, /"defaultUserScope":\s*"\/"/);
+  const unit = read('system_files/usr/lib/systemd/system/justvoxel-filebrowser.service');
+  for (const forbidden of [/--make-(?:rshared|shared|rslave|slave)/, /\bMS_(?:SHARED|SLAVE)\b/, /--device/, /--privileged/, /--network=host/, /:[zZ]\b/]) {
+    assert.doesNotMatch(container + manager + unit, forbidden);
+  }
+});
+
 test('supported proxy auth disables second login and internal settings', () => {
   assert.equal(config.http.baseURL,'/files/');
+  assert.equal(config.http.disableWebDAV,true);
+  assert.deepEqual(config.userDefaults.account.permissions,{admin:false,share:false,api:false});
   assert.equal(config.http.trustProxyHeaders,true);
   assert.equal(config.auth.methods.proxy.enabled,true);
   assert.equal(config.auth.methods.proxy.header,'X-JustVoxel-User');

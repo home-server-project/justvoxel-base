@@ -378,7 +378,7 @@ body.role-operator .control-tile.nav-operator-only{display:flex!important}
 body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-header-button{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3b454e;border-radius:10px;background:#232b31;color:#dce7e0;font-size:1.25rem;line-height:1}
 .system-monitor-header-button:hover,.system-monitor-header-button:focus-visible{background:#303941;border-color:#52616d;color:#fff}
-.system-monitor-header .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;padding:0 .75rem;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}
+.workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;padding:0 .75rem;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}
 .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;border-color:#4f8b69;background:#25382e;color:#c8f2d7;font-size:.86rem;line-height:1;font-weight:700;white-space:nowrap}
 .workspace-header-refresh:hover,.workspace-header-refresh:focus-visible{border-color:#78c99d;background:#2f4a39;color:#fff;box-shadow:0 0 0 2px #78c99d33}
 .workspace-header-close{flex:none;width:36px;height:36px}
