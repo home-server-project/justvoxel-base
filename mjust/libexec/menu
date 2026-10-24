@@ -21,6 +21,51 @@ refresh_inventory() {
     if [[ ${count} == 0 ]]; then configured=no; else configured=yes; fi
 }
 
+# Return both values to the caller; labels are never used as server authority.
+choose_instance() {
+    local -n selected_id=$1 selected_name=$2
+    selected_id='' selected_name=''
+    local inventory rows row choice index
+    local -a client=(/usr/libexec/justvoxel/mjust/api-client) ids=() names=() options=()
+    if (( EUID != 0 )); then client=(sudo "${client[@]}"); fi
+    if ! inventory="$("${client[@]}" GET /v1/minecraft/instances)" ||
+       ! rows="$(jq -cers '
+            select(length == 1) | .[0] | select(type == "object") |
+            .instances | select(type == "array") |
+            select(all(.[]; type == "object" and
+                (.id | type == "string" and test("^jv-[a-z0-9]{6,12}$")) and
+                (.display_name | type == "string" and length > 0))) |
+            select((map(.id) | unique | length) == length)
+        ' <<<"${inventory}" 2>/dev/null)"; then
+        echo 'Unable to load Minecraft servers.' >&2
+        jui_pause
+        return 1
+    fi
+    while IFS= read -r row; do
+        ids+=("$(jq -r '.id' <<<"${row}")")
+        names+=("$(jq -r '.display_name' <<<"${row}")")
+        options+=("$(jq -r '"\(.display_name) (\(.id))"' <<<"${row}")")
+    done < <(jq -c '.[]' <<<"${rows}")
+    if (( ${#ids[@]} == 0 )); then
+        echo 'No Minecraft servers are registered.' >&2
+        jui_pause
+        return 1
+    fi
+    if (( ${#ids[@]} == 1 )); then
+        selected_id=${ids[0]} selected_name=${names[0]}
+        return 0
+    fi
+    choice="$(jui_choose 'Choose Minecraft server' "${options[@]}" 'Back')" || return 1
+    [[ ${choice} != Back ]] || return 1
+    for index in "${!options[@]}"; do
+        if [[ ${choice} == "${options[index]}" ]]; then
+            selected_id=${ids[index]} selected_name=${names[index]}
+            return 0
+        fi
+    done
+    return 1
+}
+
 preview() {
     case "${1:-}" in
         setup) echo -e 'First setup\nConfigure Minecraft, storage and backups for a new server.' ;;
@@ -92,36 +137,54 @@ run_and_pause() {
     return "${rc}"
 }
 
+instance_command() {
+    local instance_id instance_name
+    choose_instance instance_id instance_name || return 0
+    local -r instance_id instance_name
+    if [[ $1 == logs ]]; then
+        /usr/bin/mjust logs "${instance_id}" || true
+    else
+        run_and_pause /usr/bin/mjust "$1" "${instance_id}" || true
+    fi
+}
+
 service_menu() {
-    local choice
-    choice="$(jui_choose 'Minecraft service' 'Start Minecraft' 'Stop Minecraft' 'Restart Minecraft' 'Back')" || return 0
-    case "${choice}" in
-        'Start Minecraft') run_and_pause /usr/bin/mjust start || true ;;
-        'Stop Minecraft') run_and_pause /usr/bin/mjust stop || true ;;
-        'Restart Minecraft') run_and_pause /usr/bin/mjust restart || true ;;
-        *) return 0 ;;
-    esac
+    local choice instance_id instance_name
+    choose_instance instance_id instance_name || return 0
+    local -r instance_id instance_name
+    while true; do
+        choice="$(jui_choose "Minecraft service - ${instance_name}" 'Start Minecraft' 'Stop Minecraft' 'Restart Minecraft' 'Back')" || return 0
+        case "${choice}" in
+            'Start Minecraft') run_and_pause /usr/bin/mjust start "${instance_id}" || true ;;
+            'Stop Minecraft') run_and_pause /usr/bin/mjust stop "${instance_id}" || true ;;
+            'Restart Minecraft') run_and_pause /usr/bin/mjust restart "${instance_id}" || true ;;
+            *) return 0 ;;
+        esac
+    done
 }
 
 configure_menu() {
-    sudo /usr/libexec/justvoxel/mjust/configure || true
+    local instance_id instance_name
+    choose_instance instance_id instance_name || return 0
+    local -r instance_id instance_name
+    sudo /usr/libexec/justvoxel/mjust/configure --instance "${instance_id}" || true
 }
 
 bedrock_enabled() {
-    sudo /usr/libexec/justvoxel/mjust/whitelist bedrock-enabled >/dev/null 2>&1
+    sudo /usr/libexec/justvoxel/mjust/whitelist --instance "$1" bedrock-enabled >/dev/null 2>&1
 }
 
 whitelist_player_type() {
-    local operation="$1" type name
+    local operation="$1" instance_id="$2" type name
     type="$(jui_choose "$([[ ${operation} == add ]] && printf 'Add player' || printf 'Remove player')" 'Java Edition' 'Bedrock / Xbox' 'Back')" || return 0
     case "${type}" in
         'Java Edition')
             name="$(jui_input 'Java username')" || return 0
             [[ -n ${name} ]] || return 0
-            run_and_pause /usr/bin/mjust "whitelist-${operation}-java" "${name}" || true
+            run_and_pause /usr/bin/mjust "whitelist-${operation}-java" "${name}" "${instance_id}" || true
             ;;
         'Bedrock / Xbox')
-            if ! bedrock_enabled; then
+            if ! bedrock_enabled "${instance_id}"; then
                 echo 'Bedrock cross-play is disabled.'
                 echo 'Enable it from Configure Minecraft -> Other safe Minecraft settings first.'
                 jui_pause
@@ -129,38 +192,49 @@ whitelist_player_type() {
             fi
             name="$(jui_input 'Bedrock / Xbox gamertag')" || return 0
             [[ -n ${name} ]] || return 0
-            run_and_pause /usr/bin/mjust "whitelist-${operation}-bedrock" "${name}" || true
+            run_and_pause /usr/bin/mjust "whitelist-${operation}-bedrock" "${name}" "${instance_id}" || true
             ;;
         *) return 0 ;;
     esac
 }
 
 whitelist_menu() {
-    local choice
+    local choice instance_id instance_name
+    choose_instance instance_id instance_name || return 0
+    local -r instance_id instance_name
     while true; do
-        choice="$(jui_choose 'Whitelist' 'Show whitelist' 'Add player' 'Remove player' 'Back')" || return 0
+        choice="$(jui_choose "Whitelist - ${instance_name}" 'Show whitelist' 'Add player' 'Remove player' 'Back')" || return 0
         case "${choice}" in
-            'Show whitelist') run_and_pause /usr/bin/mjust whitelist-list || true ;;
-            'Add player') whitelist_player_type add ;;
-            'Remove player') whitelist_player_type remove ;;
+            'Show whitelist') run_and_pause /usr/bin/mjust whitelist-list "${instance_id}" || true ;;
+            'Add player') whitelist_player_type add "${instance_id}" ;;
+            'Remove player') whitelist_player_type remove "${instance_id}" ;;
             'Back') return 0 ;;
         esac
     done
 }
 
 backup_menu() {
-    local choice
+    local choice instance_id instance_name
+    choose_instance instance_id instance_name || return 0
+    local -r instance_id instance_name
     while true; do
-        choice="$(jui_choose 'Backups' 'Create backup now' 'Restore Minecraft data' 'Restore full Minecraft data' 'Automatic backup settings' 'Backup storage location' 'Back')" || return 0
+        choice="$(jui_choose "Backups - ${instance_name}" 'Create backup now' 'Restore Minecraft data' 'Restore full Minecraft data' 'Automatic backup settings' 'Backup storage location' 'Back')" || return 0
         case "${choice}" in
-            'Create backup now') run_and_pause /usr/bin/mjust backup || true ;;
-            'Restore Minecraft data') run_and_pause /usr/bin/mjust restore || true ;;
-            'Restore full Minecraft data') run_and_pause /usr/bin/mjust restore-full || true ;;
-            'Automatic backup settings') sudo /usr/libexec/justvoxel/mjust/configure backup || true ;;
+            'Create backup now') run_and_pause /usr/bin/mjust backup "${instance_id}" || true ;;
+            'Restore Minecraft data') run_and_pause /usr/bin/mjust restore "${instance_id}" || true ;;
+            'Restore full Minecraft data') run_and_pause /usr/bin/mjust restore-full "${instance_id}" || true ;;
+            'Automatic backup settings') sudo /usr/libexec/justvoxel/mjust/configure --instance "${instance_id}" backup || true ;;
             'Backup storage location') sudo /usr/libexec/justvoxel/mjust/storage-provision backup || true ;;
             'Back') return 0 ;;
         esac
     done
+}
+
+migration_instance() {
+    local instance_id instance_name
+    choose_instance instance_id instance_name || return 0
+    local -r instance_id instance_name
+    run_and_pause sudo "/usr/libexec/justvoxel/mjust/migration-$1" --instance "${instance_id}" || true
 }
 
 migration_menu() {
@@ -168,8 +242,8 @@ migration_menu() {
     while true; do
         choice="$(jui_choose 'Migration' 'Export server' 'Import server' 'Recover / finalize interrupted import' 'Back')" || return 0
         case "${choice}" in
-            'Export server') run_and_pause /usr/bin/mjust export || true ;;
-            'Import server') run_and_pause /usr/bin/mjust import || true ;;
+            'Export server') migration_instance export ;;
+            'Import server') migration_instance import ;;
             'Recover / finalize interrupted import') run_and_pause /usr/bin/mjust migration-recover || true ;;
             'Back') return 0 ;;
         esac
@@ -351,17 +425,17 @@ while true; do
     case "${action}" in
         setup) run_and_pause /usr/bin/mjust setup || true ;;
         status) run_and_pause /usr/bin/mjust status || true ;;
-        players) run_and_pause /usr/bin/mjust players || true ;;
+        players) instance_command players ;;
         configure) configure_menu ;;
         service) service_menu ;;
         whitelist) whitelist_menu ;;
         backups) backup_menu ;;
         migration) migration_menu ;;
         storage) storage_menu ;;
-        update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
+        update) instance_command update-minecraft ;;
         system) system_menu ;;
         validate) run_and_pause /usr/bin/mjust validate || true ;;
-        logs) /usr/bin/mjust logs || true ;;
+        logs) instance_command logs ;;
         advanced) advanced_menu ;;
         exit) exit 0 ;;
         *) echo 'Unknown menu selection.' >&2 ;;

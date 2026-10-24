@@ -80,7 +80,7 @@ for id in setup status players configure service whitelist backups migration sto
 done
 
 for forbidden in '/etc/containers/systemd/minecraft.container' 'minecraft-jv-' '/v1/admin/configuration' '.instances[0]' 'jv_select_registered_instance'; do
-    if grep -Fq "${forbidden}" "${menu}"; then fail "menu inventory must not use fallback authority or select a server: ${forbidden}"; fi
+    if grep -Fq "${forbidden}" "${menu}"; then fail "menu must not use fallback authority or the direct-command selector: ${forbidden}"; fi
 done
 grep -Fq 'local -a client=(/usr/libexec/justvoxel/mjust/api-client)' "${menu}" || fail 'menu must use the shared API client'
 grep -Fq 'if (( EUID != 0 )); then client=(sudo "${client[@]}"); fi' "${menu}" || fail 'unprivileged menu inventory must use sudo'
@@ -139,9 +139,258 @@ grep -Fq 'Management API / Minecraft inventory unavailable.' "${menu}" || fail '
     done
 )
 
+# Only the dedicated operation picker selects a registered immutable ID.
+# Exercise real menu functions/dispatch with fixture transport and commands.
+(
+    fixture_dir="$(mktemp -d)"
+    trap 'rm -rf -- "${fixture_dir}"' EXIT
+    fixture_source() {
+        sed 's@/usr/libexec/justvoxel/mjust/api-client@menu_api_client@g; s@/usr/bin/mjust@menu_mjust@g; s/EUID/menu_test_euid/g'
+    }
+    source <(sed -n '/^[a-z_]*() {/,/^}/p' "${menu}" | fixture_source)
+    source <({
+        echo 'fixture_dispatch() {'
+        sed -n '/^    case "${action}" in/,/^    esac/p' "${menu}"
+        echo '}'
+    } | fixture_source)
+    menu_api_client() {
+        [[ $* == 'GET /v1/minecraft/instances' ]] || fail 'picker used incorrect inventory authority'
+        echo "direct $*" >> "${fixture_dir}/api"
+        printf '%s' "${inventory_response}"
+        return "${inventory_rc}"
+    }
+    sudo() {
+        if [[ $1 == menu_api_client ]]; then
+            echo "sudo $*" >> "${fixture_dir}/api"
+            shift
+            menu_api_client "$@"
+        else
+            echo "sudo $*" >> "${fixture_dir}/commands"
+        fi
+    }
+    menu_mjust() { echo "mjust $*" >> "${fixture_dir}/commands"; }
+    jui_pause() { echo pause >> "${fixture_dir}/pauses"; }
+    jui_input() { printf 'Alex'; }
+    jui_choose() {
+        printf '%s\n' "$@" >> "${fixture_dir}/selectors"
+        local answer
+        IFS= read -r answer < "${fixture_dir}/choices" || fail 'unexpected selector'
+        sed -i '1d' "${fixture_dir}/choices"
+        printf '%s' "${answer}"
+        return "${selector_rc}"
+    }
+    jv_variant_is_hws() { return 0; }
+    reset_fixture() {
+        local file
+        for file in api commands selectors choices pauses; do : > "${fixture_dir}/${file}"; done
+        inventory_rc=0 selector_rc=0 configured=yes
+    }
+    queue() { printf '%s\n' "$@" > "${fixture_dir}/choices"; }
+    assert_commands() {
+        [[ $(cat "${fixture_dir}/commands") == "$1" ]] || fail "incorrect menu dispatch: $(cat "${fixture_dir}/commands")"
+    }
+    assert_pickers() {
+        local count
+        count="$(grep -Fxc 'Choose Minecraft server' "${fixture_dir}/selectors" || true)"
+        [[ ${count} == "$1" ]] || fail "expected $1 picker(s), got ${count}"
+        [[ ! -s ${fixture_dir}/choices ]] || fail 'menu returned before consuming expected choices'
+    }
+    many='{"instances":[{"id":"jv-abc123","display_name":"Family Survival"},{"id":"jv-def456","display_name":"Kids Creative"}]}'
+    selected='Kids Creative (jv-def456)'
+    for menu_test_euid in 0 1000; do
+        reset_fixture
+        inventory_response='{"instances":[]}'
+        action=players
+        fixture_dispatch
+        assert_commands ''
+        assert_pickers 0
+        [[ ! -s ${fixture_dir}/selectors ]] || fail 'zero servers opened a selector'
+
+        reset_fixture
+        inventory_response='{"instances":[{"id":"jv-def456","display_name":"Kids Creative"}]}'
+        picked_id=stale picked_name=stale
+        choose_instance picked_id picked_name || fail 'single registered server was rejected'
+        [[ ${picked_id} == jv-def456 && ${picked_name} == 'Kids Creative' ]] || fail 'single server identity/name lost'
+        [[ ! -s ${fixture_dir}/selectors ]] || fail 'single server displayed a picker'
+        expected='direct GET /v1/minecraft/instances'
+        if (( menu_test_euid != 0 )); then expected=$'sudo menu_api_client GET /v1/minecraft/instances\n'"${expected}"; fi
+        [[ $(cat "${fixture_dir}/api") == "${expected}" ]] || fail 'picker used incorrect root/sudo transport'
+        reset_fixture
+        action=players
+        fixture_dispatch
+        assert_commands 'mjust players jv-def456'
+        assert_pickers 0
+
+
+        reset_fixture
+        inventory_response=${many}
+        queue "${selected}"
+        choose_instance picked_id picked_name || fail 'explicit server choice rejected'
+        [[ ${picked_id} == jv-def456 && ${picked_name} == 'Kids Creative' ]] || fail 'choice did not map to exact registered ID/name'
+        expected=$'Choose Minecraft server\nFamily Survival (jv-abc123)\nKids Creative (jv-def456)\nBack'
+        [[ $(cat "${fixture_dir}/selectors") == "${expected}" ]] || fail 'server picker labels/order incorrect'
+    done
+    # Exact labels map to IDs even with duplicate names or reordered inventory.
+    for inventory_response in \
+        '{"instances":[{"id":"jv-def456","display_name":"Kids Creative"},{"id":"jv-abc123","display_name":"Family Survival"}]}' \
+        '{"instances":[{"id":"jv-abc123","display_name":"Kids Creative"},{"id":"jv-def456","display_name":"Kids Creative"}]}'; do
+        reset_fixture
+        queue "${selected}"
+        choose_instance picked_id picked_name || fail 'reordered/duplicate-name choice rejected'
+        [[ ${picked_id} == jv-def456 ]] || fail 'picker guessed by position or display name'
+    done
+    for inventory_response in \
+        'bad JSON' '{}' '[]' 'null' '{"instances":null}' '{"instances":{}}' \
+        '{"instances":[null]}' '{"instances":["jv-abc123"]}' \
+        '{"instances":[{"id":"bad","display_name":"Name"}]}' \
+        '{"instances":[{"id":123,"display_name":"Name"}]}' \
+        '{"instances":[{"id":"jv-abc123","display_name":""}]}' \
+        '{"instances":[{"id":"jv-abc123","display_name":123}]}' \
+        '{"instances":[{"id":"jv-abc123"}]}' \
+        '{"instances":[{"id":"jv-abc123","display_name":"A"},{"id":"jv-abc123","display_name":"B"}]}' \
+        '{"instances":[{"id":"jv-abc123","display_name":"A"},{}]}' \
+        '{"instances":[]} {"instances":[]}'; do
+        reset_fixture
+        action=players
+        fixture_dispatch
+        assert_commands ''
+        [[ ! -s ${fixture_dir}/selectors ]] || fail 'invalid inventory opened a selector'
+    done
+    reset_fixture
+    inventory_response=${many} inventory_rc=1
+    fixture_dispatch
+    assert_commands ''
+    [[ ! -s ${fixture_dir}/selectors ]] || fail 'API failure opened a selector'
+
+    # Back, cancellation and unrecognized output never dispatch or keep stale IDs.
+    for answer in Back 'Kids Creative' 'Forged (jv-def456)'; do
+        reset_fixture
+        queue "${answer}"
+        picked_id=stale picked_name=stale
+        if choose_instance picked_id picked_name; then fail 'unrecognized/cancelled selection succeeded'; fi
+        [[ -z ${picked_id} && -z ${picked_name} ]] || fail 'cancelled picker retained stale identity'
+    done
+    for action in players configure service whitelist backups update logs; do
+        reset_fixture
+        queue Back
+        fixture_dispatch
+        assert_commands ''
+        assert_pickers 1
+    done
+    reset_fixture
+    selector_rc=1
+    queue "${selected}"
+    action=players
+    fixture_dispatch
+    assert_commands ''
+
+    reset_fixture
+    queue "${selected}" 'Start Minecraft' 'Stop Minecraft' 'Restart Minecraft' Back
+    action=service
+    fixture_dispatch
+    assert_pickers 1
+    [[ $(grep -Fc 'direct GET' "${fixture_dir}/api") == 1 ]] || fail 'service reloaded selection inside submenu'
+    assert_commands $'mjust start jv-def456\nmjust stop jv-def456\nmjust restart jv-def456'
+    grep -Fxq 'Minecraft service - Kids Creative' "${fixture_dir}/selectors" || fail 'service title lost friendly name'
+
+    reset_fixture
+    queue "${selected}" 'Show whitelist' 'Add player' 'Java Edition' 'Remove player' 'Java Edition' \
+        'Add player' 'Bedrock / Xbox' 'Remove player' 'Bedrock / Xbox' Back
+    action=whitelist
+    fixture_dispatch
+    assert_pickers 1
+    [[ $(grep -Fc 'direct GET' "${fixture_dir}/api") == 1 ]] || fail 'whitelist reloaded selection inside submenu'
+    assert_commands $'mjust whitelist-list jv-def456\nmjust whitelist-add-java Alex jv-def456\nmjust whitelist-remove-java Alex jv-def456\nsudo /usr/libexec/justvoxel/mjust/whitelist --instance jv-def456 bedrock-enabled\nmjust whitelist-add-bedrock Alex jv-def456\nsudo /usr/libexec/justvoxel/mjust/whitelist --instance jv-def456 bedrock-enabled\nmjust whitelist-remove-bedrock Alex jv-def456'
+    grep -Fxq 'Whitelist - Kids Creative' "${fixture_dir}/selectors" || fail 'whitelist title lost friendly name'
+
+    reset_fixture
+    queue "${selected}" 'Create backup now' 'Restore Minecraft data' 'Restore full Minecraft data' \
+        'Automatic backup settings' 'Backup storage location' Back
+    action=backups
+    fixture_dispatch
+    assert_pickers 1
+    [[ $(grep -Fc 'direct GET' "${fixture_dir}/api") == 1 ]] || fail 'backups reloaded selection inside submenu'
+    assert_commands $'mjust backup jv-def456\nmjust restore jv-def456\nmjust restore-full jv-def456\nsudo /usr/libexec/justvoxel/mjust/configure --instance jv-def456 backup\nsudo /usr/libexec/justvoxel/mjust/storage-provision backup'
+    grep -Fxq 'Backups - Kids Creative' "${fixture_dir}/selectors" || fail 'backup title lost friendly name'
+
+    for action in players configure update logs; do
+        reset_fixture
+        queue "${selected}"
+        fixture_dispatch
+        assert_pickers 1
+        case ${action} in
+            configure) expected='sudo /usr/libexec/justvoxel/mjust/configure --instance jv-def456' ;;
+            update) expected='mjust update-minecraft jv-def456' ;;
+            *) expected="mjust ${action} jv-def456" ;;
+        esac
+        assert_commands "${expected}"
+        if [[ ${action} == logs || ${action} == configure ]]; then
+            [[ ! -s ${fixture_dir}/pauses ]] || fail "${action} added an unnecessary pause"
+        else
+            [[ $(cat "${fixture_dir}/pauses") == pause ]] || fail "${action} lost its pause"
+        fi
+    done
+
+    reset_fixture
+    queue 'Export server' "${selected}" 'Import server' 'Family Survival (jv-abc123)' 'Recover / finalize interrupted import' Back
+    action=migration
+    fixture_dispatch
+    assert_pickers 2
+    assert_commands $'sudo /usr/libexec/justvoxel/mjust/migration-export --instance jv-def456\nsudo /usr/libexec/justvoxel/mjust/migration-import --instance jv-abc123\nmjust migration-recover'
+    [[ $(head -n1 "${fixture_dir}/selectors") == Migration ]] || fail 'Migration selected a server before an operation'
+    reset_fixture
+    inventory_rc=1
+    queue 'Recover / finalize interrupted import' Back
+    fixture_dispatch
+    assert_pickers 0
+    assert_commands 'mjust migration-recover'
+    [[ ! -s ${fixture_dir}/api ]] || fail 'global migration recovery requested server inventory'
+    for operation in 'Export server' 'Import server'; do
+        reset_fixture
+        queue "${operation}" Back Back
+        fixture_dispatch
+        assert_commands ''
+        assert_pickers 1
+    done
+
+    # Exercise global main operations and their existing submenus with API down.
+    reset_fixture
+    inventory_rc=1
+    for action in setup status validate; do fixture_dispatch; done
+    action=system
+    queue 'System resources' 'File browser' Network UPS 'System status & updates' 'Update system' Back Back
+    fixture_dispatch
+    action=storage
+    queue 'Storage overview' 'Move Minecraft data' Back
+    fixture_dispatch
+    action=advanced
+    for operation in 'Administrator password' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'Start over / reset Minecraft'; do
+        queue "${operation}"
+        fixture_dispatch
+    done
+    queue 'Storage devices / provisioning' 'Dedicated disk / USB backup storage' 'Storage plan / devices' Back
+    fixture_dispatch
+    assert_pickers 0
+    [[ ! -s ${fixture_dir}/api ]] || fail 'global operation requested picker inventory'
+    assert_commands $'mjust setup\nmjust status\nmjust validate\nmjust resources\nmjust files\nmjust net\nmjust ups\nmjust os-status\nmjust os-update\nmjust os-status\nsudo /usr/libexec/justvoxel/mjust/storage-summary\nmjust storage-migrate\nmjust password-reset\nmjust welcome\nmjust welcome-off\nmjust welcome-on\nmjust start-over\nmjust storage-disk\nmjust storage-plan'
+)
+
+# Direct commands still use the unchanged noninteractive shared selector.
+# Existing instance-controls/configuration suites remain untouched.
+(
+    source <(sed 's@/usr/libexec/justvoxel/mjust/api-client GET /v1/minecraft/instances/runtime@direct_inventory@g' \
+        "${repo_root}/mjust/libexec/instance-selection.sh")
+    direct_inventory() { echo '{"instances":[{"id":"jv-abc123"},{"id":"jv-def456"}]}'; }
+    jui_choose() { fail 'direct selector became interactive'; }
+    if jv_select_registered_instance >/dev/null 2>&1; then fail 'direct ambiguous selection succeeded'; fi
+    [[ $(jv_select_registered_instance jv-def456) == jv-def456 ]] || fail 'direct explicit immutable ID rejected'
+    if jv_select_registered_instance 'Kids Creative' >/dev/null 2>&1; then fail 'direct selector accepted a display name'; fi
+)
+
 # Capture both main-menu selectors without invoking any appliance commands.
 (
     source <(sed -n '/^select_rich() {/,/^}/p; /^select_compact() {/,/^}/p; /^migration_menu() {/,/^}/p' "${menu}")
+    choose_instance() { fail 'main inventory/menu must not select a server'; }
     jui_terminal_cols() { echo 100; }
     jui_terminal_lines() { echo 30; }
     jui_menu_profile() { echo standard; }
@@ -184,7 +433,7 @@ grep -Fq 'Management API / Minecraft inventory unavailable.' "${menu}" || fail '
 if grep -Fq 'Import existing Minecraft server' "${menu}" || grep -Eq '^        import\)' "${menu}"; then
     fail 'dead pre-setup import menu plumbing remains'
 fi
-grep -Fq "'Import server') run_and_pause /usr/bin/mjust import || true ;;" "${menu}" || fail 'Migration import dispatch must remain available'
+grep -Fq "'Import server') migration_instance import ;;" "${menu}" || fail 'Migration import dispatch must remain available'
 grep -Fq '  mjust import' "${menu}" || fail 'direct import command must remain advertised'
 
 grep -Fq 'jui_menu_profile()' "${repo_root}/mjust/libexec/ui.sh" || fail 'shared adaptive menu profile helper missing'
@@ -209,7 +458,7 @@ grep -Fq "elif command -v fzf" "${repo_root}/mjust/libexec/ui.sh" || fail 'fzf m
 grep -Fq -- '--height=100%' "${repo_root}/mjust/libexec/ui.sh" || fail 'submenus must use full terminal height'
 grep -Fq -- '--info=hidden' "${repo_root}/mjust/libexec/ui.sh" || fail 'submenus should hide the fzf result counter'
 grep -Fq -- '--gap=1' "${repo_root}/mjust/libexec/ui.sh" || fail 'submenus must support adaptive visual gaps'
-grep -Fq "'Automatic backup settings') sudo /usr/libexec/justvoxel/mjust/configure backup || true ;;" "${menu}" || fail 'backup schedule submenu must return directly without run_and_pause'
+grep -Fq 'sudo /usr/libexec/justvoxel/mjust/configure --instance "${instance_id}" backup || true' "${menu}" || fail 'backup schedule submenu must return directly without run_and_pause'
 grep -Fq "'Backup storage location') sudo /usr/libexec/justvoxel/mjust/storage-provision backup || true ;;" "${menu}" || fail 'backup storage submenu must return directly without run_and_pause'
 
 if grep -Fq 'setup-advanced' "${menu}" || grep -Fq 'Advanced setup' "${menu}" || grep -Fq 'setup-advanced' "${justfile}"; then
@@ -279,7 +528,7 @@ if grep -Fq "'Operating system status' 'Check / download OS update'" "${menu}"; 
     fail 'duplicate OS status/update menu entries remain'
 fi
 
-grep -Fq "logs) /usr/bin/mjust logs || true ;;" "${menu}" || fail 'Logs menu does not open the API-backed Minecraft log view directly'
+grep -Fq "logs) instance_command logs ;;" "${menu}" || fail 'Logs menu does not open the API-backed Minecraft log view directly'
 grep -Fq '"${api_client}" GET "/v1/minecraft/instances/${instance_id}/logs?limit=100&format=cat"' "${logs}" || fail 'Minecraft logs must use the instance-addressed message-only Management API view'
 grep -Fq 'instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1' "${logs}" || fail 'Minecraft logs must select an immutable registered instance'
 if grep -Fq -- '--advanced' "${logs}" || grep -Fq 'journalctl ' "${logs}" || grep -Fq 'Advanced / full system log' "${menu}"; then
