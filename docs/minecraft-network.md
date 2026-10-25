@@ -127,16 +127,14 @@ new players to an arbitrary backend.
 Velocity uses `docker.io/itzg/mc-proxy:java25` with `TYPE=VELOCITY`. Java 25 is
 required by the lobby plugins and Global Whitelist 1.2.1.
 
-On every build, the image workflows resolve the latest stable
-[LimboAPI release from Modrinth project TZOteSf2](https://modrinth.com/plugin/limboapi),
-selecting the newest publication date among listed releases for Velocity.
-Alpha, beta and development releases are never used automatically. The upstream
-file size and SHA-512 are verified before accepting the downloaded JAR, and
-`limboapi-release.json` records its non-secret build provenance.
-The latest stable release is accepted without a minimum-version requirement or a
-permanent version or commit pin. There is no automatic prerelease fallback or
-version override. Acquisition requires no Elytrium Maven service or LimboAPI
-source build.
+LimboAPI stable 1.1.26 is too old for current Velocity protocol 777 / Minecraft
+26.3. JustVoxel temporarily pins Elytrium's official
+[dev-build bfef579](https://github.com/Elytrium/LimboAPI/releases/tag/dev-build),
+published specifically for Minecraft 26.3 support. Every image build acquires the
+exact release asset, verifies its size and pinned SHA-256, and records provenance
+in `limboapi-release.json`. JustVoxel does not follow arbitrary or latest
+development builds. Remove this compatibility pin when Elytrium publishes a normal
+stable release supporting the current protocol.
 
 The image workflows provision Java 25 before invoking the build helper; the
 helper reports a prerequisite error if Java is missing or cannot run.

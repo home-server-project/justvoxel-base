@@ -19,7 +19,7 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work}"' EXIT
 
-# Resolve on every invocation. No release cache or development fallback.
+# Acquire the exact verified LimboAPI compatibility pin on every image build.
 python3 "${repo_root}/build_files/resolve-limboapi-release.py" "${output}"
 limbo_jar="${output}/limboapi.jar"
 

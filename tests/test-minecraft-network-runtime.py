@@ -296,10 +296,15 @@ class LobbySourceContract(unittest.TestCase):
                 self.assertNotIn(forbidden, runtime_source.read_text())
         self.assertIn('sha256sum limboapi.jar justvoxel-lobby.jar > SHA256SUMS', build)
         self.assertIn('org/geysermc/', build)
-        for text in ['TZOteSf2', 'version_type', 'release', 'status', 'listed',
-                     'velocity', 'date_published', 'sha512', 'size',
-                     'https', 'cdn.modrinth.com', 'limboapi-release.json']:
+        for text in ['Elytrium/LimboAPI', '390180560', '568567016', 'bfef579',
+                     'limboapi-1.1.27-SNAPSHOT.jar', '3339167',
+                     '5d541984b90ca7a88eb49ca5f8cc3a803f5ecdfa6d7ed30b605b72ff94156e40',
+                     'https://api.github.com/repos/Elytrium/LimboAPI/releases/assets/568567016',
+                     'application/octet-stream', 'hashlib.sha256()', 'limboapi-release.json']:
             self.assertIn(text, acquisition)
+        for forbidden in ['modrinth', 'version_type', 'select_release', 'sha512',
+                          '/releases/latest', '/releases/tags/', '1.1.26']:
+            self.assertNotIn(forbidden, release_resolver)
         self.assertNotIn('MINIMUM_VERSION', acquisition)
         self.assertNotIn('check_compatibility', acquisition)
         self.assertLess(build.index('command -v java'), build.index('java -XshowSettings'))
@@ -320,7 +325,7 @@ class LobbySourceContract(unittest.TestCase):
                          ['com.velocitypowered.proxy.protocol.packet.PluginMessagePacket'])
         for path in [root/'velocity-lobby/build.gradle.kts',
                      root/'build_files/build-minecraft-network-plugins.sh',
-                     root/'build_files/resolve-limboapi-release.py', SOURCE,
+                     SOURCE,
                      root/'.github/workflows/build-testing.yml', root/'.github/workflows/build.yml']:
             text = path.read_text()
             self.assertNotRegex(text, r'(?i)limbo[^\n]*(?:[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{40})')
@@ -345,7 +350,7 @@ class LimboReleaseAcquisition(unittest.TestCase):
         stderr = io.StringIO()
         with mock.patch('sys.argv', [str(RESOLVER_SOURCE)]), \
                 mock.patch('sys.stderr', stderr), \
-                mock.patch('urllib.request.build_opener') as opener:
+                mock.patch('urllib.request.urlopen') as opener:
             with self.assertRaises(SystemExit) as failure:
                 exec(compile(RESOLVER_SOURCE.read_text(), str(RESOLVER_SOURCE), 'exec'), namespace)
         self.assertNotEqual(failure.exception.code, 0)
@@ -355,149 +360,131 @@ class LimboReleaseAcquisition(unittest.TestCase):
         self.assertLessEqual(len(stderr.getvalue().splitlines()), 3)
         opener.assert_not_called()
 
-    def release(self, version='1.1.26', date='2026-01-01T00:00:00Z'):
-        data = b'verified release artifact'
-        return {
-            'project_id': 'TZOteSf2', 'id': 'AbCd1234',
-            'version_number': version, 'version_type': 'release', 'status': 'listed',
-            'loaders': ['velocity'], 'date_published': date,
-            'files': [{'filename': 'limboapi.jar', 'primary': True,
-                       'url': 'https://cdn.modrinth.com/data/TZOteSf2/versions/AbCd1234/limboapi.jar',
-                       'size': len(data), 'hashes': {'sha512': hashlib.sha512(data).hexdigest()}}],
-        }
+    PIN = {
+        'source': 'github-release-asset',
+        'repository': 'Elytrium/LimboAPI',
+        'release_id': 390180560,
+        'release_tag': 'dev-build',
+        'release_name': 'Dev-build bfef579',
+        'source_revision': 'bfef579',
+        'prerelease': True,
+        'published_at': '2026-09-16T18:44:41Z',
+        'asset_id': 568567016,
+        'filename': 'limboapi-1.1.27-SNAPSHOT.jar',
+        'size': 3339167,
+        'sha256': '5d541984b90ca7a88eb49ca5f8cc3a803f5ecdfa6d7ed30b605b72ff94156e40',
+        'compatibility': 'Minecraft 26.3 / Velocity protocol 777',
+    }
+    ASSET_URL = 'https://api.github.com/repos/Elytrium/LimboAPI/releases/assets/568567016'
 
-    def test_stable_listed_velocity_only_and_newest_publication(self):
-        old = self.release('2.0.0')
-        newest = self.release('1.1.28', '2026-02-01T00:00:00.123Z')
-        excluded = []
-        for key, value in [('version_type', 'alpha'), ('version_type', 'beta'),
-                           ('version_type', 'dev'), ('status', 'unlisted'),
-                           ('status', 'archived'), ('loaders', ['paper'])]:
-            item = self.release('9.0.0', '2026-03-01T00:00:00Z')
-            item[key] = value
-            excluded.append(item)
-            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
-                resolver['select_release']([item])
-        for versions in ([old, *excluded, newest], [newest, *excluded, old]):
-            selected, _ = resolver['select_release'](versions)
-            self.assertEqual(selected['version_number'], '1.1.28')
-        with self.assertRaisesRegex(ValueError, 'Ambiguous newest'):
-            resolver['select_release']([old, self.release()])
+    def test_exact_official_compatibility_pin(self):
+        for constant, field in [('REPOSITORY', 'repository'), ('RELEASE_ID', 'release_id'),
+                                ('RELEASE_TAG', 'release_tag'), ('RELEASE_NAME', 'release_name'),
+                                ('SOURCE_REVISION', 'source_revision'), ('PUBLISHED_AT', 'published_at'),
+                                ('ASSET_ID', 'asset_id'), ('UPSTREAM_FILENAME', 'filename'),
+                                ('EXPECTED_SIZE', 'size'), ('EXPECTED_SHA256', 'sha256'),
+                                ('COMPATIBILITY', 'compatibility')]:
+            self.assertEqual(resolver[constant], self.PIN[field])
+        self.assertEqual(resolver['ASSET_URL'], self.ASSET_URL)
 
-    def test_primary_jar_selection_and_ambiguity(self):
-        item = self.release()
-        primary = item['files'][0]
-        secondary = {**primary, 'filename': 'secondary.jar', 'primary': False}
-        item['files'].append(secondary)
-        self.assertEqual(resolver['select_release']([item])[1], primary)
-        secondary['primary'] = True
-        with self.assertRaises(ValueError):
-            resolver['select_release']([item])
-        primary['primary'] = secondary['primary'] = False
-        with self.assertRaises(ValueError):
-            resolver['select_release']([item])
-        item['files'].pop()
-        del primary['primary']
-        self.assertEqual(resolver['select_release']([item])[1], primary)
-        primary['filename'] = 'notes.txt'
-        primary['primary'] = True
-        with self.assertRaises(ValueError):
-            resolver['select_release']([item])
+    def response(self, data, url=None):
+        response = io.BytesIO(data)
+        response.geturl = mock.Mock(return_value=url or self.ASSET_URL)
+        return response
 
-    def test_strict_metadata_validation(self):
-        for key, value in [('project_id', 'other'), ('id', '../bad'),
-                           ('date_published', 'yesterday'), ('date_published', '2026-01-01'),
-                           ('version_number', '1.2.0-SNAPSHOT'), ('version_number', '1.2.0-beta'),
-                           ('version_number', '01.2.0'), ('files', [])]:
-            item = self.release()
-            item[key] = value
-            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
-                resolver['select_release']([item])
-        for key, value in [('size', 0), ('size', -1), ('size', True),
-                           ('size', resolver['MAX_JAR_SIZE'] + 1), ('primary', 'true'),
-                           ('hashes', {}), ('hashes', {'sha512': 'a'*127}),
-                           ('hashes', {'sha512': 'A'*128}), ('hashes', {'sha512': 'z'*128})]:
-            item = self.release()
-            item['files'][0][key] = value
-            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
-                resolver['select_release']([item])
+    def assert_request(self, opener):
+        opener.assert_called_once()
+        args, kwargs = opener.call_args
+        self.assertEqual(len(args), 1)
+        request = args[0]
+        self.assertEqual(request.full_url, self.ASSET_URL)
+        self.assertEqual(request.get_method(), 'GET')
+        self.assertEqual(request.get_header('Accept'), 'application/octet-stream')
+        self.assertIn('JustVoxel', request.get_header('User-agent'))
+        self.assertEqual(kwargs, {'timeout': 60})
 
-    def test_untrusted_urls_and_redirects_fail_closed(self):
-        for url in ['http://cdn.modrinth.com/file.jar', 'https://evil.example/file.jar',
-                    'https://cdn.modrinth.com.evil.example/file.jar',
-                    'https://cdn.modrinth.com@evil.example/file.jar',
-                    'https://user@cdn.modrinth.com/file.jar',
-                    'https://cdn.modrinth.com:443/file.jar',
-                    'https://cdn.modrinth.com/file.jar#fragment',
-                    'https://cdn.modrinth.com/\nfile.jar']:
-            item = self.release()
-            item['files'][0]['url'] = url
-            with self.subTest(url=url), self.assertRaises(ValueError):
-                resolver['select_release']([item])
-        with self.assertRaises(ValueError):
-            resolver['NoRedirect']().redirect_request(None, None, 302, '', {}, 'https://evil.example/file.jar')
+    def test_verified_output_and_exact_provenance_acquired_each_time(self):
+        # Synthetic bytes cannot match the upstream digest; mock only its result.
+        # Keep the real pin and exact size, and check every byte fed to the hash.
+        data = b'J' * self.PIN['size']
+        for host in ['api.github.com', 'release-assets.githubusercontent.com',
+                     'objects.githubusercontent.com']:
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for _ in range(2):
+                    digest = mock.Mock()
+                    digest.hexdigest.return_value = self.PIN['sha256']
+                    with mock.patch('urllib.request.urlopen', return_value=self.response(
+                            data, f'https://{host}/asset?signature=example')) as opener, \
+                            mock.patch.object(resolver['hashlib'], 'sha256', return_value=digest):
+                        resolver['acquire'](root)
+                    self.assert_request(opener)
+                    self.assertEqual(b''.join(call.args[0] for call in digest.update.call_args_list), data)
+                    self.assertGreater(digest.update.call_count, 1)
+                    self.assertEqual((root/'limboapi.jar').read_bytes(), data)
+                    self.assertEqual(json.loads((root/'limboapi-release.json').read_text()), self.PIN)
+                    self.assertFalse((root/'limboapi.jar.part').exists())
 
-    def test_current_stable_accepted_and_newer_stable_replaces_it(self):
-        current = self.release('1.1.26')
-        self.assertEqual(resolver['select_release']([current])[0], current)
-        for version in ['1.1.28', '1.2.0', '2.0.0']:
-            newer = self.release(version, '2026-02-01T00:00:00Z')
-            for versions in ([current, newer], [newer, current]):
-                with self.subTest(version=version, versions=versions):
-                    self.assertEqual(resolver['select_release'](versions)[0], newer)
+    def test_untrusted_final_urls_fail_before_reading_bytes(self):
+        for url in ['http://release-assets.githubusercontent.com/asset',
+                    'https://evil.example/asset',
+                    'https://release-assets.githubusercontent.com.evil.example/asset',
+                    'https://api.github.com@evil.example/asset',
+                    'https://user@api.github.com/asset',
+                    'https://api.github.com:443/asset']:
+            with self.subTest(url=url), tempfile.TemporaryDirectory() as directory:
+                response = self.response(b'untrusted', url)
+                response.read = mock.Mock(side_effect=AssertionError('must validate URL first'))
+                with mock.patch('urllib.request.urlopen', return_value=response) as opener:
+                    with self.assertRaisesRegex(ValueError, 'official GitHub HTTPS host'):
+                        resolver['acquire'](directory)
+                self.assert_request(opener)
+                response.read.assert_not_called()
+                for name in ['limboapi.jar', 'limboapi.jar.part', 'limboapi-release.json']:
+                    self.assertFalse((Path(directory)/name).exists())
 
-    def acquire(self, root, release, data=b'verified release artifact'):
-        def fetch(url):
-            if url == resolver['VERSIONS_URL']:
-                return io.BytesIO(json.dumps([release]).encode())
-            self.assertEqual(url, release['files'][0]['url'])
-            return io.BytesIO(data)
-        with mock.patch.dict(resolver, {'open_url': mock.Mock(side_effect=fetch)}):
-            resolver['acquire'](root)
-            self.assertEqual(resolver['open_url'].call_count, 2)
-
-    def test_verified_output_and_provenance_resolve_each_time(self):
-        self.assertEqual(resolver['VERSIONS_URL'], 'https://api.modrinth.com/v2/project/TZOteSf2/version')
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            for version in ['1.1.26', '1.1.28']:
-                self.acquire(root, self.release(version))
-                self.assertEqual((root/'limboapi.jar').read_bytes(), b'verified release artifact')
-                evidence = json.loads((root/'limboapi-release.json').read_text())
-                self.assertEqual(evidence, {
-                    'project_id': 'TZOteSf2', 'version_id': 'AbCd1234',
-                    'version_number': version, 'date_published': '2026-01-01T00:00:00Z',
-                    'sha512': hashlib.sha512(b'verified release artifact').hexdigest(),
-                    'size': len(b'verified release artifact'),
-                })
-                self.assertFalse((root/'limboapi.jar.part').exists())
-
-    def test_integrity_failure_never_publishes_unverified_download(self):
+    def test_integrity_failure_never_replaces_verified_artifact_or_provenance(self):
         for data, error in [(b'short', 'size mismatch'),
-                            (b'verified release artifact extra', 'size mismatch'),
-                            (b'Xerified release artifact', 'SHA-512 mismatch')]:
+                            (b'J' * (self.PIN['size'] + 1), 'size mismatch'),
+                            (b'J' * self.PIN['size'], 'SHA-256 mismatch')]:
             with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root/'limboapi.jar').write_bytes(b'previous verified jar')
+                (root/'limboapi-release.json').write_text('previous verified provenance')
                 (root/'SHA256SUMS').write_text('previous build')
-                with self.assertRaisesRegex(ValueError, error):
-                    self.acquire(root, self.release(), data)
+                def open_response(request, **kwargs):
+                    self.assertFalse((root/'SHA256SUMS').exists())
+                    return self.response(data)
+                with mock.patch('urllib.request.urlopen', side_effect=open_response) as opener:
+                    with self.assertRaisesRegex(ValueError, error):
+                        resolver['acquire'](root)
+                self.assert_request(opener)
                 self.assertEqual((root/'limboapi.jar').read_bytes(), b'previous verified jar')
+                self.assertEqual((root/'limboapi-release.json').read_text(), 'previous verified provenance')
                 self.assertFalse((root/'SHA256SUMS').exists())
-                self.assertFalse((root/'limboapi-release.json').exists())
                 self.assertFalse((root/'limboapi.jar.part').exists())
 
-    def test_current_stable_acquired_without_prerelease_fallback(self):
-        stable = self.release('1.1.26')
-        for version_type in ['beta', 'alpha', 'dev']:
-            prerelease = self.release('9.0.0', '2026-02-01T00:00:00Z')
-            prerelease['version_type'] = version_type
-            selected, _ = resolver['select_release']([prerelease, stable])
-            self.assertEqual(selected, stable)
-            with self.subTest(version_type=version_type), tempfile.TemporaryDirectory() as directory:
-                self.acquire(Path(directory), selected)
-                self.assertEqual((Path(directory)/'limboapi.jar').read_bytes(), b'verified release artifact')
-                self.assertEqual(json.loads((Path(directory)/'limboapi-release.json').read_text())['version_number'], '1.1.26')
+    def test_network_failure_invalidates_composition_without_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'SHA256SUMS').write_text('previous build')
+            def fail(request, **kwargs):
+                self.assertFalse((root/'SHA256SUMS').exists())
+                raise OSError('asset unavailable')
+            with mock.patch('urllib.request.urlopen', side_effect=fail) as opener:
+                with self.assertRaisesRegex(OSError, 'asset unavailable'):
+                    resolver['acquire'](root)
+            self.assert_request(opener)
+            for name in ['SHA256SUMS', 'limboapi.jar', 'limboapi.jar.part', 'limboapi-release.json']:
+                self.assertFalse((root/name).exists())
+
+    def test_no_dynamic_release_selection_or_old_stable_fallback(self):
+        source = RESOLVER_SOURCE.read_text()
+        for forbidden in ['modrinth', 'select_release', 'version_type', '1.1.26',
+                          '/releases/latest', '/releases/tags/', 'VERSIONS_URL']:
+            self.assertNotIn(forbidden, source)
+        self.assertEqual(source.count('urllib.request.urlopen('), 1)
+        self.assertIn('urllib.request.Request(ASSET_URL', source)
 
 
 if __name__ == '__main__':
