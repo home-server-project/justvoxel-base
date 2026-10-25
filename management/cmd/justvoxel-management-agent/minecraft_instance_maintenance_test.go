@@ -277,7 +277,7 @@ func TestInstanceMaintenanceAuthenticationAndBounds(t *testing.T) {
 			t.Fatal("unauthenticated maintenance", route.path, rr.Code)
 		}
 	}
-	for _, command := range []string{"stop", "op Alex", "say hello\nstop", "say ", strings.Repeat("a", 257)} {
+	for _, command := range []string{"", "stop", "/stop", "minecraft:stop", "/minecraft:stop", "  /minecraft:stop  ", " STOP now ", "say hello\nstop", " ", "/", strings.Repeat("a", 1025)} {
 		payload, _ := json.Marshal(map[string]string{"command": command})
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, authorizedRequest("POST", "/v1/minecraft/instances/"+id+"/console", string(payload)))

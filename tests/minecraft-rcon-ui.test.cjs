@@ -1,0 +1,164 @@
+const assert = require('node:assert/strict');
+const {readFileSync} = require('node:fs');
+const {test} = require('node:test');
+const vm = require('node:vm');
+const source = readFileSync(`${__dirname}/../webui/internal/server/static/app.js`, 'utf8');
+const implementation = source.slice(source.indexOf('function newMinecraftRconState()'), source.indexOf('if (minecraftOpen && minecraftDialog)'));
+class Element {
+  constructor(tag) {
+    this.tag = tag; this.children = []; this.events = {}; this.attributes = {}; this.value = '';
+    this.classList = {toggle() {}};
+  }
+  append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = children; }
+  setAttribute(key, value) { this.attributes[key] = value; }
+  addEventListener(name, listener) { this.events[name] = listener; }
+  focus() { this.focused = true; }
+  all() { return [this, ...this.children.flatMap(child => child.all())]; }
+  requestSubmit() { this.submitted = this.events.submit({preventDefault() {}}); }
+}
+const flush = () => new Promise(resolve => setImmediate(resolve));
+function fixture({running = true, request} = {}) {
+  const calls = [];
+  const context = vm.createContext({document: {createElement: tag => new Element(tag)}});
+  vm.runInContext(implementation, context);
+  const model = context.newMinecraftRconState();
+  let current = true;
+  const root = context.createMinecraftRconView({model, running, isCurrent: () => current, request: async values => {
+    calls.push(values);
+    return request ? request(values) : values.discover ? {commands: [
+      {name:'list', description:'Show players'}, {name:'weather', usage:'weather <clear|rain>'},
+      {name:'version'}, {name:'plugin:warp', description:'<img src=x onerror=alert(1)>'},
+    ]} : {output:'There are 3 players:\nAlex, Steve, .Illia'};
+  }});
+  const all = () => root.all();
+  const button = label => all().find(el => el.tag === 'button' && el.textContent === label);
+  const input = all().find(el => el.tag === 'input' && el.type === 'text');
+  const transcript = all().find(el => el.tag === 'pre' && el.attributes['aria-label']);
+  const form = all().find(el => el.tag === 'form');
+  const send = async command => { input.value = command; await form.events.submit({preventDefault() {}}); };
+  return {context, model, root, all, button, input, transcript, form, calls, send, stale: () => { current = false; }};
+}
+
+test('initial helper is explanatory; first response becomes text transcript and empty success is neutral', async () => {
+  const f = fixture({request: async () => ({output:'<script>unsafe</script>\nsecond line'})});
+  assert.match(f.transcript.textContent, /# See who is playing\nlist/);
+  assert.match(f.transcript.textContent, /No leading slash is required/);
+  assert.equal(f.calls.length, 0);
+  await f.send('whitelist list');
+  assert.equal(f.transcript.textContent, '> whitelist list\n<script>unsafe</script>\nsecond line');
+  assert.equal(f.transcript.children.length, 0);
+  assert.doesNotMatch(f.transcript.textContent, /# See who is playing/);
+  assert.equal(f.input.focused, true);
+  const empty = fixture({request: async () => ({output:''})});
+  await empty.send('say hello');
+  assert.equal(empty.transcript.textContent, '> say hello\nCommand completed.');
+});
+
+test('failed request preserves the initial helper and stopped servers cannot execute or discover', async () => {
+  const f = fixture({request: async () => { throw new Error('RCON is unavailable.'); }});
+  await f.send('list');
+  assert.equal(f.model.executed, false);
+  assert.match(f.transcript.textContent, /# See who is playing/);
+  const stopped = fixture({running:false});
+  assert.equal(stopped.input.disabled, true); assert.equal(stopped.button('Send').disabled, true);
+  assert.ok(stopped.all().some(el => /Server is stopped/.test(el.textContent)));
+  await stopped.send('list'); stopped.button('Commands').events.click(); await flush();
+  assert.equal(stopped.calls.length, 0);
+});
+
+test('Commands are discovered, grouped and filtered locally; clicking fills input without execution', async () => {
+  const f = fixture();
+  f.button('Commands').events.click(); await flush();
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].discover, 'yes');
+  assert.deepEqual(f.all().filter(el => el.tag === 'h3').map(el => el.textContent), ['Players & permissions','World & gameplay','Server','Plugins / Other']);
+  f.button('plugin:warp').events.click();
+  assert.equal(f.input.value, 'plugin:warp'); assert.equal(f.input.focused, true);
+  assert.equal(f.calls.length, 1);
+  assert.ok(f.all().some(el => el.tag === 'span' && el.textContent === '<img src=x onerror=alert(1)>' && el.children.length === 0));
+  const search = f.all().find(el => el.type === 'search');
+  search.value = 'warp'; search.events.input();
+  assert.ok(f.button('plugin:warp')); assert.equal(f.button('list'), undefined);
+  assert.equal(f.calls.length, 1);
+  await f.form.events.submit({preventDefault() {}});
+  assert.equal(f.calls[1].command, 'plugin:warp');
+  assert.equal(f.transcript.hidden, false);
+  assert.equal(f.button('Console').attributes['aria-pressed'], 'true');
+  assert.match(f.transcript.textContent, /^> plugin:warp\n/);
+});
+
+test('Enter submits, ArrowUp/Down navigate session history and Ctrl+L clears visible transcript', async () => {
+  const f = fixture();
+  f.input.value = 'list';
+  let prevented = 0;
+  const key = (value, extra = {}) => ({key:value, preventDefault(){prevented++;}, ...extra});
+  f.input.events.keydown(key('Enter')); await f.form.submitted;
+  await f.send('whitelist list');
+  f.input.value = '';
+  f.input.events.keydown(key('ArrowUp')); assert.equal(f.input.value, 'whitelist list');
+  f.input.events.keydown(key('ArrowUp')); assert.equal(f.input.value, 'list');
+  f.input.events.keydown(key('ArrowUp')); assert.equal(f.input.value, 'list');
+  f.input.events.keydown(key('ArrowDown')); assert.equal(f.input.value, 'whitelist list');
+  f.input.events.keydown(key('ArrowDown')); assert.equal(f.input.value, '');
+  f.root.events.keydown(key('l', {ctrlKey:true}));
+  assert.equal(f.transcript.textContent, ''); assert.equal(f.model.history.length, 2);
+  assert.equal(prevented, 7);
+});
+
+test('command help is a bounded console request; discovery unavailable invents no commands', async () => {
+  const f = fixture(); f.button('Commands').events.click(); await flush();
+  await f.button('Help').events.click();
+  assert.equal(f.calls[1].command, 'help list');
+  assert.equal(f.input.value, '');
+  const empty = fixture({request: async () => ({commands:[],partial:true})});
+  empty.button('Commands').events.click(); await flush();
+  assert.equal(empty.all().filter(el => el.tag === 'h3').length, 0);
+  assert.ok(empty.all().some(el => /Command discovery is unavailable/.test(el.textContent)));
+});
+
+test('selection invalidation prevents detached execution and ignores old in-flight results', async () => {
+  let finish;
+  const f = fixture({request: () => new Promise(resolve => { finish = resolve; })});
+  const pending = f.send('list');
+  f.stale(); finish({output:'old server response'}); await pending;
+  assert.equal(f.model.executed, false);
+  await f.send('say stale'); assert.equal(f.calls.length, 1);
+  const next = f.context.newMinecraftRconState();
+  assert.equal(next.history.length, 0); assert.equal(next.transcript.length, 0);
+  assert.equal(next.commands, null); assert.equal(next.executed, false);
+  const listener = source.slice(source.indexOf('  window.addEventListener("justvoxel:server-selection-changed",', source.indexOf('if (minecraftOpen && minecraftDialog)')), source.indexOf('  const refreshWorkspace =', source.indexOf('if (minecraftOpen && minecraftDialog)')));
+  assert.match(listener, /rconModel = newMinecraftRconState\(\)/);
+});
+
+test('existing selected request guard rejects pre-send changes and stale in-flight results', async () => {
+  const start = source.indexOf('  const requestWorkspaceJSON =', source.indexOf('if (minecraftOpen && minecraftDialog)'));
+  const code = source.slice(start, source.indexOf('  const openDeleteDialog =', start));
+  let ready, complete; const calls = [];
+  const context = vm.createContext({
+    justVoxelSelectionGeneration:{minecraft:1},
+    justVoxelSelectionReady:new Promise(resolve => {ready=resolve;}),
+    justVoxelSelectedURL:url => url+'?server=jv-family1',
+    justVoxelStaleSelection:() => Object.assign(new Error('stale'),{staleSelection:true}),
+    fetch:async (url,options) => {calls.push({url,options}); return new Promise(resolve => {complete=resolve;});},
+  });
+  vm.runInContext(code+'\nglobalThis.request=requestWorkspaceJSON;', context);
+  const waiting = context.request('/api/minecraft/workspace/console',{method:'POST'});
+  context.justVoxelSelectionGeneration.minecraft++; ready();
+  await assert.rejects(waiting, error => error.staleSelection); assert.equal(calls.length, 0);
+  context.justVoxelSelectionReady = null;
+  const pending = context.request('/api/minecraft/workspace/console',{method:'POST'});
+  assert.equal(calls[0].url, '/api/minecraft/workspace/console?server=jv-family1');
+  context.justVoxelSelectionGeneration.minecraft++;
+  complete({ok:true,status:200,json:async()=>({id:'jv-family1',output:'old'})});
+  await assert.rejects(pending, error => error.staleSelection);
+});
+
+test('RCON uses selected console context, Administrator tab, text nodes and page memory only', () => {
+  const header = readFileSync(`${__dirname}/../webui/internal/server/templates/header.html`, 'utf8');
+  assert.match(header, /data-minecraft-tab="crossplay"[^]*?class="nav-admin-only"[^>]*data-minecraft-tab="rcon"/);
+  const integration = source.slice(source.indexOf('  const renderRcon ='), source.indexOf('  async function loadCurrentTab',source.indexOf('  const renderRcon =')));
+  assert.match(integration, /role-administrator/);
+  assert.match(integration, /justVoxelSelectedURL\("\/api\/minecraft\/workspace\/console", "minecraft"\)/);
+  assert.match(integration, /server_id: id/);
+  assert.doesNotMatch(implementation, /innerHTML|outerHTML|insertAdjacentHTML|localStorage|sessionStorage|document\.cookie/);
+});

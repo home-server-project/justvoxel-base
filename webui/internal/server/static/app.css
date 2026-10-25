@@ -1750,6 +1750,19 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 [data-plugins-curseforge-section]{min-height:0;overflow:auto}
 @container(max-width:700px){.plugins-search:has([data-plugins-curseforge]) .plugins-search-filters{flex-shrink:1;min-width:0}}
 
+/* RCON owns only its new tab's internal scrolling and command lane. */
+.minecraft-workspace-body:has(.minecraft-rcon){display:flex;flex-direction:column;overflow:hidden}
+.minecraft-workspace-content:has(.minecraft-rcon){display:flex;flex:1;min-height:0}
+.minecraft-rcon{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;gap:var(--jv-space-sm)}
+.minecraft-rcon-toolbar{display:flex;flex-wrap:wrap;gap:var(--jv-space-xs);align-items:center}
+.minecraft-rcon-upper{flex:1;min-height:0;overflow:auto}
+.minecraft-rcon-transcript,.minecraft-rcon-detail{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit;font-family:monospace}
+.minecraft-rcon-lane{display:flex;flex:none;gap:var(--jv-space-xs);margin:0}
+.minecraft-rcon-lane input{flex:1;min-width:0}
+.minecraft-rcon-command{display:flex;flex-wrap:wrap;gap:var(--jv-space-xs);align-items:baseline;margin-bottom:var(--jv-space-xs)}
+.minecraft-rcon-command span{flex:1;min-width:0}
+.minecraft-rcon-toolbar button[aria-pressed="true"]{border-color:var(--jv-muted)}
+
 /* Compact Minecraft Network presentation; shared Players rules stay unchanged. */
 .minecraft-network{display:grid;gap:.65rem;min-width:0}
 .minecraft-network .minecraft-network-panel{margin:0;padding:.75rem}

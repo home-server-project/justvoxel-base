@@ -167,3 +167,30 @@ func TestPhase7SelectedWrappersNeverUseLegacyContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceConsoleClientBindsIdentityAndRequest(t *testing.T) {
+	for _, wrongID := range []bool{false, true} {
+		client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != "POST" || r.URL.Path != "/v1/minecraft/instances/jv-family1/console" || r.Header.Get("Authorization") != "Bearer session" {
+				t.Fatal("wrong console route/auth", r.Method, r.URL.Path)
+			}
+			var request InstanceConsoleRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Command != "help plugin:warp" {
+				t.Fatal("command contract", request, err)
+			}
+			id := "jv-family1"
+			if wrongID {
+				id = "jv-kids001"
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true,"id":"` + id + `","output":"usage"}`))}, nil
+		})}}
+		response, err := client.MinecraftInstanceConsole(context.Background(), "session", "jv-family1", InstanceConsoleRequest{Command: "help plugin:warp"})
+		if wrongID {
+			if err == nil || response.ID != "" {
+				t.Fatal("sibling response accepted")
+			}
+		} else if err != nil || response.Output != "usage" {
+			t.Fatal(response, err)
+		}
+	}
+}

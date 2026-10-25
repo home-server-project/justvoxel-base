@@ -3505,6 +3505,175 @@ globalThis.justVoxelOpenDeleteServer = ({name, description, csrf, request, isCur
 
 
 const minecraftDialog = document.querySelector("[data-minecraft-workspace-dialog]");
+// RCON state lives only in this page's memory and is replaced on server selection.
+function newMinecraftRconState() {
+  return {history: [], cursor: 0, draft: "", transcript: [], executed: false, commands: null, partial: false, busy: false};
+}
+function minecraftCommandGroup(name) {
+  const command = name.replace(/^minecraft:/, "");
+  if (["list", "whitelist", "op", "deop", "ban", "ban-ip", "banlist", "pardon", "pardon-ip", "kick", "msg", "tell", "w", "say", "team", "teammsg"].includes(command)) return "Players & permissions";
+  if (["weather", "time", "gamemode", "gamerule", "difficulty", "give", "tp", "teleport", "seed", "summon", "effect", "enchant", "experience", "xp", "setblock", "fill", "worldborder"].includes(command)) return "World & gameplay";
+  if (["help", "version", "plugins", "save-all", "save-on", "save-off", "stop", "reload", "datapack"].includes(command)) return "Server";
+  return "Plugins / Other";
+}
+function createMinecraftRconView({model, running, request, isCurrent}) {
+  const node = (tag, text, className = "") => {
+    const el = document.createElement(tag);
+    el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  };
+  const root = node("section", undefined, "minecraft-rcon");
+  const toolbar = node("div", undefined, "minecraft-rcon-toolbar");
+  const consoleButton = node("button", "Console", "secondary");
+  const commandsButton = node("button", "Commands", "secondary");
+  consoleButton.type = commandsButton.type = "button";
+  toolbar.append(consoleButton, commandsButton);
+  const status = node("p", running ? "" : "Server is stopped. Start it before using RCON.", "muted compact");
+  status.setAttribute("role", "status");
+  const upper = node("div", undefined, "minecraft-rcon-upper");
+  const transcript = node("pre", undefined, "minecraft-rcon-transcript");
+  transcript.setAttribute("aria-label", "Minecraft console transcript");
+  const catalog = node("div", undefined, "minecraft-rcon-commands");
+  const controls = node("div", undefined, "minecraft-rcon-toolbar");
+  const search = node("input");
+  search.type = "search"; search.placeholder = "Search commands";
+  search.setAttribute("aria-label", "Search commands");
+  const refresh = node("button", "Refresh Commands", "secondary");
+  refresh.type = "button";
+  const discoveryStatus = node("p", "", "muted compact");
+  const list = node("div");
+  const detail = node("pre", "", "minecraft-rcon-detail");
+  controls.append(search, refresh);
+  catalog.append(controls, discoveryStatus, list, detail);
+  upper.append(transcript, catalog);
+  const form = node("form", undefined, "minecraft-rcon-lane");
+  const input = node("input");
+  input.type = "text"; input.maxLength = 1024; input.autocomplete = "off";
+  input.spellcheck = false; input.placeholder = "Enter a Minecraft command";
+  input.setAttribute("aria-label", "Minecraft command");
+  const send = node("button", "Send"); send.type = "submit";
+  form.append(input, send);
+  root.append(toolbar, status, upper, form);
+  let view = "console", discovering = false;
+  const updateDisabled = () => {
+    input.disabled = !running || model.busy;
+    send.disabled = !running || model.busy || discovering;
+    refresh.disabled = !running || discovering || model.busy;
+  };
+  const paintTranscript = () => {
+    transcript.classList.toggle("muted", !model.executed);
+    transcript.textContent = model.executed ? model.transcript.join("\n\n") :
+      "Enter a Minecraft command below. No sudo, podman, container name, rcon-cli, password, or shell syntax is needed. No leading slash is required.\n\n# See who is playing\nlist\n\n# Show whitelisted players\nwhitelist list\n\n# Send a message to everyone\nsay Hello everyone!\n\n# Change weather\nweather clear\n\n# Display server version\nversion";
+    upper.scrollTop = upper.scrollHeight;
+  };
+  model.onChange = () => { updateDisabled(); paintTranscript(); };
+  const show = (next) => {
+    view = next;
+    transcript.hidden = next !== "console";
+    catalog.hidden = next !== "commands";
+    consoleButton.setAttribute("aria-pressed", String(next === "console"));
+    commandsButton.setAttribute("aria-pressed", String(next === "commands"));
+    if (next === "console") paintTranscript();
+  };
+  const paintCommands = () => {
+    list.replaceChildren();
+    const needle = search.value.toLowerCase();
+    const entries = (model.commands || []).filter(entry => `${entry.name} ${entry.usage || ""} ${entry.description || ""}`.toLowerCase().includes(needle));
+    for (const group of ["Players & permissions", "World & gameplay", "Server", "Plugins / Other"]) {
+      const members = entries.filter(entry => minecraftCommandGroup(entry.name) === group);
+      if (!members.length) continue;
+      list.append(node("h3", group));
+      for (const entry of members) {
+        const row = node("div", undefined, "minecraft-rcon-command");
+        const choose = node("button", entry.name, "secondary"); choose.type = "button";
+        choose.addEventListener("click", () => {
+          if (!isCurrent()) return;
+          // Place only the discovered name in the lane; placeholders are explanatory.
+          input.value = entry.name;
+          input.focus();
+        });
+        const help = node("button", "Help", "secondary"); help.type = "button";
+        help.disabled = !running;
+        help.addEventListener("click", async () => {
+          if (!isCurrent() || discovering || model.busy || !running) return;
+          discovering = true; updateDisabled(); help.disabled = true;
+          try {
+            const result = await request({command: "help " + entry.name});
+            if (isCurrent()) detail.textContent = result.output || "No help text returned.";
+          } catch (error) { if (isCurrent() && !error.staleSelection) detail.textContent = error.message; }
+          finally { discovering = false; updateDisabled(); help.disabled = !running; }
+        });
+        row.append(choose, node("span", entry.description || entry.usage || "", "muted"), help);
+        list.append(row);
+      }
+    }
+    if (!entries.length) list.append(node("p", model.commands?.length ? "No matching commands." : "Command discovery is unavailable. Use the Console to enter a known Minecraft command.", "muted"));
+  };
+  const discover = async () => {
+    if (!running || discovering || model.busy || !isCurrent()) return;
+    discovering = true; updateDisabled(); discoveryStatus.textContent = "Loading commands…";
+    try {
+      const result = await request({discover: "yes"});
+      if (!isCurrent()) return;
+      model.commands = result.commands || []; model.partial = !!result.partial;
+      discoveryStatus.textContent = model.partial ? "Partial command list. Some help pages could not be read." : "Commands exposed by this server.";
+      paintCommands();
+    } catch (error) {
+      if (isCurrent() && !error.staleSelection) { discoveryStatus.textContent = error.message; paintCommands(); }
+    } finally { discovering = false; updateDisabled(); }
+  };
+  consoleButton.addEventListener("click", () => show("console"));
+  commandsButton.addEventListener("click", () => {
+    show("commands");
+    if (model.commands === null && running) void discover();
+    else {
+      discoveryStatus.textContent = model.partial ? "Partial command list. Some help pages could not be read." : "";
+      paintCommands();
+    }
+  });
+  search.addEventListener("input", paintCommands);
+  refresh.addEventListener("click", discover);
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!running || model.busy || discovering || !isCurrent() || !input.value.trim()) return;
+    const command = input.value.trim();
+    show("console"); model.busy = true; updateDisabled(); status.textContent = "Sending…";
+    model.history.push(command);
+    if (model.history.length > 100) model.history.shift();
+    model.cursor = model.history.length; model.draft = ""; input.value = "";
+    try {
+      const result = await request({command});
+      if (!isCurrent()) return;
+      model.executed = true;
+      model.transcript.push(`> ${command}\n${result.output || "Command completed."}`);
+      // Keep browser memory bounded even during a long session.
+      while (model.transcript.length > 100 || model.transcript.join("\n\n").length > 65536) model.transcript.shift();
+      paintTranscript(); status.textContent = "";
+    } catch (error) { if (isCurrent() && !error.staleSelection) status.textContent = error.message; }
+    finally {
+      model.busy = false; model.onChange?.();
+      if (isCurrent()) input.focus();
+    }
+  });
+  input.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); form.requestSubmit(); return; }
+    if ((event.key === "ArrowUp" || event.key === "ArrowDown") && model.history.length) {
+      event.preventDefault();
+      if (model.cursor === model.history.length) model.draft = input.value;
+      model.cursor = Math.max(0, Math.min(model.history.length, model.cursor + (event.key === "ArrowUp" ? -1 : 1)));
+      input.value = model.cursor === model.history.length ? model.draft : model.history[model.cursor];
+    }
+  });
+  root.addEventListener("keydown", event => {
+    if (event.ctrlKey && event.key.toLowerCase() === "l") {
+      event.preventDefault(); model.transcript = []; paintTranscript();
+    }
+  });
+  paintTranscript(); show(view); updateDisabled();
+  return root;
+}
+
 if (minecraftOpen && minecraftDialog) {
   const closeButton = minecraftDialog.querySelector("[data-minecraft-close]");
   const refreshButton = minecraftDialog.querySelector("[data-minecraft-refresh]");
@@ -3516,6 +3685,7 @@ if (minecraftOpen && minecraftDialog) {
   globalThis.justVoxelServerSelection(minecraftDialog.querySelector("[data-server-selector-slot]")).catch((error)=>{if(state)state.textContent=error.message;});
   let currentTab = "overview";
   let loadSequence = 0;
+  let rconModel = newMinecraftRconState();
 
   const messageNode = (value, className = "muted compact") => {
     const node = document.createElement("p");
@@ -4317,6 +4487,23 @@ if (minecraftOpen && minecraftDialog) {
     content.replaceChildren(root);
   };
 
+  const renderRcon = async (sequence) => {
+    if (!document.body.classList.contains("role-administrator")) throw new Error("Administrator access required.");
+    const generation = globalThis.justVoxelSelectionGeneration.minecraft;
+    const snapshot = await requestWorkspaceJSON("/api/dashboard-status");
+    if (!snapshot || sequence !== loadSequence || !content) return;
+    const selectedURL = globalThis.justVoxelSelectedURL("/api/minecraft/workspace/console", "minecraft");
+    const id = new URL(selectedURL, window.location.origin).searchParams.get("server");
+    const isCurrent = () => generation === globalThis.justVoxelSelectionGeneration.minecraft;
+    content.replaceChildren(createMinecraftRconView({
+      model: rconModel, running: snapshot.status?.minecraft?.state === "running", isCurrent,
+      request: values => {
+        if (!isCurrent()) return Promise.reject(globalThis.justVoxelStaleSelection());
+        return requestWorkspaceJSON(selectedURL, {method: "POST", body: new URLSearchParams({csrf, server_id: id, ...values})});
+      },
+    }));
+  };
+
   async function loadCurrentTab(message = "") {
     if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
     const selection = globalThis.justVoxelSelectionGeneration.minecraft;
@@ -4328,6 +4515,7 @@ if (minecraftOpen && minecraftDialog) {
       if (settingsTabs.has(currentTab)) await renderSettingsTab(sequence, message);
       else if (currentTab === "players") await renderPlayers(sequence, message);
       else if (currentTab === "logs") await renderLogs(sequence, message);
+      else if (currentTab === "rcon") await renderRcon(sequence);
       else await renderOverview(sequence, message);
       if (sequence === loadSequence && state?.textContent === "Loading…") state.textContent = "";
     } catch (error) {
@@ -4348,6 +4536,7 @@ if (minecraftOpen && minecraftDialog) {
 
   window.addEventListener("justvoxel:server-selection-changed", (event) => {
     if (event.detail?.workspace !== "minecraft") return;
+    rconModel = newMinecraftRconState();
     ++loadSequence;
     content?.replaceChildren();
     if (event.detail.inventoryEmpty && globalThis.document?.querySelector("#dashboard[data-dashboard-status]")?.dataset.selectedMinecraftId === "" &&
@@ -7888,7 +8077,7 @@ if (dashboard) {
       // The Switch tab retains its existing internal control name.
       if (workspace === "version" && tab === "switch") tab = "software";
       const allowedTabs = {
-        minecraft: ["overview", "logs", "memory", "gameplay", "players", "crossplay"],
+        minecraft: ["overview", "logs", "memory", "gameplay", "players", "crossplay", "rcon"],
         version: ["software", "minecraft"],
         plugins: ["discover", "installed", "addons"],
         system: ["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "ups", "about"],

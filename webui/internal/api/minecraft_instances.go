@@ -281,3 +281,33 @@ func (c *Client) MinecraftInstanceWhitelist(ctx context.Context, session, id str
 	}
 	return out.TextOutputResponse, err
 }
+
+// Console commands always target one registered immutable instance.
+type InstanceConsoleRequest struct {
+	Command  string `json:"command"`
+	Discover bool   `json:"discover,omitempty"`
+}
+type InstanceConsoleCommand struct {
+	Name        string `json:"name"`
+	Usage       string `json:"usage,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+type InstanceConsoleResponse struct {
+	OK       bool                     `json:"ok"`
+	ID       string                   `json:"id"`
+	Output   string                   `json:"output"`
+	Commands []InstanceConsoleCommand `json:"commands,omitempty"`
+	Partial  bool                     `json:"partial,omitempty"`
+}
+
+func (c *Client) MinecraftInstanceConsole(ctx context.Context, session, id string, request InstanceConsoleRequest) (InstanceConsoleResponse, error) {
+	var out InstanceConsoleResponse
+	client := *c.http
+	client.Timeout = 25 * time.Second
+	caller := &Client{http: &client}
+	err := caller.do(ctx, http.MethodPost, "/v1/minecraft/instances/"+url.PathEscape(id)+"/console", session, request, &out)
+	if err == nil && (out.ID != id || !out.OK) {
+		return InstanceConsoleResponse{}, fmt.Errorf("selected console identity mismatch or incomplete command")
+	}
+	return out, err
+}

@@ -357,3 +357,42 @@ func (a *App) selectedWhitelist(w http.ResponseWriter, r *http.Request, session 
 	}
 	writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceWhitelistResponse{OK: true, Entries: entries, Parsed: parsed, Output: result.Output, WhitelistEnabled: result.WhitelistEnabled, CanToggle: identity.Role == "administrator"})
 }
+
+func (a *App) selectedMinecraftConsole(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		return
+	}
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	// RCON never infers a target, even for a single-server inventory.
+	if len(r.URL.Query()["server"]) != 1 || r.FormValue("server_id") != r.URL.Query().Get("server") {
+		writeMinecraftWorkspaceError(w, http.StatusConflict, "Server selection changed. Choose the server again.")
+		return
+	}
+	selected, ok := a.selectedMinecraft(w, r, session)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(interface {
+		MinecraftInstanceConsole(context.Context, string, string, api.InstanceConsoleRequest) (api.InstanceConsoleResponse, error)
+	})
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, "RCON is unavailable.")
+		return
+	}
+	result, err := client.MinecraftInstanceConsole(r.Context(), session, selected.ID, api.InstanceConsoleRequest{
+		Command: r.FormValue("command"), Discover: r.FormValue("discover") == "yes",
+	})
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, "RCON is unavailable.")
+		return
+	}
+	if result.ID != selected.ID || !result.OK {
+		writeMinecraftWorkspaceError(w, 502, "Selected server response could not be verified.")
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, result)
+}

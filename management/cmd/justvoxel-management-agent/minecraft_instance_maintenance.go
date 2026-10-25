@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -227,34 +228,62 @@ func (s *server) instanceConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Command string `json:"command"`
+		Command  string `json:"command"`
+		Discover bool   `json:"discover,omitempty"`
 	}
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	// Deliberately small console surface: announcements only. Lifecycle remains
-	// behind player checks; no plugin dispatch, host commands, or environment reads.
-	if !strings.HasPrefix(request.Command, "say ") || len(strings.TrimSpace(strings.TrimPrefix(request.Command, "say "))) == 0 || !instanceRuntimeText(request.Command, 256) {
-		writeError(w, http.StatusBadRequest, "Only a bounded say announcement is allowed.")
+	command, err := normalizeInstanceConsoleCommand(request.Command)
+	if (request.Discover && request.Command != "") || (!request.Discover && err != nil) {
+		writeError(w, http.StatusBadRequest, "Enter a single Minecraft command. Use the normal server controls to stop the server.")
 		return
 	}
-	s.withInstanceMutation(w, r, id, func(ctx context.Context) error {
+	release, err := s.lockInstanceRuntime()
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	result := instanceConsoleResponse{OK: true, ID: id}
+	run := func() error {
 		state, err := instanceRuntimes.observe(ctx, id)
 		if err != nil {
 			return err
 		}
 		if state.State != "running" {
-			return instanceRuntimeFailure("Instance is not running.")
+			return instanceRuntimeFailure("Server is stopped. Start it before using RCON.")
 		}
-		if _, err = instanceRuntimes.rcon(ctx, id, request.Command); err != nil {
+		record, err := instanceRuntimes.readRuntimeConfig(id)
+		if err != nil {
+			return err
+		}
+		if request.Discover {
+			result.Commands, result.Partial, err = instanceRuntimes.discoverCommands(ctx, id, record.Runtime.RCONPassword)
+		} else {
+			var out []byte
+			out, err = instanceRuntimes.rcon(ctx, id, command)
+			if err == nil {
+				result.Output = instanceDiagnosticText(out, record.Runtime.RCONPassword)
+			}
+		}
+		if err != nil {
 			return err
 		}
 		if s.store != nil {
-			return s.store.recordAuditEvent(actor, "minecraft_console", "minecraft-"+id+".service", true, "Instance announcement sent")
+			return s.store.recordAuditEvent(actor, "minecraft_console", "minecraft-"+id+".service", true, "Instance console request completed")
 		}
 		return nil
-	})
+	}
+	err = errors.Join(run(), release())
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
+
 func (s *server) instanceVersionVerify(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return

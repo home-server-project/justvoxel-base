@@ -272,11 +272,13 @@ records, and never fall back to `minecraft` or read legacy environment data.
 | --- | --- |
 | `GET /v1/minecraft/instances/{id}/players` | Any authenticated role; offline, online count/maximum, or explicit unknown state |
 | `GET /v1/minecraft/instances/{id}/logs` | Any authenticated role; selected unit's last 100 journal entries, at most 16 KiB of sanitized text |
-| `POST /v1/minecraft/instances/{id}/console` | Administrator; `{"command":"say …"}`, up to 256 bytes; no other console commands |
+| `POST /v1/minecraft/instances/{id}/console` | Administrator; `{"command":"list"}`, one command up to 1024 bytes; canonical `stop` and `minecraft:stop` (with optional slash) are refused. `{"discover":true}` requests bounded help discovery |
 | `GET /v1/minecraft/instances/{id}/version` | Any authenticated role; configured software/version and explicit absence of independent backups |
 | `POST /v1/minecraft/instances/{id}/version/verify` | Administrator; `{"version":"1.21.5"}` checks existing software-specific upstream availability without changing configuration |
 
-Console output is discarded; announcements are audited without their text.
+Console returns `{ok,id,output}` with sanitized text; command text and output are omitted from audit events. Commands remain a single argument to the existing in-container RCON tool, never a host shell command. Discovery returns server-exposed `{name,usage,description}` entries in `commands` plus `partial` when a bound or later-page failure prevents completion. It reads at most ten help pages and 32 KiB total within a shared 20-second deadline, retaining the normal per-call limits.
+
+The Administrator-only Minecraft Settings RCON tab uses `POST /api/minecraft/workspace/console?server=<id>` with CSRF and matching `server_id` form fields. Both execution and discovery bind to that immutable selected ID. Browser selection changes discard stale results and reset the transcript, command history and catalog; these are page-memory state only.
 RCON runs inside the selected container using its private configuration; no
 password is put in arguments, API responses, or logs. Calls have a five-second
 limit. Player lists must match the complete expected response and consistent

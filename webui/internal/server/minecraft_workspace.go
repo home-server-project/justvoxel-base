@@ -103,6 +103,7 @@ type minecraftWorkspaceErrorResponse struct {
 
 func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/minecraft/workspace/selection", a.minecraftSelection)
+	mux.HandleFunc("POST /api/minecraft/workspace/console", a.selectedMinecraftConsole)
 	mux.HandleFunc("GET /api/minecraft/workspace/snapshot", a.selectedMinecraftSnapshot)
 	mux.HandleFunc("POST /api/minecraft/workspace/rename", a.selectedMinecraftPresentation)
 	mux.HandleFunc("POST /api/minecraft/workspace/delete", a.selectedMinecraftPresentation)

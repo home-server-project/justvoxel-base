@@ -15,7 +15,7 @@ const gameplay = between('    } else if (tab === "gameplay")', '    } else if (t
 test('Minecraft navigation orders Recent logs after Overview with operator-plus permissions', () => {
   const nav = header.slice(header.indexOf('<nav class="minecraft-workspace-tabs"'), header.indexOf('<div class="minecraft-workspace-body">'));
   assert.deepEqual([...nav.matchAll(/data-minecraft-tab="([^"]+)"[^>]*>([^<]+)/g)].map(m => [m[1], m[2]]),
-    [['overview', 'Overview'], ['logs', 'Recent logs'], ['memory', 'Memory'], ['gameplay', 'Gameplay'], ['players', 'Players'], ['crossplay', 'Cross-play']]);
+    [['overview', 'Overview'], ['logs', 'Recent logs'], ['memory', 'Memory'], ['gameplay', 'Gameplay'], ['players', 'Players'], ['crossplay', 'Cross-play'], ['rcon', 'RCON']]);
   assert.match(nav, /class="nav-operator-plus"[^>]*data-minecraft-tab="logs"/);
   assert.match(source, /else if \(currentTab === "logs"\) await renderLogs\(sequence, message\)/);
   assert.match(between('  const renderLogs =', '  async function loadCurrentTab'), /requestWorkspaceJSON\("\/api\/minecraft\/workspace\/logs"\)/);
