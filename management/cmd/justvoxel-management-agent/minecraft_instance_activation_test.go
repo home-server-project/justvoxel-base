@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type instanceTestExit struct{}
@@ -83,6 +84,8 @@ func newInstanceActivationFixtureFor(t *testing.T, software, version string) *in
 	if err := os.Mkdir(b.quadlets, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// All lifecycle waits use fake time; individual tests can inspect the cadence.
+	b.pause = func(context.Context, time.Duration) error { return nil }
 	b.command = f.command
 	b.snapshot = func(context.Context) (minecraftInstanceRuntimeContext, uint32, uint32, error) {
 		return f.snapshot, 1000, 1000, nil

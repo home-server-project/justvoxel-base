@@ -15,6 +15,9 @@ type instancePlayers struct {
 	Maximum int    `json:"maximum"`
 }
 
+// Successful but oversized console output is invalid evidence, not a readiness failure.
+var errInstanceConsoleResponseTooLarge = instanceRuntimeFailure("Instance console is unavailable.")
+
 // A failed or truncated response is never interpreted as an empty server.
 func parseInstancePlayers(id string, raw []byte) (instancePlayers, error) {
 	p := instancePlayers{ID: id, State: "unknown"}
@@ -50,8 +53,11 @@ func (b *instanceRuntimeBackend) rcon(ctx context.Context, id, command string) (
 		tool = "send-command"
 	}
 	out, err := b.command(ctx, "podman", "exec", "minecraft-"+id, tool, command)
-	if err != nil || len(out) > 8192 {
+	if err != nil {
 		return nil, instanceRuntimeFailure("Instance console is unavailable.")
+	}
+	if len(out) > 8192 {
+		return nil, errInstanceConsoleResponseTooLarge
 	}
 	return out, nil
 }

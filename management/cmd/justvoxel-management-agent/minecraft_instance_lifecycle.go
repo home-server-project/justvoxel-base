@@ -188,6 +188,79 @@ func (e *instancePlayersConfirmation) Error() string {
 func (b *instanceRuntimeBackend) action(ctx context.Context, id, action string) error {
 	return b.actionWithWarnings(ctx, id, action, false)
 }
+
+const javaInterruptionReadinessRetries = 30
+const javaInterruptionReadinessInterval = 2 * time.Second
+const javaInterruptionReadinessWindow = 60 * time.Second
+
+// Service/container readiness does not prove Java's RCON listener is ready.
+// Only player-aware interruption waits; other console queries remain immediate.
+func (b *instanceRuntimeBackend) waitForJavaPlayersForInterruption(ctx context.Context, id string) (instancePlayers, []byte, error) {
+	return b.waitForJavaPlayersForInterruptionWithin(ctx, id, javaInterruptionReadinessWindow)
+}
+
+func (b *instanceRuntimeBackend) waitForJavaPlayersForInterruptionWithin(parent context.Context, id string, window time.Duration) (players instancePlayers, raw []byte, err error) {
+	ctx, cancel := context.WithTimeout(parent, window)
+	defer cancel()
+	unknown := instancePlayers{ID: id, State: "unknown"}
+	// State commands, RCON, and pauses share one deadline. Prefer the caller's
+	// error; expiry of our own window must retain the safe lifecycle message.
+	defer func() {
+		if parent.Err() != nil {
+			players, raw, err = unknown, nil, parent.Err()
+		} else if ctx.Err() != nil {
+			players, raw, err = unknown, nil, instanceRuntimeFailure("Instance console did not become ready; the instance was not interrupted.")
+		}
+	}()
+	checkRunning := func() error {
+		state, err := b.observeRaw(ctx, id)
+		if err != nil {
+			return err
+		}
+		if state.State != "running" {
+			return instanceRuntimeFailure("Instance player presence cannot be safely determined in its current state.")
+		}
+		return nil
+	}
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return unknown, nil, err
+		}
+		raw, err := b.rcon(ctx, id, "list")
+		if ctx.Err() != nil {
+			return unknown, nil, ctx.Err()
+		}
+		if err == nil {
+			players, parseErr := parseInstancePlayers(id, raw)
+			if parseErr == nil && attempt > 0 {
+				if err = checkRunning(); err != nil {
+					return unknown, nil, err
+				}
+			}
+			return players, raw, parseErr
+		}
+		if errors.Is(err, errInstanceConsoleResponseTooLarge) {
+			return unknown, nil, err
+		}
+		if err = checkRunning(); err != nil {
+			return unknown, nil, err
+		}
+		if attempt == javaInterruptionReadinessRetries {
+			return unknown, nil, instanceRuntimeFailure("Instance console did not become ready; the instance was not interrupted.")
+		}
+		if err = b.waitMaintenance(ctx, javaInterruptionReadinessInterval); err != nil {
+			return unknown, nil, err
+		}
+		if err = ctx.Err(); err != nil {
+			return unknown, nil, err
+		}
+		// Recheck after the pause before issuing another console query.
+		if err = checkRunning(); err != nil {
+			return unknown, nil, err
+		}
+	}
+}
+
 func (b *instanceRuntimeBackend) actionWithWarnings(ctx context.Context, id, action string, warnings bool) error {
 	if !instanceIDPattern.MatchString(id) {
 		return errInstanceID
@@ -228,11 +301,8 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 				return &instancePlayersConfirmation{Players: players}
 			}
 		} else {
-			rawPlayers, err := b.rcon(ctx, id, "list")
-			if err != nil {
-				return err
-			}
-			players, err = parseInstancePlayers(id, rawPlayers)
+			var rawPlayers []byte
+			players, rawPlayers, err = b.waitForJavaPlayersForInterruption(ctx, id)
 			if err != nil {
 				return err
 			}

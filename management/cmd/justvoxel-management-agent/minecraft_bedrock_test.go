@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func nativeBedrockFixture(c minecraftInstanceRuntimeConfig) minecraftInstanceRuntimeConfig {
@@ -174,13 +175,26 @@ func TestNativeBedrockLifecycleUsesSelectedInstanceAndGracefulStop(t *testing.T)
 		t.Fatal(err)
 	}
 	f.configs[0] = c
+	online := "0"
+	queries, stops := 0, 0
+	f.backend.pause = func(context.Context, time.Duration) error {
+		t.Error("ready Bedrock must not use a Java readiness wait or countdown")
+		return nil
+	}
 	base := f.backend.command
 	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 		if command == "podman" && len(args) >= 4 && args[0] == "exec" && args[2] == "send-command" {
+			queries++
 			return nil, nil
 		}
 		if command == "podman" && len(args) > 0 && args[0] == "logs" {
-			return []byte("[INFO] There are 0/20 players online:"), nil
+			return []byte("[INFO] There are " + online + "/20 players online:"), nil
+		}
+		if command == "podman" && len(args) == 4 && args[2] == "rcon-cli" {
+			t.Fatal("Bedrock used Java RCON")
+		}
+		if command == "systemctl" && args[0] == "stop" {
+			stops++
 		}
 		return base(ctx, command, args...)
 	}
@@ -192,6 +206,18 @@ func TestNativeBedrockLifecycleUsesSelectedInstanceAndGracefulStop(t *testing.T)
 		if err = f.backend.actionWithWarnings(context.Background(), c.ID, action, true); err != nil {
 			t.Fatal(action, err)
 		}
+	}
+	// Occupied Bedrock still delegates warnings and timing to its image-managed stop.
+	if err = f.backend.actionWithWarnings(context.Background(), c.ID, "start", true); err != nil {
+		t.Fatal(err)
+	}
+	online = "1"
+	beforeQueries, beforeStops := queries, stops
+	if err = f.backend.actionWithWarnings(context.Background(), c.ID, "stop", true); err != nil {
+		t.Fatal(err)
+	}
+	if queries != beforeQueries+1 || stops != beforeStops+1 {
+		t.Fatal("Bedrock occupied stop path changed", queries, stops)
 	}
 	state, err := f.backend.observe(context.Background(), c.ID)
 	if err != nil || state.State != "stopped" || !state.StartOnBoot {

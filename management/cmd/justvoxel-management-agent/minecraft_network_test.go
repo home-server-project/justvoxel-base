@@ -738,3 +738,91 @@ func TestMinecraftNetworkRunningExistingMemberResumesAfterConfigurationChange(t 
 		t.Fatal("existing running member did not resume with committed configuration", err, h.stops, h.starts)
 	}
 }
+
+func TestMinecraftNetworkJavaStartupReadinessStopsBothMembers(t *testing.T) {
+	f, c := networkTransactionFixture(t, true)
+	c.Members = []string{f.configs[0].ID, f.configs[1].ID}
+	// A third running server must remain outside the selected stop/restart wave.
+	unrelated := f.configs[0]
+	unrelated.ID, unrelated.StartOnBoot = "jv-112233", false
+	for {
+		unrelated.JavaPort = instanceTestPort(t)
+		if unrelated.JavaPort != c.JavaPort && unrelated.JavaPort != c.BedrockPort && unrelated.JavaPort != f.configs[1].JavaPort {
+			break
+		}
+	}
+	registerLogicalForTest(t, f.backend.store, "112233", unrelated.Software, "Unrelated")
+	dir, _, _ := f.backend.paths(unrelated.ID)
+	private, err := f.backend.privateDirectory(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	private.Close()
+	r := instanceRuntimeRecord{SchemaVersion: 1, Runtime: unrelated, Storage: instanceStorageFor(f.snapshot, unrelated.ID), Firewall: []instanceFirewallRule{}}
+	if err := f.backend.writeJSON(filepath.Join(dir, "config.json"), r, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.apply(unrelated.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range append(append([]string{}, c.Members...), unrelated.ID) {
+		f.states[id], f.containers[id] = "active", "running"
+	}
+	h := networkLifecycleControls(f)
+	original := f.backend.command
+	var mu sync.Mutex
+	attempts := map[string]int{}
+	pauses := 0
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if command == "podman" && len(args) == 4 && args[0] == "exec" && args[3] == "list" {
+			id := strings.TrimPrefix(args[1], "minecraft-")
+			if !networkContains(c.Members, id) {
+				t.Fatal("queried unrelated console", id)
+			}
+			attempts[id]++
+			if attempts[id] <= 2 {
+				return nil, errors.New("console not ready")
+			}
+			return []byte("There are 0 of a max of 10 players online:"), nil
+		}
+		if command == "systemctl" && (args[0] == "stop" || args[0] == "--no-block") {
+			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
+			if instanceIDPattern.MatchString(id) && (!networkContains(c.Members, id) || attempts[id] != 3) {
+				t.Fatal("interruption without verified selected players", id, attempts)
+			}
+		}
+		return original(ctx, command, args...)
+	}
+	f.backend.pause = func(_ context.Context, d time.Duration) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if d != 2*time.Second {
+			t.Error("unexpected occupied countdown", d)
+		}
+		pauses++
+		return nil
+	}
+	if err := networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	if pauses != 4 || len(h.stops) != 2 || !reflect.DeepEqual(h.starts, c.Members) || len(h.warnings) != 0 {
+		t.Fatal("startup lifecycle changed", pauses, h.stops, h.starts, h.warnings)
+	}
+	for _, id := range c.Members {
+		stops := 0
+		for _, stopped := range h.stops {
+			if stopped == id {
+				stops++
+			}
+		}
+		r, err := f.backend.readRecord(id)
+		if stops != 1 || attempts[id] != 3 || f.states[id] != "active" || f.containers[id] != "running" || err != nil || !r.NetworkMember {
+			t.Fatal("member was not safely stopped, published and restarted", id, stops, attempts[id], err)
+		}
+	}
+	if f.states[unrelated.ID] != "active" || f.containers[unrelated.ID] != "running" {
+		t.Fatal("unrelated server interrupted")
+	}
+}

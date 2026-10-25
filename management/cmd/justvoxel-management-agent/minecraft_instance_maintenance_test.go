@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -574,5 +575,217 @@ func TestInstanceUDPActivationFailureAndRecovery(t *testing.T) {
 	}
 	if len(committed.Firewall) != 6 {
 		t.Fatal("expected TCP/UDP runtime and permanent ownership", committed.Firewall)
+	}
+}
+
+func TestJavaInterruptionConsoleReadiness(t *testing.T) {
+	for _, action := range []string{"stop", "restart"} {
+		for _, tc := range []struct {
+			name             string
+			failures         int
+			raw              string
+			abort            string
+			attempts, pauses int
+			wantError        string
+		}{
+			{name: "ready_empty", raw: "There are 0 of a max of 10 players online:", attempts: 1},
+			{name: "starting_empty", failures: 3, raw: "There are 0 of a max of 10 players online:", attempts: 4, pauses: 3},
+			{name: "starting_occupied", failures: 2, raw: "There are 1 of a max of 10 players online: Alex", attempts: 3, pauses: 2},
+			{name: "unavailable", failures: 31, attempts: 31, pauses: 30, wantError: "Instance console did not become ready; the instance was not interrupted."},
+			{name: "malformed", raw: "unknown", attempts: 1, wantError: "Player presence cannot be verified; the instance was not interrupted."},
+			{name: "truncated", raw: "There are 2 of a max of 10 players online: Alex", attempts: 1, wantError: "Player presence cannot be verified; the instance was not interrupted."},
+			{name: "oversized", raw: strings.Repeat("x", 8193), attempts: 1, wantError: "Instance console is unavailable."},
+			{name: "cancelled", failures: 3, abort: "cancel", attempts: 1, pauses: 1, wantError: context.Canceled.Error()},
+			{name: "state_changed_during_wait", failures: 3, abort: "state", attempts: 1, pauses: 1, wantError: "Instance player presence cannot be safely determined in its current state."},
+			{name: "state_changed_during_query", failures: 3, abort: "query_state", attempts: 1, wantError: "Instance player presence cannot be safely determined in its current state."},
+			{name: "state_changed_on_successful_retry", failures: 1, raw: "There are 0 of a max of 10 players online:", abort: "success_state", attempts: 2, pauses: 1, wantError: "Instance player presence cannot be safely determined in its current state."},
+		} {
+			t.Run(action+"/"+tc.name, func(t *testing.T) {
+				f := newInstanceActivationFixture(t)
+				f.activateBoth()
+				id, sibling := f.configs[0].ID, f.configs[1].ID
+				f.states[id], f.containers[id] = "active", "running"
+				f.states[sibling], f.containers[sibling] = "active", "running"
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				attempts, readinessPauses, stops, starts := 0, 0, 0, 0
+				ready := false
+				var warnings []string
+				var countdown []time.Duration
+				var elapsed time.Duration
+				base := f.backend.command
+				f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+					if command == "podman" && len(args) == 4 && args[0] == "exec" {
+						if args[1] != "minecraft-"+id || args[2] != "rcon-cli" {
+							t.Fatal("console query escaped selected Java instance", args)
+						}
+						if args[3] == "list" {
+							attempts++
+							if attempts <= tc.failures {
+								if tc.abort == "query_state" {
+									f.states[id] = "deactivating"
+								}
+								return nil, errors.New("private RCON failure")
+							}
+							ready = true
+							if tc.abort == "success_state" {
+								f.states[id] = "deactivating"
+							}
+							return []byte(tc.raw), nil
+						}
+						warnings = append(warnings, args[3])
+						return nil, nil
+					}
+					if command == "systemctl" && (args[0] == "stop" || args[0] == "--no-block") {
+						if !ready {
+							t.Fatal("interruption before verified players")
+						}
+						if args[0] == "stop" || args[1] == "stop" {
+							stops++
+							if readinessPauses != tc.pauses || len(countdown) != 0 {
+								t.Fatal("stop delayed after player query", readinessPauses, countdown)
+							}
+							if args[0] == "--no-block" {
+								f.states[id] = "deactivating"
+								return nil, nil
+							}
+						} else {
+							starts++
+						}
+					}
+					return base(ctx, command, args...)
+				}
+				f.backend.pause = func(probeCtx context.Context, d time.Duration) error {
+					if !ready {
+						deadline, bounded := probeCtx.Deadline()
+						if remaining := time.Until(deadline); !bounded || remaining <= 0 || remaining > 60*time.Second || javaInterruptionReadinessWindow != 60*time.Second {
+							t.Fatal("readiness must share an overall 60-second deadline", deadline, bounded)
+						}
+						readinessPauses++
+						if d != 2*time.Second || attempts != readinessPauses || stops != 0 {
+							t.Fatal("unsafe readiness cadence", d, attempts, readinessPauses, stops)
+						}
+						if tc.abort == "cancel" {
+							cancel()
+							return nil
+						}
+						if tc.abort == "state" {
+							f.states[id], f.containers[id] = "inactive", "exited"
+						}
+						return nil
+					}
+					countdown = append(countdown, d)
+					elapsed += d
+					if elapsed == time.Minute {
+						f.states[id], f.containers[id] = "inactive", "exited"
+					}
+					return nil
+				}
+				err := f.backend.actionWithWarnings(ctx, id, action, true)
+				if tc.wantError != "" {
+					if err == nil || err.Error() != tc.wantError || stops != 0 || starts != 0 {
+						t.Fatal("unsafe failure", err, stops, starts)
+					}
+				} else {
+					wantStarts, wantState := 0, "inactive"
+					if action == "restart" {
+						wantStarts, wantState = 1, "active"
+					}
+					if err != nil || stops != 1 || starts != wantStarts || f.states[id] != wantState {
+						t.Fatal("lifecycle failed", err, stops, starts, f.states[id])
+					}
+				}
+				if attempts != tc.attempts || readinessPauses != tc.pauses {
+					t.Fatal("incorrect readiness bound", attempts, readinessPauses)
+				}
+				if tc.name == "starting_occupied" {
+					var wantWarnings []string
+					for _, seconds := range []string{"60 seconds", "30 seconds", "15 seconds", "10 seconds", "5 seconds", "4 seconds", "3 seconds", "2 seconds", "1 second"} {
+						wantWarnings = append(wantWarnings, "say Server shutting down in "+seconds)
+					}
+					wantPauses := []time.Duration{30 * time.Second, 15 * time.Second, 5 * time.Second, 5 * time.Second, time.Second, time.Second, time.Second, time.Second, time.Second}
+					if !reflect.DeepEqual(warnings, wantWarnings) || !reflect.DeepEqual(countdown, wantPauses) {
+						t.Fatal("occupied countdown changed", warnings, countdown)
+					}
+				} else if len(warnings) != 0 || len(countdown) != 0 {
+					t.Fatal("unexpected countdown", warnings, countdown)
+				}
+				if f.states[sibling] != "active" || f.containers[sibling] != "running" {
+					t.Fatal("sibling interrupted")
+				}
+			})
+		}
+	}
+}
+
+func TestJavaInterruptionReadinessContextErrors(t *testing.T) {
+	for _, stage := range []string{"rcon", "state", "pause"} {
+		for _, cause := range []string{"readiness_timeout", "parent_cancel", "parent_timeout"} {
+			t.Run(stage+"/"+cause, func(t *testing.T) {
+				f := newInstanceActivationFixture(t)
+				f.activateBoth()
+				id := f.configs[0].ID
+				f.states[id], f.containers[id] = "active", "running"
+				const shortWindow = 100 * time.Millisecond
+				window := shortWindow
+				parent, cancel := context.WithCancel(context.Background())
+				if cause == "parent_timeout" {
+					cancel()
+					parent, cancel = context.WithTimeout(context.Background(), shortWindow)
+				}
+				defer cancel()
+				if cause != "readiness_timeout" {
+					window = javaInterruptionReadinessWindow
+				}
+				// Allow setup overhead while rejecting an unbounded or five-second probe.
+				latestDeadline := time.Now().Add(2 * shortWindow)
+				blocked := false
+				block := func(ctx context.Context) error {
+					blocked = true
+					deadline, bounded := ctx.Deadline()
+					if !bounded || (cause != "parent_cancel" && deadline.After(latestDeadline)) {
+						t.Fatal("readiness operation escaped its deadline", deadline, bounded)
+					}
+					if cause == "parent_cancel" {
+						cancel()
+					}
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				base := f.backend.command
+				f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+					if command == "podman" && len(args) == 4 && args[2] == "rcon-cli" {
+						if stage == "rcon" {
+							return nil, block(ctx)
+						}
+						return nil, errors.New("private RCON startup failure")
+					}
+					if stage == "state" && command == "systemctl" && args[0] == "show" {
+						return nil, block(ctx)
+					}
+					return base(ctx, command, args...)
+				}
+				f.backend.pause = func(ctx context.Context, d time.Duration) error {
+					if stage != "pause" || d != 2*time.Second {
+						t.Fatal("unexpected readiness pause", stage, d)
+					}
+					return block(ctx)
+				}
+				players, raw, err := f.backend.waitForJavaPlayersForInterruptionWithin(parent, id, window)
+				if !blocked || players.State != "unknown" || raw != nil || err == nil {
+					t.Fatal("unsafe readiness result", blocked, players, raw, err)
+				}
+				if cause == "readiness_timeout" {
+					if parent.Err() != nil || errors.Is(err, context.DeadlineExceeded) || err.Error() != "Instance console did not become ready; the instance was not interrupted." {
+						t.Fatal("internal timeout exposed the wrong error", parent.Err(), err)
+					}
+				} else if !errors.Is(err, parent.Err()) {
+					t.Fatal("caller context error was lost", parent.Err(), err)
+				}
+				if f.states[id] != "active" || f.containers[id] != "running" {
+					t.Fatal("readiness failure interrupted the instance")
+				}
+			})
+		}
 	}
 }
