@@ -174,14 +174,35 @@ class NetworkArtifacts(unittest.TestCase):
                     runtime['check']()
                 self.files[path] = old
 
-    def test_image_rebuild_does_not_discard_valid_six_artifact_evidence(self):
+    def test_image_rebuild_refreshes_baked_artifacts_and_preserves_external_evidence(self):
         self.migrate()
         manifest = dict(self.manifest)
+        external_bytes = {name:self.files[self.root+'/artifacts/'+name] for name in runtime['EXTERNAL_ARTIFACTS']}
         self.writes.clear()
         self.baked['limboapi.jar'] = b'another verified stable image release'
         runtime['prepare']()
-        self.assertEqual(json.loads(self.files[self.root+'/artifacts.json']),manifest)
-        self.assertEqual(self.writes,[])
+        refreshed = runtime['validate_artifacts']()
+        for name, data in self.baked.items():
+            self.assertEqual(self.files[self.root+'/artifacts/'+name], data)
+            self.assertEqual(refreshed[name], hashlib.sha256(data).hexdigest())
+        for name, data in external_bytes.items():
+            self.assertEqual(self.files[self.root+'/artifacts/'+name], data)
+            self.assertEqual(refreshed[name], manifest[name])
+        self.assertEqual(set(self.writes), {self.root+'/artifacts/'+name for name in self.baked} | {self.root+'/artifacts.json'})
+        runtime['fetch'].assert_not_called()
+
+    def test_image_refresh_rejects_corrupt_cached_baked_artifact_before_writing(self):
+        self.migrate()
+        self.files[self.root+'/artifacts/limboapi.jar'] = b'corrupt cached jar'
+        self.baked['limboapi.jar'] = b'another verified stable image release'
+        original_files = dict(self.files)
+        self.writes.clear()
+        with mock.patch.dict(runtime, {'baked_artifacts': mock.Mock(side_effect=AssertionError('must validate existing evidence first'))}):
+            with self.assertRaisesRegex(ValueError, 'installed artifact checksum mismatch'):
+                runtime['prepare']()
+        self.assertEqual(self.writes, [])
+        self.assertEqual(self.files, original_files)
+        runtime['fetch'].assert_not_called()
 
     def test_velocity_start_publishes_both_baked_jars_and_generated_config(self):
         self.migrate()

@@ -180,10 +180,10 @@ def prepare():
     directory(ROOT+'/artifacts')
     if os.path.exists(ROOT+'/artifacts.json'):
         artifacts = validate_artifacts(allow_old=True)
-        if set(artifacts) == EXTERNAL_ARTIFACTS:
+        baked_hashes = {name: hashlib.sha256(data).hexdigest() for name, data in baked_artifacts().items()}
+        # External artifacts retain verified evidence; baked artifacts track the image.
+        if set(artifacts) == EXTERNAL_ARTIFACTS or any(artifacts[name] != digest for name, digest in baked_hashes.items()):
             add_baked_artifacts(artifacts)
-        # A valid complete set is retained, just like existing external JARs.
-        # Image rebuilds must not invalidate already verified runtime evidence.
         return
     artifacts = {}
     # The reviewed Modrinth project/version, loader, primary JAR, metadata hash,
