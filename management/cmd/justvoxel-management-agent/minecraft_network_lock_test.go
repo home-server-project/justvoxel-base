@@ -132,7 +132,7 @@ func TestMinecraftNetworkConfigureLockPhases(t *testing.T) {
 			rr := httptest.NewRecorder()
 			s.minecraftNetworkConfigure(rr, authorizedRequest("PUT", "/v1/minecraft/network", string(payload)))
 			if mode == "commit" {
-				if rr.Code != 200 || publications != 1 || reloads != 1 || probes != 3 {
+				if rr.Code != 200 || publications != 1 || reloads != 1 || probes != 2 {
 					t.Fatal(rr.Code, rr.Body.String(), publications, reloads, probes)
 				}
 			} else if rr.Code == 200 {

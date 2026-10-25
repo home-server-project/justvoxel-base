@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,7 +84,7 @@ var networkTCPReady = func(ctx context.Context, javaPort int) bool {
 func networkRuntimeReady(ctx context.Context, b *instanceRuntimeBackend, javaPort int) bool {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	for _, unit := range []string{"justvoxel-picolobby.service", "justvoxel-velocity.service"} {
+	for _, unit := range []string{"justvoxel-velocity.service"} {
 		if _, err := b.command(ctx, "systemctl", "is-active", "--quiet", unit); err != nil {
 			return false
 		}
@@ -220,18 +221,20 @@ func networkInfrastructure(s minecraftNetworkState, names map[string]string) map
 		return map[string][]byte{}
 	}
 	var velocity strings.Builder
-	velocity.WriteString("config-version = \"2.9\"\nbind = \"0.0.0.0:25565\"\nonline-mode = true\nforce-key-authentication = false\nplayer-info-forwarding-mode = \"modern\"\nforwarding-secret-file = \"forwarding.secret\"\nforced-hosts = {}\n[servers]\njv-lobby = \"justvoxel-picolobby:25565\"\n")
+	velocity.WriteString("config-version = \"2.9\"\nbind = \"0.0.0.0:25565\"\nonline-mode = true\nforce-key-authentication = false\nplayer-info-forwarding-mode = \"modern\"\nforwarding-secret-file = \"forwarding.secret\"\nforced-hosts = {}\n[servers]\n")
 	ids := append([]string{}, s.Config.Members...)
 	sort.Strings(ids)
 	for _, id := range ids {
 		fmt.Fprintf(&velocity, "%s = %q\n", id, id+":25565")
 	}
-	velocity.WriteString("try = [\"jv-lobby\"]\n[advanced]\nbungee-plugin-message-channel = true\n")
+	velocity.WriteString("try = []\n[advanced]\nbungee-plugin-message-channel = true\n")
+	// Base64 UTF-8 fields keep delimiters, Unicode and presentation punctuation
+	// out of the line grammar. The plugin decodes text, never configuration syntax.
 	var lobby strings.Builder
-	fmt.Fprintf(&lobby, "bind = \"0.0.0.0:25565\"\nwelcome_message = %q\ndefault_game_mode = \"adventure\"\n[forwarding]\nmethod = \"MODERN\"\nsecret = %q\n[lobby]\nenabled = true\n[lobby.selector]\nslot = 4\nitem = \"minecraft:compass\"\ndisplay_name = \"Server Selector\"\n", s.Config.WelcomeMessage, s.ForwardingSecret)
-	lobby.WriteString("[server_list]\nmax_players = 0\n")
-	for i, id := range ids {
-		fmt.Fprintf(&lobby, "[[lobby.servers]]\nid = %q\ndisplay_name = %q\nserver = %q\n[[lobby.npcs]]\nid = %q\ndestination = %q\nname = %q\nx = %d.0\ny = 320.0\nz = 4.0\nyaw = 180.0\npitch = 0.0\n", id, names[id], id, id+"-npc", id, names[id], i*3)
+	lobby.WriteString("schema=1\n")
+	fmt.Fprintf(&lobby, "welcome=%s\n", base64.StdEncoding.EncodeToString([]byte(s.Config.WelcomeMessage)))
+	for _, id := range ids {
+		fmt.Fprintf(&lobby, "server=%s:%s\n", id, base64.StdEncoding.EncodeToString([]byte(names[id])))
 	}
 	players, _ := json.Marshal(s.Whitelist)
 	return map[string][]byte{
@@ -264,7 +267,7 @@ send-floodgate-data: true
 config-version: 3
 `),
 		"velocity/plugins/Geyser-Velocity/config.yml": []byte("bedrock:\n  address: 0.0.0.0\n  port: 19132\n  clone-remote-port: false\n  transport: nethernet\nremote:\n  address: auto\n  auth-type: floodgate\n"),
-		"picolobby/server.toml":                       []byte(lobby.String()),
+		"velocity/plugins/justvoxel-lobby/lobby.conf": []byte(lobby.String()),
 	}
 }
 func registerMinecraftNetworkRoutes(mux *http.ServeMux, s *server) {

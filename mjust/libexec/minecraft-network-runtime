@@ -2,14 +2,14 @@
 set -euo pipefail
 # Unit startup shares the existing maintenance lock. Agent publication already
 # holds it; backend startup inherits instance-crossplay-start's checked lock.
-if [[ ${1:-} == start-velocity || ${1:-} == start-picolobby ]]; then
+if [[ ${1:-} == start-velocity ]]; then
     exec 9>/run/justvoxel-minecraft-maintenance.lock
     flock -w 5 9 || { echo 'ERROR: Minecraft Network is busy.' >&2; exit 1; }
 fi
 exec python3 - "$@" <<'PYTHON'
 """Fixed Minecraft Network file preparation; called only by the root Agent/units.
 
-No relabel operations. Container volumes use their two dedicated private labels.
+No relabel operations. Container volumes use the dedicated private Velocity label.
 All copying into existing instance data uses the existing private data mount.
 """
 import base64
@@ -27,6 +27,57 @@ ROOT = '/etc/justvoxel/minecraft-network'
 INSTANCE_ROOT = '/etc/justvoxel/instances'
 PINNED_WHITELIST_SHA256 = '35c059c0913f2fa3cb75265edda4d84df84465c1ebebaefef3918e02be8bfbf5'
 MAX_JAR = 64 * 1024 * 1024
+BAKED_ROOT = '/usr/lib/justvoxel/minecraft-network'
+EXTERNAL_ARTIFACTS = {'global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar','floodgate-spigot.jar'}
+BAKED_ARTIFACTS = {'limboapi.jar','justvoxel-lobby.jar'}
+VELOCITY_ARTIFACTS = ['global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar','limboapi.jar','justvoxel-lobby.jar']
+
+
+def baked_artifacts():
+    result = {}
+    for name in sorted(BAKED_ARTIFACTS):
+        path = BAKED_ROOT+'/'+name
+        data = read(path, MAX_JAR)
+        info = os.stat(path)
+        if not data or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o644:
+            raise ValueError('invalid baked artifact')
+        result[name] = data
+    return result
+
+
+def validate_artifacts(allow_old=False):
+    manifest = private_json(ROOT+'/artifacts.json')
+    allowed = [EXTERNAL_ARTIFACTS | BAKED_ARTIFACTS]
+    if allow_old:
+        allowed.append(EXTERNAL_ARTIFACTS)
+    if not isinstance(manifest, dict) or set(manifest) not in allowed or manifest.get('global-whitelist.jar') != PINNED_WHITELIST_SHA256:
+        raise ValueError('invalid artifact evidence')
+    for name, expected in manifest.items():
+        if not isinstance(expected,str) or not re.fullmatch('[a-f0-9]{64}',expected):
+            raise ValueError('invalid artifact checksum')
+        data = read(ROOT+'/artifacts/'+name,MAX_JAR)
+        if not data or hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError('installed artifact checksum mismatch')
+    return manifest
+
+
+def add_baked_artifacts(manifest):
+    # Verify the old evidence first, then prepare both immutable replacements
+    # before publishing either. Preserve all external hashes verbatim.
+    baked = baked_artifacts()
+    result = dict(manifest)
+    for name, data in baked.items():
+        result[name] = hashlib.sha256(data).hexdigest()
+        atomic(ROOT+'/artifacts/'+name,data)
+    atomic(ROOT+'/artifacts.json',json.dumps(result).encode())
+
+
+def legacy_rollback_generated():
+    marker = private_json(ROOT+'/legacy-rollback.json')
+    data = read(ROOT+'/generated.json')
+    if marker.get('schema') != 1 or marker.get('generated_sha256') != hashlib.sha256(data).hexdigest():
+        raise ValueError('invalid legacy rollback evidence')
+    return json.loads(data)
 
 
 def safe(path):
@@ -126,16 +177,13 @@ def fetch(url, limit):
 def prepare():
     directory(ROOT)
     directory(ROOT+'/velocity', 1000, 1000)
-    directory(ROOT+'/picolobby', 65532, 65532)
     directory(ROOT+'/artifacts')
     if os.path.exists(ROOT+'/artifacts.json'):
-        artifacts = private_json(ROOT+'/artifacts.json')
-        expected = {'global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar','floodgate-spigot.jar'}
-        if set(artifacts) != expected or artifacts['global-whitelist.jar'] != PINNED_WHITELIST_SHA256:
-            raise ValueError('invalid artifact evidence')
-        for name,expected_hash in artifacts.items():
-            if hashlib.sha256(read(ROOT+'/artifacts/'+name,MAX_JAR)).hexdigest() != expected_hash:
-                raise ValueError('installed artifact checksum mismatch')
+        artifacts = validate_artifacts(allow_old=True)
+        if set(artifacts) == EXTERNAL_ARTIFACTS:
+            add_baked_artifacts(artifacts)
+        # A valid complete set is retained, just like existing external JARs.
+        # Image rebuilds must not invalidate already verified runtime evidence.
         return
     artifacts = {}
     # The reviewed Modrinth project/version, loader, primary JAR, metadata hash,
@@ -170,31 +218,68 @@ def prepare():
     for name,data in artifacts.items():
         atomic(ROOT+'/artifacts/'+name,data)
         manifest[name] = hashlib.sha256(data).hexdigest()
-    atomic(ROOT+'/artifacts.json',json.dumps(manifest).encode())
+    add_baked_artifacts(manifest)
+
+
+def remove_legacy_config():
+    # Remove only the obsolete generated file; rollback can regenerate it from
+    # the journal's prior state. Never recursively remove container-owned data.
+    legacy_config = safe(ROOT+'/picolobby/server.toml')
+    if os.path.lexists(legacy_config):
+        if not stat.S_ISREG(os.lstat(legacy_config).st_mode):
+            raise ValueError('unsafe legacy configuration')
+        os.unlink(legacy_config)
 
 
 def publish(component=None):
     state = private_json(ROOT+'/state.json')
     if not state['config']['enabled']:
+        remove_legacy_config()
         return
     generated = private_json(ROOT+'/generated.json')
-    allowed = {'velocity/velocity.toml','velocity/forwarding.secret','velocity/plugins/global-whitelist/config.properties','velocity/plugins/global-whitelist/whitelist.json','velocity/plugins/floodgate/key.pem','velocity/plugins/floodgate/config.yml','velocity/plugins/Geyser-Velocity/config.yml','picolobby/server.toml'}
+    allowed = {'velocity/velocity.toml','velocity/forwarding.secret','velocity/plugins/global-whitelist/config.properties','velocity/plugins/global-whitelist/whitelist.json','velocity/plugins/floodgate/key.pem','velocity/plugins/floodgate/config.yml','velocity/plugins/Geyser-Velocity/config.yml','velocity/plugins/justvoxel-lobby/lobby.conf'}
     if set(generated) != allowed:
-        raise ValueError('unexpected generated files')
+        # Only Management recovery can create the private, hash-bound marker.
+        # This is not a selectable engine or an ordinary publication path.
+        publish_legacy_rollback(generated, allowed)
+        return
     for name,encoded in generated.items():
         if component is not None and not name.startswith(component+'/'):
             continue
-        uid = 65532 if name.startswith('picolobby/') else 1000
+        uid = 1000
         directory(os.path.dirname(ROOT+'/'+name),uid,uid)
         atomic(ROOT+'/'+name,base64.b64decode(encoded,validate=True),uid,uid)
-    artifacts = private_json(ROOT+'/artifacts.json')
-    if component == 'picolobby':
-        return
-    for name in ['global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar']:
+    artifacts = validate_artifacts()
+    for name in VELOCITY_ARTIFACTS:
         data = read(ROOT+'/artifacts/'+name,MAX_JAR)
         if hashlib.sha256(data).hexdigest() != artifacts[name]:
             raise ValueError('artifact changed')
         atomic(ROOT+'/velocity/plugins/'+name,data,1000,1000,0o644)
+    remove_legacy_config()
+
+
+def publish_legacy_rollback(generated, normal_allowed):
+    # Historical pre-commit recovery only. Never called for a normal generated
+    # configuration. Existing four-artifact evidence remains sufficient here.
+    if generated != legacy_rollback_generated() or set(generated) != (normal_allowed - {'velocity/plugins/justvoxel-lobby/lobby.conf'}) | {'picolobby/server.toml'}:
+        raise ValueError('unexpected legacy rollback files')
+    artifacts = validate_artifacts(allow_old=True)
+    for name,encoded in generated.items():
+        uid = 65532 if name == 'picolobby/server.toml' else 1000
+        directory(os.path.dirname(ROOT+'/'+name),uid,uid)
+        atomic(ROOT+'/'+name,base64.b64decode(encoded,validate=True),uid,uid)
+    for name in sorted(EXTERNAL_ARTIFACTS - {'floodgate-spigot.jar'}):
+        data = read(ROOT+'/artifacts/'+name,MAX_JAR)
+        if hashlib.sha256(data).hexdigest() != artifacts[name]:
+            raise ValueError('legacy artifact changed')
+        atomic(ROOT+'/velocity/plugins/'+name,data,1000,1000,0o644)
+    # A rolled-back proxy must not load the replacement lobby as well.
+    for name in sorted(BAKED_ARTIFACTS):
+        path = safe(ROOT+'/velocity/plugins/'+name)
+        if os.path.lexists(path):
+            if not stat.S_ISREG(os.lstat(path).st_mode):
+                raise ValueError('unsafe legacy plugin target')
+            os.unlink(path)
 
 
 # Back up only these exact configuration/managed artifact paths. Whitelist.json,
@@ -375,10 +460,12 @@ def check():
     # Container configuration loaders may normalize their files. The root-owned
     # state is authoritative: each unit republishes only its own configuration
     # before startup instead of trusting container-written bytes on the next boot.
-    artifacts = private_json(ROOT+'/artifacts.json')
-    for name in ['global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar']:
-        if hashlib.sha256(read(ROOT+'/artifacts/'+name,MAX_JAR)).hexdigest() != artifacts[name]:
-            raise ValueError('network artifact changed')
+    if os.path.exists(ROOT+'/legacy-rollback.json'):
+        # Only a matching legacy generated set authorizes old evidence/startup.
+        legacy_rollback_generated()
+        validate_artifacts(allow_old=True)
+    else:
+        validate_artifacts()
 
 
 def main():
@@ -390,7 +477,7 @@ def main():
         publish()
     elif sys.argv[1:] == ['check']:
         check()
-    elif sys.argv[1:] in [['start-velocity'],['start-picolobby']]:
+    elif sys.argv[1:] == ['start-velocity']:
         check()
         publish(sys.argv[1].removeprefix('start-'))
     elif len(sys.argv) == 3 and sys.argv[1] in ['backend','backend-publish']:

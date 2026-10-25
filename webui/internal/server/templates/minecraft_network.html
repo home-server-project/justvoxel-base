@@ -18,7 +18,7 @@
         <input class="date-time-switch" role="switch" type="checkbox" name="enabled"{{if .Network.Config.Enabled}} checked{{end}}>
       </label>
     </div>
-    <p class="muted minecraft-network-summary">Lobby: PicoLobby · Network whitelist: Enforced</p>
+    <p class="muted minecraft-network-summary">Lobby: JustVoxel virtual lobby · Network whitelist: Enforced</p>
     <section class="minecraft-network-section">
       <h2>Servers</h2>
       <p class="muted minecraft-network-help">Running selected servers are stopped automatically. Empty servers stop immediately; occupied servers receive the normal shutdown countdown. Servers that were running are started again after Apply.</p>
@@ -39,7 +39,7 @@
     </section>
     <section class="minecraft-network-section">
       <h2>Lobby</h2>
-      <p class="muted minecraft-network-summary">Server selector: Enabled · NPCs: Enabled</p>
+      <p class="muted minecraft-network-summary">Java + Bedrock server selector</p>
       <div class="minecraft-network-welcome-lane">
         <label for="minecraft-network-welcome">Welcome message</label>
         <input id="minecraft-network-welcome" name="welcome_message" maxlength="512" value="{{.Network.Config.WelcomeMessage}}">

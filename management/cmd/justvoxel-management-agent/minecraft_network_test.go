@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -102,7 +104,7 @@ func TestMinecraftNetworkWhitelistUnionAndIndependence(t *testing.T) {
 		t.Fatal("unverified identity accepted")
 	}
 }
-func TestMinecraftNetworkImmutableRoutingAndTwoPrivateMounts(t *testing.T) {
+func TestMinecraftNetworkImmutableRoutingAndOnePrivateMount(t *testing.T) {
 	n := networkDefaultState()
 	n.Config.Enabled = true
 	n.Config.Members = []string{"jv-a1b2c3"}
@@ -110,8 +112,8 @@ func TestMinecraftNetworkImmutableRoutingAndTwoPrivateMounts(t *testing.T) {
 	n.FloodgateKey = bytes.Repeat([]byte{1}, 16)
 	files := networkInfrastructure(n, map[string]string{"jv-a1b2c3": "Family Survival"})
 	velocity := string(files["velocity/velocity.toml"])
-	lobby := string(files["picolobby/server.toml"])
-	for _, want := range []string{`config-version = "2.9"`, `jv-lobby = "justvoxel-picolobby:25565"`, `try = ["jv-lobby"]`, `player-info-forwarding-mode = "modern"`, `forwarding-secret-file = "forwarding.secret"`} {
+	lobby := string(files["velocity/plugins/justvoxel-lobby/lobby.conf"])
+	for _, want := range []string{`config-version = "2.9"`, `try = []`, `player-info-forwarding-mode = "modern"`, `forwarding-secret-file = "forwarding.secret"`} {
 		if !strings.Contains(velocity, want) {
 			t.Fatal("missing Velocity configuration", want)
 		}
@@ -125,15 +127,22 @@ func TestMinecraftNetworkImmutableRoutingAndTwoPrivateMounts(t *testing.T) {
 			t.Fatal("example forced host present", host)
 		}
 	}
-	if !strings.Contains(lobby, "[server_list]\nmax_players = 0\n") {
-		t.Fatal("PicoLobby player limit is not disabled")
+	for _, forbidden := range []string{"jv-lobby", "justvoxel-picolobby", "Family Survival", `try = ["jv-a1b2c3"]`} {
+		if strings.Contains(velocity, forbidden) {
+			t.Fatal("invalid lobby routing", forbidden)
+		}
 	}
 	if !strings.Contains(velocity, `jv-a1b2c3 = "jv-a1b2c3:25565"`) || strings.Contains(velocity, "Family Survival") {
 		t.Fatal("friendly name used as routing identity")
 	}
-	for _, want := range []string{`method = "MODERN"`, `display_name = "Family Survival"`, `destination = "jv-a1b2c3"`, `server = "jv-a1b2c3"`, `[lobby.selector]`, `[[lobby.npcs]]`} {
+	for _, want := range []string{"schema=1\n", "welcome=" + base64.StdEncoding.EncodeToString([]byte(n.Config.WelcomeMessage)), "server=jv-a1b2c3:" + base64.StdEncoding.EncodeToString([]byte("Family Survival"))} {
 		if !strings.Contains(lobby, want) {
-			t.Fatal("PicoLobby configuration missing", want)
+			t.Fatal("missing virtual lobby configuration", want)
+		}
+	}
+	for _, forbidden := range []string{n.ForwardingSecret, "floodgate", "whitelist", "/etc/", "secret"} {
+		if strings.Contains(lobby, forbidden) {
+			t.Fatal("private material in lobby configuration", forbidden)
 		}
 	}
 	if string(files["velocity/plugins/global-whitelist/config.properties"]) != "white-list=true\nenforce-whitelist=true\n" {
@@ -142,15 +151,15 @@ func TestMinecraftNetworkImmutableRoutingAndTwoPrivateMounts(t *testing.T) {
 	count := 0
 	for name, data := range networkQuadlets(n) {
 		count += strings.Count(string(data), ":Z")
-		if strings.Contains(name, "picolobby") && strings.Contains(string(data), "PublishPort=") {
-			t.Fatal("lobby is public")
+		if strings.Contains(name, "picolobby") || strings.Contains(string(data), "picolobby") {
+			t.Fatal("legacy lobby generated normally")
 		}
 		if strings.Contains(string(data), ":z") {
 			t.Fatal("shared SELinux label")
 		}
 	}
-	if count != 2 {
-		t.Fatal("expected exactly the two approved infrastructure mounts", count)
+	if count != 1 || len(networkQuadlets(n)) != 2 {
+		t.Fatal("expected one infrastructure mount and only Velocity plus network", count)
 	}
 	public, err := json.Marshal(n.Config)
 	if err != nil {
@@ -888,15 +897,14 @@ func TestMinecraftNetworkJavaStartupReadinessStopsBothMembers(t *testing.T) {
 
 func TestMinecraftNetworkRuntimeStatus(t *testing.T) {
 	for _, tc := range []struct {
-		name                                            string
-		enabled, lobby, proxy, listener, recovery, want bool
+		name                                     string
+		enabled, proxy, listener, recovery, want bool
 	}{
-		{"disabled", false, true, true, true, false, false},
-		{"ready", true, true, true, true, false, true},
-		{"lobby unavailable", true, false, true, true, false, false},
-		{"proxy unavailable", true, true, false, true, false, false},
-		{"listener unavailable", true, true, true, false, false, false},
-		{"recovery required", true, true, true, true, true, false},
+		{"disabled", false, true, true, false, false},
+		{"ready", true, true, true, false, true},
+		{"proxy unavailable", true, false, true, false, false},
+		{"listener unavailable", true, true, false, false, false},
+		{"recovery required", true, true, true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, c := networkTransactionFixture(t)
@@ -919,7 +927,10 @@ func TestMinecraftNetworkRuntimeStatus(t *testing.T) {
 			original := f.backend.command
 			f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
 				if cmd == "systemctl" && len(args) == 3 && args[0] == "is-active" && args[1] == "--quiet" {
-					if (args[2] == "justvoxel-picolobby.service" && !tc.lobby) || (args[2] == "justvoxel-velocity.service" && !tc.proxy) {
+					if args[2] != "justvoxel-velocity.service" {
+						t.Fatal("unexpected infrastructure readiness probe", args)
+					}
+					if !tc.proxy {
 						return nil, errors.New("private runtime error")
 					}
 				}
@@ -948,7 +959,7 @@ func TestMinecraftNetworkRuntimeStatus(t *testing.T) {
 			if !strings.Contains(rr.Body.String(), `"runtime_ready":`) || strings.Contains(rr.Body.String(), "private runtime error") {
 				t.Fatal(rr.Body.String())
 			}
-			if (!tc.enabled || tc.recovery || !tc.proxy || !tc.lobby) && probes != 0 {
+			if (!tc.enabled || tc.recovery || !tc.proxy) && probes != 0 {
 				t.Fatal("unnecessary listener probe")
 			}
 		})
@@ -1009,5 +1020,134 @@ func TestMinecraftNetworkReadinessWaitAndParentCancellation(t *testing.T) {
 	cancel()
 	if networkWaitReady(ctx, f.backend, c.JavaPort) || probes != 3 {
 		t.Fatal("parent cancellation ignored")
+	}
+}
+
+func TestMinecraftNetworkLobbyTextRoundTrip(t *testing.T) {
+	n := networkDefaultState()
+	n.Config.Enabled = true
+	n.Config.Members = []string{"jv-a1b2c3"}
+	n.Config.WelcomeMessage = `Welcome : = "friends" \ ☃`
+	for _, name := range []string{"Family's Survival", `Quotes " : = \ — 世界`, "Name\nserver=jv-evil00:injection"} {
+		files := networkInfrastructure(n, map[string]string{"jv-a1b2c3": name})
+		config := string(files["velocity/plugins/justvoxel-lobby/lobby.conf"])
+		lines := strings.Split(strings.TrimSuffix(config, "\n"), "\n")
+		if len(lines) != 3 || lines[0] != "schema=1" {
+			t.Fatal("text changed line grammar", config)
+		}
+		for encoded, expected := range map[string]string{
+			strings.TrimPrefix(lines[1], "welcome="):          n.Config.WelcomeMessage,
+			strings.TrimPrefix(lines[2], "server=jv-a1b2c3:"): name,
+		} {
+			decoded, err := base64.StdEncoding.DecodeString(encoded)
+			if err != nil || string(decoded) != expected {
+				t.Fatal("lobby text did not round trip", err)
+			}
+		}
+	}
+}
+
+func networkLegacyFixture(t *testing.T) (*instanceActivationFixture, minecraftNetworkConfig, []byte) {
+	t.Helper()
+	f, c := networkTransactionFixture(t)
+	if err := networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	state, err := networkRead(f.backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte("[Container]\nImage=ghcr.io/home-server-project/picolobby:stable\n[Service]\nExecStartPre=" + minecraftNetworkHelper + " start-picolobby\n")
+	if err := f.backend.writePrivate(filepath.Join(f.backend.quadlets, "justvoxel-picolobby.container"), legacy, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.backend.writeJSON(filepath.Join(f.backend.networkDirectory(), "generated.json"), networkLegacyInfrastructure(state, map[string]string{c.Members[0]: "Family"}), true); err != nil {
+		t.Fatal(err)
+	}
+	return f, c, legacy
+}
+
+func TestMinecraftNetworkMigratesLegacyQuadletAndStartsOnlyVelocity(t *testing.T) {
+	f, c, _ := networkLegacyFixture(t)
+	original := f.backend.command
+	stoppedLegacy, reloadAfterRemoval, startedVelocity := false, false, false
+	f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+		if cmd == "systemctl" {
+			if len(args) > 0 && args[0] == "show" && args[len(args)-1] == "justvoxel-picolobby.service" {
+				return []byte("LoadState=loaded\nActiveState=active\nSubState=running\n"), nil
+			}
+			if len(args) > 0 && args[0] == "stop" && args[len(args)-1] == "justvoxel-picolobby.service" {
+				stoppedLegacy = true
+			}
+			if len(args) > 0 && args[0] == "daemon-reload" {
+				_, err := os.Stat(filepath.Join(f.backend.quadlets, "justvoxel-picolobby.container"))
+				reloadAfterRemoval = errors.Is(err, os.ErrNotExist)
+			}
+			if len(args) > 1 && args[0] == "--no-block" && args[1] == "start" {
+				if !reflect.DeepEqual(args, []string{"--no-block", "start", "--", "justvoxel-velocity.service"}) {
+					t.Fatal("legacy infrastructure restarted", args)
+				}
+				if !stoppedLegacy || !reloadAfterRemoval {
+					t.Fatal("started before legacy cleanup")
+				}
+				startedVelocity = true
+			}
+		}
+		return original(ctx, cmd, args...)
+	}
+	if err := networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	if !stoppedLegacy || !reloadAfterRemoval || !startedVelocity {
+		t.Fatal("migration lifecycle incomplete")
+	}
+	for _, path := range []string{filepath.Join(f.backend.quadlets, "justvoxel-picolobby.container"), filepath.Join(f.backend.networkDirectory(), "legacy-rollback.json")} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("legacy state retained", path, err)
+		}
+	}
+	generated, err := f.backend.readPrivate(filepath.Join(f.backend.networkDirectory(), "generated.json"))
+	if err != nil || bytes.Contains(generated, []byte("picolobby")) {
+		t.Fatal("legacy generated configuration retained", err)
+	}
+}
+
+func TestMinecraftNetworkLegacyRollbackAndRetryRecovery(t *testing.T) {
+	for _, reloadFailures := range []int{1, 2} {
+		t.Run(fmt.Sprint(reloadFailures), func(t *testing.T) {
+			f, c, legacy := networkLegacyFixture(t)
+			f.failReload = reloadFailures
+			if err := networkApply(context.Background(), f.backend, c); err == nil {
+				t.Fatal("failed migration claimed success")
+			}
+			if reloadFailures == 2 {
+				if networkPending(f.backend) == nil {
+					t.Fatal("lost interrupted legacy recovery")
+				}
+				if err := networkRecover(context.Background(), f.backend); err != nil {
+					t.Fatal("legacy recovery stranded", err)
+				}
+			}
+			if networkPending(f.backend) != nil {
+				t.Fatal("legacy rollback did not release guard")
+			}
+			quadlet, err := f.backend.readPrivate(filepath.Join(f.backend.quadlets, "justvoxel-picolobby.container"))
+			expected := strings.ReplaceAll(string(legacy), " start-picolobby", " check")
+			if err != nil || string(quadlet) != expected {
+				t.Fatal("legacy unit not safely restored", err)
+			}
+			marker, err := f.backend.readPrivate(filepath.Join(f.backend.networkDirectory(), "legacy-rollback.json"))
+			var evidence struct {
+				Schema int    `json:"schema"`
+				Hash   string `json:"generated_sha256"`
+			}
+			generated, readErr := f.backend.readPrivate(filepath.Join(f.backend.networkDirectory(), "generated.json"))
+			if err != nil || readErr != nil || json.Unmarshal(marker, &evidence) != nil || evidence.Schema != 1 || evidence.Hash != instanceHash(generated) {
+				t.Fatal("missing hash-bound legacy rollback configuration", err, readErr)
+			}
+			if err := networkApply(context.Background(), f.backend, c); err != nil {
+				t.Fatal("cannot retry migration after rollback", err)
+			}
+		})
 	}
 }

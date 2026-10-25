@@ -40,6 +40,15 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 		}
 		// Any rollback has completed and reservations have closed before this
 		// deferred restoration. Never start runtime against unsafe journal state.
+		if before.Config.Enabled {
+			prepareCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			prepareErr := networkPreparePrevious(prepareCtx, b)
+			cancel()
+			if prepareErr != nil {
+				result = errors.Join(result, prepareErr)
+				return
+			}
+		}
 		if err := releaseMaintenance(); err != nil {
 			result = errors.Join(result, instanceRuntimeFailure(networkMaintenanceReleaseMessage))
 			return
@@ -54,7 +63,7 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 		if before.Config.Enabled {
 			restartCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			_, restartErr := b.command(restartCtx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service")
+			restartErr := networkStartPrevious(restartCtx, b)
 			result = errors.Join(result, restartErr)
 		}
 	}()
@@ -176,7 +185,7 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 	// Stop the front gate before changing any member or plugin configuration.
 	// systemd's checked stop is bounded by the request context; no force kill.
 	if before.Config.Enabled {
-		if _, err = b.command(ctx, "systemctl", "stop", "--", "justvoxel-velocity.service", "justvoxel-picolobby.service"); err != nil {
+		if err = networkStopInfrastructure(ctx, b); err != nil {
 			return instanceRuntimeFailure("Minecraft Network could not be stopped safely.")
 		}
 	}
@@ -286,6 +295,16 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 			}
 		}
 	}
+	// Legacy definitions are removed by migration, never generated normally.
+	legacyPath := filepath.Join(b.quadlets, "justvoxel-picolobby.container")
+	if !before.Config.Enabled {
+		if _, e := os.Lstat(legacyPath); !errors.Is(e, os.ErrNotExist) {
+			return instanceRuntimeFailure("An unowned Minecraft Network definition already exists.")
+		}
+	}
+	if err = networkJournalFile(b, &journal, legacyPath, nil); err != nil {
+		return err
+	}
 	// Stage the complete unit set outside generator search paths before journal.
 	stage, err := os.MkdirTemp(b.networkDirectory(), "stage-")
 	if err != nil {
@@ -363,6 +382,9 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 			}
 		}
 	}
+	if err = b.removePrivate(filepath.Join(b.networkDirectory(), "legacy-rollback.json")); err != nil {
+		return fail()
+	}
 	if err = b.clearPending(filepath.Join(b.networkDirectory(), "pending.json")); err != nil {
 		return errInstanceRecovery
 	}
@@ -376,7 +398,7 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 		return instanceRuntimeFailure(networkMaintenanceReleaseMessage)
 	}
 	if c.Enabled {
-		if _, err = b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service"); err != nil {
+		if _, err = b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-velocity.service"); err != nil {
 			result = instanceRuntimeFailure(networkNotReadyMessage)
 		} else if !networkWaitReady(ctx, b, c.JavaPort) {
 			result = instanceRuntimeFailure(networkNotReadyMessage)
@@ -485,7 +507,7 @@ func networkRollback(ctx context.Context, b *instanceRuntimeBackend, j minecraft
 		return err
 	}
 	if j.Before.Config.Enabled {
-		if _, err := b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service"); err != nil {
+		if err := networkStartPrevious(ctx, b); err != nil {
 			return err
 		}
 	}
@@ -506,10 +528,14 @@ func networkRollbackDurable(ctx context.Context, b *instanceRuntimeBackend, j mi
 				return errInstanceRecovery
 			}
 		} else if err != nil || (instanceHash(current) != instanceHash(f.Before) && instanceHash(current) != instanceHash(f.After)) {
-			return errInstanceRecovery
+			// A previous recovery attempt may already have translated the one
+			// removed legacy startup guard. Accept only that exact translation.
+			if err != nil || f.Path != filepath.Join(b.quadlets, "justvoxel-picolobby.container") || instanceHash(current) != instanceHash(networkLegacyGuard(f.Before)) {
+				return errInstanceRecovery
+			}
 		}
 	}
-	if err := networkWriteState(b, j.Before); err != nil {
+	if err := networkWriteRollbackState(b, j); err != nil {
 		return err
 	}
 	if _, err := b.command(ctx, minecraftNetworkHelper, "publish"); err != nil {
@@ -518,6 +544,9 @@ func networkRollbackDurable(ctx context.Context, b *instanceRuntimeBackend, j mi
 	for i := len(j.Files) - 1; i >= 0; i-- {
 		f := j.Files[i]
 		data := f.Before
+		if f.Existed && f.Path == filepath.Join(b.quadlets, "justvoxel-picolobby.container") {
+			data = networkLegacyGuard(data)
+		}
 		if !f.Existed {
 			data = nil
 		}
@@ -537,6 +566,11 @@ func networkRollbackDurable(ctx context.Context, b *instanceRuntimeBackend, j mi
 		c := j.Changes[i]
 		c.Add = !c.Add
 		if err := b.changeFirewall(ctx, c); err != nil {
+			return err
+		}
+	}
+	if j.Before.Config.Enabled {
+		if err := networkPreparePrevious(ctx, b); err != nil {
 			return err
 		}
 	}
@@ -706,10 +740,16 @@ func networkQuadlets(n minecraftNetworkState) map[string][]byte {
 	return map[string][]byte{
 		minecraftNetworkName + ".network": []byte("[Network]\nNetworkName=" + minecraftNetworkName + "\nDriver=bridge\n"),
 		"justvoxel-velocity.container":    []byte(unit + "Image=docker.io/itzg/mc-proxy:java25\nContainerName=justvoxel-velocity\nNetworkAlias=justvoxel-velocity\nEnvironment=TYPE=VELOCITY\nEnvironment=MEMORY=512m\nEnvironment=ENABLE_RCON=false\nEnvironment=SKIP_CHOWN_DATA=true\nVolume=" + minecraftNetworkRoot + "/velocity:/server:Z\n" + fmt.Sprintf("PublishPort=%d:25565/tcp\nPublishPort=%d:19132/tcp\nPublishPort=%d:19132/udp\n", n.Config.JavaPort, n.Config.BedrockPort, n.Config.BedrockPort) + "LogDriver=journald\n" + strings.Replace(guard, " check\n", " start-velocity\n", 1)),
-		"justvoxel-picolobby.container":   []byte(unit + "Image=ghcr.io/home-server-project/picolobby:stable\nContainerName=justvoxel-picolobby\nNetworkAlias=justvoxel-picolobby\nVolume=" + minecraftNetworkRoot + "/picolobby:/config:Z\nLogDriver=journald\n" + strings.Replace(guard, " check\n", " start-picolobby\n", 1)),
 	}
 }
 func networkPublishWhitelist(ctx context.Context, b *instanceRuntimeBackend, before, after minecraftNetworkState) error {
+	// Finish the one-time infrastructure migration through Apply. Whitelist
+	// publication alone must never mix a legacy Quadlet with the new lobby.
+	if _, err := b.readPrivate(filepath.Join(b.quadlets, "justvoxel-picolobby.container")); err == nil {
+		return instanceRuntimeFailure("Apply Minecraft Network configuration to finish the lobby update before changing its whitelist.")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	dir, err := b.privateDirectory(b.networkDirectory(), true)
 	if err != nil {
 		return err

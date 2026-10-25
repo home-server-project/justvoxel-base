@@ -599,15 +599,14 @@ func TestApplianceValidationGroupsOwnedFirewallRepresentations(t *testing.T) {
 
 func TestAdminValidationNetworkInfrastructure(t *testing.T) {
 	for _, tc := range []struct {
-		name                                            string
-		enabled, lobby, proxy, listener, recovery, want bool
+		name                                     string
+		enabled, proxy, listener, recovery, want bool
 	}{
-		{"disabled", false, false, false, false, false, true},
-		{"ready", true, true, true, true, false, true},
-		{"lobby unavailable", true, false, true, true, false, false},
-		{"proxy unavailable", true, true, false, true, false, false},
-		{"listener unavailable", true, true, true, false, false, false},
-		{"recovery required", true, true, true, true, true, false},
+		{"disabled", false, false, false, false, true},
+		{"ready", true, true, true, false, true},
+		{"proxy unavailable", true, false, true, false, false},
+		{"listener unavailable", true, true, false, false, false},
+		{"recovery required", true, true, true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := validationFixture(t, 1)
@@ -639,7 +638,10 @@ func TestAdminValidationNetworkInfrastructure(t *testing.T) {
 			}
 			f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
 				if cmd == "systemctl" && len(args) == 3 && args[0] == "is-active" && args[1] == "--quiet" {
-					if (args[2] == "justvoxel-picolobby.service" && tc.lobby) || (args[2] == "justvoxel-velocity.service" && tc.proxy) {
+					if args[2] != "justvoxel-velocity.service" {
+						t.Fatal("unexpected infrastructure health probe", args)
+					}
+					if tc.proxy {
 						return nil, nil
 					}
 					return nil, errors.New("private proxy diagnostic")

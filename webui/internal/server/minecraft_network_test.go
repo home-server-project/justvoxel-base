@@ -61,9 +61,14 @@ func TestMinecraftNetworkWorkspaceAndCSRF(t *testing.T) {
 	if rr.Code != 200 {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{"Network Whitelist", "family Survival", "PicoLobby", "Standalone", `name="members"`, `name="welcome_message"`, `value="configure"`, `value="add"`} {
+	for _, want := range []string{"Network Whitelist", "family Survival", "JustVoxel virtual lobby", "Java + Bedrock server selector", "Standalone", `name="members"`, `name="welcome_message"`, `value="configure"`, `value="add"`} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatal("missing network UI", want)
+		}
+	}
+	for _, forbidden := range []string{"PicoLobby", "NPC", "lobby_engine"} {
+		if strings.Contains(rr.Body.String(), forbidden) {
+			t.Fatal("legacy lobby UI remains", forbidden)
 		}
 	}
 	rr = httptest.NewRecorder()

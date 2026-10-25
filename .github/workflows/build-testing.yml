@@ -182,6 +182,16 @@ jobs:
             --key cosign.pub \
             "${HOME_SERVER_BASE_IMAGE}" >/dev/null
 
+      - name: Set up Java 25 for Minecraft Network plugins
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Build Minecraft Network plugins with latest stable LimboAPI
+        shell: bash
+        run: ./build_files/build-minecraft-network-plugins.sh
+
       - name: Build local WebUI artifact
         id: webui
         shell: bash
