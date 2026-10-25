@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,63 +16,80 @@ import (
 
 type fakeNordAPI struct {
 	*fakeNetworkConfigurationAPI
-	callback, loginAction string
-	actionError           error
+	token       string
+	loginError  error
+	actionError error
 }
 
-func (f *fakeNordAPI) NordVPNLogin(_ context.Context, _, action, callback string) (api.RemoteAccessChange, error) {
+func (f *fakeNordAPI) NordVPNTokenLogin(_ context.Context, _, token string) (api.RemoteAccessChange, error) {
 	f.calls++
-	f.callback, f.loginAction = callback, action
-	return api.RemoteAccessChange{OK: true, LoginURL: "https://api.nordvpn.com/v1/users/oauth/login-redirect?attempt=example"}, nil
+	f.token = token
+	return api.RemoteAccessChange{OK: true}, f.loginError
 }
 func (f *fakeNordAPI) RemoteAccessStatus(context.Context, string) (api.RemoteAccessStatus, error) {
 	return api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{{ID: "nordvpn", DisplayName: "NordVPN Meshnet", Account: "Logged in", Meshnet: "Enabled", NordName: "local-everest.nord", IP: "100.64.0.1"}}}, nil
 }
-func TestNordWebUIProxyAdministratorCSRFAndCallback(t *testing.T) {
-	const callback = "nordvpn://login?action=login&exchange_token=never_log_me&status=done"
+func TestNordWebUIProxyAdministratorCSRFAndToken(t *testing.T) {
+	const token = "never_reflect_me+/_-.~=opaque"
 	for _, tc := range []struct {
-		role, csrf, action, callback, extra string
-		want                                int
+		name, role, csrf, token, extra string
+		want                           int
+		fail                           bool
 	}{
-		{"viewer", "token", "login", "", "", 403},
-		{"operator", "token", "login", "", "", 403},
-		{"administrator", "wrong", "login", "", "", 403},
-		{"administrator", "token", "login", "", "", 200},
-		{"administrator", "token", "complete-login", callback, "", 200},
-		{"administrator", "token", "complete-login", "https://nordaccount.com/product/nordvpn/login/success?exchange_token=never_log_me", "", 200},
-		{"administrator", "token", "complete-login", "https://nordaccount.com/product/nordvpn/login/success?exchange_token=never_log_me&extra=value", "", 400},
-		{"administrator", "token", "complete-login", "https://evil.test", "", 400},
-		{"administrator", "token", "login", "", "&referral=https://evil.test", 400},
-		{"administrator", "token", "login", "", "&dashboard=https://evil.test", 400},
+		{name: "viewer", role: "viewer", csrf: "token", token: token, want: 403},
+		{name: "operator", role: "operator", csrf: "token", token: token, want: 403},
+		{name: "csrf", role: "administrator", csrf: "wrong", token: token, want: 403},
+		{name: "success", role: "administrator", csrf: "token", token: token, want: 200},
+		{name: "maximum encoded", role: "administrator", csrf: "token", token: strings.Repeat("+", 4096), want: 200},
+		{name: "missing", role: "administrator", csrf: "token", want: 400},
+		{name: "whitespace", role: "administrator", csrf: "token", token: "a b", want: 400},
+		{name: "control", role: "administrator", csrf: "token", token: "a\x00b", want: 400},
+		{name: "oversized", role: "administrator", csrf: "token", token: strings.Repeat("a", 4097), want: 400},
+		{name: "duplicate", role: "administrator", csrf: "token", token: token, extra: "&token=other", want: 400},
+		{name: "duplicate csrf", role: "administrator", csrf: "token", token: token, extra: "&csrf=token", want: 400},
+		{name: "action", role: "administrator", csrf: "token", token: token, extra: "&action=token-login", want: 400},
+		{name: "callback", role: "administrator", csrf: "token", token: token, extra: "&callback=secret", want: 400},
+		{name: "provider", role: "administrator", csrf: "token", token: token, extra: "&provider=nordvpn", want: 400},
+		{name: "url", role: "administrator", csrf: "token", token: token, extra: "&URL=secret", want: 400},
+		{name: "vendor failure", role: "administrator", csrf: "token", token: token, want: 503, fail: true},
 	} {
-		fake := &fakeNordAPI{fakeNetworkConfigurationAPI: &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: tc.role}}}
-		app, err := New(fake, Config{ManagementAPI: "v1", ExternalScheme: "http"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := "csrf=" + tc.csrf + "&action=" + tc.action + "&callback=" + url.QueryEscape(tc.callback) + tc.extra
-		req := httptest.NewRequest(http.MethodPost, "/api/network/remote-access/nordvpn/login", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
-		req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != tc.want || strings.Contains(rr.Body.String(), "never_log_me") {
-			t.Fatal(tc.want, rr.Code)
-		}
-		if tc.want == 200 && (fake.calls != 1 || fake.callback != tc.callback || fake.loginAction != tc.action) {
-			t.Fatal("lost login request")
-		}
-		if tc.want != 200 && fake.calls != 0 {
-			t.Fatal("rejected request reached agent")
-		}
-		req = httptest.NewRequest(http.MethodGet, "/api/network/remote-access", nil)
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
-		rr = httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, req)
-		if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"meshnet":"Enabled"`) {
-			t.Fatal("Nord status proxy", rr.Code)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeNordAPI{fakeNetworkConfigurationAPI: &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: tc.role}}}
+			if tc.fail {
+				fake.loginError = errors.New("private vendor output " + token)
+			}
+			app, err := New(fake, Config{ManagementAPI: "v1", ExternalScheme: "http"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			form := url.Values{"csrf": {tc.csrf}}
+			if tc.token != "" {
+				form.Set("token", tc.token)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/network/remote-access/nordvpn/login", strings.NewReader(form.Encode()+tc.extra))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+			req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			if rr.Code != tc.want || strings.Contains(rr.Body.String(), "never_reflect_me") || strings.Contains(rr.Body.String(), "private vendor") {
+				t.Fatal("status or response privacy", tc.want, rr.Code)
+			}
+			reachesAgent := tc.want == 200 || tc.fail
+			if reachesAgent && (fake.calls != 1 || fake.token != tc.token) {
+				t.Fatal("lost opaque token")
+			}
+			if !reachesAgent && fake.calls != 0 {
+				t.Fatal("rejected request reached agent")
+			}
+			req = httptest.NewRequest(http.MethodGet, "/api/network/remote-access", nil)
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+			rr = httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"meshnet":"Enabled"`) || strings.Contains(rr.Body.String(), "never_reflect_me") {
+				t.Fatal("Nord status proxy/privacy", rr.Code)
+			}
+		})
 	}
 }
 
@@ -81,16 +99,31 @@ func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(source)
-	for _, want := range []string{"NordVPN account required", "NordVPN Meshnet requires a Nord Account.", "Already have an account?", "Log in to NordVPN", "Create NordVPN account", "https://refer-nordvpn.com/pZGMpGTrBrO", "Complete NordVPN login", "After NordVPN shows “Great – you’re in!”, if your browser asks to open NordVPN or xdg-open, choose Cancel. Copy the URL from the browser address bar and paste it below. Do not select Continue.", "NordVPN success URL", "https://nordaccount.com/product/nordvpn/login/success?exchange_token=...", "Paste the NordVPN success URL from your browser address bar.", "Open NordVPN login", "Complete login", "noopener noreferrer", "Open NordVPN account", "https://my.nordaccount.com/", `input.maxLength = 2048`, `input.autocomplete = "off"`, `input.value = ""`, `if (result?.login_required) showNordAccountDialog()`} {
+	for _, want := range []string{
+		"NordVPN account required", "NordVPN Meshnet needs a NordVPN account and access token.",
+		"Already have a NordVPN account?", "Open NordVPN dashboard", "Create NordVPN account",
+		"https://my.nordaccount.com/dashboard/nordvpn/", "https://refer-nordvpn.com/pZGMpGTrBrO",
+		"Get your NordVPN access token", "Select NordVPN from the left menu.", "Scroll down to Advanced settings.",
+		"Under Access token, select Get Access token.", "Select Generate new token.", "Copy the token and paste it below.",
+		"NordVPN may ask you to verify your email before generating the token.",
+		"Access token", "Log in & activate", "noopener noreferrer", "Open NordVPN account",
+		`input.type = "password"`, `input.maxLength = 4096`, `input.autocomplete = "off"`,
+		`input.spellcheck = false`, `input.autocapitalize = "off"`,
+		`if (result?.login_required) showNordAccountDialog()`,
+	} {
 		if !strings.Contains(script, want) {
 			t.Fatal("approved UI missing", want)
 		}
 	}
-	if strings.Contains(script, "On the Continue button, copy the link address and paste it below.") || strings.Contains(script, `"Continue link"`) {
-		t.Fatal("old Continue-copy instruction remains")
+	for _, old := range []string{"Complete NordVPN login", "NordVPN success URL", "Open NordVPN login", "xdg-open", "exchange_token", "nordvpn://", "validNordCallback", "validNordLoginURL", "complete-login"} {
+		if strings.Contains(script, old) {
+			t.Fatal("obsolete Nord browser flow remains", old)
+		}
 	}
-	if strings.Contains(script, `"Open Nord account"`) {
-		t.Fatal("old Nord account button label remains")
+	start := strings.Index(script, "  const validNordAccessToken")
+	end := strings.Index(script, "  const renderRemoteAccess")
+	if start < 0 || end <= start || strings.Contains(script[start:end], "window.open") {
+		t.Fatal("automatic Nord tab opening")
 	}
 	if strings.Contains(script, "provider.dashboard_url") || strings.Contains(script, "result.referral") {
 		t.Fatal("caller controlled destination")
@@ -172,89 +205,16 @@ func TestNordLifecycleErrorsPassThroughSafely(t *testing.T) {
 	}
 }
 
-func TestNordBrowserCompletionValidation(t *testing.T) {
+func TestNordBrowserTokenValidationAndPrivacy(t *testing.T) {
 	source, err := assets.ReadFile("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := string(source)
-	start := strings.Index(script, "  const validNordCallback =")
-	end := strings.Index(script, "  let nordDialog")
+	start := strings.Index(script, "  const validNordAccessToken")
+	end := strings.Index(script, "  const renderRemoteAccess")
 	if start < 0 || end <= start {
-		t.Fatal("missing browser validator")
-	}
-	program := script[start:end] + `
-const assert = require("node:assert/strict");
-for (const good of [
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=YWJj%2B%2F%3D",
-  "nordvpn://login?exchange_token=abc",
-  "nordvpn://login?action=login&exchange_token=abc&status=done"
-]) assert.equal(validNordCallback(good), true);
-for (const bad of [
-  "http://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-  "https://www.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-  "https://my.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-  "https://api.nordvpn.com/product/nordvpn/login/success?exchange_token=abc",
-  "https://nordaccount.com.evil.test/product/nordvpn/login/success?exchange_token=abc",
-  "https://evil.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-  "https://nordaccount.com:443/product/nordvpn/login/success?exchange_token=abc",
-  "https://user:password@nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-  "https://nordaccount.com/wrong?exchange_token=abc",
-  "https://nordaccount.com/product/nordvpn/login/%73uccess?exchange_token=abc",
-  "https://nordaccount.com/product/nordvpn/login/success/?exchange_token=abc",
-  "https://nordaccount.com/product/nordvpn/login/other/../success?exchange_token=abc",
-  "https://nordaccount.com/product/nordvpn/login%2fsuccess?exchange_token=abc",
-  "https://nordaccount.com/product/nordvpn/login/success",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&exchange_token=def",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&extra=value",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&action=login",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc#fragment",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc#",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%0a",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%20",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%3B",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%ZZ",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc+def",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc\r\n",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc def",
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc\u0000",
-  "HTTPS://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-  "//nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-  "nordvpn:login?exchange_token=abc",
-  "nordvpn://login:443?exchange_token=abc",
-  "nordvpn://login?exchange_token=abc&status=bad",
-  "nordvpn://login?exchange_token=abc&action=login&action=login",
-  "nordvpn://login?exchange_token=abc&extra=value",
-  "nordvpn://login/path?exchange_token=abc",
-  "nordvpn://user@login?exchange_token=abc",
-  "nordvpn://login?exchange_token=abc#fragment",
-  "nordvpn://login?exchange_token=abc&exchange_token=def",
-  "nordvpn://login?exchange_token=abc%0a"
-].concat([
-  "https://nordaccount.com/product/nordvpn/login/success?exchange_token=" + "a".repeat(1025),
-  "nordvpn://login?exchange_token=" + "a".repeat(1025),
-  "a".repeat(2049)
-])) assert.equal(validNordCallback(bad), false);
-`
-	cmd := exec.Command("node")
-	cmd.Stdin = strings.NewReader(program)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("browser completion validation: %v: %s", err, output)
-	}
-}
-
-func TestNordBrowserCompletionPrivacy(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := string(source)
-	start := strings.Index(script, "  const validNordLoginURL =")
-	end := strings.Index(script, "  const renderRemoteAccess =")
-	if start < 0 || end <= start {
-		t.Fatal("missing Nord login dialog")
+		t.Fatal("missing Nord token dialog")
 	}
 	program := `
 const assert = require("node:assert/strict");
@@ -270,44 +230,76 @@ class Element {
   remove() {}
 }
 const document = { createElement: tag => new Element(tag), body: new Element("body") };
-const window = { open: () => null };
-const secret = "never_reflect_this_exchange";
-const completion = "https://nordaccount.com/product/nordvpn/login/success?exchange_token=" + secret;
-let submitted;
-const postForm = async (_, request) => {
-  if (request.action === "login") return { login_url: "https://api.nordvpn.com/v1/users/oauth/login-redirect?attempt=example" };
-  submitted = request.callback;
-  throw new Error(completion); // Even sensitive backend errors must stay private.
-};
-const refreshRemoteAccess = async () => {};
+const window = { open: () => { throw new Error("automatic Nord tab"); } };
 const flatten = node => [node, ...node.children.flatMap(flatten)];
+const secret = "never_reflect_this+/_-.~=opaque";
+let submitted, input, fail = true, refreshed = 0;
+const postForm = async (path, request) => {
+  assert.equal(path, "/api/network/remote-access/nordvpn/login");
+  assert.equal(input.value, "", "clear field before async POST");
+  assert.deepEqual(request, { token: secret });
+  submitted = request.token;
+  if (fail) throw new Error(secret);
+};
+const refreshRemoteAccess = async () => { refreshed++; };
 ` + script[start:end] + `
 (async () => {
+  let visible = "";
+  for (let b = 0x21; b <= 0x7e; b++) visible += String.fromCharCode(b);
+  for (const good of [visible, secret, "a".repeat(4096)]) assert(validNordAccessToken(good));
+  for (const bad of ["", "a".repeat(4097), "a b", "a\tb", "a\rb", "a\nb", "a\0b", "a\x1fb", "a\x7fb", "é", "\ud800"]) {
+    assert.equal(validNordAccessToken(bad), false);
+  }
   showNordAccountDialog();
-  const popup = document.body.children[0];
+  let popup = document.body.children.at(-1);
   const button = label => flatten(popup).find(node => node.tag === "button" && node.textContent === label);
-  await button("Log in to NordVPN").listeners.click();
-  const input = flatten(popup).find(node => node.tag === "input");
-  const complete = button("Complete login");
-  input.value = completion + "&extra=invalid";
-  await complete.listeners.click();
+  input = flatten(popup).find(node => node.tag === "input");
+  assert.equal(input.type, "password"); assert.equal(input.maxLength, 4096);
+  assert.equal(input.autocomplete, "off"); assert.equal(input.spellcheck, false);
+  assert.equal(input.autocapitalize, "off");
+  for (const [label, href] of [
+    ["Open NordVPN dashboard", "https://my.nordaccount.com/dashboard/nordvpn/"],
+    ["Create NordVPN account", "https://refer-nordvpn.com/pZGMpGTrBrO"]
+  ]) {
+    const link = flatten(popup).find(node => node.tag === "a" && node.textContent === label);
+    assert.equal(link.href, href); assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
+  }
+  input.value = "bad token";
+  await button("Log in & activate").listeners.click();
   assert.equal(submitted, undefined);
-  assert(flatten(popup).some(node => node.textContent === "Paste the NordVPN success URL from your browser address bar."));
-  input.value = completion;
-  await complete.listeners.click();
-  assert.equal(submitted, completion);
   assert.equal(input.value, "");
-  assert(flatten(popup).some(node => node.textContent === "NordVPN login could not be completed. Try logging in again."));
+  input.value = secret;
+  await button("Log in & activate").listeners.click();
+  assert.equal(submitted, secret);
+  assert.equal(input.value, "");
+  assert.equal(popup.open, true);
+  assert(flatten(popup).some(node => node.textContent === "NordVPN login could not be completed. Check the access token and retry."));
   for (const node of flatten(popup)) {
-    for (const field of ["textContent", "innerHTML", "href", "placeholder"]) {
+    for (const field of ["value", "textContent", "innerHTML", "href", "placeholder"]) {
       assert(!String(node[field] || "").includes(secret));
     }
   }
+  fail = false;
+  input.value = secret;
+  await button("Log in & activate").listeners.click();
+  assert.equal(popup.open, false); assert.equal(input.value, ""); assert.equal(refreshed, 1);
+  showNordAccountDialog();
+  popup = document.body.children.at(-1);
+  input = flatten(popup).find(node => node.tag === "input");
+  input.value = secret;
+  button("Cancel").listeners.click();
+  assert.equal(input.value, ""); assert.equal(popup.open, false);
+  showNordAccountDialog();
+  popup = document.body.children.at(-1);
+  input = flatten(popup).find(node => node.tag === "input");
+  input.value = secret;
+  popup.close(); // Native Escape close event also clears the secret.
+  assert.equal(input.value, "");
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
 	cmd := exec.Command("node")
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("browser completion privacy: %v: %s", err, output)
+		t.Fatalf("browser token validation/privacy: %v: %s", err, output)
 	}
 }

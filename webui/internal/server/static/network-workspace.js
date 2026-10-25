@@ -1019,39 +1019,8 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     return section;
   };
 
-  const validNordLoginURL = (value) => {
-    if (typeof value !== "string" || !value || value.length > 2048 || /[\s<>"'\\]/.test(value)) return false;
-    try {
-      const url = new URL(value);
-      return url.protocol === "https:" && !url.username && !url.password && !url.hash &&
-        ["api.nordvpn.com", "nordaccount.com", "my.nordaccount.com"].includes(url.host) &&
-        ["/v1/users/oauth/login", "/v1/users/oauth/login-redirect", "/oauth/authorize", "/login"].includes(url.pathname);
-    } catch (_) { return false; }
-  };
-  const validNordCallback = (value) => {
-    if (typeof value !== "string" || !value || value.length > 2048 || /[\s\x00-\x1f\x7f-\x9f<>"'\\#]/.test(value)) return false;
-    try {
-      const url = new URL(value);
-      // Match the original authority/path before URL parsing can normalize ports or dot segments.
-      const httpsSuccess = value.startsWith("https://nordaccount.com/product/nordvpn/login/success?") &&
-        url.protocol === "https:" && url.host === "nordaccount.com" && url.pathname === "/product/nordvpn/login/success";
-      const customCallback = value.startsWith("nordvpn://login?") &&
-        url.protocol === "nordvpn:" && url.host === "login" && !url.pathname;
-      if ((!httpsSuccess && !customCallback) || url.username || url.password || url.hash) return false;
-      const query = value.slice(value.indexOf("?") + 1);
-      if (query.includes(";")) return false;
-      decodeURIComponent(query.replace(/\+/g, " ")); // Reject malformed escapes, as the API does.
-      const token = url.searchParams.get("exchange_token") || "";
-      if (token.length > 1024 || url.searchParams.getAll("exchange_token").length !== 1 || !/^[A-Za-z0-9._~+\/-]+={0,2}$/.test(token)) return false;
-      for (const [key, item] of url.searchParams) {
-        if (url.searchParams.getAll(key).length !== 1 ||
-            (httpsSuccess && key !== "exchange_token") ||
-            !["exchange_token", "action", "status"].includes(key) ||
-            (key === "action" && item !== "login") || (key === "status" && item !== "done")) return false;
-      }
-      return true;
-    } catch (_) { return false; }
-  };
+  const validNordAccessToken = (value) =>
+    typeof value === "string" && value.length > 0 && value.length <= 4096 && !/[^\x21-\x7e]/.test(value);
   let nordDialog = null;
   const showNordAccountDialog = () => {
     if (nordDialog?.open) return;
@@ -1062,80 +1031,77 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     body.className = "system-action-dialog-content";
     const title = document.createElement("h2");
     title.id = "nord-login-title";
+    title.textContent = "NordVPN account required";
     popup.setAttribute("aria-labelledby", title.id);
     const message = document.createElement("p");
+    message.textContent = "NordVPN Meshnet needs a NordVPN account and access token.";
     const details = document.createElement("div");
-    const status = document.createElement("p");
-    status.setAttribute("role", "status");
-    const actions = document.createElement("div");
-    actions.className = "action-row";
-    const cancel = document.createElement("button");
-    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
-    cancel.addEventListener("click", () => popup.close());
-    actions.appendChild(cancel);
-    body.append(title, message, details, status, actions);
-    popup.appendChild(body);
-    popup.addEventListener("close", () => {
-      details.replaceChildren(); // Erase transient callback input on Cancel/Escape too.
-      popup.remove();
-      if (nordDialog === popup) nordDialog = null;
-    });
-    title.textContent = "NordVPN account required";
-    message.textContent = "NordVPN Meshnet requires a Nord Account.";
-    const existing = document.createElement("p"); existing.textContent = "Already have an account?";
-    const login = document.createElement("button"); login.type = "button"; login.textContent = "Log in to NordVPN";
-    const newAccount = document.createElement("p"); newAccount.textContent = "Don’t have a NordVPN account yet?";
-    const referralText = document.createElement("p"); referralText.textContent = "You can create one using the JustVoxel creator’s referral link.";
+    const existing = document.createElement("p"); existing.textContent = "Already have a NordVPN account?";
+    const dashboard = document.createElement("a");
+    dashboard.href = "https://my.nordaccount.com/dashboard/nordvpn/";
+    dashboard.target = "_blank"; dashboard.rel = "noopener noreferrer";
+    dashboard.className = "button-link"; dashboard.textContent = "Open NordVPN dashboard";
+    const newAccount = document.createElement("p"); newAccount.textContent = "Do not have a NordVPN account yet?";
     const referral = document.createElement("a");
     referral.href = "https://refer-nordvpn.com/pZGMpGTrBrO";
     referral.target = "_blank"; referral.rel = "noopener noreferrer";
     referral.className = "button-link"; referral.textContent = "Create NordVPN account";
-    details.append(existing, login, newAccount, referralText, referral);
+    const heading = document.createElement("h3"); heading.textContent = "Get your NordVPN access token";
+    const instructions = document.createElement("ol");
+    for (const text of [
+      "Open your NordVPN dashboard and sign in.",
+      "Select NordVPN from the left menu.",
+      "Scroll down to Advanced settings.",
+      "Under Access token, select Get Access token.",
+      "Select Generate new token.",
+      "Copy the token and paste it below."
+    ]) {
+      const step = document.createElement("li"); step.textContent = text; instructions.appendChild(step);
+    }
+    const note = document.createElement("small");
+    note.className = "muted";
+    note.textContent = "NordVPN may ask you to verify your email before generating the token.";
+    const label = document.createElement("label"); label.textContent = "Access token";
+    const input = document.createElement("input");
+    input.type = "password"; input.maxLength = 4096;
+    input.autocomplete = "off"; input.spellcheck = false; input.autocapitalize = "off";
+    label.appendChild(input);
+    details.append(existing, dashboard, newAccount, referral, heading, instructions, note, label);
+    const status = document.createElement("p"); status.setAttribute("role", "status");
+    const actions = document.createElement("div"); actions.className = "action-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => { input.value = ""; popup.close(); });
+    const login = document.createElement("button"); login.type = "button"; login.textContent = "Log in & activate";
     login.addEventListener("click", async () => {
+      if (!validNordAccessToken(input.value)) {
+        input.value = "";
+        status.textContent = "invalid NordVPN access token";
+        return;
+      }
+      let token = input.value;
+      input.value = "";
       login.disabled = true;
-      // Reserve a tab during the click; suppress opener and referrer before navigation.
-      let tab = null;
-      try { tab = window.open("about:blank", "_blank"); if (tab) tab.opener = null; } catch (_) { /* Keep the explicit login link available. */ }
-      status.textContent = "Preparing NordVPN login…";
       try {
-        const result = await postForm("/api/network/remote-access/nordvpn/login", { action: "login" });
-        if (!validNordLoginURL(result?.login_url)) throw new Error("NordVPN login link unavailable.");
-        if (!popup.open) { if (tab) tab.close(); return; }
-        if (tab && !tab.closed) {
-          const meta = tab.document.createElement("meta"); meta.name = "referrer"; meta.content = "no-referrer"; tab.document.head.appendChild(meta);
-          tab.location.replace(result.login_url);
-        }
-        title.textContent = "Complete NordVPN login";
-        message.textContent = "Sign in on the NordVPN page that opened.";
-        details.replaceChildren();
-        const instructions = document.createElement("p"); instructions.textContent = "After NordVPN shows “Great – you’re in!”, if your browser asks to open NordVPN or xdg-open, choose Cancel. Copy the URL from the browser address bar and paste it below. Do not select Continue.";
-        const label = document.createElement("label"); label.textContent = "NordVPN success URL";
-        const input = document.createElement("input");
-        input.type = "text"; input.maxLength = 2048; input.placeholder = "https://nordaccount.com/product/nordvpn/login/success?exchange_token=...";
-        input.autocomplete = "off"; input.spellcheck = false;
-        label.appendChild(input);
-        const reopen = document.createElement("a"); reopen.href = result.login_url;
-        reopen.target = "_blank"; reopen.rel = "noopener noreferrer"; reopen.textContent = "Open NordVPN login";
-        details.append(instructions, reopen, label);
-        status.textContent = "";
-        const complete = document.createElement("button"); complete.type = "button"; complete.textContent = "Complete login";
-        actions.appendChild(complete);
-        complete.addEventListener("click", async () => {
-          if (!validNordCallback(input.value)) { status.textContent = "Paste the NordVPN success URL from your browser address bar."; return; }
-          complete.disabled = true;
-          const callback = input.value; input.value = "";
-          try {
-            await postForm("/api/network/remote-access/nordvpn/login", { action: "complete-login", callback });
-            popup.close();
-            await refreshRemoteAccess();
-          } catch (_) { status.textContent = "NordVPN login could not be completed. Try logging in again."; }
-          finally { complete.disabled = false; }
-        });
+        await postForm("/api/network/remote-access/nordvpn/login", { token: token });
+        popup.close();
+        await refreshRemoteAccess();
       } catch (_) {
-        if (tab && !tab.closed) tab.close();
-        status.textContent = "NordVPN login could not be started. Try again.";
+        status.textContent = "NordVPN login could not be completed. Check the access token and retry.";
+      } finally {
+        token = "";
+        input.value = "";
         login.disabled = false;
       }
+    });
+    actions.append(cancel, login);
+    body.append(title, message, details, status, actions);
+    popup.appendChild(body);
+    popup.addEventListener("close", () => {
+      input.value = "";
+      details.replaceChildren();
+      popup.remove();
+      if (nordDialog === popup) nordDialog = null;
     });
     document.body.appendChild(popup); popup.showModal();
   };

@@ -318,13 +318,13 @@ func (c *Client) PlayitSetup(ctx context.Context, session string, start bool) (P
 	return out, err
 }
 
-// NordVPNLogin uses only the fixed provider endpoint; callbacks never enter URLs.
-func (c *Client) NordVPNLogin(ctx context.Context, session, action, callback string) (RemoteAccessChange, error) {
+// NordVPNTokenLogin sends an opaque token to the fixed provider operation.
+func (c *Client) NordVPNTokenLogin(ctx context.Context, session, token string) (RemoteAccessChange, error) {
 	var out RemoteAccessChange
 	client := *c
 	transport := *c.http
 	transport.Timeout = 35 * time.Second
 	client.http = &transport
-	err := client.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/nordvpn", session, map[string]string{"action": action, "callback": callback}, &out)
+	err := client.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/nordvpn", session, map[string]string{"action": "token-login", "token": token}, &out)
 	return out, err
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,10 +40,8 @@ func nordFixture(t *testing.T) *[][]string {
 			return "", nil
 		case "meshnet peer list":
 			return "This device:\nHostname: appliance-everest.nord\nIP: 100.64.0.2\nLocal Peers:\nHostname: peer-everest.nord\nIP: 100.64.0.3", nil
-		case "login":
-			return "Continue in the browser: https://api.nordvpn.com/v1/users/oauth/login-redirect?attempt=example", nil
 		}
-		if len(args) == 3 && args[0] == "login" && args[1] == "--callback" {
+		if len(args) == 3 && args[0] == "login" && args[1] == "--token" {
 			return "", nil
 		}
 		t.Fatal("unexpected Nord command", args)
@@ -114,84 +111,97 @@ func TestNordStatusParsingNeverGuessesOrExposesAccount(t *testing.T) {
 	}
 }
 
-func TestNordStrictURLs(t *testing.T) {
-	for _, good := range []string{"nordvpn://login?exchange_token=YWJj%2B%2F%3D", "nordvpn://login?exchange_token=abc_123-DEF", "nordvpn://login?action=login&exchange_token=abc&status=done"} {
-		if !validNordCallback(good) {
-			t.Fatal("valid callback rejected")
+func TestNordTokenValidationAndRejectedActions(t *testing.T) {
+	calls := nordFixture(t)
+	for _, token := range []string{"", strings.Repeat("a", 4097), "a b", "a\tb", "a\rb", "a\nb", "a\x00b", "a\x1fb", "a\x7fb", "é", string([]byte{0xff})} {
+		if validNordAccessToken(token) {
+			t.Fatal("invalid token accepted")
+		}
+		body, _ := json.Marshal(map[string]string{"action": "token-login", "token": token})
+		rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", string(body))
+		if rr.Code != 400 || len(*calls) != 0 {
+			t.Fatal("invalid token reached command")
 		}
 	}
-	for _, bad := range []string{"https://login?exchange_token=abc", "nordvpn://evil?exchange_token=abc", "nordvpn://login/path?exchange_token=abc", "nordvpn://user@login?exchange_token=abc", "nordvpn://login?exchange_token=abc&exchange_token=def", "nordvpn://login?exchange_token=abc&action=logout", "nordvpn://login?exchange_token=abc&url=https://evil.test", "nordvpn://login?exchange_token=abc#fragment", "nordvpn://login?exchange_token=abc%0a", strings.Repeat("x", 2049)} {
-		if validNordCallback(bad) {
-			t.Fatal("unsafe callback accepted")
+	for _, token := range []string{"opaque+/_-.~=token", strings.Repeat("a", 4096), "!#$%&'()*,:;<=>?@[\\]^\x60{|}"} {
+		if !validNordAccessToken(token) {
+			t.Fatal("visible ASCII rejected")
 		}
 	}
-	if validNordLoginURL("https://api.nordvpn.com/v1/users/oauth/login-redirect?attempt=example") == "" {
-		t.Fatal("native login link rejected")
-	}
-	for _, bad := range []string{"http://api.nordvpn.com/v1/users/oauth/login", "https://api.nordvpn.com.evil.test/v1/users/oauth/login", "https://api.nordvpn.com:443/v1/users/oauth/login", "https://user@api.nordvpn.com/v1/users/oauth/login", "https://api.nordvpn.com/v1/users/oauth/login\n", "javascript:alert(1)", "https://evil.test/"} {
-		if validNordLoginURL(bad) != "" {
-			t.Fatal("untrusted login link accepted")
+	for _, action := range []string{"login", "complete-login"} {
+		rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"`+action+`"}`)
+		if rr.Code != 400 || len(*calls) != 0 {
+			t.Fatal("obsolete action accepted")
 		}
 	}
 }
 
-func TestNordLoginRequiredAndCallbackAuditPrivacy(t *testing.T) {
+func TestNordActivateLoginRequired(t *testing.T) {
 	calls := nordFixture(t)
-	native := runNordCommand
-	runNordCommand = func(ctx context.Context, args ...string) (string, error) {
-		if strings.Join(args, " ") == "account" {
-			return "You are not logged in.", errors.New("exit")
-		}
-		return native(ctx, args...)
+	runNordCommand = func(_ context.Context, args ...string) (string, error) {
+		*calls = append(*calls, append([]string(nil), args...))
+		return "You are not logged in.", errors.New("exit")
 	}
 	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"activate"}`)
-	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"login_required":true`) {
-		t.Fatal(rr.Code, rr.Body.String())
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"login_required":true`) ||
+		!reflect.DeepEqual(*calls, [][]string{{"account"}}) {
+		t.Fatal("logged-out activation changed", rr.Code)
 	}
-	for _, call := range *calls {
-		if reflect.DeepEqual(call, []string{"set", "meshnet", "on"}) {
-			t.Fatal("enabled while logged out")
-		}
-	}
-	runNordCommand = native
-	store, _ := openTestWebUIStore(t)
-	s := adminServerForTest()
-	s.store = store
-	const sensitive = "never_log_this_exchange"
-	const completion = "https://nordaccount.com/product/nordvpn/login/success?exchange_token=" + sensitive
-	for _, failure := range []bool{false, true} {
-		runNordCommand = func(ctx context.Context, args ...string) (string, error) {
-			if len(args) == 3 && args[1] == "--callback" {
-				if args[2] != "nordvpn://login?exchange_token="+sensitive {
-					t.Fatal("noncanonical CLI callback")
+}
+
+func TestNordTokenLoginSequenceAndPrivacy(t *testing.T) {
+	for _, stage := range []string{"success", "login", "account", "enable", "verify"} {
+		t.Run(stage, func(t *testing.T) {
+			calls := nordFixture(t)
+			native := runNordCommand
+			const token = "never_log_this+/_-.~=opaque"
+			const privateOutput = "private vendor output " + token
+			runNordCommand = func(ctx context.Context, args ...string) (string, error) {
+				fail := (stage == "login" && args[0] == "login") ||
+					(stage == "account" && args[0] == "account") ||
+					(stage == "enable" && args[0] == "set") ||
+					(stage == "verify" && args[0] == "settings")
+				if fail {
+					*calls = append(*calls, append([]string(nil), args...))
+					return privateOutput, errors.New(privateOutput)
 				}
-				if failure {
-					return completion, errors.New(completion)
-				}
+				return native(ctx, args...)
 			}
-			return native(ctx, args...)
-		}
-		rr = networkAdminRequest(s, "/v1/admin/network/remote-access/nordvpn", `{"action":"complete-login","callback":"`+completion+`"}`)
-		want := 200
-		if failure {
-			want = 503
-		}
-		if rr.Code != want || strings.Contains(rr.Body.String(), sensitive) {
-			t.Fatal("callback response privacy", rr.Code)
-		}
-	}
-	events, err := store.listAuditEvents(10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encoded, _ := json.Marshal(events)
-	if len(events) != 2 || strings.Contains(string(encoded), sensitive) || strings.Contains(string(encoded), "nordvpn://") || strings.Contains(string(encoded), completion) {
-		t.Fatal("callback audit privacy")
-	}
-	before := len(*calls)
-	rr = networkAdminRequest(s, "/v1/admin/network/remote-access/nordvpn", `{"action":"complete-login","callback":"https://evil.test"}`)
-	if rr.Code != 400 || len(*calls) != before || !strings.Contains(rr.Body.String(), "invalid NordVPN login completion URL") {
-		t.Fatal("invalid callback reached command")
+			store, _ := openTestWebUIStore(t)
+			s := adminServerForTest()
+			s.store = store
+			body, _ := json.Marshal(map[string]string{"action": "token-login", "token": token})
+			rr := networkAdminRequest(s, "/v1/admin/network/remote-access/nordvpn", string(body))
+			wantCode := 503
+			want := [][]string{{"login", "--token", token}, {"account"}, {"set", "meshnet", "on"}, {"settings"}}
+			switch stage {
+			case "success":
+				wantCode = 200
+			case "login":
+				want = want[:1]
+			case "account":
+				want = want[:2]
+			case "enable":
+				want = want[:3]
+			}
+			if rr.Code != wantCode || !reflect.DeepEqual(*calls, want) {
+				t.Fatal("token argv or verified sequence changed", rr.Code)
+			}
+			if strings.Contains(rr.Body.String(), token) || strings.Contains(rr.Body.String(), "private vendor") {
+				t.Fatal("response leaked credential/vendor output")
+			}
+			if stage != "success" && !strings.Contains(rr.Body.String(), "NordVPN login could not be completed. Check the access token and retry.") {
+				t.Fatal("unsafe login error")
+			}
+			events, err := store.listAuditEvents(10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, _ := json.Marshal(events)
+			if len(events) != 1 || strings.Contains(string(encoded), token) || strings.Contains(string(encoded), "private vendor") {
+				t.Fatal("audit leaked credential/vendor output")
+			}
+		})
 	}
 }
 
@@ -277,7 +287,7 @@ func TestNordNativeOutputAndTimeoutBounded(t *testing.T) {
 func TestNordAdministratorOnlyAndUnavailableDoesNotHideOtherProviders(t *testing.T) {
 	calls := nordFixture(t)
 	for _, role := range []principalRole{roleViewer, roleOperator} {
-		rr := networkAdminRequest(roleServerForTest(role), "/v1/admin/network/remote-access/nordvpn", `{"action":"login"}`)
+		rr := networkAdminRequest(roleServerForTest(role), "/v1/admin/network/remote-access/nordvpn", `{"action":"token-login","token":"opaque"}`)
 		if rr.Code != 403 || len(*calls) != 0 {
 			t.Fatal("non-administrator reached Nord")
 		}
@@ -316,13 +326,14 @@ func TestNordLoginStartAndPersistentSocketLifecycle(t *testing.T) {
 		calls = append(calls, strings.Join(args, " "))
 		return "", nil
 	}
-	for _, action := range []string{"login", "activate", "deactivate"} {
-		rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"`+action+`"}`)
+	for _, action := range []string{"token-login", "activate", "deactivate"} {
+		body := `{"action":"` + action + `"}`
+		if action == "token-login" {
+			body = `{"action":"token-login","token":"opaque"}`
+		}
+		rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", body)
 		if rr.Code != 200 {
 			t.Fatal(action, rr.Code)
-		}
-		if action == "login" && !strings.Contains(rr.Body.String(), "https://api.nordvpn.com/v1/users/oauth/login-redirect?attempt=example") {
-			t.Fatal("login URL missing")
 		}
 	}
 	joined := strings.Join(calls, "\n")
@@ -410,8 +421,7 @@ func TestNordActionFailuresAreSafeAndActionable(t *testing.T) {
 	for _, tc := range []struct{ action, message string }{
 		{"activate", "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."},
 		{"deactivate", "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying."},
-		{"login", "NordVPN login could not be started. Open Troubleshoot and generate a Network report before retrying."},
-		{"complete-login", "NordVPN login could not be completed. Open Troubleshoot and generate a Network report before retrying."},
+		{"token-login", "NordVPN login could not be completed. Check the access token and retry."},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			nordFixture(t)
@@ -419,8 +429,8 @@ func TestNordActionFailuresAreSafeAndActionable(t *testing.T) {
 				return "private vendor output", errors.New("private command error")
 			}
 			body := `{"action":"` + tc.action + `"}`
-			if tc.action == "complete-login" {
-				body = `{"action":"complete-login","callback":"nordvpn://login?exchange_token=private_callback"}`
+			if tc.action == "token-login" {
+				body = `{"action":"token-login","token":"private_token"}`
 			}
 			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", body)
 			var response struct {
@@ -436,82 +446,39 @@ func TestNordActionFailuresAreSafeAndActionable(t *testing.T) {
 	}
 }
 
-func TestNordHTTPSCompletionStrictValidation(t *testing.T) {
-	for _, good := range []string{
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=YWJj%2B%2F%3D",
-		"nordvpn://login?exchange_token=abc",
-		"nordvpn://login?action=login&exchange_token=abc&status=done",
-	} {
-		if !validNordCallback(good) {
-			t.Fatal("valid completion rejected")
+func TestNordNativeTokenLoginDeclinesAnalytics(t *testing.T) {
+	nordNativeFixture(t)
+	const token = "opaque+/_-.~=token"
+	for _, args := range [][]string{{"login"}, {"login", "--token", token}, {"settings"}} {
+		var command *exec.Cmd
+		nordCommand = func(ctx context.Context, name string, got ...string) *exec.Cmd {
+			if name != "/usr/bin/nordvpn" || !reflect.DeepEqual(got, args) {
+				t.Fatal("direct executable/argv changed")
+			}
+			command = exec.CommandContext(ctx, "/bin/cat")
+			return command
 		}
-	}
-	for _, bad := range []string{
-		"http://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-		"https://www.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-		"https://my.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-		"https://api.nordvpn.com/product/nordvpn/login/success?exchange_token=abc",
-		"https://nordaccount.com.evil.test/product/nordvpn/login/success?exchange_token=abc",
-		"https://evil.nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-		"https://nordaccount.com:443/product/nordvpn/login/success?exchange_token=abc",
-		"https://user:password@nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-		"https://nordaccount.com/wrong?exchange_token=abc",
-		"https://nordaccount.com/product/nordvpn/login/%73uccess?exchange_token=abc",
-		"https://nordaccount.com/product/nordvpn/login/success/?exchange_token=abc",
-		"https://nordaccount.com/product/nordvpn/login/other/../success?exchange_token=abc",
-		"https://nordaccount.com/product/nordvpn/login%2fsuccess?exchange_token=abc",
-		"https://nordaccount.com/product/nordvpn/login/success",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&exchange_token=def",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&extra=value",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc&action=login",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc#fragment",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc#",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%0a",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%20",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%3B",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc%ZZ",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc+def",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc\r\n",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc def",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=abc\u0000",
-		"HTTPS://nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-		"//nordaccount.com/product/nordvpn/login/success?exchange_token=abc",
-		"nordvpn:login?exchange_token=abc",
-		"nordvpn://login:443?exchange_token=abc",
-		"nordvpn://login?exchange_token=abc&status=bad",
-		"nordvpn://login?exchange_token=abc&action=login&action=login",
-		"nordvpn://login?exchange_token=abc&extra=value",
-		"nordvpn://login/path?exchange_token=abc",
-		"nordvpn://user@login?exchange_token=abc",
-		"nordvpn://login?exchange_token=abc#fragment",
-		"nordvpn://login?exchange_token=abc&exchange_token=def",
-		"nordvpn://login?exchange_token=abc%0a",
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=" + strings.Repeat("a", 1025),
-		"nordvpn://login?exchange_token=" + strings.Repeat("a", 1025),
-		strings.Repeat("a", 2049),
-	} {
-		if validNordCallback(bad) {
-			t.Fatal("unsafe completion accepted")
+		output, err := runNordCommand(context.Background(), args...)
+		want := ""
+		if args[0] == "login" {
+			want = "no\n"
+		}
+		if err != nil || output != want || (args[0] != "login" && command.Stdin != nil) {
+			t.Fatal("login analytics input changed")
 		}
 	}
 }
 
-func TestNordCompletionCanonicalCallback(t *testing.T) {
-	const token = "YWJj+/="
-	const canonical = "nordvpn://login?exchange_token=YWJj%2B%2F%3D"
-	for _, input := range []string{
-		"https://nordaccount.com/product/nordvpn/login/success?exchange_token=YWJj%2B%2F%3D",
-		"nordvpn://login?action=login&exchange_token=YWJj%2B%2F%3D&status=done",
-	} {
-		got, ok := normalizeNordLoginCompletion(input)
-		if !ok || got != canonical {
-			t.Fatal("completion was not canonicalized")
-		}
-		u, err := url.Parse(got)
-		if err != nil || len(u.Query()) != 1 || len(u.Query()["exchange_token"]) != 1 || u.Query().Get("exchange_token") != token {
-			t.Fatal("token changed during canonicalization")
-		}
+// JSON escaping must not reduce the accepted 4096-byte opaque token bound.
+func TestNordTokenLoginMaximumEscapedToken(t *testing.T) {
+	calls := nordFixture(t)
+	token := strings.Repeat("<", 4096)
+	body, err := json.Marshal(map[string]string{"action": "token-login", "token": token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", string(body))
+	if rr.Code != 200 || len(*calls) != 4 || !reflect.DeepEqual((*calls)[0], []string{"login", "--token", token}) {
+		t.Fatal("escaped token bound or opaque argv changed", rr.Code)
 	}
 }

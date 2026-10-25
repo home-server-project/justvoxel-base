@@ -2,20 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 )
 
-const nordCallbackLimit = 2048
+const nordAccessTokenLimit = 4096
 const nordCommandOutputLimit = 64 * 1024
 
 type nordCommandOutput struct {
@@ -52,7 +51,7 @@ var runNordCommand = func(ctx context.Context, args ...string) (string, error) {
 	var output nordCommandOutput
 	cmd.Stdout, cmd.Stderr = &output, &output
 	// Decline optional vendor analytics if first login asks for consent.
-	if len(args) == 1 && args[0] == "login" {
+	if len(args) > 0 && args[0] == "login" {
 		cmd.Stdin = strings.NewReader("no\n")
 	}
 	err := cmd.Run()
@@ -158,71 +157,17 @@ func nordStatus(ctx context.Context) (string, string, string, string) {
 	return account, mesh, name, ip
 }
 
-func validNordLoginURL(value string) string {
-	if len(value) == 0 || len(value) > 2048 || strings.ContainsAny(value, " \t\r\n<>\"'\\") {
-		return ""
+// Input hygiene only: the access token is an opaque, unchanged secret.
+func validNordAccessToken(value string) bool {
+	if len(value) == 0 || len(value) > nordAccessTokenLimit {
+		return false
 	}
-	u, err := url.Parse(value)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.Fragment != "" ||
-		(u.Host != "api.nordvpn.com" && u.Host != "nordaccount.com" && u.Host != "my.nordaccount.com") {
-		return ""
-	}
-	// The native OAuth entry point, not arbitrary pages on a trusted host.
-	if u.Path != "/v1/users/oauth/login" && u.Path != "/oauth/authorize" && u.Path != "/v1/users/oauth/login-redirect" && u.Path != "/login" {
-		return ""
-	}
-	if _, err := url.ParseQuery(u.RawQuery); err != nil {
-		return ""
-	}
-	return value
-}
-
-var nordExchangePattern = regexp.MustCompile(`^[A-Za-z0-9._~+/-]+={0,2}$`)
-
-func normalizeNordLoginCompletion(value string) (string, bool) {
-	if len(value) == 0 || len(value) > nordCallbackLimit || strings.ContainsAny(value, "<>\"'\\#") || strings.ContainsFunc(value, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-		return "", false
-	}
-	u, err := url.Parse(value)
-	if err != nil || u.User != nil || u.Fragment != "" || u.Opaque != "" {
-		return "", false
-	}
-	httpsSuccess := strings.HasPrefix(value, "https://nordaccount.com/product/nordvpn/login/success?") &&
-		u.Scheme == "https" && u.Host == "nordaccount.com" && u.Path == "/product/nordvpn/login/success" && u.RawPath == ""
-	customCallback := strings.HasPrefix(value, "nordvpn://") && u.Scheme == "nordvpn" && u.Host == "login" && u.Path == ""
-	if !httpsSuccess && !customCallback {
-		return "", false
-	}
-	q, err := url.ParseQuery(u.RawQuery)
-	token := q.Get("exchange_token")
-	if err != nil || len(q["exchange_token"]) != 1 || len(token) > 1024 || !nordExchangePattern.MatchString(token) || (httpsSuccess && len(q) != 1) {
-		return "", false
-	}
-	for key, values := range q {
-		if len(values) != 1 {
-			return "", false
-		}
-		switch key {
-		case "exchange_token":
-		case "action":
-			if values[0] != "login" {
-				return "", false
-			}
-		case "status":
-			if values[0] != "done" {
-				return "", false
-			}
-		default:
-			return "", false
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x21 || value[i] > 0x7e {
+			return false
 		}
 	}
-	callback := url.URL{Scheme: "nordvpn", Host: "login", RawQuery: url.Values{"exchange_token": {token}}.Encode()}
-	return callback.String(), true
-}
-
-func validNordCallback(value string) bool {
-	_, ok := normalizeNordLoginCompletion(value)
-	return ok
+	return true
 }
 
 func nordEnableMeshnet(ctx context.Context) error {
@@ -255,28 +200,34 @@ func nordDisableMeshnet(ctx context.Context) error {
 
 func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor session, provider remoteProviderMetadata) {
 	var request struct {
-		Action   string `json:"action"`
-		Callback string `json:"callback,omitempty"`
+		Action string `json:"action"`
+		Token  string `json:"token,omitempty"`
 	}
-	if !decodeJSON(w, r, &request) {
+	// JSON may escape each visible token byte as six bytes (for example "<").
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		request.Token = ""
+		writeError(w, http.StatusBadRequest, "invalid JSON request")
 		return
 	}
-	if request.Action != "activate" && request.Action != "deactivate" && request.Action != "login" && request.Action != "complete-login" {
+	if request.Action != "activate" && request.Action != "deactivate" && request.Action != "token-login" {
+		request.Token = ""
 		writeError(w, http.StatusBadRequest, "invalid NordVPN action")
 		return
 	}
-	var callback string
-	validCompletion := true
-	if request.Action == "complete-login" {
-		callback, validCompletion = normalizeNordLoginCompletion(request.Callback)
-	} else if request.Callback != "" {
-		validCompletion = false
+	validToken := (request.Action == "token-login" && validNordAccessToken(request.Token)) ||
+		(request.Action != "token-login" && request.Token == "")
+	token := ""
+	if validToken {
+		token = request.Token
 	}
-	request.Callback = "" // Discard the original completion URL before command/error/audit handling.
-	if !validCompletion {
-		writeError(w, http.StatusBadRequest, "invalid NordVPN login completion URL")
+	request.Token = "" // Discard before command, error or audit handling.
+	if !validToken {
+		writeError(w, http.StatusBadRequest, "invalid NordVPN access token")
 		return
 	}
+	defer func() { token = "" }()
 	if !nordOperation.TryLock() {
 		writeError(w, http.StatusConflict, "NordVPN operation already in progress")
 		return
@@ -285,7 +236,7 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 	var err error
-	loginRequired, loginURL := false, ""
+	loginRequired := false
 	if !nordSoftwareInstalled() {
 		err = errors.New("NordVPN unavailable")
 	}
@@ -306,23 +257,12 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 			if err == nil {
 				_, err = remoteSystemctl(ctx, "disable", "nordvpnd.socket", provider.unit)
 			}
-		case "login":
-			var output string
-			output, err = runNordCommand(ctx, "login")
-			if err == nil {
-				for _, word := range strings.Fields(output) {
-					if link := validNordLoginURL(word); link != "" {
-						loginURL = link
-						break
-					}
-				}
-				if loginURL == "" {
-					err = errors.New("NordVPN login URL unavailable")
-				}
+		case "token-login":
+			_, err = runNordCommand(ctx, "login", "--token", token)
+			token = "" // No persistence, error wrapping or auditing of token/CLI output.
+			if err != nil {
+				err = errors.New("NordVPN login failed")
 			}
-		case "complete-login":
-			_, err = runNordCommand(ctx, "login", "--callback", callback)
-			callback = "" // No persistence, error wrapping or auditing of callback/CLI output.
 			if err == nil {
 				output, checkErr := runNordCommand(ctx, "account")
 				if nordAccount(output, checkErr) != "Logged in" {
@@ -348,18 +288,16 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 		_ = s.store.recordAuditEvent(actor, "network_remote_access_"+request.Action, provider.id, err == nil, "fixed Meshnet lifecycle")
 	}
 	if err != nil {
-		message := "NordVPN login could not be started. Open Troubleshoot and generate a Network report before retrying."
+		message := "NordVPN login could not be completed. Check the access token and retry."
 		switch request.Action {
 		case "activate":
 			message = "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."
 		case "deactivate":
 			message = "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying."
-		case "complete-login":
-			message = "NordVPN login could not be completed. Open Troubleshoot and generate a Network report before retrying."
 		}
 		writeError(w, http.StatusServiceUnavailable, message)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "login_required": loginRequired, "login_url": loginURL})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "login_required": loginRequired})
 }

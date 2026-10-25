@@ -533,11 +533,11 @@ func (a *App) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 type networkNordAPI interface {
-	NordVPNLogin(context.Context, string, string, string) (api.RemoteAccessChange, error)
+	NordVPNTokenLogin(context.Context, string, string) (api.RemoteAccessChange, error)
 }
 
 func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	r.Body = http.MaxBytesReader(w, r.Body, 16384)
 	if !a.validCSRF(r) {
 		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
 		return
@@ -547,18 +547,21 @@ func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.RawQuery != "" || r.ParseForm() != nil {
-		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN login request")
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN access token")
 		return
 	}
 	for key, values := range r.PostForm {
-		if (key != "action" && key != "callback" && key != "csrf") || len(values) != 1 {
-			writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN login request")
+		if (key != "token" && key != "csrf") || len(values) != 1 {
+			writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN access token")
 			return
 		}
 	}
-	action, callback := r.PostForm.Get("action"), r.PostForm.Get("callback")
-	if (action != "login" && action != "complete-login") || (action == "login" && callback != "") || (action == "complete-login" && !api.ValidNordCallback(callback)) {
-		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN login completion URL")
+	token := r.PostForm.Get("token")
+	r.PostForm.Del("token")
+	r.Form.Del("token")
+	if !api.ValidNordAccessToken(token) {
+		token = ""
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN access token")
 		return
 	}
 	client, ok := a.api.(networkNordAPI)
@@ -566,8 +569,10 @@ func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
 		writeNetworkWebError(w, http.StatusServiceUnavailable, "NordVPN login unavailable")
 		return
 	}
-	result, err := client.NordVPNLogin(r.Context(), session, action, callback)
-	if !a.handleNetworkAPIError(w, err) {
+	result, err := client.NordVPNTokenLogin(r.Context(), session, token)
+	token = ""
+	if err != nil {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "NordVPN login could not be completed. Check the access token and retry.")
 		return
 	}
 	writeNetworkWebJSON(w, http.StatusOK, result)
