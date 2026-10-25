@@ -1086,8 +1086,14 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         await postForm("/api/network/remote-access/nordvpn/login", { token: token });
         popup.close();
         await refreshRemoteAccess();
-      } catch (_) {
-        status.textContent = "NordVPN login could not be completed. Check the access token and retry.";
+      } catch (error) {
+        const nordLoginFailureMessages = new Set([
+          "NordVPN login could not be completed. Check the access token and retry.",
+          "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot."
+        ]);
+        status.textContent = nordLoginFailureMessages.has(error?.message)
+          ? error.message
+          : "NordVPN login could not be completed. Check the access token and retry.";
       } finally {
         token = "";
         input.value = "";

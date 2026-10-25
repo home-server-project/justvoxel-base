@@ -16,6 +16,7 @@ import (
 
 const nordAccessTokenLimit = 4096
 const nordCommandOutputLimit = 64 * 1024
+const nordCommandTimeout = 10 * time.Second
 
 type nordCommandOutput struct {
 	data []byte
@@ -40,7 +41,7 @@ var nordCLIHome = "/run/justvoxel/nordvpn-cli"
 // Vendor output is never logged or returned. Even unsuccessful commands may
 // contain authentication material. Bound combined output and reject overflow.
 var runNordCommand = func(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, nordCommandTimeout)
 	defer cancel()
 	if err := os.MkdirAll(nordCLIHome, 0o700); err != nil {
 		return "", errors.New("NordVPN output unavailable")
@@ -171,9 +172,9 @@ func validNordAccessToken(value string) bool {
 }
 
 func nordEnableMeshnet(ctx context.Context) error {
-	if _, err := runNordCommand(ctx, "set", "meshnet", "on"); err != nil {
-		return errors.New("Meshnet activation failed")
-	}
+	// The daemon may complete activation after the set command fails or times out.
+	// Only authoritative settings establish whether Meshnet is enabled.
+	_, _ = runNordCommand(ctx, "set", "meshnet", "on")
 	output, err := runNordCommand(ctx, "settings")
 	if nordMeshnet(output, err) != "Enabled" {
 		return errors.New("Meshnet activation could not be verified")
@@ -237,6 +238,7 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 	defer cancel()
 	var err error
 	loginRequired := false
+	loginVerified := false
 	if !nordSoftwareInstalled() {
 		err = errors.New("NordVPN unavailable")
 	}
@@ -267,6 +269,8 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 				output, checkErr := runNordCommand(ctx, "account")
 				if nordAccount(output, checkErr) != "Logged in" {
 					err = errors.New("NordVPN login could not be verified")
+				} else {
+					loginVerified = true
 				}
 			}
 			if err == nil {
@@ -290,6 +294,10 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 	if err != nil {
 		message := "NordVPN login could not be completed. Check the access token and retry."
 		switch request.Action {
+		case "token-login":
+			if loginVerified {
+				message = "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot."
+			}
 		case "activate":
 			message = "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."
 		case "deactivate":

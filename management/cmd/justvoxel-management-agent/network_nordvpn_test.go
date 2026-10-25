@@ -150,7 +150,7 @@ func TestNordActivateLoginRequired(t *testing.T) {
 }
 
 func TestNordTokenLoginSequenceAndPrivacy(t *testing.T) {
-	for _, stage := range []string{"success", "login", "account", "enable", "verify"} {
+	for _, stage := range []string{"success", "login", "account", "account unknown", "enable", "enable error but enabled", "verify"} {
 		t.Run(stage, func(t *testing.T) {
 			calls := nordFixture(t)
 			native := runNordCommand
@@ -159,8 +159,16 @@ func TestNordTokenLoginSequenceAndPrivacy(t *testing.T) {
 			runNordCommand = func(ctx context.Context, args ...string) (string, error) {
 				fail := (stage == "login" && args[0] == "login") ||
 					(stage == "account" && args[0] == "account") ||
-					(stage == "enable" && args[0] == "set") ||
+					((stage == "enable" || stage == "enable error but enabled") && args[0] == "set") ||
 					(stage == "verify" && args[0] == "settings")
+				if stage == "account unknown" && args[0] == "account" {
+					*calls = append(*calls, append([]string(nil), args...))
+					return privateOutput, nil
+				}
+				if stage == "enable error but enabled" && args[0] == "settings" {
+					*calls = append(*calls, append([]string(nil), args...))
+					return "Meshnet: enabled", nil
+				}
 				if fail {
 					*calls = append(*calls, append([]string(nil), args...))
 					return privateOutput, errors.New(privateOutput)
@@ -175,14 +183,12 @@ func TestNordTokenLoginSequenceAndPrivacy(t *testing.T) {
 			wantCode := 503
 			want := [][]string{{"login", "--token", token}, {"account"}, {"set", "meshnet", "on"}, {"settings"}}
 			switch stage {
-			case "success":
+			case "success", "enable error but enabled":
 				wantCode = 200
 			case "login":
 				want = want[:1]
-			case "account":
+			case "account", "account unknown":
 				want = want[:2]
-			case "enable":
-				want = want[:3]
 			}
 			if rr.Code != wantCode || !reflect.DeepEqual(*calls, want) {
 				t.Fatal("token argv or verified sequence changed", rr.Code)
@@ -190,8 +196,22 @@ func TestNordTokenLoginSequenceAndPrivacy(t *testing.T) {
 			if strings.Contains(rr.Body.String(), token) || strings.Contains(rr.Body.String(), "private vendor") {
 				t.Fatal("response leaked credential/vendor output")
 			}
-			if stage != "success" && !strings.Contains(rr.Body.String(), "NordVPN login could not be completed. Check the access token and retry.") {
-				t.Fatal("unsafe login error")
+			if wantCode != http.StatusOK {
+				wantMessage := "NordVPN login could not be completed. Check the access token and retry."
+				if stage == "enable" || stage == "verify" {
+					wantMessage = "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot."
+				}
+				var response struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if response.Error != wantMessage {
+					t.Fatal("incorrect login stage message", response.Error)
+				}
+			} else if !strings.Contains(rr.Body.String(), `"ok":true`) {
+				t.Fatal("missing success response")
 			}
 			events, err := store.listAuditEvents(10)
 			if err != nil {
@@ -213,6 +233,9 @@ func nordNativeFixture(t *testing.T) {
 }
 
 func TestNordNativePrivateHome(t *testing.T) {
+	if nordCommandTimeout != 10*time.Second {
+		t.Fatal("Nord command timeout changed", nordCommandTimeout)
+	}
 	nordNativeFixture(t)
 	if _, err := os.Stat(nordCLIHome); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("private HOME already exists", err)
@@ -223,7 +246,7 @@ func TestNordNativePrivateHome(t *testing.T) {
 			t.Fatal("unexpected Nord command", name, args)
 		}
 		deadline, ok := ctx.Deadline()
-		if remaining := time.Until(deadline); !ok || remaining <= 0 || remaining > 4*time.Second {
+		if remaining := time.Until(deadline); !ok || remaining < 9*time.Second || remaining > 10*time.Second {
 			t.Fatal("Nord command deadline", deadline)
 		}
 		command = exec.CommandContext(ctx, "/bin/sh", "-c", `printf '%s' "$HOME"`)
@@ -480,5 +503,68 @@ func TestNordTokenLoginMaximumEscapedToken(t *testing.T) {
 	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", string(body))
 	if rr.Code != 200 || len(*calls) != 4 || !reflect.DeepEqual((*calls)[0], []string{"login", "--token", token}) {
 		t.Fatal("escaped token bound or opaque argv changed", rr.Code)
+	}
+}
+
+func TestNordOperationTimeoutRemains25Seconds(t *testing.T) {
+	nordFixture(t)
+	native := runNordCommand
+	runNordCommand = func(ctx context.Context, args ...string) (string, error) {
+		deadline, ok := ctx.Deadline()
+		if remaining := time.Until(deadline); !ok || remaining < 24*time.Second || remaining > 25*time.Second {
+			t.Fatal("Nord operation deadline changed", deadline)
+		}
+		return native(ctx, args...)
+	}
+	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"token-login","token":"opaque"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatal(rr.Code)
+	}
+}
+
+func TestNordEnableVerifiesSettingsAfterSetFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, settings string
+		settingsErr    error
+		success        bool
+	}{
+		{name: "enabled", settings: "Meshnet: enabled", success: true},
+		{name: "disabled", settings: "Meshnet: disabled"},
+		{name: "unknown", settings: "private vendor output"},
+		{name: "error", settings: "Meshnet: enabled", settingsErr: errors.New("private settings error")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nordFixture(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer cancel()
+			var calls []string
+			runNordCommand = func(gotCtx context.Context, args ...string) (string, error) {
+				if gotCtx != ctx {
+					t.Fatal("follow-up must use the parent operation context")
+				}
+				call := strings.Join(args, " ")
+				calls = append(calls, call)
+				switch call {
+				case "set meshnet on":
+					return "private vendor output", errors.New("private set error")
+				case "settings":
+					return tc.settings, tc.settingsErr
+				default:
+					t.Fatal("unexpected Nord command", call)
+					return "", errors.New("unexpected command")
+				}
+			}
+			err := nordEnableMeshnet(ctx)
+			if tc.success {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || err.Error() != "Meshnet activation could not be verified" {
+				t.Fatal("unsafe activation failure", err)
+			}
+			if !reflect.DeepEqual(calls, []string{"set meshnet on", "settings"}) {
+				t.Fatal("authoritative verification sequence", calls)
+			}
+		})
 	}
 }

@@ -93,6 +93,88 @@ func TestNordWebUIProxyAdministratorCSRFAndToken(t *testing.T) {
 	}
 }
 
+func TestNordTokenLoginAuthenticationBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, session string
+		mustChange    bool
+		want          int
+	}{
+		{name: "unauthenticated", want: http.StatusUnauthorized},
+		{name: "password change required", session: "session-token", mustChange: true, want: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeNordAPI{fakeNetworkConfigurationAPI: &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: "administrator"}}}
+			app, err := New(fake, Config{ManagementAPI: "v1", ExternalScheme: "http"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/network/remote-access/nordvpn/login", strings.NewReader("csrf=token&token=never_reflect_me"))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+			if tc.session != "" {
+				req.AddCookie(&http.Cookie{Name: sessionCookie, Value: tc.session})
+			}
+			if tc.mustChange {
+				req.AddCookie(&http.Cookie{Name: mustChangeCookie, Value: "1"})
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			if rr.Code != tc.want || fake.calls != 0 || strings.Contains(rr.Body.String(), "never_reflect_me") {
+				t.Fatal("authentication boundary or privacy changed", rr.Code)
+			}
+		})
+	}
+}
+
+func TestNordTokenLoginAllowsOnlySafeManagementErrors(t *testing.T) {
+	const token = "never_reflect_me+/_-.~=opaque"
+	const loginFailure = "NordVPN login could not be completed. Check the access token and retry."
+	const meshnetFailure = "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot."
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"login stage", &api.ResponseError{StatusCode: 503, Message: loginFailure}, loginFailure},
+		{"meshnet stage", &api.ResponseError{StatusCode: 503, Message: meshnetFailure}, meshnetFailure},
+		{"vendor response", &api.ResponseError{StatusCode: 503, Message: "secret vendor failure 123"}, loginFailure},
+		{"token response", &api.ResponseError{StatusCode: 503, Message: token}, loginFailure},
+		{"near match", &api.ResponseError{StatusCode: 503, Message: meshnetFailure + " "}, loginFailure},
+		{"transport", errors.New("private transport error " + token), loginFailure},
+		{"non ResponseError", errors.New(meshnetFailure), loginFailure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeNordAPI{
+				fakeNetworkConfigurationAPI: &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: "administrator"}},
+				loginError:                  tc.err,
+			}
+			app, err := New(fake, Config{ManagementAPI: "v1", ExternalScheme: "http"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			form := url.Values{"csrf": {"token"}, "token": {token}}
+			req := httptest.NewRequest(http.MethodPost, "/api/network/remote-access/nordvpn/login", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+			req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			var response struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if rr.Code != http.StatusServiceUnavailable || response.Error != tc.want || fake.calls != 1 {
+				t.Fatal("unsafe or incorrect login message", rr.Code, rr.Body.String())
+			}
+			if strings.Contains(rr.Body.String(), token) || strings.Contains(rr.Body.String(), "secret vendor") {
+				t.Fatal("token/vendor output reflected")
+			}
+		})
+	}
+}
+
 func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 	source, err := assets.ReadFile("static/network-workspace.js")
 	if err != nil {
@@ -216,6 +298,9 @@ func TestNordBrowserTokenValidationAndPrivacy(t *testing.T) {
 	if start < 0 || end <= start {
 		t.Fatal("missing Nord token dialog")
 	}
+	if !strings.Contains(script[start:end], "} finally {\n        token = \"\";\n        input.value = \"\";") {
+		t.Fatal("token local and input must clear in finally")
+	}
 	program := `
 const assert = require("node:assert/strict");
 class Element {
@@ -233,13 +318,13 @@ const document = { createElement: tag => new Element(tag), body: new Element("bo
 const window = { open: () => { throw new Error("automatic Nord tab"); } };
 const flatten = node => [node, ...node.children.flatMap(flatten)];
 const secret = "never_reflect_this+/_-.~=opaque";
-let submitted, input, fail = true, refreshed = 0;
+let submitted, input, fail = true, failure = new Error(secret), refreshed = 0;
 const postForm = async (path, request) => {
   assert.equal(path, "/api/network/remote-access/nordvpn/login");
   assert.equal(input.value, "", "clear field before async POST");
   assert.deepEqual(request, { token: secret });
   submitted = request.token;
-  if (fail) throw new Error(secret);
+  if (fail) throw failure;
 };
 const refreshRemoteAccess = async () => { refreshed++; };
 ` + script[start:end] + `
@@ -268,15 +353,31 @@ const refreshRemoteAccess = async () => { refreshed++; };
   await button("Log in & activate").listeners.click();
   assert.equal(submitted, undefined);
   assert.equal(input.value, "");
-  input.value = secret;
-  await button("Log in & activate").listeners.click();
-  assert.equal(submitted, secret);
-  assert.equal(input.value, "");
-  assert.equal(popup.open, true);
-  assert(flatten(popup).some(node => node.textContent === "NordVPN login could not be completed. Check the access token and retry."));
-  for (const node of flatten(popup)) {
-    for (const field of ["value", "textContent", "innerHTML", "href", "placeholder"]) {
-      assert(!String(node[field] || "").includes(secret));
+  const loginFailure = "NordVPN login could not be completed. Check the access token and retry.";
+  const meshnetFailure = "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot.";
+  for (const [error, expected] of [
+    [new Error(meshnetFailure), meshnetFailure],
+    [new Error(loginFailure), loginFailure],
+    [new Error("secret vendor failure 123"), loginFailure],
+    [new Error(secret), loginFailure],
+    [new Error(meshnetFailure + " "), loginFailure],
+    [{ message: "<img src=x onerror=alert(1)>" }, loginFailure],
+    [{}, loginFailure], [null, loginFailure], ["arbitrary failure", loginFailure]
+  ]) {
+    failure = error;
+    input.value = secret;
+    await button("Log in & activate").listeners.click();
+    assert.equal(submitted, secret);
+    assert.equal(input.value, "");
+    assert.equal(popup.open, true);
+    assert(flatten(popup).some(node => node.textContent === expected));
+    if (error?.message && error.message !== expected) {
+      assert(!flatten(popup).some(node => node.textContent === error.message));
+    }
+    for (const node of flatten(popup)) {
+      for (const field of ["value", "textContent", "innerHTML", "href", "placeholder"]) {
+        assert(!String(node[field] || "").includes(secret));
+      }
     }
   }
   fail = false;

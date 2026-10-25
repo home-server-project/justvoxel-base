@@ -572,7 +572,15 @@ func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
 	result, err := client.NordVPNTokenLogin(r.Context(), session, token)
 	token = ""
 	if err != nil {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "NordVPN login could not be completed. Check the access token and retry.")
+		message := "NordVPN login could not be completed. Check the access token and retry."
+		if safeMessage, ok := api.ErrorMessage(err); ok {
+			switch safeMessage {
+			case "NordVPN login could not be completed. Check the access token and retry.",
+				"NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot.":
+				message = safeMessage
+			}
+		}
+		writeNetworkWebError(w, http.StatusServiceUnavailable, message)
 		return
 	}
 	writeNetworkWebJSON(w, http.StatusOK, result)
