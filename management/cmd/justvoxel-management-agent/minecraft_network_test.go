@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -159,6 +160,47 @@ func TestMinecraftNetworkImmutableRoutingAndTwoPrivateMounts(t *testing.T) {
 		t.Fatal("private material in public configuration")
 	}
 }
+func TestMinecraftNetworkVelocityFloodgateSchema(t *testing.T) {
+	n := networkDefaultState()
+	n.Config.Enabled = true
+	n.FloodgateKey = bytes.Repeat([]byte{42}, 16)
+	key := append([]byte(nil), n.FloodgateKey...)
+	files := networkInfrastructure(n, nil)
+	config := string(files["velocity/plugins/floodgate/config.yml"])
+	// Check whole sections so a false value in another section cannot hide an
+	// enabled linking or metrics object. No YAML dependency is needed here.
+	for _, want := range []string{
+		"key-file-name: key.pem\n", `username-prefix: "."`, "replace-spaces: true\n",
+		"disconnect:\n  invalid-key: \"Please connect through the official Geyser\"\n  invalid-arguments-length: \"Expected {} arguments, got {}. Is Geyser up-to-date?\"\n",
+		"player-link:\n  enabled: false\n  require-link: false\n  enable-own-linking: false\n  allowed: false\n  link-code-timeout: 300\n  type: sqlite\n  enable-global-linking: false\n",
+		"metrics:\n  enabled: false\n  uuid: \"00000000-0000-0000-0000-000000000000\"\n",
+		"send-floodgate-data: true\n", "config-version: 3\n",
+	} {
+		if strings.Count(config, want) != 1 {
+			t.Fatalf("missing or duplicated Floodgate setting %q in %s", want, config)
+		}
+	}
+	for _, forbidden := range []string{"enabled: true", "require-link: true", "enable-own-linking: true", "allowed: true", "enable-global-linking: true"} {
+		if strings.Contains(config, forbidden) {
+			t.Fatal("linking or telemetry enabled", forbidden)
+		}
+	}
+	if !regexp.MustCompile(`(?m)^  uuid: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"$`).MatchString(config) {
+		t.Fatal("metrics UUID has invalid syntax")
+	}
+	if !bytes.Equal(files["velocity/plugins/floodgate/key.pem"], key) || !bytes.Equal(n.FloodgateKey, key) {
+		t.Fatal("authoritative Floodgate key changed")
+	}
+	if !strings.Contains(string(files["velocity/plugins/Geyser-Velocity/config.yml"]), "  auth-type: floodgate\n") {
+		t.Fatal("Geyser Floodgate authentication changed")
+	}
+	for name := range files {
+		if strings.Contains(strings.ToLower(name), "floodgate") && name != "velocity/plugins/floodgate/config.yml" && name != "velocity/plugins/floodgate/key.pem" {
+			t.Fatal("infrastructure generator wrote backend Floodgate configuration", name)
+		}
+	}
+}
+
 func TestMinecraftNetworkValidation(t *testing.T) {
 	c := networkDefaultState().Config
 	if err := networkValidateConfig(c); err != nil {

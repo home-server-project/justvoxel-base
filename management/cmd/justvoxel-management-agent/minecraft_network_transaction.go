@@ -18,7 +18,13 @@ import (
 
 // Every changed backend must be stopped through its normal player-aware control
 // before publication. No world data, software choice, or boot setting is changed.
-func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNetworkConfig) (result error) {
+func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNetworkConfig) error {
+	return networkApplyWithMaintenanceRelease(ctx, b, c, func() error { return nil })
+}
+
+// releaseMaintenance retains the Agent operation mutex and reset exclusions.
+// It must be idempotent and retain any release error for final cleanup.
+func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeBackend, c minecraftNetworkConfig, releaseMaintenance func() error) (result error) {
 	if err := networkPending(b); err != nil {
 		return err
 	}
@@ -26,18 +32,26 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 	if err != nil {
 		return err
 	}
-	journalPublished := false
 	committed := false
 	var stopped []string
 	defer func() {
-		if result != nil && !committed && networkPending(b) == nil {
+		if result == nil || committed || networkPending(b) != nil {
+			return
+		}
+		// Any rollback has completed and reservations have closed before this
+		// deferred restoration. Never start runtime against unsafe journal state.
+		if err := releaseMaintenance(); err != nil {
+			result = errors.Join(result, instanceRuntimeFailure(networkMaintenanceReleaseMessage))
+			return
+		}
+		if len(stopped) > 0 {
 			restoreCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 			defer cancel()
 			if networkRestartStopped(restoreCtx, b, stopped) != nil {
 				result = errors.Join(result, instanceRuntimeFailure("One or more previously running servers could not be restored. Check server status and use their normal Start controls."))
 			}
 		}
-		if result != nil && !journalPublished && before.Config.Enabled {
+		if before.Config.Enabled {
 			restartCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			_, restartErr := b.command(restartCtx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service")
@@ -304,14 +318,13 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 			return instanceRuntimeFailure("Minecraft Network could not confirm that every selected server stopped safely.")
 		}
 	}
-	journalPublished = true
 	if err = b.writeJSON(filepath.Join(b.networkDirectory(), "pending.json"), journal, false); err != nil {
 		return errInstanceRecovery
 	}
 	fail := func() error {
 		recoveryCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
-		if networkRollback(recoveryCtx, b, journal) != nil {
+		if networkRollbackDurable(recoveryCtx, b, journal) != nil {
 			return instanceRuntimeFailure("Minecraft Network needs recovery. Use Retry recovery in Minecraft Network.")
 		}
 		return instanceRuntimeFailure("Minecraft Network changes failed and were rolled back. Server data was preserved.")
@@ -359,6 +372,9 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 		h.Close()
 	}
 	held = nil
+	if err = releaseMaintenance(); err != nil {
+		return instanceRuntimeFailure(networkMaintenanceReleaseMessage)
+	}
 	if c.Enabled {
 		if _, err = b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service"); err != nil {
 			result = instanceRuntimeFailure(networkNotReadyMessage)
@@ -371,6 +387,8 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 	}
 	return result
 }
+
+const networkMaintenanceReleaseMessage = "Minecraft Network maintenance lock could not be released. Check Network status before retrying."
 
 const networkNotReadyMessage = "Minecraft Network configuration was saved, but the network entrance did not become ready. Check Network status and retry Apply."
 
@@ -463,6 +481,20 @@ func networkWriteState(b *instanceRuntimeBackend, n minecraftNetworkState) error
 	return b.writeJSON(filepath.Join(b.networkDirectory(), "state.json"), n, !errors.Is(err, os.ErrNotExist))
 }
 func networkRollback(ctx context.Context, b *instanceRuntimeBackend, j minecraftNetworkJournal) error {
+	if err := networkRollbackDurable(ctx, b, j); err != nil {
+		return err
+	}
+	if j.Before.Config.Enabled {
+		if _, err := b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Configure restores durable state under maintenance, then releases maintenance
+// before its deferred runtime restoration. Recovery callers keep their behavior.
+func networkRollbackDurable(ctx context.Context, b *instanceRuntimeBackend, j minecraftNetworkJournal) error {
 	// Refuse paths and contents not attributable to this bounded feature journal.
 	if err := networkValidateJournal(b, j); err != nil {
 		return err
@@ -513,11 +545,6 @@ func networkRollback(ctx context.Context, b *instanceRuntimeBackend, j minecraft
 	}
 	if err := b.clearPending(filepath.Join(b.networkDirectory(), "pending.json")); err != nil {
 		return err
-	}
-	if j.Before.Config.Enabled {
-		if _, err := b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service"); err != nil {
-			return err
-		}
 	}
 	return nil
 }

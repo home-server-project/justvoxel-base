@@ -543,43 +543,64 @@ func instanceHoldPort(port int) ([]net.Listener, error) {
 // Reserve the same persistent-operation locks without changing journal schemas.
 // Holding mu prevents another Agent operation from borrowing our held descriptors.
 func (s *server) lockInstanceRuntime(networkRecovery ...bool) (func() error, error) {
+	_, releaseAll, err := s.lockPhasedInstanceRuntime(networkRecovery...)
+	return releaseAll, err
+}
+
+// Only Network Configure releases maintenance before the request finishes.
+// All other callers retain maintenance until releaseAll, as before.
+func (s *server) lockPhasedInstanceRuntime(networkRecovery ...bool) (releaseMaintenance func() error, releaseAll func() error, result error) {
 	if len(networkRecovery) == 0 || !networkRecovery[0] {
 		if err := networkPending(instanceRuntimes); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if instanceRestoreActive.Load() {
-		return nil, errInstanceBusy
+		return nil, nil, errInstanceBusy
 	}
 	if s.operations == nil {
-		return nil, instanceRuntimeFailure("Appliance operation tracking is unavailable.")
+		return nil, nil, instanceRuntimeFailure("Appliance operation tracking is unavailable.")
 	}
 	o := s.operations
 	o.mu.Lock()
 	if o.currentSetupID != "" || o.currentRestoreID != "" || o.currentDataMigrationID != "" || o.currentMigrationID != "" || o.currentMinecraftResetID != "" || o.currentFactoryResetID != "" {
 		o.mu.Unlock()
-		return nil, errInstanceBusy
+		return nil, nil, errInstanceBusy
 	}
 	if err := instanceRuntimes.requireNoInstanceRestore(); err != nil {
 		o.mu.Unlock()
-		return nil, err
+		return nil, nil, err
 	}
 	if err := o.acquireMinecraftResetLocks(); err != nil {
 		o.mu.Unlock()
-		return nil, errInstanceBusy
+		return nil, nil, errInstanceBusy
 	}
-	lock, err := acquirePluginRuntimeLock()
+	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
 		releaseErr := o.releaseMinecraftResetLocks()
 		o.mu.Unlock()
-		return nil, errors.Join(errInstanceBusy, releaseErr)
+		return nil, nil, errors.Join(errInstanceBusy, releaseErr)
 	}
-	return func() error {
-		err := lock.Close()
-		err = errors.Join(err, o.releaseMinecraftResetLocks())
-		o.mu.Unlock()
-		return err
-	}, nil
+	var maintenanceErr error
+	maintenanceReleased := false
+	releaseMaintenance = func() error {
+		if !maintenanceReleased {
+			maintenanceReleased = true
+			maintenanceErr = lock.Close()
+		}
+		return maintenanceErr
+	}
+	allReleased := false
+	var releaseErr error
+	releaseAll = func() error {
+		if !allReleased {
+			allReleased = true
+			releaseErr = errors.Join(releaseMaintenance(), o.releaseMinecraftResetLocks())
+			o.mu.Unlock()
+		}
+		return releaseErr
+	}
+	return releaseMaintenance, releaseAll, nil
 }
 
 func instanceStorageFor(ctx minecraftInstanceRuntimeContext, id string) instanceRuntimeStorage {

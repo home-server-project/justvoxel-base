@@ -239,9 +239,32 @@ func networkInfrastructure(s minecraftNetworkState, names map[string]string) map
 		"velocity/plugins/global-whitelist/config.properties": []byte("white-list=true\nenforce-whitelist=true\n"),
 		"velocity/plugins/global-whitelist/whitelist.json":    players,
 		"velocity/plugins/floodgate/key.pem":                  s.FloodgateKey,
-		"velocity/plugins/floodgate/config.yml":               []byte("key-file-name: key.pem\nusername-prefix: '.'\nreplace-spaces: true\nsend-floodgate-data: true\nconfig-version: 3\n"),
-		"velocity/plugins/Geyser-Velocity/config.yml":         []byte("bedrock:\n  address: 0.0.0.0\n  port: 19132\n  clone-remote-port: false\n  transport: nethernet\nremote:\n  address: auto\n  auth-type: floodgate\n"),
-		"picolobby/server.toml":                               []byte(lobby.String()),
+		"velocity/plugins/floodgate/config.yml": []byte(`key-file-name: key.pem
+username-prefix: "."
+replace-spaces: true
+
+disconnect:
+  invalid-key: "Please connect through the official Geyser"
+  invalid-arguments-length: "Expected {} arguments, got {}. Is Geyser up-to-date?"
+
+player-link:
+  enabled: false
+  require-link: false
+  enable-own-linking: false
+  allowed: false
+  link-code-timeout: 300
+  type: sqlite
+  enable-global-linking: false
+
+metrics:
+  enabled: false
+  uuid: "00000000-0000-0000-0000-000000000000"
+
+send-floodgate-data: true
+config-version: 3
+`),
+		"velocity/plugins/Geyser-Velocity/config.yml": []byte("bedrock:\n  address: 0.0.0.0\n  port: 19132\n  clone-remote-port: false\n  transport: nethernet\nremote:\n  address: auto\n  auth-type: floodgate\n"),
+		"picolobby/server.toml":                       []byte(lobby.String()),
 	}
 }
 func registerMinecraftNetworkRoutes(mux *http.ServeMux, s *server) {
@@ -326,14 +349,14 @@ func (s *server) minecraftNetworkConfigure(w http.ResponseWriter, r *http.Reques
 		writeError(w, 400, "Invalid Minecraft Network configuration.")
 		return
 	}
-	unlock, err := s.lockInstanceRuntime()
+	releaseMaintenance, unlock, err := s.lockPhasedInstanceRuntime()
 	if err != nil {
 		instanceRuntimeError(w, err, "")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 240*time.Second)
 	defer cancel()
-	err = errors.Join(networkApply(ctx, instanceRuntimes, c), unlock())
+	err = errors.Join(networkApplyWithMaintenanceRelease(ctx, instanceRuntimes, c, releaseMaintenance), unlock())
 	if s.store != nil {
 		_ = s.store.recordAuditEvent(actor, "minecraft_network_configure", "minecraft_network", err == nil, "")
 	}
