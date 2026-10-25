@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,12 +16,28 @@ import (
 )
 
 type serverInventoryTestAPI struct {
+	connections       map[string]api.MinecraftConnection
+	connectionErrors  map[string]bool
 	legacyStatusError bool
 	*addServerTestAPI
 	states                            map[string]api.MinecraftInstanceStatus
 	configurationErrors, statusErrors map[string]bool
 	reads, actions                    []string
 	inventoryError, actionError       error
+}
+
+func (f *serverInventoryTestAPI) MinecraftInstanceConnection(_ context.Context, _, id string) (api.MinecraftConnection, error) {
+	if f.connectionErrors[id] {
+		return api.MinecraftConnection{}, errors.New("private connection error")
+	}
+	if connection, ok := f.connections[id]; ok {
+		return connection, nil
+	}
+	c, ok := f.runtimes[id]
+	if !ok {
+		return api.MinecraftConnection{}, errors.New("connection unavailable")
+	}
+	return api.MinecraftConnection{ID: id, JavaPort: c.JavaPort, BedrockPort: c.BedrockPort, BedrockEnabled: c.BedrockEnabled}, nil
 }
 
 func (f *serverInventoryTestAPI) Status(ctx context.Context, session string) (api.Status, error) {
@@ -580,5 +597,56 @@ func TestMinecraftServerSoftwareArtwork(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMinecraftServerCardAuthoritativeConnectionPorts(t *testing.T) {
+	for _, member := range []bool{false, true} {
+		app, f := newServerInventoryApp(t)
+		for i, id := range []string{"jv-family1", "jv-kids001"} {
+			c := f.runtimes[id]
+			c.JavaPort, c.BedrockPort, c.BedrockEnabled = 25565+i, 19133+i, true
+			f.runtimes[id] = c
+		}
+		if member {
+			f.connections = map[string]api.MinecraftConnection{}
+			for _, id := range []string{"jv-family1", "jv-kids001"} {
+				f.connections[id] = api.MinecraftConnection{ID: id, NetworkMember: true, JavaPort: 25565, BedrockPort: 19132, BedrockEnabled: true}
+			}
+		}
+		before := map[string]api.InstanceRuntimeSettings{}
+		for id, c := range f.runtimes {
+			before[id] = c
+			summary := app.independentServerSummary(context.Background(), "session", api.RegisteredMinecraftInstance{ID: id})
+			if summary.JavaPort != c.JavaPort || summary.BedrockPort != c.BedrockPort || summary.BedrockEnabled != c.BedrockEnabled || summary.NetworkMember != member {
+				t.Fatal("connection display replaced standalone settings", summary)
+			}
+		}
+		body := inventoryRequest(app, "GET", "", "").Body.String()
+		cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card".*?</article>`).FindAllString(body, -1)
+		if len(cards) != 2 {
+			t.Fatal(body)
+		}
+		for i, card := range cards {
+			javaLabel, bedrockLabel := "Java port", "Bedrock port"
+			java, bedrock := 25565+i, 19133+i
+			if member {
+				javaLabel, bedrockLabel, java, bedrock = "Java via Network", "Bedrock via Network", 25565, 19132
+			}
+			for _, want := range []string{"<span>" + javaLabel + "</span><strong>" + fmt.Sprint(java) + "</strong>", "<span>" + bedrockLabel + "</span><strong>" + fmt.Sprint(bedrock) + "</strong>", "data-server-running", "data-server-boot", ">Settings</a>"} {
+				if !strings.Contains(card, want) {
+					t.Fatal("missing", want, card)
+				}
+			}
+		}
+		if !reflect.DeepEqual(before, f.runtimes) || len(f.actions) != 0 {
+			t.Fatal("connection display mutated saved settings or lifecycle")
+		}
+		f.connectionErrors = map[string]bool{"jv-kids001": true}
+		body = inventoryRequest(app, "GET", "", "").Body.String()
+		cards = regexp.MustCompile(`(?s)<article class="panel minecraft-server-card".*?</article>`).FindAllString(body, -1)
+		if strings.Contains(cards[1], ">25566</strong>") || strings.Contains(cards[1], ">19134</strong>") || strings.Count(cards[1], "<strong>Unavailable</strong>") < 2 || !strings.Contains(cards[1], "data-server-running") {
+			t.Fatal("connection failure guessed ports or changed controls", cards[1])
+		}
 	}
 }

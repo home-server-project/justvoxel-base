@@ -25,6 +25,7 @@ type MinecraftNetworkServer struct {
 	State    string `json:"state"`
 }
 type MinecraftNetworkStatus struct {
+	RuntimeReady      bool                     `json:"runtime_ready"`
 	Config            MinecraftNetworkConfig   `json:"config"`
 	Servers           []MinecraftNetworkServer `json:"servers"`
 	Whitelist         []MinecraftNetworkPlayer `json:"whitelist"`

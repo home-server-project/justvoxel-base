@@ -110,6 +110,20 @@ func TestMinecraftNetworkImmutableRoutingAndTwoPrivateMounts(t *testing.T) {
 	files := networkInfrastructure(n, map[string]string{"jv-a1b2c3": "Family Survival"})
 	velocity := string(files["velocity/velocity.toml"])
 	lobby := string(files["picolobby/server.toml"])
+	for _, want := range []string{`config-version = "2.9"`, `jv-lobby = "justvoxel-picolobby:25565"`, `try = ["jv-lobby"]`, `player-info-forwarding-mode = "modern"`, `forwarding-secret-file = "forwarding.secret"`} {
+		if !strings.Contains(velocity, want) {
+			t.Fatal("missing Velocity configuration", want)
+		}
+	}
+	root := strings.SplitN(velocity, "[servers]", 2)[0]
+	if !strings.Contains(root, "\nforced-hosts = {}\n") || strings.Contains(root, "[") {
+		t.Fatal("forced-hosts must be an explicit empty root map", velocity)
+	}
+	for _, host := range []string{"lobby.example.com", "factions.example.com", "minigames.example.com"} {
+		if strings.Contains(velocity, host) {
+			t.Fatal("example forced host present", host)
+		}
+	}
 	if !strings.Contains(lobby, "[server_list]\nmax_players = 0\n") {
 		t.Fatal("PicoLobby player limit is not disabled")
 	}
@@ -184,6 +198,9 @@ func TestMinecraftNetworkRecoveryCannotTargetUnrelatedFiles(t *testing.T) {
 func networkTransactionFixture(t *testing.T, twoSupported ...bool) (*instanceActivationFixture, minecraftNetworkConfig) {
 	t.Helper()
 	f := newInstanceActivationFixture(t)
+	oldProbe := networkTCPReady
+	networkTCPReady = func(context.Context, int) bool { return true }
+	t.Cleanup(func() { networkTCPReady = oldProbe })
 	if len(twoSupported) > 0 && twoSupported[0] {
 		id := f.configs[1].ID
 		r, err := f.backend.readRecord(id)
@@ -824,5 +841,131 @@ func TestMinecraftNetworkJavaStartupReadinessStopsBothMembers(t *testing.T) {
 	}
 	if f.states[unrelated.ID] != "active" || f.containers[unrelated.ID] != "running" {
 		t.Fatal("unrelated server interrupted")
+	}
+}
+
+func TestMinecraftNetworkRuntimeStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name                                            string
+		enabled, lobby, proxy, listener, recovery, want bool
+	}{
+		{"disabled", false, true, true, true, false, false},
+		{"ready", true, true, true, true, false, true},
+		{"lobby unavailable", true, false, true, true, false, false},
+		{"proxy unavailable", true, true, false, true, false, false},
+		{"listener unavailable", true, true, true, false, false, false},
+		{"recovery required", true, true, true, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, c := networkTransactionFixture(t)
+			if err := networkApply(context.Background(), f.backend, c); err != nil {
+				t.Fatal(err)
+			}
+			n, err := networkRead(f.backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			n.Config.Enabled = tc.enabled
+			if err := networkWriteState(f.backend, n); err != nil {
+				t.Fatal(err)
+			}
+			if tc.recovery {
+				if err := f.backend.writeJSON(filepath.Join(f.backend.networkDirectory(), "pending.json"), minecraftNetworkJournal{}, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			original := f.backend.command
+			f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+				if cmd == "systemctl" && len(args) == 3 && args[0] == "is-active" && args[1] == "--quiet" {
+					if (args[2] == "justvoxel-picolobby.service" && !tc.lobby) || (args[2] == "justvoxel-velocity.service" && !tc.proxy) {
+						return nil, errors.New("private runtime error")
+					}
+				}
+				return original(ctx, cmd, args...)
+			}
+			probes := 0
+			networkTCPReady = func(_ context.Context, port int) bool {
+				probes++
+				if port != c.JavaPort {
+					t.Fatal("wrong Java entrance", port)
+				}
+				return tc.listener
+			}
+			old := instanceRuntimes
+			instanceRuntimes = f.backend
+			t.Cleanup(func() { instanceRuntimes = old })
+			rr := httptest.NewRecorder()
+			roleServerForTest(roleAdministrator).minecraftNetworkStatus(rr, authorizedRequest("GET", "/v1/minecraft/network", ""))
+			var status struct {
+				RuntimeReady bool                   `json:"runtime_ready"`
+				Config       minecraftNetworkConfig `json:"config"`
+			}
+			if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &status) != nil || status.RuntimeReady != tc.want || status.Config.Enabled != tc.enabled {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), `"runtime_ready":`) || strings.Contains(rr.Body.String(), "private runtime error") {
+				t.Fatal(rr.Body.String())
+			}
+			if (!tc.enabled || tc.recovery || !tc.proxy || !tc.lobby) && probes != 0 {
+				t.Fatal("unnecessary listener probe")
+			}
+		})
+	}
+}
+
+func TestMinecraftNetworkReadinessTimeoutKeepsCommitAndRestartsBackends(t *testing.T) {
+	f, c := networkTransactionFixture(t, true)
+	c.Members = []string{f.configs[0].ID, f.configs[1].ID}
+	for _, id := range c.Members {
+		f.states[id], f.containers[id] = "active", "running"
+	}
+	h := networkLifecycleControls(f)
+	probes, waits := 0, 0
+	networkTCPReady = func(_ context.Context, port int) bool {
+		probes++
+		n, err := networkRead(f.backend)
+		if err != nil || !n.Config.Enabled || networkPending(f.backend) != nil || !h.published || port != c.JavaPort {
+			t.Fatal("readiness probed before durable commit", err)
+		}
+		return false
+	}
+	f.backend.pause = func(ctx context.Context, d time.Duration) error {
+		if d != time.Second {
+			t.Fatal("unexpected cadence", d)
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > 30*time.Second {
+			t.Fatal("missing bounded readiness context")
+		}
+		waits++
+		return nil
+	}
+	err := networkApply(context.Background(), f.backend, c)
+	if err == nil || err.Error() != networkNotReadyMessage || waits != 30 || probes != 31 || !reflect.DeepEqual(h.starts, c.Members) {
+		t.Fatal(err, waits, probes, h.starts)
+	}
+	if networkPending(f.backend) != nil {
+		t.Fatal("runtime failure created recovery")
+	}
+	for _, id := range c.Members {
+		r, err := f.backend.readRecord(id)
+		if err != nil || !r.NetworkMember {
+			t.Fatal("committed membership rolled back", err)
+		}
+	}
+}
+
+func TestMinecraftNetworkReadinessWaitAndParentCancellation(t *testing.T) {
+	f, c := networkTransactionFixture(t)
+	probes, waits := 0, 0
+	networkTCPReady = func(context.Context, int) bool { probes++; return probes == 3 }
+	f.backend.pause = func(context.Context, time.Duration) error { waits++; return nil }
+	if !networkWaitReady(context.Background(), f.backend, c.JavaPort) || waits != 2 {
+		t.Fatal("delayed readiness was not observed", waits)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if networkWaitReady(ctx, f.backend, c.JavaPort) || probes != 3 {
+		t.Fatal("parent cancellation ignored")
 	}
 }

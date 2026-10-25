@@ -21,6 +21,9 @@ type minecraftServerSummary struct {
 	JavaPort, BedrockPort                                   int
 	ConfigurationAvailable, BedrockEnabled                  bool
 	BootKnown, StartOnBoot                                  bool
+	ConnectionAvailable, NetworkMember                      bool
+	ConnectionJavaPort, ConnectionBedrockPort               int
+	ConnectionBedrockEnabled                                bool
 	MOTD                                                    string
 	CanStart, CanStop, CanRestart                           bool
 }
@@ -190,6 +193,16 @@ func (a *App) independentServerSummary(ctx context.Context, session string, inst
 		s.BootKnown, s.StartOnBoot = true, c.StartOnBoot
 	} else {
 		s.ConfigurationError = "Server configuration could not be checked."
+	}
+	if connectionAPI, ok := a.api.(interface {
+		MinecraftInstanceConnection(context.Context, string, string) (api.MinecraftConnection, error)
+	}); ok {
+		connection, err := connectionAPI.MinecraftInstanceConnection(ctx, session, instance.ID)
+		if err == nil && connection.ID == instance.ID {
+			s.ConnectionAvailable, s.NetworkMember = true, connection.NetworkMember
+			s.ConnectionJavaPort, s.ConnectionBedrockPort = connection.JavaPort, connection.BedrockPort
+			s.ConnectionBedrockEnabled = connection.BedrockEnabled
+		}
 	}
 	if lifecycle, ok := a.api.(minecraftServerLifecycleAPI); ok {
 		status, err := lifecycle.MinecraftInstanceStatus(ctx, session, instance.ID)

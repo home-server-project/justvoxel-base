@@ -53,8 +53,8 @@
       </div>
       {{if .ConfigurationError}}<p class="notice error">{{.ConfigurationError}}</p>{{end}}
       <div class="minecraft-server-metrics">
-        <div><span>Java port</span><strong>{{if .JavaPort}}{{.JavaPort}}{{else}}Unavailable{{end}}</strong></div>
-        <div><span>Bedrock port</span><strong>{{if .ConfigurationAvailable}}{{if .BedrockEnabled}}{{.BedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable{{end}}</strong></div>
+        <div><span>{{if .NetworkMember}}Java via Network{{else}}Java port{{end}}</span><strong>{{if .ConnectionAvailable}}{{if .ConnectionJavaPort}}{{.ConnectionJavaPort}}{{else}}Unavailable{{end}}{{else}}Unavailable{{end}}</strong></div>
+        <div><span>{{if .NetworkMember}}Bedrock via Network{{else}}Bedrock port{{end}}</span><strong>{{if .ConnectionAvailable}}{{if .ConnectionBedrockEnabled}}{{.ConnectionBedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable{{end}}</strong></div>
         <div data-server-ram data-server-state="{{.State}}"><span>RAM</span><strong data-server-ram-value>{{if eq .State "Stopped"}}---{{else}}Unavailable{{end}}</strong><svg data-server-ram-graph viewBox="0 0 116 12" preserveAspectRatio="none" aria-hidden="true"></svg></div>
       </div>
       <div class="minecraft-server-switches" data-server-normal-actions>

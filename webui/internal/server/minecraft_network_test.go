@@ -86,10 +86,14 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 			t.Fatal(rr.Code, rr.Body.String())
 		}
 		body := rr.Body.String()
+		enabledLabel := "Enabled"
+		if enabled {
+			enabledLabel = "Enabled · Proxy unavailable"
+		}
 		for _, want := range []string{
 			`class="minecraft-network"`, `minecraft-network-panel`,
 			`minecraft-network-status-disabled">Disabled</span>`,
-			`minecraft-network-status-enabled">Enabled</span>`,
+			`minecraft-network-status-enabled">` + enabledLabel + `</span>`,
 			`class="minecraft-player-controls"`, `class="minecraft-player-add"`,
 			`class="minecraft-player-platform"`, `class="minecraft-player-input"`,
 			`class="minecraft-whitelist-list"`, `No players on the network whitelist.`,
@@ -327,5 +331,30 @@ func TestMinecraftNetworkAutomaticLifecycleAndEligibilityPresentation(t *testing
 	grid := regexp.MustCompile(`(?s)<div class="minecraft-network-servers">.*?</div>`).FindString(body)
 	if strings.Contains(grid, "paper.svg") || !strings.Contains(grid, "vanilla.svg") || !strings.Contains(grid, " · Vanilla · stopped") {
 		t.Fatal("grid classification did not follow Eligible", grid)
+	}
+}
+
+func TestMinecraftNetworkRuntimePresentation(t *testing.T) {
+	for _, tc := range []struct {
+		enabled, ready bool
+		label          string
+	}{
+		{false, false, "Enabled</span>"},
+		{true, true, "Enabled</span>"},
+		{true, false, "Enabled · Proxy unavailable</span>"},
+	} {
+		app, f := newNetworkTestApp(t)
+		f.network.Config.Enabled, f.network.RuntimeReady = tc.enabled, tc.ready
+		rr := httptestResponse(app, authenticatedAdminRequest("GET", "http://example/workspace/minecraft-network", ""))
+		body := rr.Body.String()
+		if rr.Code != 200 || !strings.Contains(body, `minecraft-network-status-enabled">`+tc.label) {
+			t.Fatal(rr.Code, body)
+		}
+		if strings.Contains(body, `name="enabled" checked`) != tc.enabled {
+			t.Fatal("runtime readiness changed configured toggle", body)
+		}
+		if !tc.enabled && strings.Contains(body, "Proxy unavailable") {
+			t.Fatal("disabled presentation changed", body)
+		}
 	}
 }

@@ -79,6 +79,12 @@ func (s *server) adminValidation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b := instanceRuntimes
+	network, networkErr := networkRead(b)
+	if networkErr != nil || networkPending(b) != nil {
+		check(false, "Minecraft Network infrastructure")
+	} else if network.Config.Enabled {
+		check(networkRuntimeReady(ctx, b, network.Config.JavaPort), "Minecraft Network infrastructure")
+	}
 	instances, registryErr := b.identities().listInstances("")
 	legacyID, legacyErr := b.identities().readRecord("minecraft.json")
 	check(registryErr == nil && (legacyErr == nil || errors.Is(legacyErr, os.ErrNotExist)), "Immutable instance registry")

@@ -23,7 +23,7 @@ podman() {
             if (( count < ${TRANSIENT_COUNT:-1} )); then printf '%s' "${TRANSIENT_RESPONSE:-Checking version, please wait...}"; return 0; fi
         fi; printf '%s' "${VERSION_RESPONSE:-This server is running Paper version 26.2-19-main (Implementing API version 26.2-R0.1-SNAPSHOT)}" ;;
         plugins) case "${MINECRAFT_SERVER_TYPE:-paper}" in paper|purpur) ;; *) echo 'Unexpected plugins command' >&2; return 1 ;; esac; printf '%s' "${PLUGIN_RESPONSE:-Plugins (3): Geyser-Spigot, floodgate, ViaVersion}" ;;
-        'geyser version') printf '%s' "${GEYSER_RESPONSE:-This server is running Geyser version fixture}" ;;
+        'geyser version') printf 'geyser\n' >> "${DATA_PATH}/geyser-probes"; printf '%s' "${GEYSER_RESPONSE:-This server is running Geyser version fixture}" ;;
         *) return 1 ;;
     esac
 }
@@ -163,5 +163,65 @@ for software in forge neoforge fabric quilt; do
         MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' bash "${fixture_dir}/verify" 1.21.1; then
         echo 'Wrong loader implementation accepted' >&2; exit 1
     fi
+done
+# Enrollment overrides saved standalone cross-play settings for Paper/Purpur.
+for software in paper purpur; do
+    for bedrock in yes no; do
+        rm -f "${DATA_PATH}/geyser-probes"
+        # No standalone Geyser config exists, and a Geyser command would fail.
+        rm -f "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
+        JV_NETWORK_MEMBER=yes BEDROCK_ENABLED="${bedrock}" MINECRAFT_SERVER_TYPE="${software}" \
+            VERSION_RESPONSE="This server is running ${software^} version 26.2-19-main" \
+            PLUGIN_RESPONSE='Plugins (3): floodgate, ViaBackwards, ViaVersion' GEYSER_RESPONSE='Unknown command' bash "${fixture_dir}/verify" 26.2
+        [[ ! -e ${DATA_PATH}/geyser-probes ]]
+        for plugins in 'Plugins: Geyser-Spigot, floodgate, ViaVersion' 'Plugins: ViaVersion' 'Plugins: §cfloodgate, ViaVersion' 'Plugins: floodgate'; do
+            if JV_NETWORK_MEMBER=yes BEDROCK_ENABLED="${bedrock}" MINECRAFT_SERVER_TYPE="${software}" \
+                VERSION_RESPONSE="This server is running ${software^} version 26.2-19-main" \
+                PLUGIN_RESPONSE="${plugins}" bash "${fixture_dir}/verify" 26.2; then
+                echo "Invalid Network member accepted: ${plugins}" >&2; exit 1
+            fi
+        done
+    done
+    # Standalone retains both plugin requirements and Geyser/config verification.
+    printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
+    JV_NETWORK_MEMBER=no BEDROCK_ENABLED=yes MINECRAFT_SERVER_TYPE="${software}" \
+        VERSION_RESPONSE="This server is running ${software^} version 26.2-19-main" bash "${fixture_dir}/verify" 26.2
+    for plugins in 'Plugins: floodgate, ViaVersion' 'Plugins: Geyser-Spigot, ViaVersion'; do
+        if JV_NETWORK_MEMBER=no BEDROCK_ENABLED=yes MINECRAFT_SERVER_TYPE="${software}" \
+            VERSION_RESPONSE="This server is running ${software^} version 26.2-19-main" \
+            PLUGIN_RESPONSE="${plugins}" bash "${fixture_dir}/verify" 26.2; then
+            echo 'Standalone cross-play requirements weakened' >&2; exit 1
+        fi
+    done
+    rm -f "${DATA_PATH}/geyser-probes" "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
+    JV_NETWORK_MEMBER=no BEDROCK_ENABLED=no MINECRAFT_SERVER_TYPE="${software}" \
+        VERSION_RESPONSE="This server is running ${software^} version 26.2-19-main" \
+        PLUGIN_RESPONSE='Plugins: ViaVersion' bash "${fixture_dir}/verify" 26.2
+    [[ ! -e ${DATA_PATH}/geyser-probes ]]
+done
+
+# The real instance loader reads membership only after the commitment gate.
+mkdir -p "${fixture_dir}/instances/jv-aaaaaa"
+sed -e "s|/etc/justvoxel/instances|${fixture_dir}/instances|g" \
+    -e 's|/usr/libexec/justvoxel/mjust/validate-instance-runtime-commit|fixture_commit_guard|g' \
+    "${repo_root}/mjust/libexec/instance-context.sh" > "${fixture_dir}/instance-context.sh"
+for member in true false; do
+    jq -n --arg root "${fixture_dir}" --argjson member "${member}" \
+        '{network_member:$member, storage:{root:$root,data_path:($root+"/minecraft-instances/jv-aaaaaa/data")}, runtime:{software:"paper",image_tag:"stable",version:"26.2",uid:1000,gid:1000,bedrock_enabled:true}}' \
+        > "${fixture_dir}/instances/jv-aaaaaa/config.json"
+    before="$(sha256sum "${fixture_dir}/instances/jv-aaaaaa/config.json")"
+    (
+        fixture_commit_guard() { [[ ${1} == jv-aaaaaa && ${GUARD_FAIL:-no} == no ]]; }
+        validate_server_capabilities() { :; }
+        source "${fixture_dir}/instance-context.sh"
+        jv_load_instance jv-aaaaaa
+        expected=no
+        [[ ${member} != true ]] || expected=yes
+        [[ ${JV_NETWORK_MEMBER} == "${expected}" && ${BEDROCK_ENABLED} == yes ]]
+        unset JV_NETWORK_MEMBER
+        if GUARD_FAIL=yes jv_load_instance jv-aaaaaa; then echo 'Invalid commitment accepted' >&2; exit 1; fi
+        [[ ! -v JV_NETWORK_MEMBER ]]
+    )
+    [[ $(sha256sum "${fixture_dir}/instances/jv-aaaaaa/config.json") == "${before}" ]]
 done
 echo 'Minecraft stack readiness regression checks passed.'

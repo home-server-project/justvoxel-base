@@ -361,13 +361,35 @@ func networkApply(ctx context.Context, b *instanceRuntimeBackend, c minecraftNet
 	held = nil
 	if c.Enabled {
 		if _, err = b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-picolobby.service", "justvoxel-velocity.service"); err != nil {
-			result = instanceRuntimeFailure("Minecraft Network configuration was saved; starting the network failed. Retry Apply.")
+			result = instanceRuntimeFailure(networkNotReadyMessage)
+		} else if !networkWaitReady(ctx, b, c.JavaPort) {
+			result = instanceRuntimeFailure(networkNotReadyMessage)
 		}
 	}
 	if networkRestartStopped(ctx, b, stopped) != nil {
 		result = errors.Join(result, instanceRuntimeFailure("Minecraft Network configuration was saved, but one or more previously running servers could not be started. Use their normal Start controls after checking server status."))
 	}
 	return result
+}
+
+const networkNotReadyMessage = "Minecraft Network configuration was saved, but the network entrance did not become ready. Check Network status and retry Apply."
+
+func networkWaitReady(parent context.Context, b *instanceRuntimeBackend, javaPort int) bool {
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	defer cancel()
+	// The attempt bound also makes the existing fake pause seam sufficient for tests.
+	for attempt := 0; attempt <= 30; attempt++ {
+		if ctx.Err() != nil {
+			return false
+		}
+		if networkRuntimeReady(ctx, b, javaPort) {
+			return true
+		}
+		if attempt == 30 || b.waitMaintenance(ctx, time.Second) != nil {
+			return false
+		}
+	}
+	return false
 }
 
 // Never issue a conflicting start or bypass the durable configuration guard.

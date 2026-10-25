@@ -38,6 +38,7 @@ jv_load_instance() {
     MINECRAFT_UID="$(jq -er '.runtime.uid' "${record}")" || return 1
     MINECRAFT_GID="$(jq -er '.runtime.gid' "${record}")" || return 1
     BEDROCK_ENABLED="$(jq -r 'if .runtime.bedrock_enabled then "yes" else "no" end' "${record}")" || return 1
+    JV_NETWORK_MEMBER="$(jq -r 'if .network_member then "yes" else "no" end' "${record}")" || return 1
     BEDROCK_MANAGED_PLUGINS=yes
     validate_server_capabilities || return 1
     wait_for_rcon() {

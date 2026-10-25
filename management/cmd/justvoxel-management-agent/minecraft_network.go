@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -64,6 +65,31 @@ type minecraftNetworkJournal struct {
 var networkUUIDPattern = regexp.MustCompile(`^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$`)
 var networkJavaName = regexp.MustCompile(`^[A-Za-z0-9_]{1,16}$`)
 var networkBedrockName = regexp.MustCompile(`^[A-Za-z0-9_ ][A-Za-z0-9_ ]{0,15}$`)
+
+// Probe only the configured local Java entrance; errors never reach public status.
+var networkTCPReady = func(ctx context.Context, javaPort int) bool {
+	if javaPort < 1024 || javaPort > 65535 {
+		return false
+	}
+	dialer := net.Dialer{Timeout: 250 * time.Millisecond}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(javaPort)))
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+func networkRuntimeReady(ctx context.Context, b *instanceRuntimeBackend, javaPort int) bool {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	for _, unit := range []string{"justvoxel-picolobby.service", "justvoxel-velocity.service"} {
+		if _, err := b.command(ctx, "systemctl", "is-active", "--quiet", unit); err != nil {
+			return false
+		}
+	}
+	return ctx.Err() == nil && networkTCPReady(ctx, javaPort)
+}
 
 func networkDefaultState() minecraftNetworkState {
 	return minecraftNetworkState{Schema: 1, Config: minecraftNetworkConfig{JavaPort: 25565, BedrockPort: 19132, Members: []string{}, WelcomeMessage: "Welcome to JustVoxel!"}, Imported: []string{}, Whitelist: []minecraftNetworkPlayer{}, Firewall: []instanceFirewallRule{}}
@@ -194,7 +220,7 @@ func networkInfrastructure(s minecraftNetworkState, names map[string]string) map
 		return map[string][]byte{}
 	}
 	var velocity strings.Builder
-	velocity.WriteString("config-version = \"2.7\"\nbind = \"0.0.0.0:25565\"\nonline-mode = true\nforce-key-authentication = false\nplayer-info-forwarding-mode = \"modern\"\nforwarding-secret-file = \"forwarding.secret\"\n[servers]\njv-lobby = \"justvoxel-picolobby:25565\"\n")
+	velocity.WriteString("config-version = \"2.9\"\nbind = \"0.0.0.0:25565\"\nonline-mode = true\nforce-key-authentication = false\nplayer-info-forwarding-mode = \"modern\"\nforwarding-secret-file = \"forwarding.secret\"\nforced-hosts = {}\n[servers]\njv-lobby = \"justvoxel-picolobby:25565\"\n")
 	ids := append([]string{}, s.Config.Members...)
 	sort.Strings(ids)
 	for _, id := range ids {
@@ -259,7 +285,8 @@ func (s *server) minecraftNetworkStatus(w http.ResponseWriter, r *http.Request) 
 		}
 		players = append(players, map[string]string{"name": name, "platform": platform})
 	}
-	writeJSON(w, 200, map[string]any{"config": n.Config, "servers": members, "whitelist": players, "whitelist_enforced": true, "recovery_required": networkPending(instanceRuntimes) != nil})
+	recoveryRequired := networkPending(instanceRuntimes) != nil
+	writeJSON(w, 200, map[string]any{"config": n.Config, "servers": members, "whitelist": players, "whitelist_enforced": true, "recovery_required": recoveryRequired, "runtime_ready": n.Config.Enabled && !recoveryRequired && networkRuntimeReady(r.Context(), instanceRuntimes, n.Config.JavaPort)})
 }
 func (s *server) minecraftNetworkConnection(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireReadAccess(w, r); !ok {

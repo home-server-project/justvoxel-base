@@ -127,7 +127,10 @@ fi
 plugins="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli plugins)"
 printf 'Plugins: %s\n' "${plugins}"
 [[ ${plugins} == *ViaVersion* && ${plugins} != *§cViaVersion* ]] || { echo 'ERROR: ViaVersion could not be verified.' >&2; exit 1; }
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
+if [[ ${JV_NETWORK_MEMBER:-no} == yes && ( ${MINECRAFT_SERVER_TYPE-paper} == paper || ${MINECRAFT_SERVER_TYPE-paper} == purpur ) ]]; then
+    [[ ${plugins,,} == *floodgate* && ${plugins,,} != *§cfloodgate* ]] || { echo 'ERROR: Network Floodgate could not be verified.' >&2; exit 1; }
+    [[ ${plugins,,} != *geyser* ]] || { echo 'ERROR: Backend Geyser must be absent while enrolled in Minecraft Network.' >&2; exit 1; }
+elif [[ ${BEDROCK_ENABLED} == yes ]]; then
     [[ ${plugins} == *Geyser* && ${plugins,,} == *floodgate* && ${plugins} != *§cGeyser* && ${plugins,,} != *§cfloodgate* ]] || { echo 'ERROR: Cross-play plugins could not be verified.' >&2; exit 1; }
     geyser="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version')"
     printf 'Geyser: %s\n' "${geyser}"

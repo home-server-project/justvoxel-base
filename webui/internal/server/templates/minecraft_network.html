@@ -14,7 +14,7 @@
       </div>
       <label class="minecraft-network-toggle">
         <span class="minecraft-network-status minecraft-network-status-disabled">Disabled</span>
-        <span class="minecraft-network-status minecraft-network-status-enabled">Enabled</span>
+        <span class="minecraft-network-status minecraft-network-status-enabled">Enabled{{if and .Network.Config.Enabled (not .Network.RuntimeReady)}} · Proxy unavailable{{end}}</span>
         <input class="date-time-switch" role="switch" type="checkbox" name="enabled"{{if .Network.Config.Enabled}} checked{{end}}>
       </label>
     </div>

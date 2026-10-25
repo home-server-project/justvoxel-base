@@ -119,6 +119,7 @@ func TestValidationUnexpectedHelperFailureIsSanitized(t *testing.T) {
 func validationFixture(t *testing.T, count int) *instanceActivationFixture {
 	t.Helper()
 	f := newInstanceActivationFixture(t)
+	f.backend.networkRoot = filepath.Join(filepath.Dir(f.backend.root), "network")
 	old, oldHost, oldBackup := instanceRuntimes, runAdminValidationHelper, instanceBackupStorageCommand
 	instanceRuntimes = f.backend
 	runAdminValidationHelper = func(ctx context.Context) ([]byte, error) {
@@ -593,5 +594,81 @@ func TestApplianceValidationGroupsOwnedFirewallRepresentations(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAdminValidationNetworkInfrastructure(t *testing.T) {
+	for _, tc := range []struct {
+		name                                            string
+		enabled, lobby, proxy, listener, recovery, want bool
+	}{
+		{"disabled", false, false, false, false, false, true},
+		{"ready", true, true, true, true, false, true},
+		{"lobby unavailable", true, false, true, true, false, false},
+		{"proxy unavailable", true, true, false, true, false, false},
+		{"listener unavailable", true, true, true, false, false, false},
+		{"recovery required", true, true, true, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := validationFixture(t, 1)
+			n := networkDefaultState()
+			n.Config.Enabled = tc.enabled
+			n.ForwardingSecret, n.FloodgateKey = strings.Repeat("a", 64), make([]byte, 16)
+			dir, err := f.backend.privateDirectory(f.backend.networkDirectory(), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir.Close()
+			if err := networkWriteState(f.backend, n); err != nil {
+				t.Fatal(err)
+			}
+			if tc.recovery {
+				if err := f.backend.writeJSON(filepath.Join(f.backend.networkDirectory(), "pending.json"), minecraftNetworkJournal{}, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			original, oldProbe := f.backend.command, networkTCPReady
+			t.Cleanup(func() { networkTCPReady = oldProbe })
+			probes := 0
+			networkTCPReady = func(_ context.Context, port int) bool {
+				probes++
+				if port != n.Config.JavaPort {
+					t.Fatal("wrong entrance port")
+				}
+				return tc.listener
+			}
+			f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+				if cmd == "systemctl" && len(args) == 3 && args[0] == "is-active" && args[1] == "--quiet" {
+					if (args[2] == "justvoxel-picolobby.service" && tc.lobby) || (args[2] == "justvoxel-velocity.service" && tc.proxy) {
+						return nil, nil
+					}
+					return nil, errors.New("private proxy diagnostic")
+				}
+				return original(ctx, cmd, args...)
+			}
+			rr := httptest.NewRecorder()
+			roleServerForTest(roleAdministrator).adminValidation(rr, authorizedRequest("GET", "/v1/admin/validation", ""))
+			var report adminValidationResponse
+			if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &report) != nil || report.OK != tc.want {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+			label := "FAIL: Minecraft Network infrastructure"
+			if tc.want {
+				label = "PASS: Minecraft Network infrastructure"
+			}
+			if tc.enabled && !strings.Contains(report.Output, label) {
+				t.Fatal(report.Output)
+			}
+			backendCheck := "PASS: Running instance Minecraft stack"
+			if tc.recovery {
+				backendCheck = "FAIL: Committed runtime files and recovery state"
+			}
+			if strings.Contains(report.Output, "private proxy diagnostic") || !strings.Contains(report.Output, backendCheck) {
+				t.Fatal("diagnostic leaked or backend validation skipped", report.Output)
+			}
+			if (!tc.enabled || tc.recovery) && probes != 0 {
+				t.Fatal("disabled/recovering Network probed")
+			}
+		})
 	}
 }
