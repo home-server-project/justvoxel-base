@@ -160,16 +160,16 @@ shared workspace button styling. Source/filter switches remain switches;
 whole-card article selections retain their card geometry.
 
 The selected `pluginContext()` / `pluginServerContext` is authoritative for both
-providers: ServerType, ServerSoftware and MinecraftVersion. Today Paper and Purpur
-are supported; the workspace displays that same context, including Purpur identity.
-Neither provider parses visible header text. Modrinth maps Paper to
-paper/spigot/bukkit and Purpur to purpur/paper/spigot/bukkit. Hangar maps both to
-PAPER only at its provider boundary, because Hangar exposes PAPER for these
-compatible servers and no distinct PURPUR platform. Future server types require an
-explicit provider mapping and otherwise fail closed. The future instance/server
-selector will supply this same authoritative context. Vanilla is unsupported.
-The workspace reuses appliance configuration discovery and runtime status for
-server software, Minecraft version and the configured data location.
+providers: immutable instance ID, ServerType, ServerSoftware, and MinecraftVersion.
+Paper, Purpur, and Spigot are supported, and the current server selector supplies
+that exact context; changing selection discards stale results. Neither provider
+parses visible header text. Modrinth maps Paper to paper/spigot/bukkit, Purpur to
+purpur/paper/spigot/bukkit, and Spigot only to explicit spigot/bukkit releases.
+Hangar maps Paper and Purpur to PAPER at its provider boundary and remains
+unavailable for Spigot. Any additional server type requires an explicit provider
+mapping and otherwise fails closed. Vanilla and mod-loader/native Bedrock servers
+are unsupported. The workspace reuses the selected instance's configuration and
+runtime status for software, Minecraft version, and configured data location.
 
 Discover qualifies provider hits in order, scanning at most eight times the
 requested capacity per provider (up to 96 projects each). Partial or empty pages

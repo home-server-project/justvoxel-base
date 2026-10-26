@@ -57,15 +57,30 @@ The floating top panel shows date and time in the appliance timezone. Timezone, 
 Network keeps loading and errors below its navigation. Troubleshoot groups each interface with its connection, gateway, DNS, and reconnect action. Tailscale and NetBird activation shows service progress and opens their dashboard after the service is running; use the dashboard link if the browser blocks opening. Account setup remains separate from service activation. Playit retains its dark waiting page and validated claim-link flow. Storage refresh keeps the selected physical drive when it is still available.
 
 
-The Advanced wizard uses six equal Server, Cross-play, Memory, Storage, Backups and Review navigation cards in one row below its title on desktop. Storage and local backups share the Control Center disk and partition browser and reviewed management actions: choose a physical drive to show only its partitions. Preparation opens a focused dialog with the existing destructive slider and confirmation switch, then refreshes the inventory and returns to that drive when available. Server software cards share local artwork from `webui/internal/server/static/server-software/`; its README records sources, licenses and the pending official Paper asset.
+The Advanced wizard uses six equal Server, Cross-play, Memory, Storage, Backups and Review navigation cards in one row below its title on desktop. Storage and local backups share the Control Center disk and partition browser and reviewed management actions: choose a physical drive to show only its partitions. Preparation opens a focused dialog with the existing destructive slider and confirmation switch, then refreshes the inventory and returns to that drive when available. Server software cards share local artwork from `webui/internal/server/static/server-software/`; its README records sources and licenses.
 
 First Setup (`/setup`) and Add Server (`/minecraft/servers/add`) use one setup wizard with Simple setup and Advanced setup. Simple setup chooses a family (Plugins, Mods, or Vanilla Java · Bedrock), then software, then a server name and game mode before Review. Advanced setup follows six steps: Server, Cross-play (including version and updates), Memory, Storage, Backups and Review. Progress cards only navigate backward, even after a later step has been visited; Continue validates each form before advancing. Drafts retain their choices when navigating back. Storage and local backup selection reuse the maintained Control Center Storage presentation, dialogs and reviewed actions. Storage and local backup destinations require an explicit partition selection; disk preparation remains a separate reviewed action. When data and backups use the same filesystem, JustVoxel mounts it once and uses separate directories. Review shows the four configuration summary cards and authoritative warnings. The Download configuration action provides a technical snapshot.
 
-First-run WebUI setup generates the welcome message as `JustVoxel <software> Minecraft <resolved-version> Server` using the validated plan’s Paper, Purpur, or Vanilla version. Advanced setup allows a custom message; entering one disables the automatic default and preserves the message through software and version changes. Review shows the final message. After setup, Minecraft settings can still edit it; updates and software changes do not regenerate it, and existing servers are unchanged.
+First-run WebUI setup generates the welcome message as
+`JustVoxel <software> Minecraft <resolved-version> Server` from the validated
+software plan. Advanced
+setup allows a custom message; entering one disables the automatic default and
+preserves the message through software and version changes. Review shows the final
+message. After setup, Minecraft settings can still edit it; updates and software
+changes do not regenerate it, and existing servers are unchanged.
 
 Both Simple and Advanced setup let the Administrator choose Survival, Creative, Adventure, or Spectator as the game mode (native Bedrock omits Spectator). Survival is the default. The choice appears in Review and the downloadable configuration. After setup, the Administrator can change Game mode in Minecraft settings through the normal review and apply flow. Minecraft must be restarted for the change to take effect; changes other than memory settings are saved for a later restart.
 
-In Advanced setup, Step 2 Cross-play includes Server update channel and the Minecraft version policy as separate controls. An administrator sees the exact server version selected by Recommended or Latest before continuing. Paper Recommended selects the newest stable Paper build, or the stable version supported by Geyser/Floodgate when Bedrock is enabled. Purpur uses its current API version, or the exact Geyser-supported version when available. Vanilla uses Mojang releases and has no managed Bedrock cross-play. Latest shows the version available now and follows newer versions at future starts. Specific version validates availability for the selected software; Paper previews identify pre-release builds. When Bedrock is enabled, an incompatible Latest or Specific version blocks Continue and setup planning; JustVoxel keeps the selected version and Bedrock choice intact. Review shows the resolved version and the policy chosen.
+In Advanced setup, Step 2 Cross-play includes applicable version and update
+controls. An administrator sees the exact server version selected before
+continuing. Paper Recommended selects the newest stable Paper build, or the stable
+version supported by Geyser/Floodgate when cross-play is enabled. Purpur uses its
+current API version, or the exact Geyser-supported version when available. Vanilla
+uses Mojang releases and has no managed cross-play. Newly added Java software and
+native Bedrock use the exact pinned runtime described in
+[server-software.md](server-software.md). When an enabled cross-play choice is not
+compatible, Continue and setup planning are blocked without discarding the
+administrator's selections. Review shows the resolved version and policy.
 
 Selecting **Configure JustVoxel** requests an SMB password in a modal when the backup destination requires one, then opens the Minecraft EULA dialog if acceptance has not yet been recorded for the exact validated plan. **Accept and continue** records acceptance for that plan and starts the existing setup operation. **Decline** and **Cancel** return to Review without starting setup. A changed plan requires fresh acceptance. The SMB password remains outside the draft and operation journal.
 
@@ -79,11 +94,39 @@ If setup needs attention during storage rollback, the Administrator can select *
 
 ## Server software and container updates
 
-In Version → Server Software, **Current** always identifies the installed software. Selecting Paper or Purpur moves the green frame to the review target; Cancel restores it to the installed server. Vanilla is informational: selecting it explains that switching requires Reset Minecraft and setup again.
+In Version → Server Software, the cards show Paper and Purpur. An installed Paper
+or Purpur server can select the other as a reviewed switch; for any other installed
+software, both choices are unavailable. Software conversion beyond the existing
+Paper/Purpur boundary remains roadmap work.
 
-Software & container updates reviews Paper/Purpur and the Stable, Latest, or Custom container channel together. Custom input is enabled only for Custom. **Check for updates** is read-only; **Review changes** resolves both proposed selections without saving configuration. One confirmation switch and **Apply changes** submit one persistent server update bound to the reviewed selections and image identity. Runtime changes use the existing cold backup, player-aware shutdown, pull and digest checks, runtime verification, and rollback of both selections on failure. Administrator-configured backup retention and one-generation rollback-image cleanup remain unchanged. A channel-only change using the verified identical image preserves Minecraft's running or stopped state without downtime. Incomplete recovery requires attention through the existing operation controls. Changes and failed updates are never automatically retried.
+The Minecraft Version tab shows the installed and available versions, configured
+policy, server software, container channel, and applicable managed component
+status. **Review changes** resolves the proposed version/channel without saving
+configuration. Applying a supported change starts one persistent update bound to
+the reviewed selections and image identity. Runtime changes use cold backup,
+player-aware shutdown, pull and digest checks, runtime verification, and rollback
+on failure. A channel-only change using the verified identical image preserves the
+server's running or stopped state without downtime. Incomplete recovery requires
+attention; failed updates are never automatically retried. Availability remains
+software-specific, and newly added pinned runtimes do not gain an unsupported
+ongoing game-update path merely because they appear in Setup.
 
 Minecraft memory settings retain a hard minimum of 1 GiB (1024 MiB) outside Minecraft. The recommended headroom warning appears from 1024 through 1535 MiB; at least 1.5 GiB (1536 MiB) clears that warning.
+
+## Selected-server console
+
+For a running Java instance, Minecraft Settings provides an internal RCON view
+with **Console** and **Commands** tabs. Commands are discovered from that selected
+server, then cleaned and grouped into Players & permissions, World & gameplay,
+Server & performance, Plugins, and Advanced Minecraft. Search filters the catalog;
+choosing a command places only its name in the input lane. There is no separate
+static Help pane.
+
+Discovery reads at most 64 server help pages and 64 KiB within one 20-second
+deadline. Partial results stay usable. Command history, output, and the catalog
+exist only in page memory and reset when server selection changes. RCON remains
+inside the selected container, and stop commands are refused. Native Bedrock uses
+its own managed console path and does not expose this Java RCON view.
 
 ## Password policy
 
@@ -135,17 +178,28 @@ For troubleshooting, the backend validation output is displayed without the WebU
 
 ## Minecraft data storage migration
 
-Administrator users can open **Storage & Backups -> Minecraft data storage** to move the active Minecraft persistent-data directory to another supported local disk or partition.
+Administrator users can open **Storage & Backups -> Minecraft data storage** to
+move the appliance-wide Minecraft storage root, including every managed instance,
+to another supported local disk or partition. This is not a selected-server
+operation.
 
 The WebUI is a thin frontend over the same persistent Minecraft data migration Management API used by `mjust storage-migrate`. Candidate discovery, target safety, authoritative planning, plan fingerprinting, destructive confirmation requirements, player state, pre-migration cold backup, copy and verification, configuration switching, SELinux/runtime regeneration, validation, rollback, and recovery state remain owned by the Management Agent/shared backend.
 
 The browser shows Agent-discovered choices for a dedicated disk/USB device, an existing XFS/ext4/Btrfs filesystem, a blank partition, or already-unallocated disk space. Review displays the Agent warnings and requirements. A migration requires the explicit `MIGRATE` frontend confirmation; destructive target preparation additionally requires the exact phrase supplied by the Agent, and online-player interruption requires a separate confirmation when the Agent says it is needed.
 
-Migration runs as a persistent operation. Refreshing or reopening the migration entry point reconnects to the same operation. Successful migration retains the old Minecraft data for administrator verification; a validated rollback keeps the original configuration/runtime active; `needs_attention` preserves recovery state and prevents treating the migration as safely complete.
+Migration runs as a persistent operation bound to the reviewed complete instance
+set. Refreshing or reopening the migration entry point reconnects to the same
+operation. Successful migration retains the old Minecraft data for administrator
+verification; a validated rollback keeps the original configuration/runtime
+active; `needs_attention` preserves recovery state and prevents treating the
+migration as safely complete.
 
 ## Minecraft Restore
 
-Administrator users can open **Storage & Backups -> Restore** for the same two Restore modes exposed by mJust: world Restore and full Minecraft-data Restore.
+Administrator users can open **Storage & Backups -> Restore** to replace the
+complete persistent data of one selected instance. Legacy world-only Restore is
+not a current instance Restore mode; `mjust restore-full` is an alias for the same
+full-data operation.
 
 The WebUI uses the existing Management API for completed-backup discovery, authoritative Restore planning, plan-fingerprint revalidation, apply, persistent operation tracking, runtime validation, and rollback. Compatibility and safety policy remain in the Management Agent/shared backend.
 
@@ -155,9 +209,15 @@ The browser presents Agent warnings and confirmation requirements, requires the 
 
 Administrator users have a power control in the top-right WebUI header. It opens appliance-level actions for **Restart** and **Power off**. On supported physical HWS systems, the same menu also exposes **Restart to UEFI/BIOS**. VM deployments do not show that action.
 
-Selecting a power action first opens a centered confirmation dialog. The WebUI then submits the action through the existing System Actions API; it does not call systemd or firmware tools directly. If Minecraft players are online, the Management Agent returns its player-confirmation requirement and the dialog asks again before the existing graceful shutdown path is allowed to continue.
+Selecting a power action first opens a centered confirmation dialog. The WebUI
+then submits the action through the existing System Actions API; it does not call
+systemd or firmware tools directly. If players are online on any running instance,
+the Management Agent returns its player-confirmation requirement and the dialog
+asks again before the existing graceful shutdown path is allowed to continue.
 
-The Agent remains authoritative for HWS/VM capability detection, player state, graceful Minecraft shutdown, firmware/UEFI availability, and final host action acceptance.
+The Agent remains authoritative for HWS/VM capability detection, per-instance
+player state, graceful shutdown of all running instances, firmware/UEFI
+availability, and final host action acceptance.
 
 ## Workspace controls
 

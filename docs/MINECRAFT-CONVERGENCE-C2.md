@@ -1,5 +1,11 @@
 # Minecraft convergence C2 source report
 
+> Historical delivery record. This report describes the C2 convergence snapshot
+> at commit `4213527`; its “remaining” lists are not the current project roadmap.
+> Use [ARCHITECTURE.md](ARCHITECTURE.md),
+> [MINECRAFT_RUNTIME.md](MINECRAFT_RUNTIME.md), and
+> [ROADMAP.md](ROADMAP.md) for the current design and status.
+
 Base: `testing`, HEAD `4213527`. The original nine-file partial C2 diff was retained and completed in this working tree. No commit, push, GitHub mutation, package installation, image build or deployment was performed.
 
 ## Creation and recovery

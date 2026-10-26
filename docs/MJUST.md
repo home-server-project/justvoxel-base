@@ -18,15 +18,16 @@ The normal interactive interface groups appliance tasks by what the user wants t
 
 The main areas are:
 
-- first setup and Minecraft configuration
+- first setup and per-instance Minecraft configuration
 - appliance status and health
 - Minecraft start, stop, and restart
 - players and whitelist management
 - backups and restore
 - storage and Minecraft data migration
-- Minecraft/Paper updates
+- Minecraft software, version, and container updates
 - operating-system maintenance
 - live system resources
+- terminal file management
 - friendly and advanced NetworkManager configuration
 - validation and logs
 - advanced/reset tools
@@ -35,9 +36,16 @@ Safety checks live in the command/workflow layer, not only in the menu. Using a 
 
 ## First setup
 
-`mjust setup` is the normal first-run wizard.
+`mjust setup` is the normal first-run wizard and creates the first registered
+Minecraft instance. Additional servers are created through the WebUI's **Add
+Minecraft Server** workflow.
 
-It collects the settings needed to bring the appliance online, including Minecraft data location, Java and container memory, Java and optional Bedrock ports, timezone, maximum players, server message, Minecraft container-image policy, Minecraft/Paper version policy, backup target and schedule, backup retention, and Minecraft EULA acceptance.
+It collects the settings needed to bring the appliance online, including server
+software, Minecraft data location, applicable memory and ports, maximum players,
+server message, container-image and game-version policy, backup target and
+schedule, retention, and Minecraft EULA acceptance. The current choices are Paper,
+Purpur, Spigot, Fabric, NeoForge, Forge, Quilt, Vanilla Java, and native Bedrock;
+their available controls differ by capability.
 
 The normal flow tries to keep Linux-specific details out of the way. Memory values are suggested from installed physical RAM, but the user can change them.
 
@@ -69,9 +77,13 @@ See `STATUS.md` for the full status model.
 
 The normal commands are:
 
-- `mjust start`
-- `mjust stop`
-- `mjust restart`
+- `mjust start [instance_id]`
+- `mjust stop [instance_id]`
+- `mjust restart [instance_id]`
+
+When exactly one server is registered, the ID may be omitted. With multiple
+servers, choose or provide the immutable `jv-…` ID; a friendly name is never used
+as the backend target.
 
 Stop and restart are player-aware. When Minecraft is running, JustVoxel checks players through internal RCON before interruption. If player state cannot be confirmed, the operation fails closed instead of guessing.
 
@@ -124,25 +136,37 @@ See `RESTORE.md` for the detailed recovery model and boundaries.
 
 ## Import, export, and migration
 
-`mjust export` creates a portable JustVoxel migration bundle containing the complete persistent Minecraft server state plus versioned migration metadata and integrity information.
+`mjust export` selects one registered instance and creates a portable JustVoxel
+migration bundle containing its complete persistent Minecraft server state plus
+versioned migration metadata and integrity information.
 
-`mjust import` can adopt a native JustVoxel migration bundle, an existing JustVoxel backup, or supported external Paper server data after staging and validation. Import does not treat migration as a Minecraft version upgrade.
+`mjust import` selects an existing destination instance and can adopt a native
+JustVoxel migration bundle, an existing JustVoxel backup, or supported external
+Paper server data after staging and validation. Import does not create an
+unconfigured destination and does not treat migration as a Minecraft version
+upgrade.
 
-`mjust migration-recover` is the recovery path for an incomplete or failed migration transaction that requires administrator review.
+`mjust migration-recover` selects the destination instance and is the recovery
+path for an incomplete or failed migration transaction that requires
+administrator review.
 
 Migration uses the same appliance safety principles as restore and storage workflows: staging before activation, player-aware interruption, destination-specific configuration, transaction preservation, SELinux/ownership normalization, runtime validation, and rollback of the previous live state when possible.
 
 See `MIGRATION.md` for supported sources, transport options, version/identity safety, transaction behavior, and recovery boundaries.
 
-## Minecraft/Paper updates
+## Minecraft updates
 
-`mjust update-minecraft` handles Minecraft container-image maintenance and the configured Minecraft/Paper version policy.
+`mjust update-minecraft [instance_id]` handles container-image maintenance and
+the configured software/version policy for the selected server. Omit the ID only
+when exactly one instance is registered.
 
-The container-image tag and Minecraft/Paper game version are independent settings.
+The container-image tag and Minecraft game/software version are independent
+settings where that server type supports both controls.
 
 Before disruptive maintenance, JustVoxel checks players, creates a verified cold backup, performs the selected update work, starts Minecraft once, and validates the resulting server.
 
-Moving container tags are refreshed only by an explicit image pull. A pinned Minecraft/Paper version is not silently changed just because a newer stable Paper-supported version exists.
+Moving container tags are refreshed only by an explicit image pull. A pinned game
+version is not silently changed because a newer supported release exists.
 
 JustVoxel retains one previous Minecraft image generation for rollback and does not run a broad Podman image prune that could affect unrelated containers.
 
@@ -190,7 +214,24 @@ Running a bootc OS update does not stop Minecraft, create a backup, or reboot th
 
 `mjust net` keeps networking inside the System area. It presents **nm-hsp** as the friendly Home Server Project interface for normal Ethernet, Wi-Fi, and easy network troubleshooting, while retaining **nmtui** as the classic advanced NetworkManager interface. No separate `mjust net-hsp` or `mjust nmtui` commands are exposed.
 
-Reboot, poweroff, and firmware reboot are thin frontends over the Management API. The Management Agent owns host capability checks, player-aware Minecraft shutdown, and the final system action, allowing the future WebUI to use the same implementation.
+Reboot, poweroff, and firmware reboot are thin frontends over the Management API.
+The Management Agent owns host capability checks, player-aware shutdown of all
+running instances, and the final system action. The WebUI uses the same
+implementation.
+
+## Minecraft Network
+
+`mjust minecraft-network` manages the optional Velocity front door for selected
+Paper and Purpur instances. Status, membership, enable/disable, whitelist state,
+and recovery use the same Management API as the WebUI. Standalone instances do
+not require the network. See [minecraft-network.md](minecraft-network.md).
+
+## UPS
+
+`mjust ups` shows UPS status and, on a hardware-capable deployment, configures a
+local or remote NUT source, automatic shutdown protection, and optional network
+sharing. The WebUI exposes the same backend. Automatic hardware/driver discovery
+is not implemented; local setup requires explicit NUT values.
 
 `mjust firmware` is available only when the Agent reports that the running HWS system supports the physical-hardware firmware workflow and refuses unsupported/VM use.
 
@@ -203,6 +244,14 @@ See `SYSTEM.md` for the complete system-management behavior.
 `mjust resources` opens `btop` for a live view of CPU, memory and swap, disks, network activity, and processes.
 
 It requires an interactive terminal. Inside btop, `q` exits directly back to the JustVoxel menu or calling shell.
+
+## Terminal file management
+
+`mjust files` opens the packaged Superfile (`spf`) terminal file manager in the
+current local or SSH terminal. It is an advanced administrator tool and follows
+the permissions of the account that launched it. It does not provision or mount
+storage; use `mjust storage` for those operations. This command is separate from
+the authenticated WebUI Files workspace and its constrained FileBrowser sources.
 
 ## Logs
 
@@ -276,7 +325,7 @@ The current implementation deliberately does not:
 - expose RCON publicly
 - relocate Podman's global image store
 - run a broad Podman image prune
-- automatically change a pinned Minecraft/Paper version
+- automatically change a pinned Minecraft version
 
 These are intentional safety boundaries rather than missing automatic steps.
 

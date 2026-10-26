@@ -28,7 +28,13 @@ public network ports.
 
 ## Whitelists
 
-The network whitelist is an enforced front gate, checked at Velocity login before
+**Enforce Network whitelist** controls whether the network player list is used as
+a Velocity login gate. It defaults on for existing and new configurations. When
+off, players may enter the lobby without a network-list entry, but every backend's
+own whitelist remains independent and still applies. Turning enforcement off does
+not delete saved Java or Bedrock entries; turning it back on reuses them.
+
+When enforcement is on, the network whitelist is checked at Velocity login before
 a player reaches the lobby or a backend. Java and Bedrock player operations are
 separate. Player identities are resolved through the corresponding Mojang/Geyser
 identity services; a lookup failure does not add an unverified identity.
@@ -39,11 +45,11 @@ backend whitelist edits and backend removal do not re-import, synchronize or
 subtract network players. Each backend's existing whitelist API remains
 independent and authoritative for that backend.
 
-Adding a player to the network whitelist grants entry to the lobby. They also
-need permission from each backend's own whitelist to join that server. Removing
-a network player blocks the entire network regardless of backend entries.
-Changing the network whitelist restarts Velocity to enforce removal for existing
-sessions; the backend servers and their whitelists are preserved.
+With enforcement on, adding a player to the network whitelist grants entry to the
+lobby. They also need permission from each backend's own whitelist to join that
+server. Removing a network player blocks the entire network regardless of backend
+entries. Changing the network whitelist restarts Velocity to enforce removal for
+existing sessions; the backend servers and their whitelists are preserved.
 
 ## Terminal administration
 
@@ -81,6 +87,9 @@ A pending network journal blocks startup until recovery restores the previous
 configuration. Use **Network → Retry recovery** or `mjust minecraft-network recover`;
 do not edit journals or use a reset to clear a failed publication. Recovery also
 handles first-enable interruptions before infrastructure services are generated.
+Disabling the network removes its generated units and clears only stale failed
+systemd state for units that are now absent; failures for still-loaded units remain
+visible for diagnosis.
 
 Standalone configuration and managed artifact snapshots are private to each
 instance. Network-member data also carries bounded original standalone
@@ -154,7 +163,11 @@ The helper produces `limboapi.jar`, `justvoxel-lobby.jar`, `SHA256SUMS` and
 their hashes and installs root-owned mode-0644 copies under
 `/usr/lib/justvoxel/minecraft-network/`. Appliances copy these baked JARs into the
 private artifact cache and verify all managed JAR hashes before Velocity startup.
-They do not download LimboAPI at runtime.
+On a bootc image update, the baked LimboAPI and JustVoxel Lobby artifacts refresh
+from the newly deployed image after the existing private artifact set has been
+verified; externally fetched Geyser, Floodgate, and Global Whitelist evidence is
+preserved. A corrupt cache fails closed before replacement. Appliances do not
+download LimboAPI at runtime.
 
 The old PicoLobby implementation has been removed. Apply migrates existing testing
 systems by stopping Velocity and the legacy lobby, removing the legacy Quadlet

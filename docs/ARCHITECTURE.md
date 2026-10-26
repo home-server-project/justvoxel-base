@@ -1,10 +1,18 @@
 # JustVoxel architecture
 
-JustVoxel is a purpose-built immutable server appliance for deploying and operating a Minecraft server workload without requiring the user to assemble and maintain the underlying Linux stack by hand.
+JustVoxel is a purpose-built immutable server appliance for deploying and operating
+multiple independent Minecraft server workloads without requiring the user to
+assemble and maintain the underlying Linux stack by hand.
 
 The project deliberately separates the appliance operating system from the Minecraft workload itself.
 
-JustVoxel does **not** ship Minecraft server binaries, Mojang server software, a pre-created world, or pre-accepted Minecraft EULA state inside the bootc image. The image provides the operating system, management logic, runtime templates, safety mechanisms, and container-management environment. After setup, the administrator accepts the EULA and JustVoxel creates the active runtime configuration for a separate containerized Paper-based server workload.
+JustVoxel does **not** ship Mojang server software, a pre-created world, or
+pre-accepted Minecraft EULA state inside the bootc image. The image provides the
+operating system, management logic, runtime templates, safety mechanisms, and
+container-management environment. After EULA acceptance, JustVoxel creates the
+first independently identified containerized Minecraft instance. Additional
+instances can be created and run concurrently when their ports and host resources
+do not conflict.
 
 ## Why an appliance instead of a setup script
 
@@ -56,24 +64,57 @@ A bootc image update can replace the immutable implementation without silently r
 
 Minecraft is not baked into the JustVoxel operating-system image.
 
-The JustVoxel image contains the management logic and templates needed to create and operate a separate containerized server workload. During first setup, the administrator chooses the supported Minecraft settings and explicitly accepts the Minecraft EULA. JustVoxel then renders the local runtime configuration and manages the separate container workload through Podman and systemd Quadlets.
+The JustVoxel image contains the management logic and templates needed to create
+and operate independently identified containerized server workloads. During first
+setup, the administrator chooses supported Minecraft settings and explicitly
+accepts the Minecraft EULA. JustVoxel then creates the first immutable `jv-*`
+identity, renders its private runtime configuration, and manages its container
+through Podman and a per-instance systemd Quadlet. Add Server uses the same
+creation and safety model for later instances.
 
 This separation is intentional for both maintenance and licensing clarity:
 
 - JustVoxel OS images do not contain Minecraft server binaries or Mojang server software.
-- Minecraft/Paper runtime updates are separate from JustVoxel operating-system updates.
+- Minecraft runtime updates are separate from JustVoxel operating-system updates.
 - Minecraft persistent data remains outside the immutable OS deployment.
 - The administrator retains control of the runtime policy and data location.
 
-The current runtime design uses Paper with optional cross-play components managed by the JustVoxel runtime workflow. See [MINECRAFT_RUNTIME.md](MINECRAFT_RUNTIME.md) for the runtime boundary.
+Current setup supports Paper, Purpur, Spigot, Fabric, NeoForge, Forge, Quilt,
+Vanilla Java, and native Bedrock. Features remain capability-based rather than
+pretending every server type supports the same plugins, mods, cross-play, version,
+or conversion behavior. See [server-software.md](server-software.md) and
+[MINECRAFT_RUNTIME.md](MINECRAFT_RUNTIME.md).
 
 ## Podman and Quadlets
 
-Podman runs the Minecraft server workload as a container.
+Podman runs each Minecraft server workload as its own container.
 
-Systemd Quadlets describe the container as a normal systemd-managed service. This lets JustVoxel use standard service ordering, restart behavior, logging, and host integration without introducing a separate proprietary daemon for the Minecraft process.
+Per-instance systemd Quadlets describe the containers as normal systemd-managed
+services. This lets JustVoxel use standard service ordering, restart behavior,
+logging, and host integration without introducing a separate proprietary daemon
+for Minecraft processes.
 
-The active rendered Quadlet is administrator-visible under `/etc`. Advanced users can inspect it directly, while normal users operate the appliance through `mjust`.
+Active rendered Quadlets are administrator-visible under `/etc`. Advanced users
+can inspect them directly, while normal users operate the appliance through the
+WebUI or `mjust`.
+
+## Multi-instance identity and isolation
+
+Every managed server has an immutable ID such as `jv-a1b2c3`. Friendly names are
+labels and never privileged lookup keys. The immutable ID binds the server's
+configuration, generated environment and Quadlet, container and systemd unit,
+data directory, firewall ownership, backups, operations, and recovery evidence.
+
+Configured instances reserve their ports and memory even while stopped. Creation
+fails before publication when a port conflicts, the requested memory would exceed
+the appliance policy, storage identity cannot be proved, or another incomplete
+operation owns the required state. One server's lifecycle and maintenance actions
+must not silently target a sibling.
+
+The optional Minecraft Network is separate infrastructure. It can place eligible
+Paper or Purpur instances behind a Velocity entrance and lightweight virtual
+lobby. Standalone instances remain independent unless an administrator explicitly
+adds them to the network.
 
 ## mjust is the normal appliance interface
 
@@ -127,7 +168,9 @@ The JustVoxel OS is updated through bootc. `mjust os-status` and `mjust os-updat
 
 ### Minecraft workload updates
 
-The Minecraft/Paper container workload is maintained separately. `mjust update-minecraft` handles the configured container-image policy and Minecraft/Paper version policy without treating a Minecraft update as an operating-system update.
+Minecraft container workloads are maintained separately. Supported per-instance
+maintenance handles container-image and Minecraft version policy without treating
+a Minecraft update as an operating-system update.
 
 Keeping these paths separate reduces unnecessary coupling between the appliance OS and the server workload.
 
@@ -156,6 +199,10 @@ The documentation is intentionally split by purpose:
 
 - [README](../README.md) — project overview and the normal starting point
 - [MJUST.md](MJUST.md) — operating the appliance
+- [MINECRAFT_RUNTIME.md](MINECRAFT_RUNTIME.md) — multi-instance runtime and safety boundaries
+- [server-software.md](server-software.md) — software-specific capabilities
+- [plugin-workspace.md](plugin-workspace.md) — Bukkit plugin management
+- [minecraft-network.md](minecraft-network.md) — optional Velocity network
 - [MANAGEMENT.md](MANAGEMENT.md) — management layers and native Linux access
 - [STATUS.md](STATUS.md) — appliance health/status model
 - [SYSTEM.md](SYSTEM.md) — OS maintenance and power controls

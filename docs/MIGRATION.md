@@ -4,17 +4,31 @@
 
 Server migration **Export, Import, and Recovery** now share the authoritative Management API/backend. The Agent owns reviewed planning and fingerprints, the exclusive server-migration operation family, persistent operation tracking, player interruption requirements, source and destination revalidation, temporary local/configured-backup/device/NFS/SMB transport handling, transactional execution, verification, rollback state, and conservative restart/interruption recovery.
 
-Steps 5A.2 and 5B are complete. `mjust export`, `mjust import`, `mjust migration-recover`, and the Administrator WebUI Server Migration workflows are thin frontends over the same shared Management API. Import preserves the supported source choices and fresh-destination storage review without returning mount, storage, rollback, or Minecraft lifecycle authority to either frontend. Export, Import, Recovery, persistent operation state, reconnect behavior, and recovery handoff are shared through the Management Agent.
+`mjust export`, `mjust import`, `mjust migration-recover`, and the Administrator
+WebUI Server Migration workflows are thin frontends over the same shared
+Management API. Every workflow first binds one existing immutable `jv-…`
+instance. Import preserves the supported source choices without returning mount,
+storage, rollback, or Minecraft lifecycle authority to either frontend. Export,
+Import, Recovery, persistent operation state, reconnect behavior, and recovery
+handoff are shared through the Management Agent.
 
 ### WebUI Server Migration
 
 Administrators can open **Storage & Backups → Server Migration** in the WebUI. Export, Import, and Recovery use the same Agent discovery, reviewed planning, fingerprints, Apply endpoints, persistent operation journal, rollback semantics, and needs-attention state used by `mjust`.
 
-The WebUI does not mount filesystems, manipulate Minecraft data, execute migration helpers, or implement storage policy directly. Temporary source SMB credentials are supplied only for the current planning or Apply request. Export SMB passwords and fresh-destination backup SMB passwords are Apply-only. They are not stored in reviewed plans, URLs, hidden persistent state, or the operation journal.
+The WebUI does not mount filesystems, manipulate Minecraft data, execute migration
+helpers, or implement storage policy directly. Temporary SMB credentials are
+supplied only for the current planning or Apply request. Export and source SMB
+passwords are Apply-only. They are not stored in reviewed plans, URLs, hidden
+persistent state, or the operation journal.
 
 After a successful Export, **Done** returns to a fresh Export screen and clears the completed operation from the workspace URL. It keeps the operation journal and diagnostic log. Export success and failure views offer **Logs**, opening System → Logs → Migration and selecting that operation's log when it exists. The log records the reviewed normalized bundle filename, destination, and destination type, and repeats them after successful completion; existing secret and host-identity redaction still applies.
 
-Refreshing or reopening a migration reconnects to the current persistent Agent operation. If Import reaches `needs_attention`, the WebUI exposes the Agent-owned Recovery handoff. Fresh-unconfigured `rolled-back-fresh` recovery is supported. Browser file upload is intentionally outside migration v1; imported data must already be reachable through a supported local, configured-backup, device/USB, NFS, or SMB source.
+Refreshing or reopening a migration reconnects to the selected instance's current
+persistent Agent operation. If Import reaches `needs_attention`, the WebUI exposes
+the Agent-owned Recovery handoff for that same instance. Browser file upload is
+intentionally outside migration v1; imported data must already be reachable
+through a supported local, configured-backup, device/USB, NFS, or SMB source.
 
 JustVoxel migration moves the **complete persistent Minecraft server state** to another JustVoxel installation. It is separate from normal JustVoxel Backup/Restore.
 
@@ -34,11 +48,11 @@ A native JustVoxel export is one portable `justvoxel-migration-*.tar.gz` file. I
 
 Supported:
 
-- JustVoxel native migration bundle
+- JustVoxel native migration bundle from Paper or Purpur
 - existing JustVoxel `minecraft-*.tar.gz` backup
 - Paper server directory/archive
 - `itzg/minecraft-server` using `TYPE=PAPER`
-- vanilla server -> Paper, with an explicit conversion warning
+- vanilla server -> Paper/Purpur, with an explicit conversion warning
 
 Generic import formats:
 
@@ -51,9 +65,12 @@ ZIP uses Python's built-in ZIP support already present in JustVoxel; no addition
 
 Not supported automatically in v1:
 
+- Spigot
 - Fabric
 - Forge
 - NeoForge
+- Quilt
+- native Bedrock
 - modpacks and arbitrary modded launchers
 - arbitrary custom Minecraft launchers
 
@@ -83,7 +100,9 @@ Migration is **not** a Minecraft upgrade.
 
 JustVoxel determines the exact source Minecraft version from native metadata or recognizable Paper/itzg server evidence. The first imported start is pinned to that version. It never switches an imported world to `LATEST` automatically.
 
-If the source version cannot be determined, the administrator must provide the exact source version. If JustVoxel cannot confirm a compatible stable Paper build for that exact version, import stops before activation.
+If the source version cannot be determined, the administrator must provide the
+exact source version. If JustVoxel cannot confirm that exact version for the
+selected Paper or Purpur destination, import stops before activation.
 
 After a migration succeeds and gameplay has been checked, a later version change is a separate operation:
 
@@ -113,9 +132,10 @@ Native JustVoxel-to-JustVoxel migration does not repeat the external-code warnin
 
 ## EULA
 
-A source server may contain `eula.txt`. That file is server data, not destination administrator consent.
-
-A **fresh/unconfigured JustVoxel import always requires explicit Minecraft EULA acceptance** before the imported server can be started. JustVoxel never infers destination acceptance from an imported `eula.txt`.
+A source server may contain `eula.txt`. That file is server data, not destination
+administrator consent. Import targets an already-created instance whose reviewed
+setup recorded its own EULA acceptance; JustVoxel never infers destination
+acceptance from an imported `eula.txt`.
 
 ## Transport choices
 
@@ -160,7 +180,7 @@ FAT32/vfat has a single-file size limit of 4 GiB minus 1 byte. Export performs a
 
 ## JustVoxel -> JustVoxel
 
-On the source JustVoxel:
+On the source JustVoxel, select the instance to export:
 
 ```text
 mjust export
@@ -170,13 +190,15 @@ Choose a destination such as local storage, USB, configured backup storage, temp
 
 Move the resulting file to the destination JustVoxel.
 
-On the destination:
+On the destination, first create and select the destination instance:
 
 ```text
 mjust import
 ```
 
-Select the bundle. JustVoxel verifies SHA-256 integrity, source compatibility and exact Minecraft version before activation.
+Select the bundle. JustVoxel verifies SHA-256 integrity, source compatibility and
+exact Minecraft version before replacing that instance's data. Migration never
+selects a destination by archive name or friendly server name.
 
 ## Existing JustVoxel backup
 
@@ -332,24 +354,17 @@ Enter the temporary username/password when prompted. The password is not placed 
 
 This is a useful migration path between an existing Linux/Windows/NAS host and a disposable JustVoxel VM.
 
-## Import into a fresh JustVoxel appliance
+## Import into a new JustVoxel appliance
 
-A fresh appliance menu includes `Import existing Minecraft server`.
+Complete First Setup, or use **Add Minecraft Server**, to create the destination
+instance before importing. Its setup establishes destination-owned storage,
+memory, ports, backup policy, runtime credentials, immutable identity, and EULA
+acceptance. Stop that instance, then open Server Migration and select it.
 
-Import asks only for destination-specific state that cannot safely come from the source, such as:
-
-- destination data storage;
-- destination memory;
-- Java/Bedrock host ports;
-- backup destination and schedule;
-- destination UID/GID resolution;
-- explicit EULA acceptance.
-
-The imported source Minecraft version is pinned for the first start. Old disk UUIDs, paths, RCON secrets and host state are not adopted.
-
-## Replacing an existing JustVoxel server
-
-On an already configured appliance, `mjust import` means **replace the current persistent Minecraft server state**.
+Import means **replace the selected instance's persistent Minecraft server
+state**. It does not create an instance, adopt source disk paths or host identity,
+or silently target a first/default server. The imported source Minecraft version
+is pinned for its first start.
 
 JustVoxel stages and validates the candidate before asking for the final exact confirmation:
 
@@ -372,17 +387,19 @@ The sequence is:
 5. determine destination-specific configuration;
 6. acquire the shared Minecraft maintenance lock;
 7. perform a final player check;
-8. gracefully stop the current Minecraft server if required;
+8. gracefully stop the selected Minecraft instance if required;
 9. preserve the old live data and destination runtime/firewall state;
 10. activate the staged server by same-filesystem rename;
 11. apply destination ownership and SELinux `container_file_t` labels;
 12. render destination runtime with a new RCON secret;
 13. start Minecraft;
-14. validate RCON, Paper/version, plugins and Geyser/Floodgate when enabled;
-15. run full `mjust validate`;
+14. validate RCON, destination software/version, plugins, and Geyser/Floodgate when enabled;
+15. run appliance validation;
 16. remove transaction/safety data only after success.
 
-If imported runtime validation fails on an existing JustVoxel server, JustVoxel attempts to restore the old data, configuration, rendered environment, Quadlet/runtime files, backup unit/timer state and the Java/Bedrock firewall state that existed before import.
+If imported runtime validation fails, JustVoxel attempts to restore the selected
+instance's old data, configuration, rendered environment, Quadlet/runtime files,
+backup unit/timer state, and Java/Bedrock firewall state.
 
 A successful rollback reports:
 
@@ -393,15 +410,15 @@ Original server restored and validated.
 
 If rollback itself cannot be validated, JustVoxel reports a **CRITICAL** state and retains all recovery evidence under the `.justvoxel-import-*` transaction directory. Do not delete that recovery directory until the appliance is recovered.
 
-For a fresh import failure, generated Minecraft runtime/firewall state is removed and the appliance returns to its previous unconfigured runtime state. Storage that the administrator explicitly provisioned is not reformatted or destroyed merely because the Minecraft import failed.
-
 ## Guided migration recovery
 
 Use `mjust migration-recover` when an Import leaves retained rollback/recovery evidence or an interrupted persistent migration operation requires administrator attention.
 
-Recovery is owned by the Management Agent and uses the same exclusive server-migration operation family as Export and Import. The Agent discovers the retained Import recovery state, validates the expected configured or fresh-unconfigured destination state, requires the reviewed recovery confirmation, and removes retained transaction evidence only after the recovery state is safely finalized.
-
-Fresh Import rollback state is supported explicitly. A successful fresh rollback can leave a `rolled-back-fresh` transaction while the appliance is intentionally unconfigured; Recovery can validate and finalize that state without requiring a normal configured Minecraft destination.
+Recovery is owned by the Management Agent and uses the same exclusive
+server-migration operation family as Export and Import. The Agent discovers
+retained Import recovery state for the selected instance, validates that exact
+configured destination, requires reviewed recovery confirmation, and removes
+transaction evidence only after the rollback state is safely finalized.
 
 If the Management Agent or appliance restarts during an active migration operation, the persistent operation journal is preserved conservatively as requiring attention rather than assuming success or silently restarting destructive work.
 

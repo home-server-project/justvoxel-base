@@ -19,13 +19,56 @@ JustVoxel reuses only patterns useful to this purpose-built Minecraft appliance 
 
 ## Minecraft runtime projects
 
-JustVoxel ships configuration templates that reference upstream runtime projects. Their Minecraft/Paper/Geyser/Floodgate/ViaVersion artifacts are fetched from their proper upstream sources at runtime; those server binaries are not redistributed in the bootc image.
+JustVoxel ships configuration and management code for upstream server projects.
+The bootc image does not contain Mojang, Paper, Purpur, Spigot, mod-loader, or
+Bedrock server binaries. The selected workload image and its verified upstream
+download paths acquire the applicable runtime when an administrator creates or
+starts an instance.
 
 - itzg/minecraft-server: https://github.com/itzg/docker-minecraft-server
+- itzg/minecraft-bedrock-server: https://github.com/itzg/docker-minecraft-bedrock-server
 - Paper: https://papermc.io/
+- Purpur: https://purpurmc.org/
+- Spigot: https://www.spigotmc.org/
+- Fabric: https://fabricmc.net/
+- NeoForge: https://neoforged.net/
+- Minecraft Forge: https://minecraftforge.net/
+- Quilt: https://quiltmc.org/
+- Minecraft Java and Bedrock: https://www.minecraft.net/
 - Geyser: https://geysermc.org/
 - Floodgate: https://geysermc.org/wiki/floodgate/
 - ViaVersion: https://viaversion.com/
+
+## Optional Minecraft Network
+
+The optional network uses the itzg Velocity proxy image and verified proxy
+plugins. LimboAPI and the repository-built JustVoxel Lobby plugin are compiled
+and baked into the bootc image with pinned hash evidence. Geyser, Floodgate, and
+Global Whitelist are downloaded and verified by the appliance's managed artifact
+workflow. The Velocity server JAR used to compile JustVoxel Lobby is temporary and
+is not bundled as a second runtime.
+
+- itzg/mc-proxy: https://github.com/itzg/docker-mc-proxy
+- Velocity: https://papermc.io/software/velocity
+- LimboAPI: https://github.com/Elytrium/LimboAPI
+- Global Whitelist: https://github.com/UrAvgCode/global-whitelist
+
+Exact versions, hashes, and the temporary LimboAPI compatibility pin are recorded
+in [`docs/minecraft-network.md`](docs/minecraft-network.md) and the image build
+metadata.
+
+## Appliance tools and remote access
+
+The image also consumes these maintained external tools or package artifacts.
+Their upstream projects retain their own licenses and notices:
+
+- Tailscale: https://tailscale.com/
+- NetBird: https://netbird.io/
+- Playit: https://playit.gg/
+- NordVPN: https://nordvpn.com/
+- Superfile: https://github.com/yorukot/superfile
+- Glances: https://github.com/nicolargo/glances
+- ttyd: https://github.com/tsl0922/ttyd
 
 ## Universal Blue `ujust` / `ugum`
 

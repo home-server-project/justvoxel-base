@@ -1,6 +1,9 @@
 # JustVoxel Base capability model
 
-JustVoxel Base contains one common Minecraft appliance implementation and is already VM-ready.
+JustVoxel Base contains one common Minecraft appliance implementation and is
+already VM-ready. `justvoxel-base` is the shared source and image channel; the
+current finalized OS metadata identifies the directly deployable baseline as
+`JustVoxel VM 10` / `justvoxel-vm`.
 
 It includes:
 
@@ -40,3 +43,8 @@ Hardware-dependent features must not make ordinary VM operation depend on physic
 When the running system supplies the required hardware support, the same JustVoxel WebUI, Management Agent, mjust workflows, and validation model can expose the corresponding physical-machine functionality.
 
 Deployment-specific hardware configuration remains local state. UPS identifiers, NUT driver selection, credentials, shutdown policy, device paths, and similar machine-specific values are not baked into the generic Base image.
+
+The common Base code already contains capability-gated HWS behavior such as UPS
+and firmware controls. A downstream HWS image supplies hardware-only packages and
+native units, including NUT; it does not fork the WebUI, Management API, or mjust
+architecture.

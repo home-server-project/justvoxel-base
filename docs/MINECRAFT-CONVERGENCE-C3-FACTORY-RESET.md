@@ -1,5 +1,11 @@
 # C3: appliance-wide Factory Reset
 
+> Historical convergence record. This document preserves the C3 implementation
+> and audit boundary; its “remaining references” section is not the current
+> roadmap. Current architecture and user-visible reset behavior are described in
+> [ARCHITECTURE.md](ARCHITECTURE.md), [WEBUI.md](WEBUI.md), and
+> [ROADMAP.md](ROADMAP.md).
+
 This slice changes Factory Reset's Minecraft runtime ownership only. The routes
 remain `/v1/admin/reset/factory/{plan,apply,resolve}` and
 `/v1/admin/reset/factory/current-operation`. No selected-instance Factory Reset

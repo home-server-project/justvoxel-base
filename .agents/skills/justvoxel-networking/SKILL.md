@@ -1,6 +1,6 @@
 ---
 name: justvoxel-networking
-description: Change or review JustVoxel appliance networking, LAN configuration, remote access, Tailscale-related flows, HSP Network Manager CLI integration, and controlled WebUI networking behavior.
+description: Change or review JustVoxel appliance networking, LAN configuration, remote access, Tailscale, NetBird, Playit, NordVPN Meshnet, HSP Network Manager CLI integration, and controlled WebUI networking behavior.
 ---
 
 # JustVoxel Networking

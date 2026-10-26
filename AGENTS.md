@@ -25,15 +25,19 @@ Upstream platform:
 
 Home Server Base 10 -> AlmaLinux 10 -> bootc
 
-This repository does not own the JustVoxel ISO installer or the future public-facing JustVoxel release repository.
+This repository does not own the JustVoxel ISO installer or the separate public-facing JustVoxel release repository.
 
 ## Product boundary
 
 JustVoxel is a focused Minecraft server appliance, not a general-purpose server distribution.
 
-The supported product manages one Minecraft server container.
+The supported product manages multiple independent Minecraft server instances. Each
+instance has its own immutable ID, runtime configuration, container, ports, data,
+backups, lifecycle, and status. Optional Minecraft Network infrastructure can join
+eligible instances behind one Velocity entrance and lobby.
 
-Knowledgeable users may run additional Podman containers manually, but generic multi-container management is outside the supported JustVoxel product.
+Knowledgeable users may run additional non-JustVoxel Podman containers manually,
+but generic container management remains outside the supported JustVoxel product.
 
 Prefer simple, safe, stable, secure solutions. Do not add machinery merely because it is technically possible.
 
@@ -125,9 +129,13 @@ Before editing, inspect:
 
 Normal Codex scope is `testing` or an explicitly selected development branch.
 
-`main` and any future `stable` branch are outside normal Codex modification scope unless the human explicitly approves a branch-specific task.
+`main` is outside normal Codex modification scope unless the human explicitly
+approves a branch-specific task.
 
-When a future `stable` branch exists, promotion is human-controlled. The intended release flow is development branch -> PR to testing -> testing image -> human runtime/VM acceptance -> PR from testing to stable -> stable image.
+Promotion is human-controlled. The intended release flow is development branch ->
+PR to `testing` -> testing image -> human runtime/VM acceptance -> PR from
+`testing` to `main` -> stable image from the validated `main` revision. The stable
+workflow remains manual-only until its documented automatic triggers are implemented.
 
 Codex must not merge, promote, tag, publish a release, or modify a stable branch unless the human explicitly authorizes that exact action.
 
@@ -172,7 +180,7 @@ Available skills:
 - `justvoxel-mjust`: mjust menus, direct commands, recovery CLI, and terminal behavior.
 - `justvoxel-image`: Containerfile, build files, system files, packages, systemd, SELinux, bootc image composition, and persistence boundaries.
 - `justvoxel-ci`: GitHub Actions, source checks, image builds, publishing/signing, workflow triggers, and CI failure investigation.
-- `justvoxel-networking`: appliance networking, HSP Network Manager CLI integration, WebUI networking, LAN/remote-access behavior, and Tailscale-related flows.
+- `justvoxel-networking`: appliance networking, HSP Network Manager CLI integration, WebUI networking, LAN behavior, and Tailscale, NetBird, Playit, and NordVPN Meshnet flows.
 - `justvoxel-review`: independent human-directed verification/review of a completed change.
 
 Typical routing examples:
@@ -266,6 +274,7 @@ Important areas:
 - `templates/`: generated/runtime configuration templates
 - `build_files/`: image composition and build logic
 - `tests/`: source-level integration and regression tests
+- `velocity-lobby/`: the JustVoxel Velocity lobby/server-selector plugin
 - `docs/`: architecture and user/developer documentation
 - `Containerfile`: bootc image definition
 

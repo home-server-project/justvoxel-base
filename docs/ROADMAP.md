@@ -4,14 +4,20 @@ This roadmap lists features that JustVoxel still plans to build. Working feature
 
 ## Active development
 
-### Multiple Minecraft server instances
+### Server cloning and controlled software conversion
 
-- Run and manage multiple independent Minecraft containers, each with its own configuration, data, ports, backups, lifecycle, and status.
-- Allow cloning an existing Minecraft server into a separate instance.
-- Support changing a cloned Paper instance to Purpur, or Purpur to Paper, where compatible.
-- Prevent port conflicts and unsafe overcommit of host CPU and memory.
-- Keep existing Paper/Purpur switching working while multi-instance support is developed.
-- Keep Vanilla as a separate supported server type. No Vanilla-to-Paper/Purpur conversion or migration project.
+Multiple independent Minecraft instances are implemented and can run concurrently.
+Each current instance has its own immutable identity, configuration, container,
+ports, storage, backups, lifecycle, and status.
+
+The remaining project is safe cloning and broader software conversion:
+
+- Clone an existing server into a separate instance while leaving the source unchanged.
+- Discover the source software, Minecraft version, plugins, mods, and loader requirements before offering a conversion.
+- Allow a reviewed conversion only when the destination software and retained content are compatible.
+- When compatibility is incomplete or unknown, offer a normal clone without conversion instead of risking the source.
+- Identify incompatible plugins or mods clearly so the administrator can remove them and review the conversion again.
+- Keep existing supported Paper/Purpur changes working while the broader compatibility design is developed.
 
 ## Planned features
 
@@ -26,10 +32,10 @@ This roadmap lists features that JustVoxel still plans to build. Working feature
 
 - Optionally schedule Minecraft restarts and appliance maintenance operations.
 
-### Optional support reporting
+### Optional support-report sharing
 
-- Keep existing local logs and log viewing unchanged.
-- Let an administrator review a privacy-sanitized support report and explicitly choose whether to send it.
+- Local bounded, privacy-sanitized support-report generation, viewing, and download are implemented.
+- A future sharing workflow may let an administrator review the report and explicitly choose whether and where to send it.
 - Do not send reports automatically.
 
 ### JustVoxel-aware bootc rollback

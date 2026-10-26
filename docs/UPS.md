@@ -12,4 +12,11 @@ The Base image supplies the fixed helpers `/usr/libexec/justvoxel/ups-emergency-
 
 The downstream HWS image supplies the NUT package and its stock `/etc/ups` configuration files. On first configuration, the Base Management Agent safely adopts untouched packaged NUT configuration, including files with active stock defaults. It never overwrites modified, unmarked administrator configuration. JustVoxel generates its `/etc/ups` files atomically with an ownership marker. `upsd.conf` and `upsd.users` are root:nut 0640; credentials in `upsmon.conf` and the state JSON remain protected. Source, shutdown, and sharing state live in `/etc/justvoxel` and survive image updates.
 
-The downstream HWS image supplies NUT 2.8.2.1 and its native units. Device discovery selection, mjust and WebUI controls for protection and sharing, firewall policy, and hardware/SELinux validation are later passes.
+The downstream HWS image supplies NUT 2.8.2.1 and its native units. Current
+administration is available through `mjust ups` and the conditional WebUI UPS
+workspace. Both surfaces can show status, configure an explicit local or remote
+source, enable/disable shutdown protection, and manage local network sharing
+through the API above. Automatic device/driver discovery and its choice UI remain
+future work. JustVoxel also does not create the sharing firewall rule; the
+administrator must deliberately allow the intended interface or zone. Real-device,
+shutdown-chain, firewall, and SELinux behavior still require hardware validation.

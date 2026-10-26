@@ -37,12 +37,22 @@ The WebUI exposes the same operation from **Control Center -> System Update**. I
 
 When an update is staged, the same dialog offers one **Reboot** action with two optional choices:
 
-- **Back up Minecraft before reboot** — runs the existing verified cold Minecraft backup after Minecraft has stopped. This is a Minecraft-data backup only; JustVoxel does not require a separate system backup.
+- **Back up Minecraft before reboot** — after all running instances have stopped,
+  creates a verified cold backup for every registered instance. This is
+  Minecraft-data backup only; JustVoxel does not require a separate system backup.
 - **Quick reboot** — uses a 10-second player warning instead of the normal 60 seconds.
 
-Both options are off by default. If no players are online, Minecraft is stopped immediately through the existing adaptive shutdown path. If players are online, the administrator confirms the interruption and the dialog shows the remaining countdown. The normal mode keeps the existing 60-second warning; Quick reboot uses 10 seconds.
+Both options are off by default. If no players are online, all running instances
+are stopped immediately through the existing adaptive shutdown path. If players
+are online on any instance, the administrator confirms the combined interruption
+and the dialog shows the remaining countdown. The normal mode keeps the existing
+60-second warning; Quick reboot uses 10 seconds.
 
-The update-specific reboot runs in a detached worker, so closing the browser dialog does not cancel an in-progress shutdown or backup. If the optional Minecraft backup fails, the reboot is cancelled and Minecraft is restarted when it had been running before the workflow. The administrator can then retry the backup or turn the backup option off and use the same **Reboot** button.
+The update-specific reboot runs in a detached worker, so closing the browser dialog
+does not cancel an in-progress shutdown or backup. If any optional instance backup
+fails, the reboot is cancelled and exactly the instances that were running before
+the workflow are restarted. The administrator can then retry the backup or turn
+the backup option off and use the same **Reboot** button.
 
 The existing Control Center **Reboot**, **Power off**, and firmware/UEFI reboot actions are unchanged by this workflow and continue to use their existing normal player-aware behavior.
 
@@ -78,14 +88,17 @@ The JustVoxel menu does not add an extra pause after btop exits.
 
 `mjust reboot` and `mjust poweroff` are thin Management API frontends.
 
-The Agent exposes system-action capability/status data and requires explicit confirmation before accepting either action. It applies the same player-aware interruption policy as Minecraft service control:
+The Agent exposes system-action capability/status data and requires explicit
+confirmation before accepting either action. It takes one authoritative snapshot
+of all registered instances and applies the same player-aware interruption policy
+to every running instance:
 
-1. if Minecraft is stopped, no RCON query is needed
-2. if Minecraft is running, query players through internal RCON
+1. stopped instances are left stopped and need no RCON query
+2. query every running instance through its software-appropriate internal console
 3. fail closed if player state cannot be determined
 4. require explicit approval when players are online
-5. stop Minecraft through the shared adaptive graceful-shutdown path
-6. queue the requested host action only after Minecraft has stopped safely
+5. stop every running instance through the shared adaptive graceful-shutdown path
+6. queue the requested host action only after the complete running set has stopped safely
 
 Accepted host actions are queued with a short delay so the API can return a final accepted response before the machine goes down.
 

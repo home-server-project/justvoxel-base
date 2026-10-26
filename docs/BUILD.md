@@ -22,7 +22,18 @@ This repository builds one image:
 ghcr.io/home-server-project/justvoxel-base
 ```
 
-The Base contains the complete shared JustVoxel appliance layer and is already VM-ready. It includes the management agent, WebUI integration, `mjust`, Minecraft runtime templates and helpers, common networking/storage tooling, and both `health/common` and `health/vm` validation.
+The Base contains the complete shared JustVoxel appliance layer and is already
+VM-ready. It includes the management agent, WebUI integration, `mjust`, Minecraft
+runtime templates and helpers, common networking/storage tooling, and the
+`/usr/libexec/justvoxel/health/common` image validator. There is no separate
+`health/vm` validator in this repository.
+
+The repository and published channel are named `justvoxel-base`. The current
+finalized OS identity is intentionally the deployable VM baseline: `JustVoxel VM
+10` with variant ID `justvoxel-vm`. The image records the Base repository as its
+update source and also trusts the VM repository for the current deployment model.
+“Base” therefore describes the shared source/composition layer; it does not mean
+that the built image presents a generic or unfinished OS identity at runtime.
 
 Hardware-dependent appliance logic can live in Base, while hardware-specific package payloads are not required for the VM-ready Base image.
 

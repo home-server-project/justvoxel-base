@@ -31,7 +31,10 @@ Use one authoritative backend for genuine shared product capabilities, but do no
 Intentional examples:
 
 - CLI networking may use HSP Network Manager while WebUI networking uses controlled Management Agent operations.
-- CLI users may launch Superfile while WebUI intentionally has no general file manager.
+- CLI users may launch Superfile while the WebUI exposes only the constrained,
+  primary-administrator FileBrowser workspace through its authenticated proxy.
+- The WebUI Terminal is a constrained primary-administrator login shell through
+  the Management Agent proxy, not a generic shell-execution API.
 
 Do not create a duplicate orchestration engine merely to make one frontend easier to implement.
 

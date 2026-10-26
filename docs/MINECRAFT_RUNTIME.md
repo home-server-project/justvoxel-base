@@ -1,46 +1,89 @@
 # Minecraft runtime
 
-JustVoxel ships immutable runtime templates based on the hardware-verified Home Server Project Paper deployment. The bootc image itself does not create a world, accept the Minecraft EULA, or activate a Minecraft service.
+JustVoxel renders one isolated Podman/Quadlet runtime for each registered Minecraft
+instance. The bootc image supplies immutable templates and management code, but it
+does not create a world, accept the Minecraft EULA, or activate a server by itself.
+First Setup creates the first instance; **Add Minecraft Server** creates more.
+Multiple instances can run at the same time when their ports, memory reservations,
+and storage placement pass appliance-wide validation.
 
-`mjust setup` copies and renders those templates into administrator-owned files under `/etc`. Minecraft runs only from the local rendered Quadlet in `/etc/containers/systemd/minecraft.container`; it never runs directly from `/usr/share/justvoxel/templates`.
+The current software choices are **Paper, Purpur, Spigot, Fabric, NeoForge, Forge,
+Quilt, Vanilla Java, and native Bedrock**. Java servers use software-appropriate
+tags of `docker.io/itzg/minecraft-server`; native Bedrock uses
+`docker.io/itzg/minecraft-bedrock-server`. Capability is determined by the selected
+software rather than assumed globally: Bukkit plugins are available for the
+Spigot family, managed cross-play is available only for verified compatible
+runtimes, and native Bedrock has neither Java plugins nor Geyser/Floodgate. See
+[Minecraft server software](server-software.md) for the exact capability matrix.
 
-The runtime supports **Paper (default), Purpur, and Vanilla**, using the same `docker.io/itzg/minecraft-server` image and Quadlet. `MINECRAFT_SERVER_TYPE` in administrator configuration is lowercase `paper`, `purpur`, or `vanilla`; old configurations without it default to Paper. Invalid values fail validation.
+Each modern instance has an immutable `jv-…` ID. That ID binds its private
+configuration, generated unit and container names, data directory, firewall
+ownership, backups, operations, and recovery evidence. Friendly names can change;
+the ID cannot. Typical active files include
+`/etc/justvoxel/instances/<id>/config.json`,
+`/etc/justvoxel/instances/<id>/minecraft.env`, and
+`/etc/containers/systemd/minecraft-<id>.container`. Persistent data normally lives
+below `<appliance storage root>/minecraft-instances/<id>/data`. Stopped instances
+continue to reserve their configured ports and memory so a sibling cannot take
+resources needed for their next start.
 
-Paper and Purpur support plugins, managed ViaVersion, and optional managed Bedrock cross-play through the existing Geyser-Spigot/Floodgate-Spigot pair. Vanilla has no managed plugins, ViaVersion, or Bedrock cross-play in this implementation. Both setup paths allow all three implementations; Recommended enables Bedrock for Paper/Purpur and disables it for Vanilla. Backend validation rejects enabling Bedrock on Vanilla.
+Software/version changes use reviewed, per-instance maintenance transactions with
+player checks, cold backup, graceful stop, rendering, restart, verification, and
+rollback. Only changes explicitly offered by the Version workspace are supported;
+server cloning and broader software conversion remain roadmap work.
 
-The Version workspace offers reviewed Paper ↔ Purpur changes through the existing safe maintenance transaction: player checks, cold backup, graceful stop, configuration/render, start and complete stack verification. A failure restores the previous server type, version and runtime and verifies the restarted previous state; incomplete recovery requires attention. Worlds, plugins, player data and server configuration files are preserved, including `purpur.yml` when returning to Paper. Changing to or from Vanilla requires **Reset Minecraft** and setup again.
+Migration v1 is limited to Paper/Purpur-compatible destinations and native
+bundles. Exports record authoritative software in the existing
+`minecraft.implementation` manifest field. Paper and Purpur may move between one
+another through their already-supported in-place compatibility boundary; other
+native software is rejected rather than converted silently. Legacy bundles without
+an implementation continue to mean Paper. Broader cross-software import is a
+separate compatibility project.
 
-Purpur Recommended uses the Downloads API `metadata.current`, or the exact released Geyser-supported Java version when Bedrock is enabled and that version exists in Purpur `versions[]`. Latest uses the newest available Purpur Minecraft version; Pinned requires an exact listed version. The image resolves the latest Purpur build; no Paper build channels are passed to Purpur. Vanilla Recommended and Latest use Mojang's current release, never snapshots; Pinned requires an exact Mojang release. Unavailable upstream metadata fails planning/status safely. Vanilla stack verification uses `mc-monitor status --json` plus RCON, without plugin commands.
+Version and image controls are capability-specific. Mature Paper/Purpur/Vanilla
+flows retain their reviewed Recommended, Latest, Specific, and image-channel
+behavior where offered. Newly added Java software resolves and pins its exact
+game/loader runtime during setup; native Bedrock pins an exact verified release.
+Changing or restarting a service does not by itself pull a moving container tag;
+`mjust update-minecraft` performs supported per-instance image/version maintenance.
 
-Migration v1 remains a Paper import format/workflow. Exports record the authoritative software in the existing `minecraft.implementation` manifest field. Import rejects non-Paper native bundles and non-Paper destinations rather than converting them silently. Legacy bundles without an implementation continue to use Paper. Cross-software import support is a separate compatibility project.
+Java uses TCP 25565 by default. Managed cross-play reserves its configured port
+over both TCP and UDP. Native Bedrock instead uses a TCP signaling port plus a
+contiguous UDP gameplay range. Setup can select non-conflicting ports. Java RCON
+stays private inside its container; native Bedrock uses its own internal console
+path. No management console is published as a host port.
 
-The image tag is administrator-configurable: JustVoxel offers upstream `stable`, upstream `latest`, or a validated custom/exact tag. The Minecraft game version is a separate setting: Recommended uses an exact stable version, Latest follows newer versions, and Specific uses an exact version available for the selected software. Setup keeps the chosen policy and the resolved version separately. For Paper, a non-stable build uses `PAPER_CHANNEL=experimental`. At runtime, Latest renders `VERSION=LATEST`.
+Graceful stop is software-aware and coordinated per instance. Host actions stop
+all running instances in one bounded window; ordinary selected-instance
+maintenance affects only that server. Online players receive the reviewed warning
+path, and uncertain player state fails closed for disruptive operations.
 
-Changing or restarting a service does not itself refresh a moving container tag from the registry. `mjust update-minecraft` explicitly checks and pulls the configured tag when its remote digest changes. If the game version uses `VERSION=LATEST`, however, the container can download a newer Minecraft release during startup; mjust warns about that behavior when the policy is selected.
+Persistent data is mounted only at `/data` with a private SELinux `:Z` label. No
+upstream Minecraft server binary, world, EULA acceptance, private console
+credential, or Floodgate private key is baked into the bootc image.
 
-Java uses TCP 25565 by default and managed Bedrock cross-play uses TCP and UDP 19132 by default, but setup can render administrator-selected host ports. RCON is enabled inside the container for local administration and is never published as a host port.
-
-The template preserves the proven graceful-stop behavior: the itzg shutdown announcement delay is 60 seconds, Podman has 180 seconds to stop, and systemd allows 240 seconds around the stop operation. If an administrator chooses to continue maintenance while players are online, that normal shutdown warning remains the mechanism that gives players time to finish.
-
-Persistent Minecraft data is a configurable host path mounted only at `/data` with a private SELinux `:Z` label. No Mojang server JAR, Paper server JAR, world, EULA acceptance, RCON password, or Floodgate private key is baked into the bootc image.
-
-## Memory behavior
+## Java memory behavior
 
 Minecraft memory usage may stay high even when no players are online.
 
 That does not necessarily mean the server actively needs all of that memory. Java can grow its heap while the server is running and keep memory reserved for reuse instead of immediately returning it to the operating system. High idle memory usage by itself is therefore not automatically a problem.
 
-JustVoxel enables zram only as a memory-pressure safety buffer. Zram is compressed swap in RAM; it is not extra physical memory and is not counted when `mjust setup` recommends Minecraft memory values. The recommendation logic uses physical `MemTotal` only.
+JustVoxel enables zram only as a memory-pressure safety buffer. Zram is compressed swap in RAM; it is not extra physical memory and is not counted when setup recommends Java or container memory values. The recommendation logic uses physical `MemTotal` only. Native Bedrock has a container limit but no Java heap setting.
 
 JustVoxel does not configure disk swap by default.
 
-The single managed Minecraft server has one persistent, immutable destination Instance ID, independent of its name, software, container, version, and data path. The Management Agent stores only that ID in `/var/lib/justvoxel/instances/minecraft.json` (root:root, `0600`), in a root-only `0700` directory. Restarts, container recreation, and image updates preserve the record.
+Restore and migration target a selected destination instance and preserve that
+destination's immutable identity. Archive metadata never chooses another local
+instance implicitly.
 
-Reviewed first-run setup and Fresh Import persist the destination identity before creating an operation or starting a worker. Registration success is silent. If automatic registration fails, the active Review workflow asks for a manual `jv-` suffix of 6–12 letters and numbers, then resumes the same reviewed submission with all safety checks intact. Uppercase is normalized to lowercase; automatic IDs have 12 lowercase alphanumeric characters. Existing valid IDs cannot be changed, and collisions are rejected.
+## Historical implementation record
 
-For previously configured servers, the administrator dashboard silently attempts missing identity registration once per authenticated WebUI session. Failure immediately opens the same manual popup. Registration does not change server data or stop/restart Minecraft. Instance ID is internal metadata and is absent from Minecraft Overview and Settings.
-
-Identity belongs to the local destination, independently of archive metadata. Replace Import and restore preserve the destination ID. Old backups and external archives need no ID; archive layouts and unattended backup timers are unchanged. The authenticated Management API provides `GET /v1/minecraft/identity` and administrator-only `POST /v1/minecraft/identity/ensure` and `POST /v1/minecraft/identity/manual` (JSON `suffix`), including before first-run creation. WebUI writes require CSRF protection. This identity foundation manages only the existing single server.
+The phase sections below record how the multi-instance architecture was delivered.
+They are retained for design and review history; statements such as “future,”
+“single-instance,” or “not yet provided” describe that named phase, not the current
+product. The current contract is the overview above together with
+[server-software.md](server-software.md), [RESTORE.md](RESTORE.md), and
+[MIGRATION.md](MIGRATION.md).
 
 ## Instance registry foundation (Phase 1)
 
@@ -276,7 +319,7 @@ records, and never fall back to `minecraft` or read legacy environment data.
 | `GET /v1/minecraft/instances/{id}/version` | Any authenticated role; configured software/version and explicit absence of independent backups |
 | `POST /v1/minecraft/instances/{id}/version/verify` | Administrator; `{"version":"1.21.5"}` checks existing software-specific upstream availability without changing configuration |
 
-Console returns `{ok,id,output}` with sanitized text; command text and output are omitted from audit events. Commands remain a single argument to the existing in-container RCON tool, never a host shell command. Discovery returns server-exposed `{name,usage,description}` entries in `commands` plus `partial` when a bound or later-page failure prevents completion. It reads at most ten help pages and 32 KiB total within a shared 20-second deadline, retaining the normal per-call limits.
+Console returns `{ok,id,output}` with sanitized text; command text and output are omitted from audit events. Commands remain a single argument to the existing in-container RCON tool, never a host shell command. Discovery returns server-exposed `{name,usage,description}` entries in `commands` plus `partial` when a bound or later-page failure prevents completion. It reads at most 64 help pages and 64 KiB total within a shared 20-second deadline, retaining the normal per-call limits. The WebUI groups the discovered catalog by command namespace and provides search and direct execution; it does not maintain a separate static Help pane.
 
 The Administrator-only Minecraft Settings RCON tab uses `POST /api/minecraft/workspace/console?server=<id>` with CSRF and matching `server_id` form fields. Both execution and discovery bind to that immutable selected ID. Browser selection changes discard stale results and reset the transcript, command history and catalog; these are page-memory state only.
 RCON runs inside the selected container using its private configuration; no

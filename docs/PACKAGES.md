@@ -2,7 +2,11 @@
 
 JustVoxel Base includes the common operating-system and appliance packages used by every JustVoxel installation.
 
-This document groups those packages by purpose so the package set is understandable without reading the build scripts. The exact current package declaration remains the source of truth in [`build_files/packages.env`](../build_files/packages.env).
+This document groups those packages by purpose so the package set is understandable
+without reading the build scripts. `build_files/packages.env` declares inherited
+requirements and the common DNF package list. The complete image composition also
+includes package-stage RPMs and vendor repositories declared by `Containerfile`
+and `build_files/build-common.sh`; no single package file is the entire inventory.
 
 ## Core networking and remote access
 
@@ -56,6 +60,9 @@ The Base includes the tools required for the containerized Minecraft workload an
 - `fzf`
 - `gum`
 - `btop`
+- `ttyd` for the authenticated on-demand WebUI terminal
+- Superfile (`spf`) for the administrator file-manager backend
+- Glances for the local system-monitor backend
 - Python 3
 - common JSON, TLS, archive, file, and process utilities
 
@@ -106,12 +113,17 @@ The Base is VM-ready and includes guest integration for the major supported hype
 
 These packages can remain installed even when a particular hypervisor does not use them.
 
-## Exact package list
+## Exact package sources
 
-For the exact current package names used by the image build, see:
+For inherited requirements and the common DNF package names, see:
 
 - [`build_files/packages.env`](../build_files/packages.env)
 
-The build logic that installs the Base packages, Tailscale, and NetBird is in:
+The build logic that installs those packages plus the verified Superfile, Glances,
+and Playit package-stage RPMs and the native NordVPN RPM is in:
 
 - [`build_files/build-common.sh`](../build_files/build-common.sh)
+
+The package-stage image references are declared in:
+
+- [`Containerfile`](../Containerfile)
