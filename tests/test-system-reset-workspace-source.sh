@@ -31,6 +31,25 @@ grep -Fq '/api/system/workspace/reset/factory/apply' "${script}"
 grep -Fq '/api/system/workspace/reset/factory/resolve' "${script}"
 grep -Fq 'workspaceRestoreAllowed() ? saved : { ...saved, open: false }' "${script}"
 grep -Fq 'Keep current server' "${script}"
+grep -Fq 'Review and retry Factory Reset' "${script}"
+grep -Fq 'retry.addEventListener("click", () => planReset("factory"));' "${script}"
+grep -Fq 'if (operation.operation_type !== "factory_reset") built.panel.appendChild(liveConsole);' "${script}"
+# Keep the Factory Reset console after the yellow warning and before recovery actions.
+factory_console_placement='    if (operation.operation_type === "factory_reset") {
+      const note = document.createElement("div");
+      note.className = "notice warning";
+      note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out. Sign in with voxel / voxel, then choose a new administrator password before normal administration is available.";
+      built.panel.appendChild(note);
+      const consoleActions = document.createElement("div");
+      consoleActions.className = "action-row";
+      consoleActions.appendChild(liveConsole);
+      built.panel.appendChild(consoleActions);
+      if (operation.state === "needs_attention") {'
+[[ "$(cat "${script}")" == *"${factory_console_placement}"* ]] || {
+    echo 'ERROR: Factory Reset Live Console must follow the yellow sign-out warning in an action row before recovery content.' >&2
+    exit 1
+}
+grep -Fq '.action-row,.form-actions{justify-content:flex-end}' "${styles}"
 grep -Fq 'Retry Reset Minecraft' "${script}"
 grep -Fq 'retry.addEventListener("click", () => planReset("minecraft", true));' "${script}"
 grep -Fq '/api/system/workspace/reset/factory/current' "${script}"

@@ -3507,7 +3507,7 @@ globalThis.justVoxelOpenDeleteServer = ({name, description, csrf, request, isCur
 const minecraftDialog = document.querySelector("[data-minecraft-workspace-dialog]");
 // RCON state lives only in this page's memory and is replaced on server selection.
 function newMinecraftRconState() {
-  return {history: [], cursor: 0, draft: "", transcript: [], executed: false, commands: null, partial: false, busy: false};
+  return {history: [], cursor: 0, draft: "", transcript: [], executed: false, transcriptCleared: false, commands: null, partial: false, busy: false};
 }
 function minecraftCommandGroup(name) {
   const command = name.replace(/^minecraft:/, "");
@@ -3542,7 +3542,7 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
   const refresh = node("button", "Refresh Commands", "secondary");
   refresh.type = "button";
   const discoveryStatus = node("p", "", "muted compact");
-  const list = node("div");
+  const list = node("div", undefined, "minecraft-rcon-command-list");
   const detail = node("pre", "", "minecraft-rcon-detail");
   controls.append(search, refresh);
   catalog.append(controls, discoveryStatus, list, detail);
@@ -3552,8 +3552,9 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
   input.type = "text"; input.maxLength = 1024; input.autocomplete = "off";
   input.spellcheck = false; input.placeholder = "Enter a Minecraft command";
   input.setAttribute("aria-label", "Minecraft command");
+  const clear = node("button", "Clear", "secondary"); clear.type = "button";
   const send = node("button", "Send"); send.type = "submit";
-  form.append(input, send);
+  form.append(input, clear, send);
   root.append(toolbar, status, upper, form);
   let view = "console", discovering = false;
   const updateDisabled = () => {
@@ -3563,10 +3564,16 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
   };
   const paintTranscript = () => {
     transcript.classList.toggle("muted", !model.executed);
-    transcript.textContent = model.executed ? model.transcript.join("\n\n") :
+    transcript.textContent = model.executed || model.transcriptCleared ? model.transcript.join("\n\n") :
       "Enter a Minecraft command below. No sudo, podman, container name, rcon-cli, password, or shell syntax is needed. No leading slash is required.\n\n# See who is playing\nlist\n\n# Show whitelisted players\nwhitelist list\n\n# Send a message to everyone\nsay Hello everyone!\n\n# Change weather\nweather clear\n\n# Display server version\nversion";
-    upper.scrollTop = upper.scrollHeight;
+    transcript.scrollTop = transcript.scrollHeight;
   };
+  const clearTranscript = () => {
+    model.transcript = [];
+    model.transcriptCleared = true;
+    paintTranscript();
+  };
+  clear.addEventListener("click", clearTranscript);
   model.onChange = () => { updateDisabled(); paintTranscript(); };
   const show = (next) => {
     view = next;
@@ -3667,7 +3674,7 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
   });
   root.addEventListener("keydown", event => {
     if (event.ctrlKey && event.key.toLowerCase() === "l") {
-      event.preventDefault(); model.transcript = []; paintTranscript();
+      event.preventDefault(); clearTranscript();
     }
   });
   paintTranscript(); show(view); updateDisabled();
@@ -5778,13 +5785,17 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       state: operation.state, stage: operation.stage,
       onUnauthorized: () => resetLiveConsoleUnauthorized(operation),
     }));
-    built.panel.appendChild(liveConsole);
+    if (operation.operation_type !== "factory_reset") built.panel.appendChild(liveConsole);
 
     if (operation.operation_type === "factory_reset") {
       const note = document.createElement("div");
       note.className = "notice warning";
       note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out. Sign in with voxel / voxel, then choose a new administrator password before normal administration is available.";
       built.panel.appendChild(note);
+      const consoleActions = document.createElement("div");
+      consoleActions.className = "action-row";
+      consoleActions.appendChild(liveConsole);
+      built.panel.appendChild(consoleActions);
       if (operation.state === "needs_attention") {
         const recovery = document.createElement("div");
         recovery.className = "notice warning";

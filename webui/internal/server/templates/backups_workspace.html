@@ -145,7 +145,7 @@
       <label>Keep last
         <input name="backup_keep" type="number" min="1" step="1" value="{{.Automatic.Keep}}" required>
       </label>
-      <button type="submit">Review settings</button>
+      <button type="submit" class="backup-standard-action">Review settings</button>
     </form>
     <p class="muted compact">Daily time uses {{if .Timezone}}{{.Timezone}}{{else}}the appliance timezone{{end}}. After a successful backup, JustVoxel automatically removes older backups beyond the Keep last value.</p>
 
@@ -242,7 +242,7 @@
     {{if .Destination.Current.SamePhysicalDisk}}<div class="notice warning backup-destination-warning"><strong>Same physical disk.</strong> These backups do not protect against failure of the disk that also stores Minecraft data.</div>{{end}}
 
     <details class="backup-destination-change" {{if .DestinationPlan}}open{{end}}>
-      <summary>Change destination</summary>
+      <summary class="button-link backup-standard-action">Change destination</summary>
       <form class="backup-destination-form" method="post" action="{{.DestinationWorkspace}}/destination/plan{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}" data-backup-destination-form>
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <label>Destination type

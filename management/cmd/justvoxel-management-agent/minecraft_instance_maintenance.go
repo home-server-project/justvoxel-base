@@ -265,7 +265,7 @@ func (s *server) instanceConsole(w http.ResponseWriter, r *http.Request) {
 			var out []byte
 			out, err = instanceRuntimes.rcon(ctx, id, command)
 			if err == nil {
-				result.Output = instanceDiagnosticText(out, record.Runtime.RCONPassword)
+				result.Output = instanceRCONText(out, record.Runtime.RCONPassword)
 			}
 		}
 		if err != nil {

@@ -162,3 +162,79 @@ test('RCON uses selected console context, Administrator tab, text nodes and page
   assert.match(integration, /server_id: id/);
   assert.doesNotMatch(implementation, /innerHTML|outerHTML|insertAdjacentHTML|localStorage|sessionStorage|document\.cookie/);
 });
+
+test('Console and Commands pressed states use the existing green selected style', async () => {
+  const f = fixture();
+  const pressed = (console, commands) => {
+    assert.equal(f.button('Console').attributes['aria-pressed'], String(console));
+    assert.equal(f.button('Commands').attributes['aria-pressed'], String(commands));
+    assert.equal(f.button('Console').className, 'secondary');
+    assert.equal(f.button('Commands').className, 'secondary');
+  };
+  pressed(true, false);
+  f.button('Commands').events.click(); await flush(); pressed(false, true);
+  assert.equal(f.transcript.hidden, true);
+  f.button('Console').events.click(); pressed(true, false);
+  assert.equal(f.transcript.hidden, false);
+  const css = readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8');
+  assert.match(css, /\.minecraft-rcon-toolbar button\[aria-pressed="true"\]\{background:#25382e;border-color:#4f8b69;color:#c8f2d7}/);
+});
+
+test('Clear and Ctrl+L empty only the visible transcript and preserve session command history/catalog', async () => {
+  const f = fixture();
+  assert.equal(f.button('Clear').type, 'button');
+  assert.equal(f.button('Clear').className, 'secondary');
+  const lane = f.form.children;
+  assert.deepEqual(lane.map(el => el.tag === 'input' ? 'input' : el.textContent), ['input', 'Clear', 'Send']);
+  f.button('Clear').events.click();
+  assert.equal(f.transcript.textContent, '');
+  f.button('Commands').events.click(); await flush();
+  await f.send('list'); await f.send('version');
+  const commands = f.model.commands, history = [...f.model.history], calls = f.calls.length;
+  f.input.value = 'unsent draft';
+  f.button('Clear').events.click();
+  assert.equal(f.transcript.textContent, '');
+  assert.equal(f.model.executed, true);
+  assert.deepEqual([...f.model.history], history);
+  assert.equal(f.model.commands, commands); assert.equal(f.calls.length, calls);
+  assert.equal(f.input.value, 'unsent draft');
+  f.button('Commands').events.click(); f.button('Console').events.click();
+  assert.equal(f.transcript.textContent, '');
+  f.input.events.keydown({key:'ArrowUp', preventDefault(){}});
+  assert.equal(f.input.value, 'version');
+  await f.send('list');
+  assert.match(f.transcript.textContent, /^> list\n/);
+  let prevented = false;
+  f.root.events.keydown({key:'l', ctrlKey:true, preventDefault(){prevented=true;}});
+  assert.equal(prevented, true); assert.equal(f.transcript.textContent, '');
+  assert.equal(f.model.history.length, 3); assert.equal(f.model.commands, commands);
+  // Both controls call the same implementation, rather than duplicating clear logic.
+  assert.match(implementation, /clear\.addEventListener\("click", clearTranscript\)/);
+  assert.match(implementation, /event\.preventDefault\(\); clearTranscript\(\)/);
+  assert.equal(f.context.newMinecraftRconState().transcriptCleared, false);
+});
+
+test('Refresh replaces the server-derived catalog; partial results retain discovered commands', async () => {
+  let discovery = 0;
+  const f = fixture({request: async () => ({commands:[{name: ++discovery === 1 ? 'actual:one' : 'actual:two'}], partial:true})});
+  f.button('Commands').events.click(); await flush();
+  assert.ok(f.button('actual:one'));
+  assert.ok(f.all().some(el => /Partial command list/.test(el.textContent)));
+  await f.button('Refresh Commands').events.click();
+  assert.equal(f.button('actual:one'), undefined); assert.ok(f.button('actual:two'));
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.all().filter(el => el.tag === 'h3').length, 1);
+});
+
+test('terminal and command list scroll inside the resizable upper area, with a standard non-stretched Send', () => {
+  const css = readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8');
+  assert.match(css, /\.minecraft-rcon-upper\{[^}]*flex:1;min-height:0;overflow:hidden/);
+  assert.match(css, /\.minecraft-rcon-transcript\{[^}]*flex:1;[^}]*min-height:0;overflow:auto;[^}]*border:1px solid #303942;[^}]*background:#0f1317;[^}]*monospace/);
+  assert.match(css, /\.minecraft-rcon-transcript,\.minecraft-rcon-detail\{white-space:pre-wrap;overflow-wrap:anywhere/);
+  assert.match(css, /\.minecraft-rcon-commands\{[^}]*flex-direction:column;[^}]*min-height:0;[^}]*overflow:hidden/);
+  assert.match(css, /\.minecraft-rcon-command-list\{flex:1;min-height:0;overflow:auto/);
+  assert.match(css, /\.minecraft-rcon-lane\{display:flex;flex:none;align-items:center/);
+  assert.match(css, /\.minecraft-rcon-lane button\{flex:none;margin:0}/);
+  assert.doesNotMatch(css, /\.minecraft-rcon-lane button\{[^}]*(?:padding:|height:|font-weight:|border-radius:)/);
+  assert.match(implementation, /transcript\.scrollTop = transcript\.scrollHeight/);
+});

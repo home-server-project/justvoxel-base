@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -313,6 +315,25 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	}
 	if !strings.Contains(string(styles), ".backup-destination-change>summary{display:flex") {
 		t.Fatal("Change destination must be a normal right-aligned action button")
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(styles)); got != "23e64d2ff226fdc6488e4a124b77f8f12264861ded37278031e9c02252a1dc49" {
+		t.Fatal("new-backups.css must remain frozen; standard action sizing belongs in app.css")
+	}
+	for _, want := range []string{
+		`<button type="submit" class="backup-standard-action">Review settings</button>`,
+		`<summary class="button-link backup-standard-action">Change destination</summary>`,
+		`<button type="submit">Backup Now</button>`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Backups standard action markup missing %q", want)
+		}
+	}
+	baseStyles, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(baseStyles), ".backups-workspace-content .backup-standard-action{min-height:0!important;padding:.72rem 1rem!important;border:0!important;border-radius:8px;font-weight:700!important}") {
+		t.Fatal("Backups standard actions must override historical sizing without changing responsive widths")
 	}
 
 	for _, want := range []string{"data-backup-delete-confirmation-control", "data-destructive-slider", "data-destructive-toggle", "data-destructive-submit"} {

@@ -9,8 +9,8 @@ import (
 	"unicode/utf8"
 )
 
-const instanceHelpMaxPages = 10
-const instanceHelpMaxBytes = 32768
+const instanceHelpMaxPages = 64
+const instanceHelpMaxBytes = 65536
 const instanceHelpMaxEntries = 512
 
 type instanceConsoleCommand struct {
@@ -47,15 +47,24 @@ func normalizeInstanceConsoleCommand(raw string) (string, error) {
 	return command, nil
 }
 
-var instanceHelpColor = regexp.MustCompile(`§[0-9A-FK-ORXa-fk-orx]|\x1b\[[0-9;]*m`)
+var instanceRCONSGR = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
+var instanceHelpColor = regexp.MustCompile(`§[0-9A-FK-ORXa-fk-orx]`)
 var instanceHelpPages = regexp.MustCompile(`(?i)(?:\(|page\s+)([0-9]{1,4})\s*(?:/|of)\s*([0-9]{1,4})`)
 var instanceHelpEntry = regexp.MustCompile(`^/?([A-Za-z0-9_][A-Za-z0-9_.-]*(?::[A-Za-z0-9_][A-Za-z0-9_.-]*)?)(.*)$`)
+
+// Remove complete RCON formatting before diagnostic sanitization removes ESC.
+// Otherwise ANSI color fragments remain visible and hide command-shaped lines.
+func instanceRCONText(out []byte, secret string) string {
+	text := instanceRCONSGR.ReplaceAll(out, nil)
+	text = instanceHelpColor.ReplaceAll(text, nil)
+	return instanceDiagnosticText(text, secret)
+}
 
 // Parse only command-shaped help lines. Unknown prose is not a command catalog.
 func parseInstanceHelp(raw string) ([]instanceConsoleCommand, int) {
 	entries := []instanceConsoleCommand{}
 	pages := 1
-	for _, line := range strings.Split(instanceHelpColor.ReplaceAllString(raw, ""), "\n") {
+	for _, line := range strings.Split(instanceHelpColor.ReplaceAllString(instanceRCONSGR.ReplaceAllString(raw, ""), ""), "\n") {
 		line = strings.TrimSpace(line)
 		if match := instanceHelpPages.FindStringSubmatch(line); match != nil {
 			n, _ := strconv.Atoi(match[2])
@@ -119,7 +128,7 @@ func (b *instanceRuntimeBackend) discoverCommands(ctx context.Context, id, secre
 		if total > instanceHelpMaxBytes {
 			return entries, true, nil
 		}
-		text := instanceDiagnosticText(out, secret)
+		text := instanceRCONText(out, secret)
 		if responses[text] {
 			return entries, true, nil
 		}
