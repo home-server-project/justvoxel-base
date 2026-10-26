@@ -279,7 +279,7 @@ func networkTransactionFixture(t *testing.T, twoSupported ...bool) (*instanceAct
 		}
 		if command == "systemctl" {
 			for _, arg := range args {
-				if strings.HasPrefix(arg, "justvoxel-velocity") || strings.HasPrefix(arg, "justvoxel-picolobby") {
+				if strings.HasPrefix(arg, "justvoxel-velocity") || strings.HasPrefix(arg, "justvoxel-picolobby") || arg == "justvoxel-minecraft-network-network.service" {
 					if args[0] == "show" {
 						return []byte("LoadState=not-found\nActiveState=inactive\nSubState=dead\n"), nil
 					}
@@ -306,6 +306,271 @@ func networkTransactionFixture(t *testing.T, twoSupported ...bool) (*instanceAct
 	c.Members = []string{f.configs[0].ID}
 	return f, c
 }
+
+func TestMinecraftNetworkRemovedFailurePolicy(t *testing.T) {
+	units := []string{"justvoxel-velocity.service", "justvoxel-minecraft-network-network.service"}
+	for _, tc := range []struct {
+		name, state string
+		reset       bool
+	}{
+		{"stale", "LoadState=not-found\nActiveState=failed\n", true},
+		{"real-failure", "LoadState=loaded\nActiveState=failed\n", false},
+		{"absent-inactive", "LoadState=not-found\nActiveState=inactive\n", false},
+		{"loaded-active", "LoadState=loaded\nActiveState=active\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var inspected, reset []string
+			b := &instanceRuntimeBackend{}
+			b.command = func(_ context.Context, command string, args ...string) ([]byte, error) {
+				if command != "systemctl" || len(args) == 0 {
+					t.Fatal("unexpected command", command, args)
+				}
+				unit := args[len(args)-1]
+				if !networkContains(units, unit) {
+					t.Fatal("inspected or reset unrelated service", args)
+				}
+				switch args[0] {
+				case "show":
+					if !reflect.DeepEqual(args, []string{"show", "--property=LoadState,ActiveState", "--", unit}) {
+						t.Fatal("missing authoritative state inspection", args)
+					}
+					inspected = append(inspected, unit)
+					return []byte(tc.state), nil
+				case "reset-failed":
+					if !reflect.DeepEqual(args, []string{"reset-failed", "--", unit}) || !networkContains(inspected, unit) {
+						t.Fatal("global, implicit, or uninspected failure reset", args)
+					}
+					reset = append(reset, unit)
+					return nil, nil
+				default:
+					t.Fatal("unexpected systemctl operation", args)
+					return nil, nil
+				}
+			}
+			if err := networkClearRemovedFailures(context.Background(), b); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(inspected, units) || (tc.reset && !reflect.DeepEqual(reset, units)) || (!tc.reset && len(reset) != 0) {
+				t.Fatal("incorrect failure cleanup", inspected, reset)
+			}
+		})
+	}
+}
+
+func TestMinecraftNetworkRemovedFailureTransactionBoundaries(t *testing.T) {
+	for _, mode := range []string{"disable", "failed-disable", "rollback-disabled", "recover-disabled", "recover-enabled"} {
+		t.Run(mode, func(t *testing.T) {
+			f, c := networkTransactionFixture(t)
+			b := f.backend
+			ctx := context.Background()
+			beforeEnabled := mode == "disable" || mode == "failed-disable" || mode == "recover-enabled"
+			if beforeEnabled {
+				if err := networkApply(ctx, b, c); err != nil {
+					t.Fatal(err)
+				}
+				c.Enabled = false
+			}
+			switch mode {
+			case "failed-disable", "rollback-disabled":
+				f.failReload = 1
+			case "recover-disabled", "recover-enabled":
+				f.failReload = 2
+			}
+			var inspected, reset []string
+			reloaded := false
+			original := b.command
+			b.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "systemctl" && len(args) > 0 {
+					if args[0] == "show" && len(args) > 1 && args[1] == "--property=LoadState,ActiveState" {
+						if !reloaded || networkPending(b) != nil {
+							t.Fatal("cleanup before successful reload and pending-state clearance")
+						}
+						n, err := networkRead(b)
+						if err != nil || n.Config.Enabled {
+							t.Fatal("cleanup before disabled state was saved/restored", err)
+						}
+						for _, name := range []string{"justvoxel-velocity.container", "justvoxel-minecraft-network.network"} {
+							if _, err := os.Stat(filepath.Join(b.quadlets, name)); !errors.Is(err, os.ErrNotExist) {
+								t.Fatal("cleanup before infrastructure removal", name, err)
+							}
+						}
+						unit := args[len(args)-1]
+						if unit != "justvoxel-velocity.service" && unit != "justvoxel-minecraft-network-network.service" {
+							t.Fatal("unrelated service inspected", args)
+						}
+						inspected = append(inspected, unit)
+						return []byte("LoadState=not-found\nActiveState=failed\n"), nil
+					}
+					if args[0] == "reset-failed" {
+						unit := args[len(args)-1]
+						if !reflect.DeepEqual(args, []string{"reset-failed", "--", unit}) || !networkContains(inspected, unit) {
+							t.Fatal("global, unrelated, or premature reset", args)
+						}
+						reset = append(reset, unit)
+						return nil, nil
+					}
+					// Recovery to an enabled Network must preserve real failures.
+					if mode == "recover-enabled" && args[0] == "show" && args[len(args)-1] == "justvoxel-velocity.service" {
+						return []byte("LoadState=loaded\nActiveState=failed\nSubState=failed\n"), nil
+					}
+				}
+				output, err := original(ctx, command, args...)
+				if command == "systemctl" && reflect.DeepEqual(args, []string{"daemon-reload"}) && err == nil {
+					reloaded = true
+				}
+				return output, err
+			}
+			err := networkApply(ctx, b, c)
+			if (err == nil) != (mode == "disable") {
+				t.Fatal("unexpected transaction result", err)
+			}
+			if mode == "recover-disabled" || mode == "recover-enabled" {
+				if len(inspected) != 0 || len(reset) != 0 || networkPending(b) == nil {
+					t.Fatal("incomplete rollback cleared failure evidence")
+				}
+				if err := networkRecover(ctx, b); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var want []string
+			if mode == "disable" || mode == "rollback-disabled" || mode == "recover-disabled" {
+				want = []string{"justvoxel-velocity.service", "justvoxel-minecraft-network-network.service"}
+			}
+			if !reflect.DeepEqual(inspected, want) || !reflect.DeepEqual(reset, want) {
+				t.Fatal("incorrect cleanup at durable transaction boundary", inspected, reset)
+			}
+			if networkPending(b) != nil {
+				t.Fatal("completed transaction retained recovery guard")
+			}
+		})
+	}
+}
+
+func TestMinecraftNetworkRemovedFailurePostCommitErrors(t *testing.T) {
+	for _, mode := range []string{"inspect", "missing-load", "missing-active", "reset", "inspect-start", "missing-load-start", "missing-active-start", "reset-start"} {
+		t.Run(mode, func(t *testing.T) {
+			cleanupMode := strings.TrimSuffix(mode, "-start")
+			f, c := networkTransactionFixture(t)
+			b := f.backend
+			ctx := context.Background()
+			if err := networkApply(ctx, b, c); err != nil {
+				t.Fatal(err)
+			}
+			id := c.Members[0]
+			f.states[id], f.containers[id] = "active", "running"
+			h := networkLifecycleControls(f)
+			h.failStart = !strings.HasSuffix(mode, "-start")
+			original := b.command
+			b.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "systemctl" && len(args) > 1 && args[0] == "show" && args[1] == "--property=LoadState,ActiveState" &&
+					(args[len(args)-1] == "justvoxel-velocity.service" || args[len(args)-1] == "justvoxel-minecraft-network-network.service") {
+					switch cleanupMode {
+					case "inspect":
+						return nil, errors.New("mock inspection failure")
+					case "missing-load":
+						return []byte("ActiveState=failed\n"), nil
+					case "missing-active":
+						return []byte("LoadState=not-found\n"), nil
+					default:
+						return []byte("LoadState=not-found\nActiveState=failed\n"), nil
+					}
+				}
+				if command == "systemctl" && len(args) > 0 && args[0] == "reset-failed" {
+					if cleanupMode != "reset" || !reflect.DeepEqual(args, []string{"reset-failed", "--", "justvoxel-velocity.service"}) {
+						t.Fatal("unsafe failure reset", args)
+					}
+					return nil, errors.New("mock reset failure")
+				}
+				return original(ctx, command, args...)
+			}
+			c.Enabled = false
+			err := networkApply(ctx, b, c)
+			if err == nil || !strings.Contains(err.Error(), "configuration was saved, but stale Network service failure state could not be cleared") {
+				t.Fatal("missing post-commit cleanup error", err)
+			}
+			wantCleanupError := "incomplete systemd state for justvoxel-velocity.service"
+			if cleanupMode == "inspect" {
+				wantCleanupError = "mock inspection failure"
+			} else if cleanupMode == "reset" {
+				wantCleanupError = "mock reset failure"
+			}
+			if !strings.Contains(err.Error(), wantCleanupError) {
+				t.Fatal("cleanup diagnosis was lost", err)
+			}
+			restorationMessage := "Minecraft Network configuration was saved, but one or more previously running servers could not be started. Use their normal Start controls after checking server status."
+			if strings.Contains(err.Error(), restorationMessage) != h.failStart || strings.Contains(err.Error(), "mock start failure") {
+				t.Fatal("incorrect joined server restoration error", err)
+			}
+			joined, ok := err.(interface{ Unwrap() []error })
+			if !ok {
+				t.Fatal("post-commit errors were not joined", err)
+			}
+			parts := joined.Unwrap()
+			if h.failStart {
+				if len(parts) != 2 || !strings.Contains(parts[0].Error(), wantCleanupError) || parts[1].Error() != restorationMessage {
+					t.Fatal("cleanup and generic restoration errors were not both retained", err)
+				}
+			} else if len(parts) != 1 || !strings.Contains(parts[0].Error(), wantCleanupError) || err.Error() != parts[0].Error() {
+				t.Fatal("successful restoration returned an extra failure", err)
+			}
+			n, readErr := networkRead(b)
+			if readErr != nil || n.Config.Enabled || networkPending(b) != nil {
+				t.Fatal("cleanup failure rolled back or stranded committed disable", readErr)
+			}
+			if !reflect.DeepEqual(h.starts, []string{id}) || (!h.failStart && f.states[id] != "active") {
+				t.Fatal("post-commit error prevented normal server restoration", h.starts)
+			}
+		})
+	}
+}
+
+func TestMinecraftNetworkRemovedFailurePostRollbackErrors(t *testing.T) {
+	for _, mode := range []string{"inspect", "missing-load", "missing-active", "reset"} {
+		t.Run(mode, func(t *testing.T) {
+			f, c := networkTransactionFixture(t)
+			b := f.backend
+			id := c.Members[0]
+			f.states[id], f.containers[id] = "active", "running"
+			h := networkLifecycleControls(f)
+			f.failReload = 1
+			original := b.command
+			b.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "systemctl" && len(args) > 1 && args[len(args)-1] == "justvoxel-velocity.service" {
+					if args[0] == "show" && args[1] == "--property=LoadState,ActiveState" {
+						if networkPending(b) != nil {
+							t.Fatal("cleanup preceded completed rollback")
+						}
+						switch mode {
+						case "inspect":
+							return nil, errors.New("mock inspection failure")
+						case "missing-load":
+							return []byte("ActiveState=failed\n"), nil
+						case "missing-active":
+							return []byte("LoadState=not-found\n"), nil
+						default:
+							return []byte("LoadState=not-found\nActiveState=failed\n"), nil
+						}
+					}
+					if args[0] == "reset-failed" {
+						return nil, errors.New("mock reset failure")
+					}
+				}
+				return original(ctx, command, args...)
+			}
+			err := networkApply(context.Background(), b, c)
+			if err == nil || !strings.Contains(err.Error(), "changes failed and were rolled back") ||
+				!strings.Contains(err.Error(), "configuration was restored, but stale Network service failure state could not be cleared") ||
+				strings.Contains(err.Error(), "needs recovery") || strings.Contains(err.Error(), "could not be restored") {
+				t.Fatal("cleanup diagnosis obscured successful rollback or restoration", err)
+			}
+			n, readErr := networkRead(b)
+			if readErr != nil || n.Config.Enabled || networkPending(b) != nil || !reflect.DeepEqual(h.starts, []string{id}) || f.states[id] != "active" {
+				t.Fatal("cleanup failure stranded rolled-back server", readErr, h.starts)
+			}
+		})
+	}
+}
+
 func TestMinecraftNetworkPublicationAndStandaloneRestoration(t *testing.T) {
 	f, c := networkTransactionFixture(t)
 	b := f.backend

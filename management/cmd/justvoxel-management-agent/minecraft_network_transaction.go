@@ -343,10 +343,13 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 	fail := func() error {
 		recoveryCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
-		if networkRollbackDurable(recoveryCtx, b, journal) != nil {
+		rollbackErr := networkRollbackDurable(recoveryCtx, b, journal)
+		if rollbackErr != nil && networkPending(b) != nil {
 			return instanceRuntimeFailure("Minecraft Network needs recovery. Use Retry recovery in Minecraft Network.")
 		}
-		return instanceRuntimeFailure("Minecraft Network changes failed and were rolled back. Server data was preserved.")
+		// A cleanup diagnostic after pending-state clearance does not undo the
+		// completed rollback or prevent deferred server restoration.
+		return errors.Join(instanceRuntimeFailure("Minecraft Network changes failed and were rolled back. Server data was preserved."), rollbackErr)
 	}
 	// Journal presence blocks boot/manual startup until all files and hashes agree.
 	if err = networkWriteState(b, after); err != nil {
@@ -389,19 +392,26 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 		return errInstanceRecovery
 	}
 	committed = true
+	if !c.Enabled {
+		if cleanupErr := networkClearRemovedFailures(ctx, b); cleanupErr != nil {
+			// The configuration is committed. Retain cleanup failures while still
+			// releasing reservations and restoring previously running servers.
+			result = errors.Join(result, instanceRuntimeFailure("Minecraft Network configuration was saved, but stale Network service failure state could not be cleared: "+cleanupErr.Error()))
+		}
+	}
 	// Infrastructure is optional and only started following an enabled commit.
 	for _, h := range held {
 		h.Close()
 	}
 	held = nil
 	if err = releaseMaintenance(); err != nil {
-		return instanceRuntimeFailure(networkMaintenanceReleaseMessage)
+		return errors.Join(result, instanceRuntimeFailure(networkMaintenanceReleaseMessage))
 	}
 	if c.Enabled {
 		if _, err = b.command(ctx, "systemctl", "--no-block", "start", "--", "justvoxel-velocity.service"); err != nil {
-			result = instanceRuntimeFailure(networkNotReadyMessage)
+			result = errors.Join(result, instanceRuntimeFailure(networkNotReadyMessage))
 		} else if !networkWaitReady(ctx, b, c.JavaPort) {
-			result = instanceRuntimeFailure(networkNotReadyMessage)
+			result = errors.Join(result, instanceRuntimeFailure(networkNotReadyMessage))
 		}
 	}
 	if networkRestartStopped(ctx, b, stopped) != nil {
@@ -580,8 +590,43 @@ func networkRollbackDurable(ctx context.Context, b *instanceRuntimeBackend, j mi
 	if err := b.clearPending(filepath.Join(b.networkDirectory(), "pending.json")); err != nil {
 		return err
 	}
+	if !j.Before.Config.Enabled {
+		if err := networkClearRemovedFailures(ctx, b); err != nil {
+			return instanceRuntimeFailure("Minecraft Network configuration was restored, but stale Network service failure state could not be cleared: " + err.Error())
+		}
+	}
 	return nil
 }
+
+// Only call after committing or restoring a disabled Network configuration.
+// Loaded failures remain evidence of real faults, even when Network is disabled.
+func networkClearRemovedFailures(ctx context.Context, b *instanceRuntimeBackend) error {
+	for _, unit := range []string{"justvoxel-velocity.service", "justvoxel-minecraft-network-network.service"} {
+		output, err := b.command(ctx, "systemctl", "show", "--property=LoadState,ActiveState", "--", unit)
+		if err != nil {
+			return fmt.Errorf("could not inspect %s: %w", unit, err)
+		}
+		loadState, activeState := "", ""
+		for _, line := range strings.Split(string(output), "\n") {
+			if strings.HasPrefix(line, "LoadState=") {
+				loadState = strings.TrimPrefix(line, "LoadState=")
+			}
+			if strings.HasPrefix(line, "ActiveState=") {
+				activeState = strings.TrimPrefix(line, "ActiveState=")
+			}
+		}
+		if loadState == "" || activeState == "" {
+			return fmt.Errorf("incomplete systemd state for %s", unit)
+		}
+		if loadState == "not-found" && activeState == "failed" {
+			if _, err := b.command(ctx, "systemctl", "reset-failed", "--", unit); err != nil {
+				return fmt.Errorf("could not clear %s: %w", unit, err)
+			}
+		}
+	}
+	return nil
+}
+
 func networkValidateJournal(b *instanceRuntimeBackend, j minecraftNetworkJournal) error {
 	if j.Schema != 1 || j.Before.Schema != 1 || j.After.Schema != 1 || networkValidateConfig(j.Before.Config) != nil || networkValidateConfig(j.After.Config) != nil || len(j.Files) > 90 {
 		return errInstanceRecovery
