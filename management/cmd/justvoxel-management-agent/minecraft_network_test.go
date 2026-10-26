@@ -1151,3 +1151,107 @@ func TestMinecraftNetworkLegacyRollbackAndRetryRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestMinecraftNetworkWhitelistEnforcementCompatibility(t *testing.T) {
+	if !networkDefaultState().Config.whitelistEnforced() {
+		t.Fatal("default whitelist must remain enforced")
+	}
+	for _, setting := range []string{"legacy", "true", "false"} {
+		t.Run(setting, func(t *testing.T) {
+			f, c := networkTransactionFixture(t)
+			if err := networkApply(context.Background(), f.backend, c); err != nil {
+				t.Fatal(err)
+			}
+			n, err := networkRead(f.backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			n.Whitelist = []minecraftNetworkPlayer{{UUID: "11111111-1111-1111-1111-111111111111", Name: "Alex"}}
+			want := setting != "false"
+			n.Config.WhitelistEnforced = nil
+			if setting != "legacy" {
+				n.Config.WhitelistEnforced = &want
+			}
+			if err := networkWriteState(f.backend, n); err != nil {
+				t.Fatal(err)
+			}
+			data, err := f.backend.readPrivate(filepath.Join(f.backend.networkDirectory(), "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if setting == "legacy" && bytes.Contains(data, []byte("whitelist_enforced")) {
+				t.Fatal("legacy fixture must omit enforcement")
+			}
+			n, err = networkRead(f.backend)
+			if err != nil || n.Config.whitelistEnforced() != want || len(n.Whitelist) != 1 {
+				t.Fatal("state lost enforcement or saved players", err, n)
+			}
+			if setting == "false" && (n.Config.WhitelistEnforced == nil || *n.Config.WhitelistEnforced) {
+				t.Fatal("explicit false was lost")
+			}
+			files := networkInfrastructure(n, nil)
+			if got := string(files["velocity/plugins/global-whitelist/config.properties"]); got != fmt.Sprintf("white-list=%t\nenforce-whitelist=%t\n", want, want) {
+				t.Fatal("incorrect generated enforcement", got)
+			}
+			var players []minecraftNetworkPlayer
+			if json.Unmarshal(files["velocity/plugins/global-whitelist/whitelist.json"], &players) != nil || !reflect.DeepEqual(players, n.Whitelist) {
+				t.Fatal("generated whitelist lost players")
+			}
+			old := instanceRuntimes
+			instanceRuntimes = f.backend
+			t.Cleanup(func() { instanceRuntimes = old })
+			rr := httptest.NewRecorder()
+			roleServerForTest(roleAdministrator).minecraftNetworkStatus(rr, authorizedRequest("GET", "/v1/minecraft/network", ""))
+			var status struct {
+				Config struct {
+					WhitelistEnforced *bool `json:"whitelist_enforced"`
+				} `json:"config"`
+				WhitelistEnforced *bool `json:"whitelist_enforced"`
+			}
+			if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &status) != nil || status.Config.WhitelistEnforced == nil || status.WhitelistEnforced == nil || *status.Config.WhitelistEnforced != want || *status.WhitelistEnforced != want {
+				t.Fatal("status must expose matching explicit booleans", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestMinecraftNetworkConfigurePersistsEnforcementWithoutDeletingPlayers(t *testing.T) {
+	f, c := networkTransactionFixture(t)
+	if err := networkApply(context.Background(), f.backend, c); err != nil {
+		t.Fatal(err)
+	}
+	n, err := networkRead(f.backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.Whitelist = []minecraftNetworkPlayer{{UUID: "11111111-1111-1111-1111-111111111111", Name: "Alex"}}
+	if err := networkWriteState(f.backend, n); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := networkLockFixture(t, f)
+	for _, setting := range []string{"false", "true", "legacy"} {
+		c.WhitelistEnforced = nil
+		want := setting != "false"
+		if setting != "legacy" {
+			c.WhitelistEnforced = &want
+		}
+		body, err := json.Marshal(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
+		s.minecraftNetworkConfigure(rr, authorizedRequest("PUT", "/v1/minecraft/network", string(body)))
+		if rr.Code != 200 {
+			t.Fatal(rr.Code, rr.Body.String())
+		}
+		after, err := networkRead(f.backend)
+		if err != nil || after.Config.WhitelistEnforced == nil || after.Config.whitelistEnforced() != want || !reflect.DeepEqual(after.Whitelist, n.Whitelist) {
+			t.Fatal("configure lost setting or players", err, after)
+		}
+		generated, err := f.backend.readPrivate(filepath.Join(f.backend.networkDirectory(), "generated.json"))
+		var files map[string][]byte
+		if err != nil || json.Unmarshal(generated, &files) != nil || string(files["velocity/plugins/global-whitelist/config.properties"]) != fmt.Sprintf("white-list=%t\nenforce-whitelist=%t\n", want, want) {
+			t.Fatal("configure did not publish enforcement", err)
+		}
+	}
+}

@@ -57,7 +57,7 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 			if e1 != nil || e2 != nil {
 				err = errors.New("invalid ports")
 			} else {
-				err = client.ConfigureMinecraftNetwork(r.Context(), session, api.MinecraftNetworkConfig{Enabled: r.FormValue("enabled") == "on", JavaPort: java, BedrockPort: bedrock, Members: r.Form["members"], WelcomeMessage: r.FormValue("welcome_message")})
+				err = client.ConfigureMinecraftNetwork(r.Context(), session, api.MinecraftNetworkConfig{WhitelistEnforced: r.FormValue("whitelist_enforced") == "true", Enabled: r.FormValue("enabled") == "on", JavaPort: java, BedrockPort: bedrock, Members: r.Form["members"], WelcomeMessage: r.FormValue("welcome_message")})
 			}
 		case "recover":
 			err = client.RecoverMinecraftNetwork(r.Context(), session)

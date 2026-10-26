@@ -7983,11 +7983,68 @@ if (minecraftNetworkDialog) {
   const state = minecraftNetworkDialog.querySelector("[data-minecraft-network-state]");
   let sequence = 0;
   let saving = false;
+  let configureForm = null;
+  let baseline = "";
+  let originalFields = [];
+  const configuration = () => {
+    if (!configureForm) return "";
+    const data = new FormData(configureForm);
+    return JSON.stringify({
+      enabled: data.get("enabled") === "on",
+      java_port: Number(data.get("java_port")),
+      bedrock_port: Number(data.get("bedrock_port")),
+      members: data.getAll("members").sort(),
+      welcome_message: data.get("welcome_message") || "",
+      whitelist_enforced: data.get("whitelist_enforced") === "true",
+    });
+  };
+  const isDirty = () => configureForm !== null && configuration() !== baseline;
+  const syncDraft = () => {
+    if (!configureForm) return;
+    const enforced = configureForm.elements.namedItem("whitelist_enforced").value === "true";
+    content.querySelector("[data-network-whitelist-switch]").setAttribute("aria-checked", String(enforced));
+    content.querySelector("[data-network-whitelist-badge]").textContent = enforced ? "Enabled" : "Disabled";
+    content.querySelector("[data-network-whitelist-heading]").textContent = enforced ? "Network Whitelist: Enforced" : "Network Whitelist";
+    const dirty = isDirty();
+    configureForm.querySelector("[data-minecraft-network-cancel]").disabled = !dirty;
+    configureForm.querySelector('[value="configure"]').disabled = !dirty || configureForm.dataset.recoveryRequired === "true";
+  };
+  const discardDraft = () => {
+    for (const {field, value, checked} of originalFields) {
+      field.value = value;
+      if (typeof checked === "boolean") field.checked = checked;
+    }
+    syncDraft();
+  };
+  const establishBaseline = () => {
+    configureForm = content.querySelector("#minecraft-network-configure");
+    originalFields = configureForm ? Array.from(configureForm.elements, field => ({field, value: field.value, checked: field.checked})) : [];
+    baseline = configuration();
+    syncDraft();
+  };
+  content.addEventListener("input", syncDraft);
+  content.addEventListener("change", syncDraft);
+  content.addEventListener("reset", (event) => {
+    if (event.target !== configureForm) return;
+    event.preventDefault();
+    discardDraft();
+  });
+  content.addEventListener("click", (event) => {
+    if (event.target.closest("[data-minecraft-network-cancel]")) discardDraft();
+    if (event.target.closest("[data-network-whitelist-switch]") && configureForm) {
+      const input = configureForm.elements.namedItem("whitelist_enforced");
+      input.value = input.value === "true" ? "false" : "true";
+      syncDraft();
+    }
+  });
   const load = async (body = null) => {
     if (saving) return;
     const current = ++sequence;
     saving = body !== null;
     content.inert = saving;
+    state.classList.toggle("notice", saving);
+    state.classList.toggle("warning", saving);
+    if (saving) content.querySelectorAll(".notice.success").forEach(notice => notice.remove());
     state.textContent = saving ? "Updating Minecraft Network…" : "Loading Minecraft Network…";
     try {
       // POST returns freshly read authoritative status, including recovery state.
@@ -8002,9 +8059,18 @@ if (minecraftNetworkDialog) {
       const range = document.createRange();
       range.selectNodeContents(content);
       content.replaceChildren(range.createContextualFragment(html));
+      establishBaseline();
       state.textContent = "";
+      state.classList.remove("notice", "warning");
+      if (body && ["configure", "recover"].includes(body.get("action")) && content.querySelector(".notice.success")) {
+        const servers = document.querySelector("[data-minecraft-servers-workspace-dialog]");
+        if (servers?.open) servers.querySelector("[data-minecraft-servers-refresh]")?.click();
+      }
     } catch (error) {
-      if (current === sequence) state.textContent = error.message;
+      if (current === sequence) {
+        state.classList.remove("notice", "warning");
+        state.textContent = error.message;
+      }
     } finally {
       if (current === sequence) {
         saving = false;
@@ -8012,7 +8078,8 @@ if (minecraftNetworkDialog) {
       }
     }
   };
-  const workspaceWindow = setupWorkspaceWindow(minecraftNetworkDialog, { onOpen: () => load() });
+  const workspaceWindow = setupWorkspaceWindow(minecraftNetworkDialog, { onOpen: () => load(), onClose: discardDraft });
+  minecraftNetworkDialog.addEventListener("cancel", discardDraft);
   // Delegation also covers the dynamically loaded Minecraft Servers action bar.
   document.addEventListener("click", (event) => {
     const launcher = event.target.closest("[data-minecraft-network-open]");
@@ -8032,7 +8099,9 @@ if (minecraftNetworkDialog) {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
     event.preventDefault();
+    if (form === configureForm && (!isDirty() || configureForm.dataset.recoveryRequired === "true")) return;
     const body = new URLSearchParams(new FormData(form));
+    if (form === configureForm) body.set("action", "configure");
     if (event.submitter?.name) body.set(event.submitter.name, event.submitter.value);
     load(body);
   });

@@ -4,7 +4,7 @@
   {{if .Message}}<p class="notice success" role="status">{{.Message}}</p>{{end}}
   <p class="muted minecraft-network-help">Optionally connect selected servers through one shared entrance and lobby. Servers stay standalone unless you select them here and enable Minecraft Network.</p>
   {{if .Network.RecoveryRequired}}<div class="notice warning"><p>Minecraft Network needs recovery before servers can start.</p><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="recover" type="submit">Retry recovery</button></form></div>{{end}}
-  <form method="post" action="/workspace/minecraft-network">
+  <form id="minecraft-network-configure" data-recovery-required="{{.Network.RecoveryRequired}}" method="post" action="/workspace/minecraft-network">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <h2>Network</h2>
     <div class="minecraft-network-lane">
@@ -18,7 +18,6 @@
         <input class="date-time-switch" role="switch" type="checkbox" name="enabled"{{if .Network.Config.Enabled}} checked{{end}}>
       </label>
     </div>
-    <p class="muted minecraft-network-summary">Lobby: JustVoxel virtual lobby · Network whitelist: Enforced</p>
     <section class="minecraft-network-section">
       <h2>Servers</h2>
       <p class="muted minecraft-network-help">Running selected servers are stopped automatically. Empty servers stop immediately; occupied servers receive the normal shutdown countdown. Servers that were running are started again after Apply.</p>
@@ -38,18 +37,25 @@
       </details>{{end}}
     </section>
     <section class="minecraft-network-section">
-      <h2>Lobby</h2>
-      <p class="muted minecraft-network-summary">Java + Bedrock server selector</p>
       <div class="minecraft-network-welcome-lane">
+        <span>Lobby: Java + Bedrock server selector</span>
         <label for="minecraft-network-welcome">Welcome message</label>
         <input id="minecraft-network-welcome" name="welcome_message" maxlength="512" value="{{.Network.Config.WelcomeMessage}}">
-        <button type="submit" name="action" value="configure"{{if .Network.RecoveryRequired}} disabled{{end}}>Apply</button>
+        <button type="button" class="secondary" data-minecraft-network-cancel disabled>Cancel</button>
+        <button type="submit" name="action" value="configure" disabled>Apply</button>
       </div>
     </section>
   </form>
 </section>
 <section class="panel control-panel minecraft-network-panel minecraft-whitelist-section">
-  <h2>Network Whitelist</h2>
+  <div class="section-heading">
+    <h2 data-network-whitelist-heading>Network Whitelist{{if .Network.Config.WhitelistEnforced}}: Enforced{{end}}</h2>
+    <div class="minecraft-whitelist-state">
+      <span class="badge" data-network-whitelist-badge>{{if .Network.Config.WhitelistEnforced}}Enabled{{else}}Disabled{{end}}</span>
+      <button type="button" class="minecraft-whitelist-switch" role="switch" aria-label="Network Whitelist" aria-checked="{{.Network.Config.WhitelistEnforced}}" data-network-whitelist-switch></button>
+      <input type="hidden" name="whitelist_enforced" form="minecraft-network-configure" value="{{.Network.Config.WhitelistEnforced}}">
+    </div>
+  </div>
   <div class="minecraft-player-controls">
     <p class="muted minecraft-network-help">The network whitelist controls entry to the lobby. Each backend server keeps its own whitelist. Adding a player here does not add them to a server whitelist.</p>
     <form class="minecraft-player-add" method="post" action="/workspace/minecraft-network">

@@ -221,55 +221,117 @@ func TestMinecraftNetworkLaunchersAndFragmentTransport(t *testing.T) {
 	if start < 0 || end <= start {
 		t.Fatal("Minecraft Network workspace initialization missing")
 	}
-	program := `
+	program := "const source = " + fmt.Sprintf("%q", source[start:end]) + ";\n" + `
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const source = ` + fmt.Sprintf("%q", source[start:end]) + `;
 const element = () => ({events: {}, addEventListener(name, fn) {this.events[name] = fn;}});
 const content = element(), state = element(), refresh = element(), close = element();
-let role = "administrator", savedOpen = false;
-const dialog = {querySelector: key => ({
+const classes = new Set();
+state.classList = {toggle(name, on) {on ? classes.add(name) : classes.delete(name);}, remove(...names) {names.forEach(name => classes.delete(name));}};
+let role = "administrator", savedOpen = false, form, success = false, failOperation = false;
+const toggle = {setAttribute(name, value) {this[name] = value;}}, badge = {}, heading = {};
+let authoritative = {enabled: false, java_port: "25565", bedrock_port: "19132", members: ["jv-family1"], welcome_message: "Welcome", whitelist_enforced: "true"};
+class Form {
+  constructor(config) {
+    this.dataset = {recoveryRequired: "false"};
+    this.apply = {disabled: true}; this.cancel = {disabled: true};
+    this.elements = [
+      {name: "csrf", value: "csrf-token"},
+      {name: "enabled", value: "on", type: "checkbox", checked: config.enabled},
+      ...["java_port", "bedrock_port", "welcome_message", "whitelist_enforced"].map(name => ({name, value: config[name]})),
+      ...["jv-family1", "jv-kids001"].map(value => ({name: "members", value, type: "checkbox", checked: config.members.includes(value)})),
+    ];
+    this.elements.namedItem = name => this.elements.find(field => field.name === name);
+  }
+  querySelector(selector) {
+    if (selector === "[data-minecraft-network-cancel]") return this.cancel;
+    if (selector === '[value="configure"]') return this.apply;
+    throw new Error("unexpected form selector " + selector);
+  }
+}
+class FormData extends URLSearchParams {
+  constructor(form) {super(form.elements.filter(field => field.type !== "checkbox" || field.checked).map(field => [field.name, field.value]));}
+}
+content.querySelector = selector => ({
+  "#minecraft-network-configure": form,
+  "[data-network-whitelist-switch]": toggle,
+  "[data-network-whitelist-badge]": badge,
+  "[data-network-whitelist-heading]": heading,
+  ".notice.success": success ? {} : null,
+})[selector];
+content.querySelectorAll = selector => {
+  assert.equal(selector, ".notice.success");
+  return success ? [{remove() {success = false;}}] : [];
+};
+const dialog = element();
+dialog.querySelector = key => ({
   "[data-minecraft-network-content]": content, "[data-minecraft-network-state]": state,
   "[data-minecraft-network-refresh]": refresh, "[data-minecraft-network-close]": close
-})[key]};
+})[key];
+let serverRefreshes = 0;
+const servers = {open: true, querySelector(key) {
+  assert.equal(key, "[data-minecraft-servers-refresh]");
+  return {click() {serverRefreshes++;}};
+}};
 const document = element();
-document.querySelector = () => dialog;
+document.querySelector = selector => selector === "[data-minecraft-network-workspace-dialog]" ? dialog : servers;
 document.body = {classList: {contains: value => value === "role-" + role}};
 document.createRange = () => ({selectNodeContents() {}, createContextualFragment: html => html});
 const rendered = [];
-content.replaceChildren = html => rendered.push(html);
+content.replaceChildren = html => {rendered.push(html); form = new Form(authoritative); success = html === "success";};
 const controlCenter = {open: true};
 const window = {location: {href: "http://example/?workspace=minecraft-servers&tab=overview"}, history: {
   state: {kept: true}, replaceState(state, unused, url) {assert.equal(state.kept, true); window.location.href = String(url);}
 }};
 let opened = 0, closed = 0;
 const requests = [];
-class Form {constructor(values) {this.values = values;}}
-class FormData {constructor(form) {this.form = form;} [Symbol.iterator]() {return this.form.values[Symbol.iterator]();}}
 vm.runInNewContext(source, {
   document, window, controlCenter, URL, URLSearchParams, FormData, HTMLFormElement: Form,
   readWorkspaceWindowState: () => ({open: savedOpen}),
   setupWorkspaceWindow: (target, options) => {
     assert.equal(target, dialog);
-    return {open() {opened++; return options.onOpen();}, close() {closed++;}};
+    dialog.addEventListener("close", options.onClose);
+    return {open() {opened++; return options.onOpen();}, close() {closed++; dialog.events.close();}};
   },
   fetch: async (url, options) => {
+    assert.equal(url, "/workspace/minecraft-network");
     requests.push({url, options});
-    return {ok: true, redirected: false, text: async () => "authoritative fragment " + requests.length};
+    if (options.method === "POST") {
+      assert.equal(success, false, "old success removed before POST");
+      assert.equal(state.textContent, "Updating Minecraft Network…");
+      assert.equal(classes.has("notice") && classes.has("warning"), true);
+      assert.equal(content.inert, true);
+      assert.equal(options.credentials, "same-origin");
+      assert.equal(options.body.get("csrf"), "csrf-token");
+      if (options.body.get("action") === "configure" && !failOperation) {
+        authoritative = {enabled: options.body.get("enabled") === "on", java_port: options.body.get("java_port"), bedrock_port: options.body.get("bedrock_port"), members: options.body.getAll("members"), welcome_message: options.body.get("welcome_message"), whitelist_enforced: options.body.get("whitelist_enforced")};
+      }
+    }
+    return {ok: true, redirected: false, text: async () => options.method === "POST" && !failOperation ? "success" : "authoritative fragment"};
   }
 });
 const settle = () => new Promise(resolve => setImmediate(resolve));
+const field = name => form.elements.namedItem(name);
+const clean = () => {assert.equal(form.cancel.disabled, true); assert.equal(form.apply.disabled, true);};
+const dirty = () => {assert.equal(form.cancel.disabled, false); assert.equal(form.apply.disabled, false);};
+const click = selector => content.events.click({target: {closest: key => key === selector ? {} : null}});
+const submit = (action, target = form) => {
+  let prevented = false;
+  content.events.submit({target, submitter: action ? {name: "action", value: action} : null, preventDefault() {prevented = true;}});
+  assert.equal(prevented, true);
+};
+const launch = () => {
+  let prevented = false;
+  document.events.click({target: {closest(selector) {
+    assert.equal(selector, "[data-minecraft-network-open]"); return {};
+  }}, preventDefault() {prevented = true;}});
+  assert.equal(prevented, true);
+};
 (async () => {
   assert.equal(opened, 0);
-  // Both launchers (including the dynamically inserted action-bar button)
-  // match the same delegated selector and therefore the same window control.
+  // Both static and dynamic launchers use this delegated handler.
   for (const launcher of ["control-center", "servers-action-bar"]) {
-    let prevented = false;
-    document.events.click({target: {closest(selector) {
-      assert.equal(selector, "[data-minecraft-network-open]"); return {launcher};
-    }}, preventDefault() {prevented = true;}});
-    await settle();
-    assert.equal(prevented, true);
+    launch(); await settle(); clean();
     assert.equal(controlCenter.open, false);
     const url = new URL(window.location.href);
     assert.equal(url.searchParams.get("workspace"), "minecraft-network");
@@ -277,33 +339,142 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
   }
   assert.equal(opened, 2);
   assert.equal(rendered.length, 2);
-  for (const action of ["configure", "recover", "add", "remove"]) {
-    const form = new Form([["csrf", "csrf-token"], ["members", "jv-family1"], ["members", "jv-kids001"]]);
-    let prevented = false;
-    content.events.submit({target: form, submitter: {name: "action", value: action}, preventDefault() {prevented = true;}});
-    await settle();
-    assert.equal(prevented, true);
-    const request = requests.at(-1);
-    assert.equal(request.url, "/workspace/minecraft-network");
-    assert.equal(request.options.method, "POST");
-    assert.equal(request.options.credentials, "same-origin");
-    assert.equal(request.options.body.get("csrf"), "csrf-token");
-    assert.equal(request.options.body.get("action"), action);
-    assert.deepEqual(request.options.body.getAll("members"), ["jv-family1", "jv-kids001"]);
-    assert.equal(rendered.at(-1), "authoritative fragment " + requests.length);
-    assert.equal(content.inert, false);
+  const posts = () => requests.filter(request => request.options.method === "POST").length;
+  const noPosts = posts();
+  submit("configure"); await settle(); assert.equal(posts(), noPosts); clean();
+  submit(null); await settle(); assert.equal(posts(), noPosts);
+  for (const name of ["enabled", "java_port", "bedrock_port", "members", "welcome_message", "whitelist_enforced"]) {
+    const input = name === "members" ? form.elements.filter(field => field.name === "members")[1] : field(name);
+    const before = {value: input.value, checked: input.checked};
+    if (input.type === "checkbox") input.checked = !input.checked;
+    else input.value = name === "whitelist_enforced" ? "false" : name.endsWith("port") ? "25570" : "New welcome";
+    content.events.input(); dirty();
+    Object.assign(input, before); content.events.change(); clean();
   }
-  refresh.events.click(); await settle();
-  assert.equal(requests.at(-1).options.method, "GET");
-  close.events.click(); assert.equal(closed, 1);
+  field("java_port").value = "025565"; content.events.input(); clean();
+  click("[data-minecraft-network-cancel]"); clean();
+  // Input in the separate Add player form does not define configuration dirtiness.
+  content.events.input({target: new Form(authoritative)}); clean();
+  // Recovery continues to block configure while allowing draft cancellation.
+  form.dataset.recoveryRequired = "true";
+  field("welcome_message").value = "Blocked by recovery"; content.events.input();
+  assert.equal(form.apply.disabled, true); assert.equal(form.cancel.disabled, false);
+  submit("configure"); await settle(); assert.equal(posts(), noPosts);
+  click("[data-minecraft-network-cancel]"); form.dataset.recoveryRequired = "false"; clean();
+  // Toggle is draft-only and updates the heading, badge, and hidden form value.
+  click("[data-network-whitelist-switch]"); dirty();
+  assert.equal(field("whitelist_enforced").value, "false");
+  assert.equal(toggle["aria-checked"], "false"); assert.equal(badge.textContent, "Disabled");
+  assert.equal(heading.textContent, "Network Whitelist");
+  assert.equal(posts(), noPosts);
+  click("[data-network-whitelist-switch]"); clean();
+  assert.equal(badge.textContent, "Enabled"); assert.equal(heading.textContent, "Network Whitelist: Enforced");
+  // Cancel restores every field, including external hidden values and checkboxes.
+  for (const input of form.elements) {
+    if (input.name === "csrf") continue;
+    if (input.type === "checkbox") input.checked = !input.checked;
+    else input.value = input.name === "whitelist_enforced" ? "false" : "changed";
+  }
+  content.events.input(); dirty(); click("[data-minecraft-network-cancel]"); clean();
+  assert.equal(field("enabled").checked, authoritative.enabled);
+  for (const name of ["java_port", "bedrock_port", "welcome_message", "whitelist_enforced"]) assert.equal(field(name).value, authoritative[name]);
+  assert.deepEqual(new FormData(form).getAll("members"), authoritative.members);
+  assert.equal(posts(), noPosts);
+  click("[data-network-whitelist-switch]");
+  content.events.reset({target: form, preventDefault() {}}); clean();
+  assert.equal(toggle["aria-checked"], "true");
+  // Both explicit and native close/cancel discard drafts without network writes.
+  for (const closeWindow of [() => close.events.click(), () => dialog.events.close(), () => dialog.events.cancel()]) {
+    field("welcome_message").value = "Draft"; click("[data-network-whitelist-switch]"); dirty();
+    closeWindow(); clean();
+    assert.equal(field("welcome_message").value, "Welcome");
+    assert.equal(toggle["aria-checked"], "true"); assert.equal(posts(), noPosts);
+  }
+  assert.equal(closed, 1);
+  launch(); await settle(); clean();
+  // Successful configure refreshes cards once and establishes the returned baseline.
+  field("welcome_message").value = "Saved welcome";
+  form.elements.filter(field => field.name === "members")[1].checked = true;
+  click("[data-network-whitelist-switch]"); dirty();
+  submit("configure"); await settle(); clean();
+  assert.equal(serverRefreshes, 1); assert.equal(posts(), noPosts + 1);
+  assert.equal(requests.at(-1).options.method, "POST");
+  assert.equal(requests.at(-1).options.body.get("action"), "configure");
+  assert.deepEqual(requests.at(-1).options.body.getAll("members"), ["jv-family1", "jv-kids001"]);
+  assert.equal(rendered.at(-1), "success");
+  assert.equal(field("welcome_message").value, "Saved welcome");
+  assert.equal(field("whitelist_enforced").value, "false");
+  assert.equal(classes.has("warning"), false); assert.equal(content.inert, false);
+  submit("configure"); await settle(); assert.equal(posts(), noPosts + 1);
+  // Separate whitelist operations replace drafts with authoritative configuration.
+  for (const action of ["recover", "add", "remove"]) {
+    field("welcome_message").value = "Unsaved"; content.events.input(); dirty();
+    const mutation = new Form(authoritative);
+    const previousRenders = rendered.length;
+    submit(action, mutation); await settle(); clean();
+    assert.equal(rendered.length, previousRenders + 1);
+    assert.equal(rendered.at(-1), "success");
+    assert.equal(content.inert, false);
+    assert.deepEqual(requests.at(-1).options.body.getAll("members"), ["jv-family1", "jv-kids001"]);
+    assert.equal(serverRefreshes, 2, "only recovery refreshes server cards");
+    assert.equal(requests.at(-1).options.body.get("action"), action);
+    assert.equal(field("welcome_message").value, "Saved welcome");
+  }
+  // HTTP-200 operation errors do not count as successful configuration.
+  failOperation = true;
+  field("welcome_message").value = "Rejected"; content.events.change();
+  submit("configure"); await settle(); clean(); assert.equal(serverRefreshes, 2);
+  failOperation = false;
+  servers.open = false;
+  submit("recover", new Form(authoritative)); await settle(); assert.equal(serverRefreshes, 2);
+  field("welcome_message").value = "Saved while servers closed"; content.events.input();
+  submit("configure"); await settle(); clean(); assert.equal(serverRefreshes, 2);
+  const beforeRefresh = posts(); refresh.events.click(); await settle(); clean();
+  assert.equal(requests.at(-1).options.method, "GET"); assert.equal(posts(), beforeRefresh);
+  assert.equal(serverRefreshes, 2);
+  const wasOpened = opened;
   role = "operator";
   document.events.click({target: {closest() {return {}; }}, preventDefault() {throw new Error("non-admin launcher accepted");}});
-  assert.equal(opened, 2);
+  assert.equal(opened, wasOpened);
 })().catch(error => {console.error(error); process.exitCode = 1;});
 `
 	cmd := exec.Command("node")
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Minecraft Network workspace behavior: %v\n%s", err, output)
+	}
+}
+
+func TestMinecraftNetworkWhitelistConfigureAndFragment(t *testing.T) {
+	for _, enforced := range []bool{true, false} {
+		t.Run(fmt.Sprint(enforced), func(t *testing.T) {
+			app, f := newNetworkTestApp(t)
+			body := fmt.Sprintf("csrf=csrf-token&action=configure&java_port=25565&bedrock_port=19132&whitelist_enforced=%t", enforced)
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/minecraft-network", body))
+			if rr.Code != http.StatusOK || f.writes != 1 || f.network.Config.WhitelistEnforced != enforced {
+				t.Fatal("enforcement was not forwarded", rr.Code, rr.Body.String())
+			}
+			heading, badge := "Network Whitelist</h2>", "Disabled"
+			if enforced {
+				heading, badge = "Network Whitelist: Enforced</h2>", "Enabled"
+			}
+			for _, want := range []string{
+				heading, `class="badge" data-network-whitelist-badge>` + badge + `</span>`,
+				`class="minecraft-whitelist-switch" role="switch"`, fmt.Sprintf(`aria-checked="%t"`, enforced),
+				fmt.Sprintf(`name="whitelist_enforced" form="minecraft-network-configure" value="%t"`, enforced),
+				`Lobby: Java + Bedrock server selector`, `data-minecraft-network-cancel disabled>Cancel</button>`,
+				`name="action" value="configure" disabled>Apply</button>`,
+			} {
+				if !strings.Contains(rr.Body.String(), want) {
+					t.Errorf("missing %q", want)
+				}
+			}
+			for _, forbidden := range []string{"Lobby: JustVoxel virtual lobby", "Network whitelist: Enforced", "<h2>Lobby</h2>"} {
+				if strings.Contains(rr.Body.String(), forbidden) {
+					t.Errorf("old summary remains: %s", forbidden)
+				}
+			}
+		})
 	}
 }

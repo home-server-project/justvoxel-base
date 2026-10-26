@@ -1789,8 +1789,9 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .minecraft-network .minecraft-network-unavailable{font-size:.85rem}
 .minecraft-network .minecraft-network-welcome-lane{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
 .minecraft-network .minecraft-network-welcome-lane label{margin:0}
-.minecraft-network .minecraft-network-welcome-lane input{flex:1 1 14rem;min-width:0;width:auto;margin:0;padding:.5rem .6rem}
-.minecraft-network .minecraft-network-welcome-lane button{flex:none;margin-left:auto}
+.minecraft-network .minecraft-network-welcome-lane input{flex:0 1 14rem;min-width:0;width:14rem;margin:0;padding:.5rem .6rem}
+.minecraft-network .minecraft-network-welcome-lane button{flex:none}
+.minecraft-network [data-minecraft-network-cancel]{margin-left:auto}
 .minecraft-network .minecraft-player-controls{padding:0}
 .minecraft-network .minecraft-player-platform{flex-basis:9rem}
 .minecraft-network .minecraft-player-input{flex-basis:14rem}

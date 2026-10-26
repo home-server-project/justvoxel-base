@@ -47,7 +47,7 @@ func (f *networkTestAPI) MinecraftInstanceConnection(context.Context, string, st
 func newNetworkTestApp(t *testing.T) (*App, *networkTestAPI) {
 	t.Helper()
 	_, base := newServerInventoryApp(t)
-	f := &networkTestAPI{serverInventoryTestAPI: base, network: api.MinecraftNetworkStatus{Config: api.MinecraftNetworkConfig{JavaPort: 25565, BedrockPort: 19132, WelcomeMessage: "Welcome"}, WhitelistEnforced: true, Servers: []api.MinecraftNetworkServer{{ID: "jv-family1", Software: "paper", Eligible: true, State: "stopped"}, {ID: "jv-kids001", Software: "vanilla", State: "stopped"}}}}
+	f := &networkTestAPI{serverInventoryTestAPI: base, network: api.MinecraftNetworkStatus{Config: api.MinecraftNetworkConfig{WhitelistEnforced: true, JavaPort: 25565, BedrockPort: 19132, WelcomeMessage: "Welcome"}, WhitelistEnforced: true, Servers: []api.MinecraftNetworkServer{{ID: "jv-family1", Software: "paper", Eligible: true, State: "stopped"}, {ID: "jv-kids001", Software: "vanilla", State: "stopped"}}}}
 	app, err := New(f, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestMinecraftNetworkWorkspaceAndCSRF(t *testing.T) {
 	if rr.Code != 200 {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{"Network Whitelist", "family Survival", "JustVoxel virtual lobby", "Java + Bedrock server selector", "Standalone", `name="members"`, `name="welcome_message"`, `value="configure"`, `value="add"`} {
+	for _, want := range []string{"Network Whitelist", "family Survival", "Java + Bedrock server selector", "Standalone", `name="members"`, `name="welcome_message"`, `value="configure"`, `value="add"`} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatal("missing network UI", want)
 		}
@@ -140,17 +140,16 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 				t.Errorf("shared icon is missing: %s: %v", icon, err)
 			}
 		}
-		lane := regexp.MustCompile(`(?s)class="minecraft-network-lane">(.*?)<p class="muted minecraft-network-summary"`).FindString(body)
+		lane := regexp.MustCompile(`(?s)class="minecraft-network-lane">(.*?)<section class="minecraft-network-section"`).FindString(body)
 		for _, want := range []string{`class="minecraft-network-ports"`, `name="java_port"`, `value="25565"`, `name="bedrock_port"`, `value="19132"`, `class="minecraft-network-toggle"`} {
 			if !strings.Contains(lane, want) {
 				t.Errorf("missing port/toggle lane contract %q", want)
 			}
 		}
 		switchTag := `<input class="date-time-switch" role="switch" type="checkbox" name="enabled"`
-		applyTag := `<button type="submit" name="action" value="configure"`
+		applyTag := `<button type="submit" name="action" value="configure" disabled`
 		if enabled {
 			switchTag += ` checked`
-			applyTag += ` disabled`
 			if !strings.Contains(body, `value="recover"`) {
 				t.Error("recovery action missing")
 			}

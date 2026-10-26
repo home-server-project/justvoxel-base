@@ -8,11 +8,12 @@ import (
 )
 
 type MinecraftNetworkConfig struct {
-	Enabled        bool     `json:"enabled"`
-	JavaPort       int      `json:"java_port"`
-	BedrockPort    int      `json:"bedrock_port"`
-	Members        []string `json:"members"`
-	WelcomeMessage string   `json:"welcome_message"`
+	WhitelistEnforced bool     `json:"whitelist_enforced"`
+	Enabled           bool     `json:"enabled"`
+	JavaPort          int      `json:"java_port"`
+	BedrockPort       int      `json:"bedrock_port"`
+	Members           []string `json:"members"`
+	WelcomeMessage    string   `json:"welcome_message"`
 }
 type MinecraftNetworkPlayer struct {
 	Name     string `json:"name"`

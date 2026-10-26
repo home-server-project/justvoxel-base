@@ -27,12 +27,19 @@ const minecraftNetworkHelper = "/usr/libexec/justvoxel/mjust/minecraft-network-r
 const minecraftNetworkName = "justvoxel-minecraft-network"
 
 type minecraftNetworkConfig struct {
-	Enabled        bool     `json:"enabled"`
-	JavaPort       int      `json:"java_port"`
-	BedrockPort    int      `json:"bedrock_port"`
-	Members        []string `json:"members"`
-	WelcomeMessage string   `json:"welcome_message"`
+	// Missing in deployed schema-1 state means the original enforced behavior.
+	WhitelistEnforced *bool    `json:"whitelist_enforced,omitempty"`
+	Enabled           bool     `json:"enabled"`
+	JavaPort          int      `json:"java_port"`
+	BedrockPort       int      `json:"bedrock_port"`
+	Members           []string `json:"members"`
+	WelcomeMessage    string   `json:"welcome_message"`
 }
+
+func (c minecraftNetworkConfig) whitelistEnforced() bool {
+	return c.WhitelistEnforced == nil || *c.WhitelistEnforced
+}
+
 type minecraftNetworkPlayer struct {
 	UUID string `json:"uuid"`
 	Name string `json:"name"`
@@ -239,7 +246,7 @@ func networkInfrastructure(s minecraftNetworkState, names map[string]string) map
 	players, _ := json.Marshal(s.Whitelist)
 	return map[string][]byte{
 		"velocity/velocity.toml": []byte(velocity.String()), "velocity/forwarding.secret": []byte(s.ForwardingSecret),
-		"velocity/plugins/global-whitelist/config.properties": []byte("white-list=true\nenforce-whitelist=true\n"),
+		"velocity/plugins/global-whitelist/config.properties": []byte(fmt.Sprintf("white-list=%t\nenforce-whitelist=%t\n", s.Config.whitelistEnforced(), s.Config.whitelistEnforced())),
 		"velocity/plugins/global-whitelist/whitelist.json":    players,
 		"velocity/plugins/floodgate/key.pem":                  s.FloodgateKey,
 		"velocity/plugins/floodgate/config.yml": []byte(`key-file-name: key.pem
@@ -311,8 +318,11 @@ func (s *server) minecraftNetworkStatus(w http.ResponseWriter, r *http.Request) 
 		}
 		players = append(players, map[string]string{"name": name, "platform": platform})
 	}
+	// Public status always has an explicit boolean, including legacy state.
+	enforced := n.Config.whitelistEnforced()
+	n.Config.WhitelistEnforced = &enforced
 	recoveryRequired := networkPending(instanceRuntimes) != nil
-	writeJSON(w, 200, map[string]any{"config": n.Config, "servers": members, "whitelist": players, "whitelist_enforced": true, "recovery_required": recoveryRequired, "runtime_ready": n.Config.Enabled && !recoveryRequired && networkRuntimeReady(r.Context(), instanceRuntimes, n.Config.JavaPort)})
+	writeJSON(w, 200, map[string]any{"config": n.Config, "servers": members, "whitelist": players, "whitelist_enforced": enforced, "recovery_required": recoveryRequired, "runtime_ready": n.Config.Enabled && !recoveryRequired && networkRuntimeReady(r.Context(), instanceRuntimes, n.Config.JavaPort)})
 }
 func (s *server) minecraftNetworkConnection(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireReadAccess(w, r); !ok {
@@ -348,6 +358,9 @@ func (s *server) minecraftNetworkConfigure(w http.ResponseWriter, r *http.Reques
 	if !decodeJSON(w, r, &c) {
 		return
 	}
+	// Persist an explicit setting for every new request, including older callers.
+	enforced := c.whitelistEnforced()
+	c.WhitelistEnforced = &enforced
 	if networkValidateConfig(c) != nil {
 		writeError(w, 400, "Invalid Minecraft Network configuration.")
 		return
