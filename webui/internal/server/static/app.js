@@ -3509,12 +3509,41 @@ const minecraftDialog = document.querySelector("[data-minecraft-workspace-dialog
 function newMinecraftRconState() {
   return {history: [], cursor: 0, draft: "", transcript: [], executed: false, transcriptCleared: false, commands: null, partial: false, busy: false};
 }
-function minecraftCommandGroup(name) {
-  const command = name.replace(/^minecraft:/, "");
-  if (["list", "whitelist", "op", "deop", "ban", "ban-ip", "banlist", "pardon", "pardon-ip", "kick", "msg", "tell", "w", "say", "team", "teammsg"].includes(command)) return "Players & permissions";
-  if (["weather", "time", "gamemode", "gamerule", "difficulty", "give", "tp", "teleport", "seed", "summon", "effect", "enchant", "experience", "xp", "setblock", "fill", "worldborder"].includes(command)) return "World & gameplay";
-  if (["help", "version", "plugins", "save-all", "save-on", "save-off", "stop", "reload", "datapack"].includes(command)) return "Server";
-  return "Plugins / Other";
+// Keep discovery evidence intact; only this derived catalog is cleaned for display.
+function minecraftCommandCatalog(commands) {
+  const entries = commands.map(entry => {
+    const description = (entry.description || "").trim();
+    return {...entry, description: /^a mojang provided command\.$/i.test(description) ? "" : description};
+  }).filter(entry => {
+    const name = entry.name.toLowerCase();
+    const description = entry.description.toLowerCase();
+    const indexTopic = (name === "aliases" && description === "lists command aliases") || description === `all commands for ${name}`;
+    return !indexTopic && name !== "stop" && name !== "minecraft:stop";
+  });
+  const bareNames = new Set(entries.filter(entry => !entry.name.includes(":")).map(entry => entry.name.toLowerCase()));
+  const pluginNames = new Set();
+  for (const entry of entries) {
+    const [namespace, name] = entry.name.toLowerCase().split(":");
+    if (name && !["minecraft", "bukkit"].includes(namespace)) pluginNames.add(name);
+  }
+  return entries.filter(entry => {
+    const name = entry.name.toLowerCase();
+    return !name.includes(":") || !bareNames.has(name.slice(name.indexOf(":") + 1));
+  }).map(entry => ({...entry, group: minecraftCommandGroup(entry.name, pluginNames)}));
+}
+function minecraftCommandGroup(name, pluginNames) {
+  const normalized = name.toLowerCase();
+  const [namespace, localName] = normalized.split(":");
+  const command = localName || normalized;
+  // Keep unique plugin commands out of the core player/gameplay groups.
+  const pluginNamespace = localName && !["minecraft", "bukkit"].includes(namespace);
+  if (!pluginNamespace) {
+    if (["list", "whitelist", "op", "deop", "ban", "ban-ip", "banlist", "pardon", "pardon-ip", "kick", "msg", "tell", "w", "say", "team", "teammsg"].includes(command)) return "Players & permissions";
+    if (["weather", "time", "gamemode", "gamerule", "difficulty", "give", "tp", "teleport", "seed", "summon", "effect", "enchant", "experience", "xp", "setblock", "fill", "fillbiome", "worldborder", "setworldspawn", "spawnpoint", "locate", "loot", "recipe", "advancement", "forceload", "place", "playsound", "stopsound", "particle", "title", "bossbar", "attribute", "damage", "ride", "spreadplayers"].includes(command)) return "World & gameplay";
+  }
+  if (["help", "version", "ver", "about", "plugins", "pl", "reload", "save-all", "save-on", "save-off", "datapack", "tps", "mspt", "timings", "ping", "uptime", "ram", "perf", "jfr", "debug", "restart"].includes(command)) return "Server & performance";
+  if (pluginNamespace || pluginNames.has(command)) return "Plugins";
+  return "Advanced Minecraft";
 }
 function createMinecraftRconView({model, running, request, isCurrent}) {
   const node = (tag, text, className = "") => {
@@ -3543,9 +3572,8 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
   refresh.type = "button";
   const discoveryStatus = node("p", "", "muted compact");
   const list = node("div", undefined, "minecraft-rcon-command-list");
-  const detail = node("pre", "", "minecraft-rcon-detail");
   controls.append(search, refresh);
-  catalog.append(controls, discoveryStatus, list, detail);
+  catalog.append(controls, discoveryStatus, list);
   upper.append(transcript, catalog);
   const form = node("form", undefined, "minecraft-rcon-lane");
   const input = node("input");
@@ -3583,14 +3611,26 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
     commandsButton.setAttribute("aria-pressed", String(next === "commands"));
     if (next === "console") paintTranscript();
   };
+  const groupOpen = new Map();
+  let searching = false;
   const paintCommands = () => {
     list.replaceChildren();
-    const needle = search.value.toLowerCase();
-    const entries = (model.commands || []).filter(entry => `${entry.name} ${entry.usage || ""} ${entry.description || ""}`.toLowerCase().includes(needle));
-    for (const group of ["Players & permissions", "World & gameplay", "Server", "Plugins / Other"]) {
-      const members = entries.filter(entry => minecraftCommandGroup(entry.name) === group);
+    const needle = search.value.trim().toLowerCase();
+    if (searching && !needle) groupOpen.clear();
+    searching = !!needle;
+    const entries = minecraftCommandCatalog(model.commands || []).filter(entry => `${entry.name} ${entry.usage || ""} ${entry.description}`.toLowerCase().includes(needle));
+    for (const group of ["Players & permissions", "World & gameplay", "Server & performance", "Plugins", "Advanced Minecraft"]) {
+      const members = entries.filter(entry => entry.group === group);
       if (!members.length) continue;
-      list.append(node("h3", group));
+      const section = node("details", undefined, "minecraft-rcon-group");
+      section.open = searching || (groupOpen.get(group) ?? group === "Players & permissions");
+      section.addEventListener("toggle", () => {
+        if (!searching && Array.from(list.children).includes(section)) groupOpen.set(group, section.open);
+      });
+      const summary = node("summary", group);
+      summary.append(node("span", ` (${members.length})`, "minecraft-rcon-group-count"));
+      section.append(summary);
+      list.append(section);
       for (const entry of members) {
         const row = node("div", undefined, "minecraft-rcon-command");
         const choose = node("button", entry.name, "secondary"); choose.type = "button";
@@ -3600,19 +3640,9 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
           input.value = entry.name;
           input.focus();
         });
-        const help = node("button", "Help", "secondary"); help.type = "button";
-        help.disabled = !running;
-        help.addEventListener("click", async () => {
-          if (!isCurrent() || discovering || model.busy || !running) return;
-          discovering = true; updateDisabled(); help.disabled = true;
-          try {
-            const result = await request({command: "help " + entry.name});
-            if (isCurrent()) detail.textContent = result.output || "No help text returned.";
-          } catch (error) { if (isCurrent() && !error.staleSelection) detail.textContent = error.message; }
-          finally { discovering = false; updateDisabled(); help.disabled = !running; }
-        });
-        row.append(choose, node("span", entry.description || entry.usage || "", "muted"), help);
-        list.append(row);
+        const explanation = [entry.description, entry.usage].filter(Boolean).join(" · ");
+        row.append(choose, node("span", explanation, "muted"));
+        section.append(row);
       }
     }
     if (!entries.length) list.append(node("p", model.commands?.length ? "No matching commands." : "Command discovery is unavailable. Use the Console to enter a known Minecraft command.", "muted"));
@@ -3635,7 +3665,7 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
     show("commands");
     if (model.commands === null && running) void discover();
     else {
-      discoveryStatus.textContent = model.partial ? "Partial command list. Some help pages could not be read." : "";
+      discoveryStatus.textContent = model.partial ? "Partial command list. Some help pages could not be read." : model.commands === null ? "" : "Commands exposed by this server.";
       paintCommands();
     }
   });

@@ -332,8 +332,15 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(baseStyles), ".backups-workspace-content .backup-standard-action{min-height:0!important;padding:.72rem 1rem!important;border:0!important;border-radius:8px;font-weight:700!important}") {
+	if !strings.Contains(string(baseStyles), ".backups-workspace-content .backup-standard-action{min-height:0!important;padding:.5rem .8rem!important;border:0!important;border-radius:8px;font-weight:700!important}") {
 		t.Fatal("Backups standard actions must override historical sizing without changing responsive widths")
+	}
+
+	if strings.Count(string(baseStyles), ".backup-standard-action") != 1 || strings.Contains(string(baseStyles), ".backup-standard-action{min-height:0!important;padding:.72rem 1rem") {
+		t.Fatal("Backups standard actions must have one compact override, with no later forced minimum height")
+	}
+	if strings.Count(markup, `class="backup-standard-action"`) != 1 || strings.Count(markup, `class="button-link backup-standard-action"`) != 1 {
+		t.Fatal("Only Review settings and Change destination may use the compact sizing override")
 	}
 
 	for _, want := range []string{"data-backup-delete-confirmation-control", "data-destructive-slider", "data-destructive-toggle", "data-destructive-submit"} {

@@ -71,7 +71,7 @@ test('Commands are discovered, grouped and filtered locally; clicking fills inpu
   const f = fixture();
   f.button('Commands').events.click(); await flush();
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0].discover, 'yes');
-  assert.deepEqual(f.all().filter(el => el.tag === 'h3').map(el => el.textContent), ['Players & permissions','World & gameplay','Server','Plugins / Other']);
+  assert.deepEqual(f.all().filter(el => el.tag === 'summary').map(el => el.textContent), ['Players & permissions','World & gameplay','Server & performance','Plugins']);
   f.button('plugin:warp').events.click();
   assert.equal(f.input.value, 'plugin:warp'); assert.equal(f.input.focused, true);
   assert.equal(f.calls.length, 1);
@@ -105,15 +105,106 @@ test('Enter submits, ArrowUp/Down navigate session history and Ctrl+L clears vis
   assert.equal(prevented, 7);
 });
 
-test('command help is a bounded console request; discovery unavailable invents no commands', async () => {
+test('rows have no Help buttons or detail pane; unavailable discovery invents no commands', async () => {
   const f = fixture(); f.button('Commands').events.click(); await flush();
-  await f.button('Help').events.click();
-  assert.equal(f.calls[1].command, 'help list');
-  assert.equal(f.input.value, '');
+  assert.equal(f.button('Help'), undefined);
+  assert.equal(f.all().some(el => el.className === 'minecraft-rcon-detail'), false);
+  assert.doesNotMatch(implementation, /command: "help "|help\.addEventListener/);
   const empty = fixture({request: async () => ({commands:[],partial:true})});
   empty.button('Commands').events.click(); await flush();
-  assert.equal(empty.all().filter(el => el.tag === 'h3').length, 0);
+  assert.equal(empty.all().filter(el => el.tag === 'details').length, 0);
   assert.ok(empty.all().some(el => /Command discovery is unavailable/.test(el.textContent)));
+});
+
+const catalogEntries = [
+  {name:'ban', description:' A MOJANG provided command. '}, {name:'minecraft:ban'},
+  {name:'msg'}, {name:'tell'}, {name:'w'},
+  {name:'tp'}, {name:'teleport'}, {name:'weather', usage:'weather <clear|rain>'}, {name:'minecraft:weather'},
+  {name:'plugins', description:'Gets a list of plugins running on the server'}, {name:'bukkit:plugins'},
+  {name:'mspt', description:'View server tick times'}, {name:'paper:mspt'},
+  {name:'Geyser', description:'Easy way to whitelist Bedrock players'}, {name:'geyser-spigot:geyser'},
+  {name:'spark'}, {name:'paper:spark'}, {name:'unique:warp', usage:'unique:warp <place>'},
+  {name:'paper', description:'Paper related commands'},
+  {name:'purpur', description:'Purpur related commands'},
+  {name:'viaversion', description:'Shows ViaVersion Version and more.'},
+  {name:'execute'}, {name:'minecraft:unique-core'},
+  {name:'stop'}, {name:'minecraft:stop'},
+  {name:'Aliases', description:'Lists command aliases'},
+  ...['Bukkit', 'Minecraft', 'Paper', 'Geyser-Spigot', 'ViaVersion'].map(name => ({name, description:`All commands for ${name}`})),
+];
+const sections = f => f.all().filter(el => el.tag === 'details');
+const rows = section => section.all().filter(el => el.className === 'minecraft-rcon-command');
+const rowNames = f => f.all().filter(el => el.className === 'minecraft-rcon-command').map(el => el.children[0].textContent);
+const catalogFixture = () => fixture({request: async () => ({commands:catalogEntries})});
+
+test('presentation cleans filler, help topics, namespaced duplicates and stop without mutating discovery', async () => {
+  const f = catalogFixture();
+  f.button('Commands').events.click(); await flush();
+  const names = rowNames(f);
+  for (const name of ['ban', 'msg', 'tell', 'w', 'tp', 'teleport', 'weather', 'plugins', 'mspt', 'Geyser', 'spark', 'unique:warp', 'paper', 'purpur', 'viaversion', 'execute', 'minecraft:unique-core']) {
+    assert.ok(names.includes(name), `${name} remains available`);
+  }
+  for (const name of ['minecraft:ban', 'minecraft:weather', 'bukkit:plugins', 'paper:mspt', 'geyser-spigot:geyser', 'paper:spark', 'stop', 'minecraft:stop', 'Aliases', 'Bukkit', 'Minecraft', 'Paper', 'Geyser-Spigot', 'ViaVersion']) {
+    assert.ok(!names.includes(name), `${name} is hidden`);
+  }
+  assert.equal(names.length, 17);
+  const rendered = f.all().map(el => el.textContent || '').join('\n');
+  assert.doesNotMatch(rendered, /A Mojang provided command\./i);
+  for (const description of ['Gets a list of plugins running on the server', 'Easy way to whitelist Bedrock players', 'View server tick times', 'Purpur related commands', 'Shows ViaVersion Version and more.', 'Paper related commands']) {
+    assert.ok(rendered.includes(description));
+  }
+  assert.match(rendered, /weather <clear\|rain>/);
+  assert.equal(f.model.commands, catalogEntries);
+  assert.equal(f.model.commands[0].description, ' A MOJANG provided command. ');
+  assert.ok(f.model.commands.some(entry => entry.name === 'minecraft:ban'));
+  assert.equal(f.button('Help'), undefined);
+  f.button('Geyser').events.click();
+  assert.equal(f.input.value, 'Geyser'); assert.equal(f.input.focused, true);
+  assert.equal(f.calls.length, 1);
+  assert.ok(f.all().some(el => el.textContent === 'Commands exposed by this server.'));
+});
+
+test('five native collapsible groups count cleaned commands and permit independent toggles', async () => {
+  const f = catalogFixture(); f.button('Commands').events.click(); await flush();
+  const groups = sections(f);
+  assert.deepEqual(groups.map(el => el.children[0].textContent), ['Players & permissions', 'World & gameplay', 'Server & performance', 'Plugins', 'Advanced Minecraft']);
+  assert.deepEqual(groups.map(el => el.open), [true, false, false, false, false]);
+  assert.deepEqual(groups.map(el => rows(el).length), [4, 3, 2, 3, 5]);
+  groups.forEach(el => {
+    assert.equal(el.children[0].tag, 'summary');
+    assert.equal(el.children[0].children[0].className, 'minecraft-rcon-group-count');
+    assert.equal(el.children[0].children[0].textContent, ` (${rows(el).length})`);
+  });
+  assert.deepEqual(rows(groups[3]).map(el => el.children[0].textContent), ['Geyser', 'spark', 'unique:warp']);
+  assert.deepEqual(rows(groups[2]).map(el => el.children[0].textContent), ['plugins', 'mspt']);
+  groups[0].open = false; groups[0].events.toggle();
+  groups[3].open = true; groups[3].events.toggle();
+  assert.deepEqual(groups.map(el => el.open), [false, false, false, true, false]);
+  f.button('Console').events.click(); f.button('Commands').events.click();
+  assert.deepEqual(sections(f).map(el => el.open), [false, false, false, true, false]);
+});
+
+test('search filters cleaned fields, opens matching groups, hides empty groups and clears to defaults', async () => {
+  const f = catalogFixture(); f.button('Commands').events.click(); await flush();
+  const search = f.all().find(el => el.type === 'search');
+  const filter = value => {search.value = value; search.events.input();};
+  filter('commands');
+  assert.deepEqual(sections(f).map(el => el.children[0].textContent), ['Advanced Minecraft']);
+  assert.ok(sections(f).every(el => el.open));
+  assert.deepEqual(rowNames(f), ['paper', 'purpur']);
+  filter('place');
+  assert.deepEqual(rowNames(f), ['unique:warp']);
+  assert.equal(sections(f)[0].open, true);
+  filter('t');
+  assert.ok(sections(f).length > 1);
+  assert.ok(sections(f).every(el => el.open));
+  for (const group of sections(f)) assert.equal(group.children[0].children[0].textContent, ` (${rows(group).length})`);
+  filter('A Mojang provided command.');
+  assert.equal(sections(f).length, 0); assert.equal(rowNames(f).length, 0);
+  filter('');
+  assert.equal(sections(f).length, 5);
+  assert.deepEqual(sections(f).map(el => el.open), [true, false, false, false, false]);
+  assert.equal(f.calls.length, 1);
 });
 
 test('selection invalidation prevents detached execution and ignores old in-flight results', async () => {
@@ -128,6 +219,18 @@ test('selection invalidation prevents detached execution and ignores old in-flig
   assert.equal(next.commands, null); assert.equal(next.executed, false);
   const listener = source.slice(source.indexOf('  window.addEventListener("justvoxel:server-selection-changed",', source.indexOf('if (minecraftOpen && minecraftDialog)')), source.indexOf('  const refreshWorkspace =', source.indexOf('if (minecraftOpen && minecraftDialog)')));
   assert.match(listener, /rconModel = newMinecraftRconState\(\)/);
+});
+
+test('selection invalidation ignores discovery responses and detached command choices', async () => {
+  let finish;
+  const f = fixture({request: () => new Promise(resolve => {finish = resolve;})});
+  f.button('Commands').events.click();
+  f.stale(); finish({commands:[{name:'old:command'}], partial:true}); await flush();
+  assert.equal(f.model.commands, null); assert.equal(f.model.partial, false);
+  assert.equal(f.button('old:command'), undefined);
+  const loaded = fixture(); loaded.button('Commands').events.click(); await flush();
+  loaded.stale(); loaded.button('list').events.click();
+  assert.equal(loaded.input.value, ''); assert.equal(loaded.calls.length, 1);
 });
 
 test('existing selected request guard rejects pre-send changes and stale in-flight results', async () => {
@@ -223,14 +326,16 @@ test('Refresh replaces the server-derived catalog; partial results retain discov
   await f.button('Refresh Commands').events.click();
   assert.equal(f.button('actual:one'), undefined); assert.ok(f.button('actual:two'));
   assert.equal(f.calls.length, 2);
-  assert.equal(f.all().filter(el => el.tag === 'h3').length, 1);
+  f.button('Console').events.click(); f.button('Commands').events.click();
+  assert.ok(f.all().some(el => /Partial command list/.test(el.textContent)));
+  assert.equal(f.all().filter(el => el.tag === 'details').length, 1);
 });
 
 test('terminal and command list scroll inside the resizable upper area, with a standard non-stretched Send', () => {
   const css = readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8');
   assert.match(css, /\.minecraft-rcon-upper\{[^}]*flex:1;min-height:0;overflow:hidden/);
   assert.match(css, /\.minecraft-rcon-transcript\{[^}]*flex:1;[^}]*min-height:0;overflow:auto;[^}]*border:1px solid #303942;[^}]*background:#0f1317;[^}]*monospace/);
-  assert.match(css, /\.minecraft-rcon-transcript,\.minecraft-rcon-detail\{white-space:pre-wrap;overflow-wrap:anywhere/);
+  assert.match(css, /\.minecraft-rcon-transcript\{white-space:pre-wrap;overflow-wrap:anywhere/);
   assert.match(css, /\.minecraft-rcon-commands\{[^}]*flex-direction:column;[^}]*min-height:0;[^}]*overflow:hidden/);
   assert.match(css, /\.minecraft-rcon-command-list\{flex:1;min-height:0;overflow:auto/);
   assert.match(css, /\.minecraft-rcon-lane\{display:flex;flex:none;align-items:center/);

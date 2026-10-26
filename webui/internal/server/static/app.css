@@ -431,7 +431,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .backups-workspace-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942;cursor:move;touch-action:none;user-select:none}
 .backups-workspace-header h2{margin:.1rem 0 0;font-size:1.25rem}
 .backups-workspace-header-actions{display:flex;gap:.45rem}
-.backups-workspace-content .backup-standard-action{min-height:0!important;padding:.72rem 1rem!important;border:0!important;border-radius:8px;font-weight:700!important}
+.backups-workspace-content .backup-standard-action{min-height:0!important;padding:.5rem .8rem!important;border:0!important;border-radius:8px;font-weight:700!important}
 .backups-workspace-body{flex:1;min-height:0;overflow:auto;padding:1rem 1.1rem 1.1rem}
 .backups-workspace-state{margin:0;color:#9ca7b0;font-size:.8rem}
 .backups-workspace-state:empty{display:none}
@@ -1757,17 +1757,19 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .minecraft-rcon{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;gap:var(--jv-space-sm)}
 .minecraft-rcon-toolbar{display:flex;flex-wrap:wrap;gap:var(--jv-space-xs);align-items:center}
 .minecraft-rcon-upper{display:flex;flex:1;min-height:0;overflow:hidden}
-.minecraft-rcon-transcript,.minecraft-rcon-detail{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit;font-family:monospace}
+.minecraft-rcon-transcript{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit;font-family:monospace}
 .minecraft-rcon-transcript{flex:1;min-width:0;min-height:0;overflow:auto;padding:.65rem;border:1px solid #303942;border-radius:10px;background:#0f1317;color:#eef1f4;font:0.82rem/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
 .minecraft-rcon-commands{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;gap:var(--jv-space-xs);overflow:hidden}
 .minecraft-rcon-commands>.minecraft-rcon-toolbar{flex:none}
 .minecraft-rcon-commands input[type="search"]{flex:1;min-width:0;width:auto;margin:0}
 .minecraft-rcon-command-list{flex:1;min-height:0;overflow:auto}
-.minecraft-rcon-detail{flex:none;max-height:30%;overflow:auto}
 .minecraft-rcon-lane{display:flex;flex:none;align-items:center;gap:var(--jv-space-xs);margin:0}
 .minecraft-rcon-lane input[type="text"]{flex:1;min-width:0;margin:0}
 .minecraft-rcon-lane button{flex:none;margin:0}
-.minecraft-rcon-command{display:flex;flex-wrap:wrap;gap:var(--jv-space-xs);align-items:baseline;margin-bottom:var(--jv-space-xs)}
+.minecraft-rcon-group{margin:0 0 var(--jv-space-xs);border:1px solid #303942;border-radius:8px;background:#171d22}
+.minecraft-rcon-group>summary{padding:.5rem .65rem;cursor:pointer;font-weight:700}
+.minecraft-rcon-group-count{color:#9ca7b0;font-weight:400}
+.minecraft-rcon-command{padding:0 .65rem;display:flex;flex-wrap:wrap;gap:var(--jv-space-xs);align-items:baseline;margin-bottom:var(--jv-space-xs)}
 .minecraft-rcon-command span{flex:1;min-width:0}
 .minecraft-rcon-toolbar button[aria-pressed]{border:1px solid transparent}
 .minecraft-rcon-toolbar button[aria-pressed="true"]{background:#25382e;border-color:#4f8b69;color:#c8f2d7}
