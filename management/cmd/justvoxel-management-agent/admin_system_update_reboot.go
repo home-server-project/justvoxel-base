@@ -13,10 +13,11 @@ import (
 const adminSystemUpdateRebootHelper = "/usr/libexec/justvoxel/mjust/admin-system-update-reboot-json"
 
 type adminSystemUpdateRebootRequest struct {
-	ActionConfirmed bool `json:"action_confirmed"`
-	ConfirmPlayers  bool `json:"confirm_players"`
-	BackupMinecraft bool `json:"backup_minecraft"`
-	WarningSeconds  int  `json:"warning_seconds"`
+	ActionConfirmed bool   `json:"action_confirmed"`
+	ConfirmPlayers  bool   `json:"confirm_players"`
+	BackupMinecraft bool   `json:"backup_minecraft"`
+	WarningSeconds  int    `json:"warning_seconds"`
+	StagedDigest    string `json:"staged_digest,omitempty"`
 }
 
 type adminSystemUpdateRebootResponse struct {
@@ -102,7 +103,14 @@ func (s *server) adminSystemUpdateReboot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if request.StagedDigest != "" && !operationFingerprintPattern.MatchString(request.StagedDigest) {
+		writeError(w, 400, "Invalid staged update")
+		return
+	}
 	args := []string{"request"}
+	if request.StagedDigest != "" {
+		args = append(args, "--staged-digest="+request.StagedDigest)
+	}
 	if request.ConfirmPlayers {
 		args = append(args, "--confirm-players")
 	}

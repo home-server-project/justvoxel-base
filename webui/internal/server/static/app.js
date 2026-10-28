@@ -1636,7 +1636,7 @@ const initSystemUpdateWorkspace = () => {
   };
 
   const requestUpdateReboot = async () => {
-    if (freshUpdateAvailable() && !updating) {
+    if (freshUpdateAvailable() && !latestStatus?.reboot_required && !updating) {
       await applySystemUpdate(true);
       return;
     }
@@ -1648,6 +1648,7 @@ const initSystemUpdateWorkspace = () => {
 
     const body = new URLSearchParams();
     body.set("csrf", csrfInput.value);
+    if (latestStatus?.staged?.digest) body.set("staged_digest", latestStatus.staged.digest);
     if (backupToggle && backupToggle.checked) body.set("backup_minecraft", "yes");
     if (quickToggle && quickToggle.checked) body.set("quick_reboot", "yes");
     if (pendingPlayerConfirmation) body.set("confirm_players", "yes");

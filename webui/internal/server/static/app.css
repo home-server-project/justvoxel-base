@@ -1699,6 +1699,22 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
   justify-content: space-between;
 }
 
+/* Version / Container owns its available height, including the scrollable output. */
+.version-workspace-body:has(.version-container-workspace){display:flex;flex-direction:column}
+.version-workspace-body:has(.version-container-workspace) [data-version-content]{display:flex;flex:1;min-height:0;flex-direction:column}
+.version-container-workspace{display:flex;flex:1;flex-direction:column;min-height:0;gap:var(--jv-space-sm)}
+.version-container-workspace>.log-box{flex:1;min-height:140px;height:auto;max-height:none;overflow:auto;margin:0}
+.version-container-workspace>.panel,.version-container-workspace>[data-version-operation]{flex:none}
+.version-container-action-lane{display:flex;align-items:center;gap:var(--jv-space-sm);flex-wrap:wrap}
+.version-container-retention{display:flex;align-items:center;gap:var(--jv-space-sm)}
+.version-container-retention input{width:5rem}
+.version-container-history .backup-file-grid{max-height:180px;overflow:auto}
+.version-container-history .backup-file-card>div{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
+.version-container-history .backup-library-summary{display:flex;justify-content:space-between;align-items:center;gap:var(--jv-space-sm);margin-top:var(--jv-space-sm)}
+
+.version-container-history .backup-file-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:.4rem}
+.version-container-workspace .version-container-history .backup-file-card{grid-template-columns:32px minmax(0,1fr)!important;padding:.45rem .55rem;gap:.5rem}
+
 /* Approved Minecraft Overview controls and destructive review. */
 .minecraft-overview-playerline>.minecraft-summary-label{color:var(--jv-muted);font-size:.72rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
 .minecraft-overview-compact .minecraft-overview-boot-card{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-width:0;margin:0;padding:.8rem;border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface-sunken);color:var(--jv-text);font-size:.83rem;font-weight:700}

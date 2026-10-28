@@ -74,6 +74,10 @@ systemctl enable firewalld.service 2>/dev/null || true
 systemctl enable sshd.service 2>/dev/null || true
 systemctl enable justvoxel-web-bootstrap.service
 systemctl enable justvoxel-minecraft-shutdown-guard.service
+systemctl enable justvoxel-system-update-stage.timer
+# JustVoxel owns download scheduling; only a confirmed appliance operation reboots.
+systemctl --root=/ disable bootc-fetch-apply-updates.timer
+systemctl --root=/ mask bootc-fetch-apply-updates.timer
 
 install -d -m0755 /usr/share/doc/justvoxel
 cp -avf /ctx/docs/. /usr/share/doc/justvoxel/

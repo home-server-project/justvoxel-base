@@ -5,17 +5,20 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
 
 const bootcStatusCurrentFixture = `{"apiVersion":"org.containers.bootc/v1","status":{"booted":{"image":{"image":{"image":"ghcr.io/home-server-project/justvoxel-vm:testing"},"version":"10","imageDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"staged":null,"rollback":null,"readOnly":false}}`
 
-const bootcStatusStagedFixture = `{"apiVersion":"org.containers.bootc/v1","status":{"booted":{"image":{"image":{"image":"ghcr.io/home-server-project/justvoxel-vm:testing"},"version":"10","imageDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"staged":{"image":{"image":{"image":"ghcr.io/home-server-project/justvoxel-vm:testing"},"version":"11","imageDigest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"rollback":null,"readOnly":false}}`
+const bootcStatusStagedFixture = `{"apiVersion":"org.containers.bootc/v1","status":{"booted":{"image":{"image":{"image":"ghcr.io/home-server-project/justvoxel-vm:testing"},"version":"10","imageDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"staged":{"downloadOnly":true,"image":{"image":{"image":"ghcr.io/home-server-project/justvoxel-vm:testing"},"version":"11","imageDigest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},"rollback":null,"readOnly":false}}`
 
 const bootcStatusReadOnlyFixture = `{"apiVersion":"org.containers.bootc/v1","status":{"booted":{"image":{"image":{"image":"ghcr.io/home-server-project/justvoxel-vm:testing"},"version":"10","imageDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"staged":null,"rollback":null,"readOnly":true}}`
 
 func TestAdminSystemUpdateStatusRequiresAdministrator(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	defer func() { runBootcStatus = oldStatus }()
 	called := false
@@ -36,6 +39,7 @@ func TestAdminSystemUpdateStatusRequiresAdministrator(t *testing.T) {
 }
 
 func TestAdminSystemUpdateStatusAllowsLocalRoot(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	defer func() { runBootcStatus = oldStatus }()
 	runBootcStatus = func(_ context.Context) ([]byte, error) {
@@ -54,6 +58,7 @@ func TestAdminSystemUpdateStatusAllowsLocalRoot(t *testing.T) {
 }
 
 func TestAdminSystemUpdateCheckRunsAgainstRegistryWithStagedDeployment(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldCheck := runBootcUpgradeCheck
 	defer func() {
@@ -92,6 +97,7 @@ func TestAdminSystemUpdateCheckRunsAgainstRegistryWithStagedDeployment(t *testin
 }
 
 func TestAdminSystemUpdateCheckRecognizesLatestImageAlreadyStaged(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldCheck := runBootcUpgradeCheck
 	defer func() {
@@ -117,6 +123,7 @@ func TestAdminSystemUpdateCheckRecognizesLatestImageAlreadyStaged(t *testing.T) 
 }
 
 func TestAdminSystemUpdateCheckTreatsMatchingStagedDigestAsCurrent(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldCheck := runBootcUpgradeCheck
 	defer func() {
@@ -145,6 +152,7 @@ func TestAdminSystemUpdateCheckTreatsMatchingStagedDigestAsCurrent(t *testing.T)
 }
 
 func TestParseBootcUpgradeCheckMatchesVersionlessOutput(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	output := "Update available for: docker://ghcr.io/home-server-project/justvoxel-base:testing\n" +
 		"  Digest: sha256:125d8fd678c43eabb2ce398fd0df7d6cc365cc57513f9a7476c8b415822cb11c\n" +
 		"Total new layers: 128   Size: 682.5 MB\n" +
@@ -160,6 +168,7 @@ func TestParseBootcUpgradeCheckMatchesVersionlessOutput(t *testing.T) {
 }
 
 func TestAdminSystemUpdateCheckReturnsBootcFailureDetail(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldCheck := runBootcUpgradeCheck
 	defer func() {
@@ -184,6 +193,7 @@ func TestAdminSystemUpdateCheckReturnsBootcFailureDetail(t *testing.T) {
 }
 
 func TestOperatorCannotCheckSystemUpdate(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldCheck := runBootcUpgradeCheck
 	defer func() {
@@ -212,6 +222,7 @@ func TestOperatorCannotCheckSystemUpdate(t *testing.T) {
 }
 
 func TestAdminSystemUpdateRunsUpgradeAndReturnsStagedStatus(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldUpgrade := runBootcUpgrade
 	defer func() {
@@ -248,6 +259,7 @@ func TestAdminSystemUpdateRunsUpgradeAndReturnsStagedStatus(t *testing.T) {
 }
 
 func TestAdminSystemUpdateCurrentImageReturnsCurrent(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldUpgrade := runBootcUpgrade
 	defer func() {
@@ -273,6 +285,7 @@ func TestAdminSystemUpdateCurrentImageReturnsCurrent(t *testing.T) {
 }
 
 func TestAdminSystemUpdateRejectsReadOnlyBootc(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldUpgrade := runBootcUpgrade
 	defer func() {
@@ -300,6 +313,7 @@ func TestAdminSystemUpdateRejectsReadOnlyBootc(t *testing.T) {
 }
 
 func TestAdminSystemUpdateFailureIsServiceUnavailable(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldUpgrade := runBootcUpgrade
 	defer func() {
@@ -322,6 +336,7 @@ func TestAdminSystemUpdateFailureIsServiceUnavailable(t *testing.T) {
 }
 
 func TestOperatorCannotRequestSystemUpdate(t *testing.T) {
+	isolateSystemUpdateLock(t)
 	oldStatus := runBootcStatus
 	oldUpgrade := runBootcUpgrade
 	defer func() {
@@ -346,5 +361,161 @@ func TestOperatorCannotRequestSystemUpdate(t *testing.T) {
 	}
 	if called {
 		t.Fatal("bootc command ran for forbidden operator request")
+	}
+}
+
+func isolateSystemUpdateLock(t *testing.T) {
+	t.Helper()
+	old := acquireSystemUpdateLock
+	t.Cleanup(func() { acquireSystemUpdateLock = old })
+	dir := t.TempDir()
+	acquireSystemUpdateLock = func() (*os.File, error) { return os.CreateTemp(dir, "system-update-lock-") }
+}
+func TestDownloadOnlyStageAndAutomaticSchedulingContract(t *testing.T) {
+	source, err := os.ReadFile("admin_system_updates.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{`exec.CommandContext(ctx, "bootc", "upgrade", "--check")`, `exec.CommandContext(ctx, "bootc", "upgrade", "--download-only")`, `exec.CommandContext(ctx, "bootc", "upgrade", "--from-downloaded")`} {
+		if !strings.Contains(string(source), command) {
+			t.Fatal(command)
+		}
+	}
+	if strings.Contains(string(source), `"--apply"`) {
+		t.Fatal("bootc owns reboot")
+	}
+	service, err := os.ReadFile("../../../system_files/usr/lib/systemd/system/justvoxel-system-update-stage.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(service), "ExecStart=/usr/libexec/justvoxel/mjust/os-update") || strings.Contains(string(service), "bootc ") || strings.Contains(string(service), "reboot") {
+		t.Fatal("automatic stage bypasses API or reboots")
+	}
+	timer, err := os.ReadFile("../../../system_files/usr/lib/systemd/system/justvoxel-system-update-stage.timer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"OnBootSec=20min", "OnUnitInactiveSec=5h", "RandomizedDelaySec=10min"} {
+		if !strings.Contains(string(timer), want) {
+			t.Fatal(want)
+		}
+	}
+	build, err := os.ReadFile("../../../build_files/build-common.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"systemctl enable justvoxel-system-update-stage.timer", "systemctl --root=/ disable bootc-fetch-apply-updates.timer", "systemctl --root=/ mask bootc-fetch-apply-updates.timer"} {
+		if !strings.Contains(string(build), want) {
+			t.Fatal(want)
+		}
+	}
+	client, err := os.ReadFile("../../../mjust/libexec/system-update-api.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(client), `"${JV_SYSTEM_UPDATE_API_CLIENT}" POST /v1/admin/system/updates`) {
+		t.Fatal("stage does not use Management API")
+	}
+	check := regexp.MustCompile(`(?s)var runBootcUpgradeCheck =.*?\n}`).FindString(string(source))
+	if strings.Contains(check, "--download-only") || strings.Contains(check, "--from-downloaded") {
+		t.Fatal("metadata check mutates deployments")
+	}
+}
+func TestDownloadedActivationVerifiesExactStageAndSupportsQueuedDeployment(t *testing.T) {
+	oldStatus, oldActivate := runBootcStatus, runBootcActivate
+	t.Cleanup(func() { runBootcStatus = oldStatus; runBootcActivate = oldActivate })
+	digest := "sha256:" + strings.Repeat("b", 64)
+	for _, downloadOnly := range []bool{true, false} {
+		activated := false
+		calls := 0
+		runBootcStatus = func(context.Context) ([]byte, error) {
+			fixture := bootcStatusStagedFixture
+			if !downloadOnly || activated {
+				fixture = strings.Replace(fixture, `"downloadOnly":true`, `"downloadOnly":false`, 1)
+			}
+			return []byte(fixture), nil
+		}
+		runBootcActivate = func(context.Context) error { calls++; activated = true; return nil }
+		if err := activateDownloadedSystemUpdate(context.Background(), digest); err != nil {
+			t.Fatal(err)
+		}
+		if (calls == 1) != downloadOnly {
+			t.Fatal("normal queued stage compatibility lost")
+		}
+	}
+	for _, reason := range []string{"activation failed", "stage replaced", "activation not verified"} {
+		calls := 0
+		runBootcStatus = func(context.Context) ([]byte, error) {
+			fixture := bootcStatusStagedFixture
+			if reason == "stage replaced" {
+				fixture = strings.ReplaceAll(fixture, digest, "sha256:"+strings.Repeat("c", 64))
+			}
+			return []byte(fixture), nil
+		}
+		runBootcActivate = func(context.Context) error {
+			calls++
+			if reason == "activation failed" {
+				return errors.New("activation failed")
+			}
+			return nil
+		}
+		if err := activateDownloadedSystemUpdate(context.Background(), digest); err == nil {
+			t.Fatal(reason)
+		}
+		if reason == "stage replaced" && calls != 0 {
+			t.Fatal("activated a different image")
+		}
+	}
+}
+func TestAutomaticStageFailureDoesNotChangeRunningDeployment(t *testing.T) {
+	isolateSystemUpdateLock(t)
+	oldStatus, oldUpgrade := runBootcStatus, runBootcUpgrade
+	t.Cleanup(func() { runBootcStatus = oldStatus; runBootcUpgrade = oldUpgrade })
+	runBootcStatus = func(context.Context) ([]byte, error) { return []byte(bootcStatusCurrentFixture), nil }
+	runBootcUpgrade = func(context.Context) ([]byte, error) { return nil, errors.New("download failed") }
+	s := &server{sessions: make(map[string]session)}
+	w := httptest.NewRecorder()
+	s.adminSystemUpdate(w, requestWithPeerUID(http.MethodPost, "http://unix/v1/admin/system/updates", 0))
+	if w.Code != 503 {
+		t.Fatal(w.Code)
+	}
+	after, err := collectAdminSystemUpdateStatus(context.Background())
+	if err != nil || after.Staged != nil || after.RebootRequired || after.Running.Digest != "sha256:"+strings.Repeat("a", 64) {
+		t.Fatalf("running deployment changed: %+v %v", after, err)
+	}
+}
+
+func TestAutomaticStageReturnsAuthoritativeStagedDeployment(t *testing.T) {
+	isolateSystemUpdateLock(t)
+	oldStatus, oldUpgrade := runBootcStatus, runBootcUpgrade
+	t.Cleanup(func() { runBootcStatus = oldStatus; runBootcUpgrade = oldUpgrade })
+	downloaded := false
+	runBootcStatus = func(context.Context) ([]byte, error) {
+		if downloaded {
+			return []byte(bootcStatusStagedFixture), nil
+		}
+		return []byte(bootcStatusCurrentFixture), nil
+	}
+	runBootcUpgrade = func(context.Context) ([]byte, error) { downloaded = true; return []byte("downloaded"), nil }
+	s := &server{sessions: make(map[string]session)}
+	w := httptest.NewRecorder()
+	s.adminSystemUpdate(w, requestWithPeerUID(http.MethodPost, "http://unix/v1/admin/system/updates", 0))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"reboot_required":true`) || !strings.Contains(w.Body.String(), `"check_state":"staged_current"`) || !strings.Contains(w.Body.String(), "sha256:"+strings.Repeat("b", 64)) {
+		t.Fatalf("automatic stage: %d %s", w.Code, w.Body.String())
+	}
+}
+func TestStageDoesNotClaimSuccessWithoutVerifiedDeployment(t *testing.T) {
+	isolateSystemUpdateLock(t)
+	oldStatus, oldUpgrade := runBootcStatus, runBootcUpgrade
+	t.Cleanup(func() { runBootcStatus = oldStatus; runBootcUpgrade = oldUpgrade })
+	// A cached update is available, but a zero-exit upgrade did not stage it.
+	available := strings.Replace(bootcStatusCurrentFixture, `"booted":{"image":`, `"booted":{"cachedUpdate":{"image":{"image":"ghcr.io/home-server-project/justvoxel-base:testing"},"imageDigest":"sha256:`+strings.Repeat("b", 64)+`"},"image":`, 1)
+	runBootcStatus = func(context.Context) ([]byte, error) { return []byte(available), nil }
+	runBootcUpgrade = func(context.Context) ([]byte, error) { return []byte("done"), nil }
+	s := &server{sessions: make(map[string]session)}
+	w := httptest.NewRecorder()
+	s.adminSystemUpdate(w, requestWithPeerUID(http.MethodPost, "http://unix/v1/admin/system/updates", 0))
+	if w.Code != 503 {
+		t.Fatalf("unverified staging accepted: %d %s", w.Code, w.Body.String())
 	}
 }

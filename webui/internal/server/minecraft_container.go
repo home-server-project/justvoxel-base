@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -63,7 +65,11 @@ func (a *App) minecraftContainerWorkspace(w http.ResponseWriter, r *http.Request
 			writeMinecraftWorkspaceError(w, 400, "Invalid container update request.")
 			return
 		}
-		allowed := []string{"csrf", "plan_fingerprint", "restart_now", "backup_before_restart", "confirm_players"}
+		allowed := []string{"csrf", "plan_fingerprint", "restart_now", "backup_before_restart", "confirm_players", "restore_digest"}
+		retention := r.URL.Path == "/api/version/container/retention"
+		if retention {
+			allowed = []string{"csrf", "keep_previous_images"}
+		}
 		acknowledge := r.URL.Path == "/api/version/container/acknowledge"
 		if acknowledge {
 			allowed = []string{"csrf", "operation_id"}
@@ -84,10 +90,39 @@ func (a *App) minecraftContainerWorkspace(w http.ResponseWriter, r *http.Request
 			writeMinecraftWorkspaceError(w, 403, "Invalid CSRF token.")
 			return
 		}
+		if retention {
+			value := r.FormValue("keep_previous_images")
+			if value == "" {
+				value = "1"
+			}
+			if strings.Trim(value, "0123456789") != "" {
+				writeMinecraftWorkspaceError(w, 400, "Keep previous images must be a non-negative integer.")
+				return
+			}
+			n, parseErr := strconv.Atoi(value)
+			if parseErr != nil || n < 0 {
+				writeMinecraftWorkspaceError(w, 400, "Keep previous images must be a non-negative integer.")
+				return
+			}
+			writer, ok := a.api.(interface {
+				MinecraftInstanceContainerRetention(context.Context, string, string, int) error
+			})
+			if !ok {
+				writeMinecraftWorkspaceError(w, 503, "Previous image retention is unavailable.")
+				return
+			}
+			if err := writer.MinecraftInstanceContainerRetention(r.Context(), session, selected.ID, n); err != nil {
+				a.writeMinecraftWorkspaceAPIError(w, err, "Previous image retention could not be saved.")
+				return
+			}
+			writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "keep_previous_images": n})
+			return
+		}
+
 		if acknowledge {
 			out, err = client.MinecraftInstanceContainerAcknowledge(r.Context(), session, selected.ID, r.FormValue("operation_id"))
 		} else {
-			out, err = client.MinecraftInstanceContainerUpdate(r.Context(), session, selected.ID, api.MinecraftContainerUpdateRequest{PlanFingerprint: r.FormValue("plan_fingerprint"), RestartNow: r.FormValue("restart_now") == "yes", BackupBeforeRestart: r.FormValue("backup_before_restart") == "yes", ConfirmPlayers: r.FormValue("confirm_players") == "yes"})
+			out, err = client.MinecraftInstanceContainerUpdate(r.Context(), session, selected.ID, api.MinecraftContainerUpdateRequest{PlanFingerprint: r.FormValue("plan_fingerprint"), RestartNow: r.FormValue("restart_now") == "yes", BackupBeforeRestart: r.FormValue("backup_before_restart") == "yes", ConfirmPlayers: r.FormValue("confirm_players") == "yes", RestoreDigest: r.FormValue("restore_digest")})
 			code = 202
 		}
 	}

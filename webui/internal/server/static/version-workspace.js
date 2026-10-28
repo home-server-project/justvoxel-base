@@ -56,13 +56,13 @@ if (versionLauncher && versionDialog) {
     const resolved = operation.state === "resolved";
     const kind = operationKinds.get(operation.operation_id);
     const heading = succeeded ? kind === "switch" ? "Switch succeeded" : kind === "container" ? "Container update succeeded" : "Server update succeeded"
-      : failed ? "Server update needs attention" : resolved ? "Current server verified and kept" : "Server update in progress";
+      : failed ? kind === "container" ? "Update stopped. Check the details below." : "Server update needs attention" : resolved ? "Current version kept" : "Server update in progress";
     const progress = card(heading);
     progress.className += " version-operation-status " + (succeeded || resolved ? "is-succeeded" : failed ? "is-failed" : "is-running");
     progress.dataset.versionOperation = "";
     progress.setAttribute("role", "status");
     const notice = document.createElement("p");
-    notice.textContent = operation.status;
+    notice.textContent = kind === "container" && failed ? "You can keep the current version or try again." : operation.status;
     progress.appendChild(notice);
     return progress;
   };
@@ -253,7 +253,7 @@ if (versionLauncher && versionDialog) {
   const containerLabel = (value) => ({ up_to_date: "Up to date", update_available: "Update available", image_missing: "Download required", restart_needed: "Restart required", unavailable: "Unable to check" })[value] || "Unable to check";
   const renderContainer = async (ticket, selection, message) => {
     const current = () => ticket === sequence && selection === globalThis.justVoxelSelectionGeneration.version && currentTab === "container";
-    const root = document.createElement("div");
+    const root = document.createElement("div"); root.className = "version-container-workspace";
     const panel = card("Minecraft container");
     panel.className += " version-container-panel";
     const identity = document.createElement("div");
@@ -280,13 +280,27 @@ if (versionLauncher && versionDialog) {
     actions.dataset.containerRow = "actions";
     const statusLine = line("Status:", "Checking…");
     const update = document.createElement("button"); update.type = "button"; update.textContent = "Update now"; update.disabled = true;
-    actions.append(statusLine, update);
+    const actionLane = document.createElement("div"); actionLane.className = "version-container-action-lane";
+    actionLane.appendChild(update); actions.append(statusLine, actionLane);
+    const retentionLabel = document.createElement("label"); retentionLabel.className = "version-container-retention";
+    const retentionTitle = document.createElement("span"); retentionTitle.textContent = "Keep previous images:";
+    const retention = document.createElement("input"); retention.type = "number"; retention.min = "0"; retention.step = "1"; retention.value = "1"; retention.disabled = true;
+    const saveRetention = document.createElement("button"); saveRetention.type = "button"; saveRetention.textContent = "Save"; saveRetention.disabled = true;
+    retentionLabel.append(retentionTitle, retention); controls.append(retentionLabel, saveRetention);
+    const library = card("Previous container images"); library.className += " version-container-history backup-library-section";
+    const images = document.createElement("div"); images.className = "backup-file-grid";
+    const footer = document.createElement("div"); footer.className = "backup-library-summary";
+    const summary = document.createElement("span");
+    const restore = document.createElement("button"); restore.type = "button"; restore.textContent = "Restore selected"; restore.disabled = true;
+    footer.append(summary, restore); library.append(images, footer);
+    let selectedDigest = "";
+    const sizeLabel = (bytes) => bytes > 0 ? bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(1)} GB` : `${Math.ceil(bytes / 1048576)} MB` : "";
     const helper = document.createElement("p"); helper.className = "muted compact"; helper.hidden = true;
     const progress = document.createElement("div");
     const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = "";
     terminal.textContent = "Checking the selected container image…";
     panel.append(identity, controls, actions, helper);
-    root.append(panel, progress, terminal);
+    root.append(panel, library, progress, terminal);
     if (!current()) return;
     content.replaceChildren(root);
     let plan = { state: "unavailable", running: false };
@@ -294,10 +308,25 @@ if (versionLauncher && versionDialog) {
     let busy = true;
     const sync = () => {
       const actionable = ["update_available", "image_missing", "restart_needed"].includes(plan.state) && Boolean(plan.plan_fingerprint);
-      restart.disabled = backup.disabled = busy || !actionable || !plan.running;
+      restart.disabled = busy || !actionable || !plan.running;
+      backup.disabled = busy || !plan.running || (!actionable && !(plan.previous_images || []).length);
+      retention.disabled = saveRetention.disabled = busy;
+      restore.disabled = busy || !selectedDigest || !plan.restore_fingerprint;
       if (!plan.running) restart.checked = backup.checked = false;
       update.disabled = busy || !actionable || (plan.state === "restart_needed" && !restart.checked);
     };
+    saveRetention.addEventListener("click", async () => {
+      if (!current() || saveRetention.disabled) return;
+      const value = retention.value === "" ? "1" : retention.value;
+      if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(Number(value))) { state.textContent = "Keep previous images must be a non-negative integer."; return; }
+      busy = true; sync();
+      try {
+        const body = new URLSearchParams({ csrf, keep_previous_images: value });
+        await request("/api/version/container/retention", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+        if (!current()) return;
+        await render();
+      } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; busy = false; sync(); }
+    });
     backup.addEventListener("change", () => { if (backup.checked) restart.checked = true; sync(); });
     restart.addEventListener("change", () => { if (!restart.checked) backup.checked = false; sync(); });
     const trace = async (id) => {
@@ -325,12 +354,13 @@ if (versionLauncher && versionDialog) {
         } else setTimeout(() => watch(id), 2000);
       } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; }
     };
-    update.addEventListener("click", async () => {
-      if (!current() || update.disabled) return;
+    const submit = async (restoring) => {
+      if (!current() || (restoring ? restore.disabled : update.disabled)) return;
       busy = true; sync();
       try {
         let confirmPlayers = false;
-        if (restart.checked) {
+        const restartNow = restoring ? Boolean(plan.running) : restart.checked;
+        if (restartNow) {
           const snapshot = await request("/api/minecraft/workspace/snapshot");
           if (!current()) return;
           const online = snapshot?.players?.online;
@@ -340,7 +370,8 @@ if (versionLauncher && versionDialog) {
             if (!confirmPlayers) { busy = false; sync(); return; }
           }
         }
-        const body = new URLSearchParams({ csrf, plan_fingerprint: plan.plan_fingerprint, restart_now: restart.checked ? "yes" : "no", backup_before_restart: backup.checked ? "yes" : "no", confirm_players: confirmPlayers ? "yes" : "no" });
+        const body = new URLSearchParams({ csrf, plan_fingerprint: restoring ? plan.restore_fingerprint : plan.plan_fingerprint, restart_now: restartNow ? "yes" : "no", backup_before_restart: backup.checked && restartNow ? "yes" : "no", confirm_players: confirmPlayers ? "yes" : "no" });
+        if (restoring) body.set("restore_digest", selectedDigest);
         const result = await request("/api/version/container/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
         if (!current()) return;
         if (!result.operation?.operation_id) throw new Error("Container update tracking is unavailable. Refresh to check its status.");
@@ -355,7 +386,9 @@ if (versionLauncher && versionDialog) {
         // A lost POST response may still have started the operation.
         await render(failure.message);
       }
-    });
+    };
+    update.addEventListener("click", () => submit(false));
+    restore.addEventListener("click", () => submit(true));
     try {
       const [status, pending] = await Promise.all([
         request("/api/version/container/status").catch((failure) => { if (failure.staleSelection) throw failure; return { state: "unavailable", running: false }; }),
@@ -363,6 +396,22 @@ if (versionLauncher && versionDialog) {
       ]);
       if (!current()) return;
       plan = status;
+      retention.value = String(status.keep_previous_images ?? 1);
+      const retained = Array.isArray(status.previous_images) ? status.previous_images : [];
+      let totalSize = 0;
+      for (const image of retained) {
+        const entry = document.createElement("label"); entry.className = "backup-file-card backup-file-selectable";
+        const select = document.createElement("input"); select.type = "radio"; select.className = "backup-file-checkbox"; select.name = "previous-container-image"; select.value = image.digest;
+        select.addEventListener("change", () => { if (!current() || busy) return; selectedDigest = select.checked ? image.digest : ""; sync(); });
+        const details = document.createElement("div");
+        const name = document.createElement("strong"); name.textContent = image.image;
+        const metadata = document.createElement("span"); metadata.className = "muted compact";
+        const size = sizeLabel(image.size); totalSize += image.size || 0;
+        metadata.textContent = `${image.digest.slice(0, 19)}… · ${new Date(image.retained_at).toLocaleString()}${size ? " · " + size : ""}`;
+        details.append(name, metadata); entry.append(select, details); images.appendChild(entry);
+      }
+      summary.textContent = `${retained.length} images${totalSize ? " · " + sizeLabel(totalSize) : ""}`;
+      if (!retained.length) { const empty = document.createElement("p"); empty.className = "muted compact"; empty.textContent = "No previous container images."; images.appendChild(empty); }
       if (status.server_name) serverLine.replaceChildren(...line("Server:", status.server_name).children);
       imageLine.replaceChildren(...line("Image:", status.image).children);
       statusLine.replaceChildren(...line("Status:", containerLabel(status.state)).children);
@@ -378,8 +427,9 @@ if (versionLauncher && versionDialog) {
         if (!current()) return;
         if (["needs_attention", "failed"].includes(operation.state)) {
           const acknowledge = document.createElement("button"); acknowledge.type = "button";
-          acknowledge.textContent = "Verify and keep current server";
+          acknowledge.textContent = "Keep current version";
           acknowledge.addEventListener("click", async () => {
+            if (!current()) return;
             acknowledge.disabled = true;
             try {
               const body = new URLSearchParams({ csrf, operation_id: operation.operation_id });
@@ -388,7 +438,7 @@ if (versionLauncher && versionDialog) {
               containerCompleted = null; await render();
             } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; acknowledge.disabled = false; }
           });
-          progress.appendChild(acknowledge);
+          actionLane.replaceChildren(acknowledge, update);
         } else if (!["succeeded", "resolved"].includes(operation.state)) void watch(operation.operation_id);
       }
       sync();
@@ -424,14 +474,14 @@ if (versionLauncher && versionDialog) {
           updateOperation = "";
           const acknowledge = document.createElement("button");
           acknowledge.type = "button";
-          acknowledge.textContent = "Verify and keep current server";
+          acknowledge.textContent = "Keep current version";
           acknowledge.addEventListener("click", async () => {
             acknowledge.disabled = true;
             try {
               const body = new URLSearchParams({ csrf, acknowledge: "yes", operation_id: operation.operation_id });
               await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
               completedOperation = null;
-              await render("Current server verified and kept. Review changes again when ready.");
+              await render("Current version kept. Review changes again when ready.");
             } catch (failure) { if (failure.staleSelection) return; state.textContent = failure.message; acknowledge.disabled = false; }
           });
           progress.appendChild(acknowledge);

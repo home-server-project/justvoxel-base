@@ -127,6 +127,18 @@ func main() {
 		if err := dataMigrationRuntimeCommand(context.Background(), args[1:]); err != nil {
 			fatal("data migration runtime: %v", err)
 		}
+	case "instance-container-history":
+		if err := containerHistoryCommand(context.Background(), args[1:]); err != nil {
+			fatal("container image history: %v", err)
+		}
+	case "system-update-activate":
+		if os.Geteuid() != 0 || len(args) != 2 {
+			fatal("invalid system update activation")
+		}
+		if err := activateDownloadedSystemUpdate(context.Background(), args[1]); err != nil {
+			fatal("The staged update could not be prepared. Reboot was cancelled: %v", err)
+		}
+
 	case "instance-version-publish", "instance-version-backup", "instance-container-publish":
 		if err := instanceVersionCommand(context.Background(), args); err != nil {
 			fatal("instance version operation: %v", err)

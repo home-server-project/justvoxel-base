@@ -59,3 +59,29 @@ func TestContainerWorkspaceSelectionAndStrictCSRFDecisions(t *testing.T) {
 		t.Fatalf("selected pull-only choices: %d %+v", w.Code, client.change)
 	}
 }
+
+func (f *containerWorkspaceTestAPI) MinecraftInstanceContainerRetention(_ context.Context, _ string, id string, n int) error {
+	f.id = id
+	f.writes++
+	return nil
+}
+func TestContainerRetentionNumericEmptyDefaultCSRFAndSelection(t *testing.T) {
+	_, base := phase7App(t)
+	client := &containerWorkspaceTestAPI{phase7API: base}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{"csrf=csrf-token&keep_previous_images=-1", "csrf=csrf-token&keep_previous_images=1.5", "csrf=csrf-token&keep_previous_images=1&keep_previous_images=2", "csrf=csrf-token&command=prune", "csrf=wrong&keep_previous_images=1"} {
+		w := phase7Request(app, "POST", "/api/version/container/retention?server=jv-family1", body)
+		if w.Code < 400 || client.writes != 0 {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+	for _, body := range []string{"csrf=csrf-token&keep_previous_images=", "csrf=csrf-token&keep_previous_images=0", "csrf=csrf-token&keep_previous_images=2"} {
+		w := phase7Request(app, "POST", "/api/version/container/retention?server=jv-family1", body)
+		if w.Code != 200 || client.id != "jv-family1" {
+			t.Fatalf("retention: %d %s", w.Code, w.Body.String())
+		}
+	}
+}

@@ -89,6 +89,7 @@ func (a *App) systemUpdateReboot(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := client.AdminSystemUpdateReboot(r.Context(), session, api.AdminSystemUpdateRebootOptions{
 		ConfirmPlayers:  r.FormValue("confirm_players") == "yes",
+		StagedDigest:    r.FormValue("staged_digest"),
 		BackupMinecraft: r.FormValue("backup_minecraft") == "yes",
 		WarningSeconds:  warningSeconds,
 	})

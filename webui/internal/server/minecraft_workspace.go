@@ -112,6 +112,7 @@ func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/minecraft/workspace/identity/manual", a.minecraftWorkspaceInstance)
 	mux.HandleFunc("GET /api/version/workspace/status", a.versionWorkspaceStatus)
 	mux.HandleFunc("GET /api/version/container/status", a.minecraftContainerWorkspace)
+	mux.HandleFunc("POST /api/version/container/retention", a.minecraftContainerWorkspace)
 	mux.HandleFunc("POST /api/version/container/update", a.minecraftContainerWorkspace)
 	mux.HandleFunc("GET /api/version/container/operation", a.minecraftContainerWorkspace)
 	mux.HandleFunc("POST /api/version/container/acknowledge", a.minecraftContainerWorkspace)

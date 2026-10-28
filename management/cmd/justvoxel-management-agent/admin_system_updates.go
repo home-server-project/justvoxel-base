@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -23,6 +25,7 @@ type bootcDeploymentImage struct {
 type bootcDeployment struct {
 	Image        bootcDeploymentImage  `json:"image"`
 	CachedUpdate *bootcDeploymentImage `json:"cachedUpdate,omitempty"`
+	DownloadOnly bool                  `json:"downloadOnly"`
 }
 
 type bootcStatusPayload struct {
@@ -61,11 +64,69 @@ var runBootcStatus = func(ctx context.Context) ([]byte, error) {
 }
 
 var runBootcUpgrade = func(ctx context.Context) ([]byte, error) {
-	return exec.CommandContext(ctx, "bootc", "upgrade").CombinedOutput()
+	return exec.CommandContext(ctx, "bootc", "upgrade", "--download-only").CombinedOutput()
 }
 
 var runBootcUpgradeCheck = func(ctx context.Context) ([]byte, error) {
 	return exec.CommandContext(ctx, "bootc", "upgrade", "--check").CombinedOutput()
+}
+
+// Shared with the persistent reboot worker: staging cannot replace its target.
+func lockSystemUpdate() (*os.File, error) {
+	if err := os.MkdirAll("/run/justvoxel", 0755); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile("/run/justvoxel/system-update.lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+var acquireSystemUpdateLock = lockSystemUpdate
+
+var runBootcActivate = func(ctx context.Context) error {
+	return exec.CommandContext(ctx, "bootc", "upgrade", "--from-downloaded").Run()
+}
+
+// The root worker holds system-update.lock throughout activation and shutdown.
+func activateDownloadedSystemUpdate(ctx context.Context, digest string) error {
+	if !operationFingerprintPattern.MatchString(digest) {
+		return errors.New("invalid staged image")
+	}
+	read := func() (bootcStatusDocument, error) {
+		var doc bootcStatusDocument
+		data, err := runBootcStatus(ctx)
+		if err == nil {
+			err = json.Unmarshal(data, &doc)
+		}
+		if err == nil && (doc.APIVersion != "org.containers.bootc/v1" || doc.Status.ReadOnly || doc.Status.Booted == nil || !operationFingerprintPattern.MatchString(doc.Status.Booted.Image.ImageDigest) || doc.Status.Staged == nil || doc.Status.Staged.Image.ImageDigest != digest || doc.Status.Booted.Image.ImageDigest == digest) {
+			err = errors.New("staged image changed; refresh and try again")
+		}
+		return doc, err
+	}
+	before, err := read()
+	if err != nil {
+		return err
+	}
+	// Normal queued deployments written by older versions need no activation.
+	if before.Status.Staged.DownloadOnly {
+		if err = runBootcActivate(ctx); err != nil {
+			return err
+		}
+	}
+	after, err := read()
+	if err != nil {
+		return err
+	}
+	if after.Status.Staged.DownloadOnly || after.Status.Booted.Image.ImageDigest != before.Status.Booted.Image.ImageDigest {
+		return errors.New("staged image activation could not be verified")
+	}
+	return nil
 }
 
 func registerAdminSystemUpdateRoutes(mux *http.ServeMux, s *server) {
@@ -315,6 +376,13 @@ func (s *server) adminSystemUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.systemUpdateMu.Unlock()
 
+	lock, lockErr := acquireSystemUpdateLock()
+	if lockErr != nil {
+		writeError(w, http.StatusConflict, "a system update reboot is in progress")
+		return
+	}
+	defer lock.Close()
+
 	statusCtx, statusCancel := context.WithTimeout(r.Context(), 10*time.Second)
 	before, err := collectAdminSystemUpdateStatus(statusCtx)
 	statusCancel()
@@ -346,6 +414,14 @@ func (s *server) adminSystemUpdate(w http.ResponseWriter, r *http.Request) {
 			_ = s.store.recordAuditEvent(actor, "system_update", "host", false, "bootc upgrade completed but deployment status could not be verified")
 		}
 		writeError(w, http.StatusInternalServerError, "bootc upgrade completed but deployment status could not be verified")
+		return
+	}
+
+	if after.Running.Digest != before.Running.Digest || (before.Available != nil && before.Available.Digest != "" && before.Available.Digest != before.Running.Digest && !after.RebootRequired) {
+		if s.store != nil {
+			_ = s.store.recordAuditEvent(actor, "system_update", "host", false, "downloaded deployment could not be verified as staged")
+		}
+		writeError(w, http.StatusServiceUnavailable, "The downloaded update could not be verified as staged. Refresh and try again.")
 		return
 	}
 

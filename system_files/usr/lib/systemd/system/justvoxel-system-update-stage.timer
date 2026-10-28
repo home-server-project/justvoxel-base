@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically stage JustVoxel system updates without rebooting
+
+[Timer]
+OnBootSec=20min
+OnUnitInactiveSec=5h
+RandomizedDelaySec=10min
+Persistent=true
+Unit=justvoxel-system-update-stage.service
+
+[Install]
+WantedBy=timers.target

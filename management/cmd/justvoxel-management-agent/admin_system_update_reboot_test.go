@@ -114,3 +114,28 @@ func TestAdminSystemUpdateRebootStatusAllowsLocalRoot(t *testing.T) {
 		t.Fatalf("unexpected status: %s", rr.Body.String())
 	}
 }
+
+func TestAdminSystemUpdateRebootPinsDisplayedStagedDigest(t *testing.T) {
+	old := runAdminSystemUpdateRebootHelper
+	t.Cleanup(func() { runAdminSystemUpdateRebootHelper = old })
+	digest := "sha256:" + strings.Repeat("b", 64)
+	calls := 0
+	runAdminSystemUpdateRebootHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+		calls++
+		if strings.Join(args, " ") != "request --staged-digest="+digest+" --warning-seconds=60" {
+			t.Fatal(args)
+		}
+		return []byte(`{"ok":true,"state":"queued","accepted":true}`), 0, nil
+	}
+	s := adminServerForTest()
+	w := httptest.NewRecorder()
+	s.adminSystemUpdateReboot(w, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/update-reboot", `{"action_confirmed":true,"staged_digest":"stable"}`))
+	if w.Code != 400 || calls != 0 {
+		t.Fatal("mutable reboot identity accepted")
+	}
+	w = httptest.NewRecorder()
+	s.adminSystemUpdateReboot(w, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/update-reboot", `{"action_confirmed":true,"staged_digest":"`+digest+`"}`))
+	if w.Code != 202 || calls != 1 {
+		t.Fatalf("pinned reboot: %d %s", w.Code, w.Body.String())
+	}
+}

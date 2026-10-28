@@ -1,0 +1,10 @@
+[Unit]
+Description=Download and stage JustVoxel system updates
+Wants=network-online.target
+After=network-online.target justvoxel-management.service
+Requires=justvoxel-management.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/justvoxel/mjust/os-update
+TimeoutStartSec=20min

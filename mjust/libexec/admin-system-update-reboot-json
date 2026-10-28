@@ -2,6 +2,7 @@
 set -euo pipefail
 
 source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/system-update-api.sh
 readonly shutdown_helper=/usr/libexec/justvoxel/mjust/instance-host-shutdown-prepare
 require_root
 
@@ -23,12 +24,15 @@ emit_error() {
 }
 
 request_reboot() {
-    local confirm_players=no backup_minecraft=no warning_seconds=60
+    local confirm_players=no backup_minecraft=no warning_seconds=60 expected_digest=""
     local instances online=0 players_json='[]'
 
     shift
     while (( $# > 0 )); do
         case "$1" in
+            --staged-digest=sha256:*)
+                expected_digest="${1#--staged-digest=}"
+                [[ ${expected_digest} =~ ^sha256:[a-f0-9]{64}$ ]] || { emit_error invalid_stage 'Invalid staged update.'; return 2; } ;;
             --confirm-players) confirm_players=yes ;;
             --backup-minecraft) backup_minecraft=yes ;;
             --warning-seconds=10) warning_seconds=10 ;;
@@ -58,11 +62,22 @@ request_reboot() {
         return 10
     fi
 
+    local update_status staged_digest
+    if ! update_status="$(jv_system_update_get)" || ! staged_digest="$(jq -er 'select(.reboot_required == true) | .staged.digest | select(test("^sha256:[a-f0-9]{64}$"))' <<<"${update_status}")"; then
+        emit_error stage_unavailable 'No verified staged update is ready. Refresh and try again.'
+        return 3
+    fi
+
+    if [[ -n ${expected_digest} && ${expected_digest} != "${staged_digest}" ]]; then
+        emit_error stage_changed 'The staged update changed. Refresh and try again.'
+        return 3
+    fi
+
     install -d -m0755 /run/justvoxel
     jq -cn --argjson warning "${warning_seconds}" --argjson backup "$([[ ${backup_minecraft} == yes ]] && echo true || echo false)"         '{ok:true,state:"queued",accepted:true,confirmation_required:false,warning_seconds:$warning,backup_minecraft:$backup}' > "${state_file}.tmp"
     mv -f "${state_file}.tmp" "${state_file}"
 
-    if ! systemd-run --quiet --collect --unit="${unit_name}"         --setenv="JV_UPDATE_REBOOT_BACKUP=${backup_minecraft}"         --setenv="JV_UPDATE_REBOOT_WARNING_SECONDS=${warning_seconds}"         "${worker}"; then
+    if ! systemd-run --quiet --collect --unit="${unit_name}"         --setenv="JV_UPDATE_REBOOT_DIGEST=${staged_digest}" --setenv="JV_UPDATE_REBOOT_BACKUP=${backup_minecraft}"         --setenv="JV_UPDATE_REBOOT_WARNING_SECONDS=${warning_seconds}"         "${worker}"; then
         jq -cn '{ok:true,state:"failed",accepted:false,confirmation_required:false,reason:"action_failed",message:"System update reboot workflow could not be started."}' > "${state_file}.tmp"
         mv -f "${state_file}.tmp" "${state_file}"
         emit_error action_failed 'System update reboot workflow could not be started.'

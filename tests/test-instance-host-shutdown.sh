@@ -22,7 +22,7 @@ class Shutdown(unittest.TestCase):
         for name in ('instances', 'registry', 'quadlets', 'bin', 'helpers', 'run'):
             (self.root / name).mkdir(mode=0o700)
         self.env = dict(os.environ, PATH=str(self.root / 'bin') + ':' + os.environ['PATH'],
-                        FIXTURE=str(self.root), JV_UPDATE_REBOOT_WARNING_SECONDS='10')
+                        FIXTURE=str(self.root), JV_UPDATE_REBOOT_WARNING_SECONDS='10', JV_UPDATE_REBOOT_DIGEST='sha256:'+'b'*64)
         self.data = dict(running=[], players={}, queue_fail=False, reboot_fail=False, backup_fail='')
         self.save()
         tool = '''#!/usr/bin/env python3
@@ -58,6 +58,9 @@ elif tool=='podman':
     elif a[:3]!=['kill','--signal','SIGUSR1']: sys.exit(2)
 elif tool=='systemd-run': sys.exit(1 if d['queue_fail'] else 0)
 elif tool=='management-agent':
+    if a[0]=='system-update-activate':
+        assert a[1]=='sha256:'+'b'*64
+        sys.exit(1 if d.get('activation_fail') else 0)
     assert a[0]=='instance-version-backup'
     assert not d['running'], 'backup must be cold across the appliance'
     sys.exit(1 if a[1]==d['backup_fail'] else 0)
@@ -68,6 +71,7 @@ else: sys.exit(2)
         common = 'require_root() { :; }; jv_variant_kind() { echo hws; }; jv_bootc_status_json() { :; }\n'
         for name in ('common.sh', 'os-common.sh'):
             self.write(self.root / 'helpers' / name, common, 0o600)
+        self.write(self.root / 'helpers/system-update-api.sh', 'jv_system_update_get(){ printf \'%s\\n\' \'{"ok":true,"reboot_required":true,"staged":{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}\'; }\n', 0o600)
         for relative in ('mjust/libexec/instance-host-shutdown-prepare',
                          'mjust/libexec/host-shutdown-guard',
                          'mjust/libexec/admin-system-actions-json',
@@ -222,7 +226,7 @@ else: sys.exit(2)
         self.instances(IDS[:2])
         self.run_helper('system-update-reboot-worker', JV_UPDATE_REBOOT_BACKUP='yes')
         self.assertEqual(self.changed('stop'), ['minecraft-'+i+'.service' for i in IDS[:2]])
-        self.assertEqual([c[2] for c in self.calls() if c[0]=='management-agent'], IDS)
+        self.assertEqual([c[2] for c in self.calls() if c[:2]==['management-agent','instance-version-backup']], IDS)
         self.assertEqual(self.changed('start'), [])
         self.assert_running([])
 
@@ -260,6 +264,41 @@ else: sys.exit(2)
         self.run_helper('system-update-reboot-worker', rc=4)
         self.assert_running(IDS[:2])
         self.assertNotIn(['systemctl', 'reboot'], self.calls())
+
+    def test_activation_failure_preserves_running_servers_and_prevents_reboot(self):
+        self.instances(IDS[:2])
+        self.data['activation_fail'] = True
+        self.save()
+        self.run_helper('system-update-reboot-worker', rc=3)
+        self.assertEqual(self.changed('stop'), [])
+        self.assertEqual(self.changed('start'), [])
+        self.assertNotIn(['systemctl', 'reboot'], self.calls())
+        self.assert_running(IDS[:2])
+        self.assertEqual(json.loads((self.root / 'run/system-update-reboot.json').read_text())['reason'], 'activation_failed')
+
+    def test_activation_precedes_graceful_stop_backup_and_reboot(self):
+        self.instances(IDS[:2])
+        self.run_helper('system-update-reboot-worker', JV_UPDATE_REBOOT_BACKUP='yes')
+        calls = self.calls()
+        activate = next(i for i,c in enumerate(calls) if c[:2]==['management-agent','system-update-activate'])
+        stop = next(i for i,c in enumerate(calls) if c[:3]==['systemctl','--no-block','stop'])
+        backup = next(i for i,c in enumerate(calls) if c[:2]==['management-agent','instance-version-backup'])
+        self.assertLess(activate, stop)
+        self.assertLess(stop, backup)
+        self.assertLess(backup, calls.index(['systemctl','reboot']))
+
+    def test_player_confirmation_does_not_activate_or_queue(self):
+        self.instances(IDS[:2], {IDS[1]: 'There are 1 of a max of 20 players online: Steve'})
+        self.run_helper('admin-system-update-reboot-json', 'request', rc=10)
+        self.assertFalse(any(c[0] in ('management-agent','systemd-run') for c in self.calls()))
+        self.assert_running(IDS[:2])
+
+    def test_reviewed_stage_mismatch_does_not_queue(self):
+        self.instances(IDS[:2])
+        result=self.run_helper('admin-system-update-reboot-json','request','--staged-digest=sha256:'+'c'*64,rc=3)
+        self.assertEqual(result['reason'],'stage_changed')
+        self.assertFalse(any(c[0]=='systemd-run' for c in self.calls()))
+        self.assertEqual(self.changed('stop'),[])
 
     def test_guard_only_instance_helper_and_preserves_delay(self):
         self.instances(IDS[:2], {IDS[1]: None})

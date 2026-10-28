@@ -191,3 +191,84 @@ func TestContainerInterruptedJournalKeepsExclusionAndSelectedIdentity(t *testing
 		t.Fatal("interrupted container operation released exclusion")
 	}
 }
+
+func TestContainerRetentionStrictNumericDefaultAndAuthorization(t *testing.T) {
+	whitelistSurfaceFixture(t)
+	old := runMinecraftContainerRetention
+	t.Cleanup(func() { runMinecraftContainerRetention = old })
+	calls := 0
+	got := -1
+	runMinecraftContainerRetention = func(_ context.Context, id string, n int) error {
+		calls++
+		got = n
+		if id != "jv-a1b2c3" {
+			t.Fatal(id)
+		}
+		return nil
+	}
+	for _, body := range []string{`{"keep_previous_images":-1}`, `{"keep_previous_images":1.5}`, `{"keep_previous_images":"1"}`, `{"keep_previous_images":1,"keep_previous_images":2}`, `{"keep_previous_images":1,"KEEP_PREVIOUS_IMAGES":2}`, `{"keep_previous_images":1,"command":"prune"}`, `{} {}`} {
+		s := surfaceTestServer(t, roleAdministrator)
+		w := httptest.NewRecorder()
+		s.adminMinecraftContainerRetention(w, surfaceRequest("POST", "/v1/minecraft/instances/jv-a1b2c3/container/retention", body))
+		if w.Code != 400 || calls != 0 {
+			t.Fatalf("accepted %s: %d", body, w.Code)
+		}
+	}
+	for _, role := range []principalRole{roleOperator, roleViewer} {
+		s := surfaceTestServer(t, role)
+		w := httptest.NewRecorder()
+		s.adminMinecraftContainerRetention(w, surfaceRequest("POST", "/v1/minecraft/instances/jv-a1b2c3/container/retention", `{"keep_previous_images":0}`))
+		if w.Code != 403 || calls != 0 {
+			t.Fatal("retention authorization bypass")
+		}
+	}
+	for _, item := range []struct {
+		body string
+		want int
+	}{{`{}`, 1}, {`{"keep_previous_images":0}`, 0}, {`{"keep_previous_images":2}`, 2}, {`{"keep_previous_images":25}`, 25}} {
+		s := surfaceTestServer(t, roleAdministrator)
+		w := httptest.NewRecorder()
+		s.adminMinecraftContainerRetention(w, surfaceRequest("POST", "/v1/minecraft/instances/jv-a1b2c3/container/retention", item.body))
+		if w.Code != 200 || got != item.want {
+			t.Fatalf("retention %s: %d %d", item.body, w.Code, got)
+		}
+	}
+}
+func TestContainerRestoreRequiresRetainedDigestAndReviewedLocalFingerprint(t *testing.T) {
+	whitelistSurfaceFixture(t)
+	oldStatus, oldWorker := runMinecraftContainerStatus, startMinecraftContainerUpdateWorker
+	t.Cleanup(func() { runMinecraftContainerStatus = oldStatus; startMinecraftContainerUpdateWorker = oldWorker })
+	digest := "sha256:" + strings.Repeat("a", 64)
+	running := true
+	starts := 0
+	runMinecraftContainerStatus = func(_ context.Context, id string) (minecraftContainerStatus, error) {
+		return minecraftContainerStatus{InstanceID: id, State: "unavailable", Running: running, RestoreFingerprint: testMinecraftResetFingerprint, PreviousImages: []retainedContainerImage{{Digest: digest}}}, nil
+	}
+	startMinecraftContainerUpdateWorker = func(_ *server, _ string, r minecraftContainerUpdateRequest, _ session) {
+		starts++
+		if r.RestoreDigest != digest || r.RestartNow != running {
+			t.Fatal("restore identity changed")
+		}
+	}
+	for _, active := range []bool{true, false} {
+		running = active
+		s := surfaceTestServer(t, roleAdministrator)
+		s.operations = openTestOperationStore(t)
+		body := `{"plan_fingerprint":"` + testMinecraftResetFingerprint + `","restore_digest":"` + digest + `","restart_now":` + boolText(running) + `}`
+		for _, bad := range []string{strings.Replace(body, digest, "stable", 1), strings.Replace(body, digest, "sha256:"+strings.Repeat("b", 64), 1), strings.Replace(body, testMinecraftResetFingerprint, "sha256:"+strings.Repeat("c", 64), 1), strings.TrimSuffix(body, "}") + `,"restore_digest":"` + digest + `"}`} {
+			w := httptest.NewRecorder()
+			s.adminMinecraftContainerUpdate(w, surfaceRequest("POST", "/v1/minecraft/instances/jv-a1b2c3/container/update", bad))
+			if w.Code < 400 {
+				t.Fatal("unsafe restore accepted")
+			}
+		}
+		w := httptest.NewRecorder()
+		s.adminMinecraftContainerUpdate(w, surfaceRequest("POST", "/v1/minecraft/instances/jv-a1b2c3/container/update", body))
+		if w.Code != 202 {
+			t.Fatalf("offline restore: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if starts != 2 {
+		t.Fatal(starts)
+	}
+}

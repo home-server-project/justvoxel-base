@@ -37,6 +37,14 @@ if ! instances="$("${shutdown_helper}" check)"; then
     write_state failed 'Could not confirm Minecraft instance/player status.' 0 0 player_status_unavailable
     exit 3
 fi
+# Pin the reviewed deployment and exclude automatic/manual staging until reboot.
+install -d -m0755 /run/justvoxel
+exec 8>/run/justvoxel/system-update.lock
+if ! flock -n 8 || ! /usr/libexec/justvoxel/management-agent system-update-activate "${JV_UPDATE_REBOOT_DIGEST:-}"; then
+    write_state failed 'The staged update could not be prepared. Reboot was cancelled. Refresh and try again.' 0 0 activation_failed
+    exit 3
+fi
+
 online="$(jq '.online' <<<"${instances}")"
 if (( online > 0 )); then
     deadline=$(( $(date +%s) + warning_seconds ))

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -73,7 +74,11 @@ func TestVersionStackUIUsesSafeStackStateAndSingleReview(t *testing.T) {
 		"status.installed} → ${status.selected_candidate",
 		`needsUpdate && !channelChange && status.stack_state !== "updates_available"`,
 		"csrf, plan_fingerprint: status.plan_fingerprint",
-		"Verify and keep current server",
+		"Keep current version",
+		"Current version kept. Review changes again when ready.",
+		"Previous container images",
+		"Keep previous images:",
+		"Restore selected",
 		`up_to_date: "Up to date"`,
 		`waiting_for_compatibility: "Waiting for compatibility"`,
 		"may start temporarily for verification and will be stopped again afterward",
@@ -123,6 +128,32 @@ func TestVersionStackUIUsesSafeStackStateAndSingleReview(t *testing.T) {
 	for _, forbidden := range []string{"Review updates", "Apply update", `status.update_available ? "Available"`, "Update Geyser", "Update Floodgate", "Update ViaVersion", "sha256", "A stopped server will start for verification.", "BEDROCK_MANAGED_PLUGINS", "MODRINTH_PROJECTS", "PLUGINS="} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("unsafe or technical normal UI: %q", forbidden)
+		}
+	}
+}
+
+func TestVersionRecoveryWordingInNormalWebUI(t *testing.T) {
+	for _, root := range []string{"static", "templates"} {
+		err := fs.WalkDir(os.DirFS(root), ".", func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			data, err := os.ReadFile(root + "/" + path)
+			if err != nil {
+				return err
+			}
+			for _, forbidden := range []string{"Verify and keep current server", "Current server verified and kept"} {
+				if strings.Contains(string(data), forbidden) {
+					t.Errorf("%s/%s contains technical recovery wording %q", root, path, forbidden)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }

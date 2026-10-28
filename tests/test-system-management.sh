@@ -48,8 +48,8 @@ grep -Fq 'POST /v1/admin/system/updates/check' "${system_update_agent}" || fail 
 grep -Fq 'POST /v1/admin/system/updates' "${system_update_agent}" || fail 'System Update apply route missing'
 grep -Fq 'exec.CommandContext(ctx, "bootc", "status", "--json", "--format-version=1")' "${system_update_agent}" || fail 'System Update backend bootc status command missing'
 grep -Fq 'exec.CommandContext(ctx, "bootc", "upgrade", "--check")' "${system_update_agent}" || fail 'System Update backend fresh registry check missing'
-grep -Fq 'exec.CommandContext(ctx, "bootc", "upgrade")' "${system_update_agent}" || fail 'System Update backend ordinary bootc upgrade command missing'
-if grep -Eq -- '--download-only|--from-downloaded|--apply' "${system_update_agent}"; then fail 'System Update backend contains an unwanted bootc download/apply mode'; fi
+grep -Fq 'exec.CommandContext(ctx, "bootc", "upgrade", "--download-only")' "${system_update_agent}" || fail 'System Update backend download-only staging command missing'
+if grep -Eq -- '--apply' "${system_update_agent}"; then fail 'System Update backend contains an automatic bootc reboot mode'; fi
 grep -Fq 'JustVoxel operating system' "${os_status}" || fail 'OS status summary missing'
 
 grep -Fqx "UMask=0007" "${management_unit}" ||
@@ -142,5 +142,13 @@ grep -Fq '/usr/bin/mjust os-update' "${menu}" || fail 'combined System view does
 if grep -Fq "'Operating system status'" "${menu}" || grep -Fq "'Check / download OS update'" "${menu}"; then
     fail 'obsolete duplicate System entries remain in the normal menu'
 fi
+
+
+grep -Fq 'exec.CommandContext(ctx, "bootc", "upgrade", "--from-downloaded")' "${system_update_agent}" || fail 'Downloaded stage activation missing'
+grep -Fq 'system-update-activate "${JV_UPDATE_REBOOT_DIGEST:-}"' "${system_update_reboot_worker}" || fail 'Worker must activate reviewed downloaded stage'
+grep -Fq 'mask bootc-fetch-apply-updates.timer' "${build_common}" || fail 'Upstream automatic reboot timer must be masked'
+grep -Fq 'enable justvoxel-system-update-stage.timer' "${build_common}" || fail 'JustVoxel staging timer must be enabled'
+grep -Fxq 'Persistent=true' "${repo_root}/system_files/usr/lib/systemd/system/justvoxel-system-update-stage.timer" || fail 'Automatic staging timer must persist missed runs'
+grep -Fq 'ExecStart=/usr/libexec/justvoxel/mjust/os-update' "${repo_root}/system_files/usr/lib/systemd/system/justvoxel-system-update-stage.service" || fail 'Automatic staging must use the existing root API path'
 
 echo 'system-management regression tests passed.'

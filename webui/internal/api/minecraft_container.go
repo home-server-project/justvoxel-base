@@ -10,18 +10,28 @@ import (
 	"time"
 )
 
+type RetainedContainerImage struct {
+	Digest     string    `json:"digest"`
+	Image      string    `json:"image"`
+	RetainedAt time.Time `json:"retained_at"`
+	Size       int64     `json:"size,omitempty"`
+}
 type MinecraftContainerStatus struct {
-	InstanceID      string `json:"instance_id"`
-	Image           string `json:"image"`
-	State           string `json:"state"`
-	Running         bool   `json:"running"`
-	PlanFingerprint string `json:"plan_fingerprint"`
+	InstanceID         string                   `json:"instance_id"`
+	Image              string                   `json:"image"`
+	State              string                   `json:"state"`
+	Running            bool                     `json:"running"`
+	PlanFingerprint    string                   `json:"plan_fingerprint"`
+	RestoreFingerprint string                   `json:"restore_fingerprint"`
+	KeepPreviousImages int                      `json:"keep_previous_images"`
+	PreviousImages     []RetainedContainerImage `json:"previous_images"`
 }
 type MinecraftContainerUpdateRequest struct {
 	PlanFingerprint     string `json:"plan_fingerprint"`
 	RestartNow          bool   `json:"restart_now"`
 	BackupBeforeRestart bool   `json:"backup_before_restart"`
 	ConfirmPlayers      bool   `json:"confirm_players"`
+	RestoreDigest       string `json:"restore_digest,omitempty"`
 }
 
 func (c *Client) minecraftContainerRequest(ctx context.Context, session, id, method, action string, body any, out any) error {
@@ -79,4 +89,11 @@ func (c *Client) MinecraftInstanceContainerAcknowledge(ctx context.Context, sess
 	var out PersistentOperationResponse
 	err := c.minecraftContainerRequest(ctx, session, id, "POST", "update/acknowledge", map[string]string{"operation_id": operation}, &out)
 	return out, err
+}
+
+func (c *Client) MinecraftInstanceContainerRetention(ctx context.Context, session, id string, keep int) error {
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	return c.minecraftContainerRequest(ctx, session, id, "POST", "retention", map[string]int{"keep_previous_images": keep}, &out)
 }

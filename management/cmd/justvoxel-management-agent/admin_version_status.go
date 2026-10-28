@@ -73,6 +73,7 @@ var runSetupVersionPreview = func(ctx context.Context, policy, version, bedrock,
 
 func registerAdminVersionStatusRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/container/status", s.adminMinecraftContainerStatus)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/container/retention", s.adminMinecraftContainerRetention)
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/container/update", s.adminMinecraftContainerUpdate)
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/container/update/current", s.adminMinecraftContainerUpdateCurrent)
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/container/update/acknowledge", s.adminMinecraftContainerUpdateAcknowledge)

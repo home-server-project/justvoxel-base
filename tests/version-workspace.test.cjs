@@ -294,6 +294,14 @@ test('unknown operation after reconnect uses generic success without inferring i
   assert.equal(context.root.children[0].children[0].textContent, 'Server update succeeded');
   assert.equal(context.operationKinds.has('reconnected'), false);
 });
+test('resolved operations use normal-user keep-current success wording', () => {
+  for (const kind of [undefined, 'switch', 'container']) {
+    const context = operationPresentation(kind ? new Map([['resolved-operation', kind]]) : new Map());
+    const frame = context.operationFrame({operation_id:'resolved-operation',state:'resolved',status:''});
+    assert.equal(frame.children[0].textContent, 'Current version kept');
+    assert.doesNotMatch(frame.children[0].textContent, /verified/i);
+  }
+});
 test('render shows journal progress once inside the operation frame and preserves unrelated messages', async () => {
   const operation = { operation_id: 'persisted', state: 'running', status: 'Creating cold backup.' };
   const context = operationPresentation();
@@ -306,7 +314,7 @@ test('render shows journal progress once inside the operation frame and preserve
   for (const [message, expected] of [
     ['', ''], [operation.status, ''], ['Response lost', 'Response lost'],
     ['Verification failed.', 'Verification failed.'],
-    ['Current server verified and kept. Review changes again when ready.', 'Current server verified and kept. Review changes again when ready.'],
+    ['Current version kept. Review changes again when ready.', 'Current version kept. Review changes again when ready.'],
   ]) {
     context.message = message;
     await vm.runInContext('(async () => {\n' + finish + '\n})()', context);
@@ -353,7 +361,7 @@ test('operation framing and state accents are scoped to Version Workspace', () =
   assert.ok(source.includes('const progress = operationFrame(operation)'));
 });
 
-test('failed operation keeps verified acknowledgement and reconnect polling stays intact', async () => {
+test('failed operation keeps recovery acknowledgement and reconnect polling stays intact', async () => {
   const start = source.indexOf('      const operation = pending.operation || confirmedOperation;');
   const end = source.indexOf('      if (currentTab === "software")', start);
   for (const failure of [false, true]) {
@@ -370,7 +378,7 @@ test('failed operation keeps verified acknowledgement and reconnect polling stay
     });
     vm.runInContext(source.slice(start,end),context);
     const acknowledge = root.all().find(node=>node.tag==='button');
-    assert.equal(acknowledge.textContent,'Verify and keep current server');
+    assert.equal(acknowledge.textContent,'Keep current version');
     await acknowledge.listeners.click();
     assert.equal(calls[0].url,'/api/version/workspace/update');
     assert.equal(calls[0].body.get('operation_id'),'persisted');
@@ -380,7 +388,10 @@ test('failed operation keeps verified acknowledgement and reconnect polling stay
       assert.equal(context.state.textContent,'Verification failed.');
       assert.equal(acknowledge.disabled,false);
       assert.equal(calls.length,1);
-    } else assert.match(calls[1].message,/Current server verified and kept/);
+    } else {
+      assert.equal(calls[1].message,'Current version kept. Review changes again when ready.');
+      assert.doesNotMatch(calls[1].message,/verified/i);
+    }
   }
   assert.ok(source.includes('completedOperation = operation;'));
   assert.ok(source.includes('confirmedOperation = completedOperation'));
@@ -459,7 +470,7 @@ class ContainerElement extends Element {
   get textContent() { return (this.ownText || '') + this.children.map(child => child.textContent).join(' '); }
   set innerHTML(_) { throw new Error('Container output must use textContent'); }
 }
-function containerWorkspace({status = 'up_to_date', running = true, pending, statusReply, traceReply, selected = 'jv-family1'} = {}) {
+function containerWorkspace({status = 'up_to_date', running = true, pending, statusReply, traceReply, selected = 'jv-family1', previousImages = [], retentionCount = 1} = {}) {
   const calls = [], timers = [], renders = [];
   const content = new ContainerElement('div');
   const context = vm.createContext({
@@ -474,9 +485,11 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
     window: {confirm: () => true},
     request: async (url,options) => {
       calls.push({url,body:options?.body});
-      if(url==='/api/version/container/status') return statusReply ? statusReply() : {instance_id:selected,server_name:'22222',image:'docker.io/itzg/minecraft-server:stable',state:status,running,plan_fingerprint:status==='unavailable'?'':'reviewed'};
+      if(url==='/api/version/container/status') return statusReply ? statusReply() : {instance_id:selected,server_name:'22222',image:'docker.io/itzg/minecraft-server:stable',state:status,running,plan_fingerprint:status==='unavailable'?'':'reviewed',restore_fingerprint:'local-reviewed',keep_previous_images:retentionCount,previous_images:previousImages};
       if(url.startsWith('/api/version/container/operation')) return {operation:pending};
       if(url==='/api/minecraft/workspace/snapshot') return {players:{online:0}};
+      if(url==='/api/version/container/retention') return {ok:true};
+      if(url==='/api/version/container/acknowledge') return {operation:{state:'resolved'}};
       if(url==='/api/version/container/update') return {operation:{operation_id:'container-1',state:'running'}};
       throw new Error(url);
     },
@@ -488,7 +501,7 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
   const end=source.indexOf('  const render = async',start);
   vm.runInContext(source.slice(start,end)+'\nglobalThis.mount = renderContainer;',context);
   return {context,content,calls,timers,renders,mount:()=>context.mount(context.sequence,context.justVoxelSelectionGeneration.version,''),
-    toggles:()=>content.all().filter(node=>node.tag==='input'),
+    toggles:()=>content.all().filter(node=>node.tag==='input'&&node.type==='checkbox'),
     update:()=>content.all().find(node=>node.tag==='button'&&node.textContent==='Update now'),
     terminal:()=>content.all().find(node=>'containerTerminal' in node.dataset)};
 }
@@ -546,4 +559,91 @@ test('Container stale status and stale trace cannot replace a new selection',asy
   active.content.replaceChildren(Object.assign(new ContainerElement('div'),{textContent:'New server terminal'}));
   resolveTrace('Old server trace');await oldTrace;
   assert.equal(active.content.textContent,'New server terminal');assert.equal(active.timers.length,0);
+});
+
+const retainedImage = digest => ({digest,image:'docker.io/itzg/minecraft-server:stable',retained_at:'2026-10-27T12:00:00Z',size:1048576});
+test('Container retention is numeric, missing defaults to one and empty saves one',async()=>{
+ const page=containerWorkspace({retentionCount:undefined});await page.mount();
+ const number=page.content.all().find(node=>node.tag==='input'&&node.type==='number');
+ const save=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Save');
+ assert.equal(number.value,'1');assert.equal(number.min,'0');assert.equal(number.step,'1');
+ assert.ok(!page.content.all().some(node=>node.tag==='select'));
+ number.value='';await save.listeners.click();
+ const sent=page.calls.find(call=>call.url==='/api/version/container/retention');
+ assert.equal(sent.body.get('keep_previous_images'),'1');assert.equal(sent.body.get('csrf'),'csrf');
+ for(const invalid of ['-1','1.5','one']){
+  const invalidPage=containerWorkspace();await invalidPage.mount();
+  invalidPage.content.all().find(node=>node.type==='number').value=invalid;
+  await invalidPage.content.all().find(node=>node.tag==='button'&&node.textContent==='Save').listeners.click();
+  assert.ok(!invalidPage.calls.some(call=>call.url==='/api/version/container/retention'));
+ }
+});
+test('Container lists real previous images and exact selection enables restore',async()=>{
+ const digest='sha256:'+'a'.repeat(64);
+ for(const running of [true,false]){
+  const page=containerWorkspace({running,previousImages:[retainedImage(digest)]});await page.mount();
+  const restore=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
+  assert.equal(restore.disabled,true);
+  const radios=page.content.all().filter(node=>node.type==='radio');assert.equal(radios.length,1);
+  assert.ok(page.content.textContent.includes('sha256:aaaaaaaaaaaa…'));
+  assert.ok(!page.content.textContent.includes(digest));
+  radios[0].checked=true;radios[0].listeners.change();assert.equal(restore.disabled,false);
+  await restore.listeners.click();
+  const sent=page.calls.find(call=>call.url==='/api/version/container/update');
+  assert.equal(sent.body.get('restore_digest'),digest);assert.equal(sent.body.get('plan_fingerprint'),'local-reviewed');
+  assert.equal(sent.body.get('restart_now'),running?'yes':'no');
+  assert.equal(page.calls.some(call=>call.url==='/api/minecraft/workspace/snapshot'),running);
+ }
+ const empty=containerWorkspace();await empty.mount();
+ assert.equal(empty.content.all().filter(node=>node.type==='radio').length,0);
+ assert.match(empty.content.textContent,/0 images/);
+ assert.equal(empty.content.all().find(node=>node.textContent==='Restore selected').disabled,true);
+});
+test('Container keep-current action shares the Update-now lane',async()=>{
+ const page=containerWorkspace({status:'update_available',pending:{operation_id:'failed-update',state:'needs_attention'}});await page.mount();
+ const keep=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Keep current version');
+ assert.ok(keep);assert.equal(keep.parent,page.update().parent);
+ assert.deepEqual(keep.parent.children.map(node=>node.textContent),['Keep current version','Update now']);
+ assert.ok(!page.content.textContent.includes('Verify and keep current server'));
+ await keep.listeners.click();
+ assert.ok(page.calls.some(call=>call.url==='/api/version/container/acknowledge'));
+});
+test('Container output grows inside a responsive workspace',()=>{
+ assert.match(cssRule('.version-container-workspace'),/display:flex;flex:1;flex-direction:column;min-height:0/);
+ assert.match(cssRule('.version-container-workspace>.log-box'),/flex:1;min-height:140px;height:auto;max-height:none;overflow:auto/);
+ assert.match(cssRule('.version-workspace-body:has(.version-container-workspace) [data-version-content]'),/flex:1;min-height:0/);
+ assert.doesNotMatch(cssRule('.version-container-workspace>.log-box'),/resize:/);
+});
+test('Version Container rules precede the Minecraft Network-only CSS region',()=>{
+ const marker='/* Compact Minecraft Network presentation; shared Players rules stay unchanged. */';
+ const networkStart=css.indexOf(marker);
+ assert.ok(networkStart>=0);
+ for(const selector of [
+  '.version-workspace-body:has(.version-container-workspace)',
+  '.version-workspace-body:has(.version-container-workspace) [data-version-content]',
+  '.version-container-workspace',
+  '.version-container-workspace>.log-box',
+  '.version-container-workspace>.panel,.version-container-workspace>[data-version-operation]',
+  '.version-container-action-lane',
+  '.version-container-retention',
+  '.version-container-retention input',
+  '.version-container-history .backup-file-grid',
+  '.version-container-history .backup-file-card>div',
+  '.version-container-history .backup-library-summary',
+  '.version-container-workspace .version-container-history .backup-file-card',
+ ]) {
+  const start=css.indexOf(selector+'{');
+  assert.ok(start>=0&&start<networkStart,selector);
+ }
+ assert.doesNotMatch(css.slice(networkStart),/\.version-/);
+});
+test('Old container restore selection and retention callbacks cannot submit for a new server',async()=>{
+ const page=containerWorkspace({previousImages:[retainedImage('sha256:'+'a'.repeat(64))]});await page.mount();
+ const radio=page.content.all().find(node=>node.type==='radio');
+ radio.checked=true;radio.listeners.change();
+ const restore=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
+ const save=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Save');
+ page.context.justVoxelSelectionGeneration.version++;
+ await restore.listeners.click();await save.listeners.click();radio.listeners.change();
+ assert.ok(!page.calls.some(call=>call.url==='/api/version/container/update'||call.url==='/api/version/container/retention'));
 });

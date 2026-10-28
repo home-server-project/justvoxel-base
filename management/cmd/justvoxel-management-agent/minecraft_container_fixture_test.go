@@ -53,7 +53,7 @@ systemctl(){
 podman(){
  printf 'podman %s\n' "$*" >> "$FIXTURE_ROOT/calls"
  case "$1" in
- pull) printf 'Copying blob fixture\nCopying config fixture\nWriting manifest fixture\n'; touch "$FIXTURE_ROOT/downloaded"; if [[ -f $FIXTURE_ROOT/move-remote ]]; then cat "$FIXTURE_ROOT/move-remote" > "$FIXTURE_ROOT/remote"; fi;;
+ pull) [[ ! -f $FIXTURE_ROOT/pull-fail ]] || return 17; printf 'Copying blob fixture\nCopying config fixture\nWriting manifest fixture\n'; touch "$FIXTURE_ROOT/downloaded"; if [[ -f $FIXTURE_ROOT/move-remote ]]; then cat "$FIXTURE_ROOT/move-remote" > "$FIXTURE_ROOT/remote"; fi;;
  ps) [[ $(cat "$FIXTURE_ROOT/active") != active ]] || printf minecraft-jv-a1b2c3;;
  image)
   if [[ $3 == *"$FIXTURE_REMOTE" ]];then
@@ -84,9 +84,22 @@ podman(){
 		f.write(name, text)
 	}
 	f.write("validate-instance-runtime-commit", "#!/bin/bash\n[[ $1 == jv-a1b2c3 ]]\n")
-	f.write("verify-minecraft-stack", "#!/bin/bash\nprintf 'verify %s\\n' \"$*\" >> \"$FIXTURE_ROOT/calls\"\n")
+	f.write("verify-minecraft-stack", "#!/bin/bash\nif [[ -f $FIXTURE_ROOT/fail-old && $(jq -r .runtime.image_digest $FIXTURE_ROOT/instances/jv-a1b2c3/config.json) == $FIXTURE_OLD ]]; then exit 1; fi\nprintf 'verify %s\\n' \"$*\" >> \"$FIXTURE_ROOT/calls\"\n")
 	f.write("management-agent", `#!/bin/bash
 printf 'agent %s\n' "$*" >> "$FIXTURE_ROOT/calls"
+if [[ $1 == instance-container-history ]]; then
+ [[ $3 == jv-a1b2c3 ]] || exit 95
+ history="$FIXTURE_ROOT/history.json"
+ [[ -f $history ]] || printf '{"keep_previous_images":1,"previous_images":[]}' > "$history"
+ case "$2" in
+ status) jq --arg selected "$(jq -r .runtime.image_digest "$FIXTURE_ROOT/instances/$3/config.json")" '.previous_images |= map(select(.digest != $selected))' "$history";;
+ record)
+  jq --arg old "$4" --arg selected "$5" '.previous_images=([if $old!="" and $old!=$selected then {digest:$old,image:"docker.io/itzg/minecraft-server:stable",retained_at:"2026-10-27T00:00:00Z",size:1024} else empty end]+[.previous_images[]|select(.digest!=$old and .digest!=$selected)]) | .previous_images=.previous_images[:.keep_previous_images]' "$history" > "$history.tmp"
+  mv "$history.tmp" "$history";;
+ retention) jq --argjson n "$4" '.keep_previous_images=$n | .previous_images=.previous_images[:$n]' "$history" > "$history.tmp"; mv "$history.tmp" "$history";;
+ *) exit 96;;esac
+ exit
+fi
 [[ $2 == jv-a1b2c3 ]] || exit 95
 case "$1" in
  instance-container-publish)
@@ -308,5 +321,105 @@ func TestContainerStoppedMissingImageCanBeAcknowledgedWithoutStarting(t *testing
 		if strings.Contains(f.text("calls"), forbidden) {
 			t.Fatalf("acknowledgement invoked %s", forbidden)
 		}
+	}
+}
+
+func TestContainerFailedPullPreservesSelectedDigestAndHistory(t *testing.T) {
+	f := newContainerFixture(t)
+	plan := f.status()
+	before := f.text("instances/jv-a1b2c3/config.json")
+	history := f.text("history.json")
+	f.write("pull-fail", "")
+	if _, err := f.apply(plan, true, true, true); err == nil {
+		t.Fatal("failed pull succeeded")
+	}
+	if f.text("instances/jv-a1b2c3/config.json") != before || f.text("history.json") != history {
+		t.Fatal("failed pull published image or history")
+	}
+	for _, forbidden := range []string{"instance-container-publish", "instance-container-history record", "systemctl --no-block", "instance-version-backup"} {
+		if strings.Contains(f.text("calls"), forbidden) {
+			t.Fatal(forbidden)
+		}
+	}
+}
+func TestContainerSuccessfulUpdateRetainsServingImageAndRestoresExactImage(t *testing.T) {
+	for _, running := range []bool{false, true} {
+		t.Run(boolText(running), func(t *testing.T) {
+			f := newContainerFixture(t)
+			if !running {
+				f.write("active", "inactive")
+			}
+			if data, err := f.apply(f.status(), running, false, false); err != nil {
+				t.Fatalf("update: %v %s", err, data)
+			}
+			status := f.status()
+			if status.KeepPreviousImages != 1 || len(status.PreviousImages) != 1 || status.PreviousImages[0].Digest != f.old {
+				t.Fatalf("history: %+v", status)
+			}
+			// Restore remains possible without consulting the moving tag/registry.
+			f.write("remote", "offline")
+			status = f.status()
+			f.write("calls", "")
+			if data, err := f.run("restore", status.RestoreFingerprint, boolText(running), boolText(running), "false", f.old); err != nil {
+				t.Fatalf("restore: %v %s", err, data)
+			}
+			calls := f.text("calls")
+			if strings.Contains(calls, "podman pull") {
+				t.Fatal("restore fetched a moving image")
+			}
+			if !strings.Contains(calls, "instance-container-publish jv-a1b2c3 "+f.old) {
+				t.Fatal("restore lost exact digest")
+			}
+			if running {
+				for _, want := range []string{"systemctl --no-block stop", "instance-version-backup", "systemctl start", "verify --instance"} {
+					if !strings.Contains(calls, want) {
+						t.Fatal(want)
+					}
+				}
+			} else if strings.Contains(calls, "systemctl start") || strings.Contains(calls, "systemctl --no-block") {
+				t.Fatal("stopped restore disrupted server")
+			}
+			after := f.status()
+			if len(after.PreviousImages) != 1 || after.PreviousImages[0].Digest != f.remote {
+				t.Fatalf("undo restore lost: %+v", after)
+			}
+		})
+	}
+}
+func TestContainerRestoreFailureRecoversPreviouslySelectedDigest(t *testing.T) {
+	f := newContainerFixture(t)
+	if data, err := f.apply(f.status(), true, false, false); err != nil {
+		t.Fatalf("%v %s", err, data)
+	}
+	plan := f.status()
+	history := f.text("history.json")
+	f.write("calls", "")
+	f.write("fail-old", "")
+	if _, err := f.run("restore", plan.RestoreFingerprint, "true", "false", "false", f.old); err == nil {
+		t.Fatal("failed verification accepted")
+	}
+	if !strings.Contains(f.text("instances/jv-a1b2c3/config.json"), f.remote) || f.text("running") != "new-id" {
+		t.Fatal("previous selection/runtime not recovered")
+	}
+	if f.text("history.json") != history {
+		t.Fatal("failed restore changed history")
+	}
+}
+func TestContainerRestorePlayerConfirmationPrecedesShutdown(t *testing.T) {
+	f := newContainerFixture(t)
+	if data, err := f.apply(f.status(), true, false, false); err != nil {
+		t.Fatalf("%v %s", err, data)
+	}
+	plan := f.status()
+	f.write("players", "There are 1 of a max of 20 players online: Alex")
+	f.write("calls", "")
+	if _, err := f.run("restore", plan.RestoreFingerprint, "true", "false", "false", f.old); err == nil {
+		t.Fatal("missing player confirmation accepted")
+	}
+	if strings.Contains(f.text("calls"), "systemctl --no-block") || strings.Contains(f.text("calls"), "instance-container-publish") {
+		t.Fatal("disrupted before confirmation")
+	}
+	if data, err := f.run("restore", plan.RestoreFingerprint, "true", "false", "true", f.old); err != nil {
+		t.Fatalf("%v %s", err, data)
 	}
 }

@@ -109,6 +109,7 @@ func decodeAdminSystemUpdateStatus(reader io.Reader, target *AdminSystemUpdateSt
 }
 
 type AdminSystemUpdateRebootOptions struct {
+	StagedDigest    string
 	ConfirmPlayers  bool
 	BackupMinecraft bool
 	WarningSeconds  int
@@ -129,10 +130,11 @@ type AdminSystemUpdateRebootStatus struct {
 }
 
 type adminSystemUpdateRebootRequest struct {
-	ActionConfirmed bool `json:"action_confirmed"`
-	ConfirmPlayers  bool `json:"confirm_players"`
-	BackupMinecraft bool `json:"backup_minecraft"`
-	WarningSeconds  int  `json:"warning_seconds"`
+	ActionConfirmed bool   `json:"action_confirmed"`
+	ConfirmPlayers  bool   `json:"confirm_players"`
+	BackupMinecraft bool   `json:"backup_minecraft"`
+	WarningSeconds  int    `json:"warning_seconds"`
+	StagedDigest    string `json:"staged_digest,omitempty"`
 }
 
 func (c *Client) AdminSystemUpdateRebootStatus(ctx context.Context, session string) (AdminSystemUpdateRebootStatus, error) {
@@ -172,6 +174,7 @@ func (c *Client) AdminSystemUpdateReboot(ctx context.Context, session string, op
 	}
 	payload, err := json.Marshal(adminSystemUpdateRebootRequest{
 		ActionConfirmed: true,
+		StagedDigest:    options.StagedDigest,
 		ConfirmPlayers:  options.ConfirmPlayers,
 		BackupMinecraft: options.BackupMinecraft,
 		WarningSeconds:  options.WarningSeconds,
