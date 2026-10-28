@@ -28,6 +28,11 @@ type phase7API struct {
 	putError          error
 	deletions         []api.RegisteredMinecraftInstance
 	backupRequests    map[string]json.RawMessage
+	playerSnapshot    *api.InstancePlayers
+	settingsEvents    []string
+	stopConfirmation  int
+	lifecycleError    error
+	confirmations     []bool
 }
 
 func (f *phase7API) MinecraftInstanceDeletions(context.Context, string) ([]api.RegisteredMinecraftInstance, error) {
@@ -35,6 +40,7 @@ func (f *phase7API) MinecraftInstanceDeletions(context.Context, string) ([]api.R
 }
 
 func (f *phase7API) SetMinecraftInstanceConfiguration(_ context.Context, _, id string, v api.InstanceRuntimeSettings) error {
+	f.settingsEvents = append(f.settingsEvents, "apply:"+id)
 	f.writes = append(f.writes, id)
 	if f.putError != nil {
 		return f.putError
@@ -44,7 +50,27 @@ func (f *phase7API) SetMinecraftInstanceConfiguration(_ context.Context, _, id s
 }
 func (f *phase7API) MinecraftInstancePlayers(_ context.Context, _, id string) (api.InstancePlayers, error) {
 	f.players = append(f.players, id)
+	if f.playerSnapshot != nil {
+		return *f.playerSnapshot, nil
+	}
 	return api.InstancePlayers{ID: id, State: "offline"}, nil
+}
+func (f *phase7API) MinecraftInstanceActionConfirmed(_ context.Context, _, id, action string, confirm bool) (api.MinecraftActionResponse, error) {
+	f.actions = append(f.actions, id+":"+action)
+	f.settingsEvents = append(f.settingsEvents, action+":"+id)
+	f.confirmations = append(f.confirmations, confirm)
+	if f.lifecycleError != nil {
+		return api.MinecraftActionResponse{}, f.lifecycleError
+	}
+	if action == "stop" && f.stopConfirmation > 0 && !confirm {
+		return api.MinecraftActionResponse{ConfirmationRequired: true, Online: f.stopConfirmation}, nil
+	}
+	state := "running"
+	if action == "stop" {
+		state = "stopped"
+	}
+	f.states[id] = api.MinecraftInstanceStatus{ID: id, State: state}
+	return api.MinecraftActionResponse{OK: true}, nil
 }
 func (f *phase7API) MinecraftInstanceLogs(context.Context, string, string) (string, error) {
 	return "", nil
@@ -134,6 +160,9 @@ func TestSelectedSettingsReviewedOverlayAndIsolation(t *testing.T) {
 			if plan.Code != 200 {
 				t.Fatal(plan.Code, plan.Body.String())
 			}
+			if !strings.HasPrefix(body, "tab=overview") && !strings.Contains(plan.Body.String(), "The server stays stopped. Start it normally when ready.") {
+				t.Fatal("stopped review message missing", plan.Body.String())
+			}
 			var review struct {
 				Review string `json:"review"`
 			}
@@ -185,11 +214,11 @@ func TestSelectedInvalidAndVersionNeverFallBack(t *testing.T) {
 		t.Fatal("invalid selection mutated runtime")
 	}
 }
-func TestSelectedStoppedRefusalAndStaleReview(t *testing.T) {
+func TestSelectedRunningUnknownPlayersRetainsReview(t *testing.T) {
 	app, f := phase7App(t)
 	f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running"}
 	w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", "csrf=csrf-token&tab=memory&java_memory=4G&container_memory=6G")
-	if w.Code != 409 || len(f.actions) != 0 || len(f.writes) != 0 {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"apply_blocked":true`) || !strings.Contains(w.Body.String(), `"review":`) || len(f.actions) != 0 || len(f.writes) != 0 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
@@ -485,7 +514,7 @@ func TestSelectedMinecraftRunningStartOnBootReviewedChanges(t *testing.T) {
 	}
 }
 
-func TestSelectedMinecraftRunningOtherSettingsStayStoppedOnly(t *testing.T) {
+func TestSelectedMinecraftRunningOtherSettingsUnknownPlayersFailClosed(t *testing.T) {
 	for _, body := range []string{
 		"tab=memory&java_memory=5G&container_memory=7G",
 		"tab=gameplay&motd=Changed&max_players=12&game_mode=creative",
@@ -505,7 +534,7 @@ func TestSelectedMinecraftRunningOtherSettingsStayStoppedOnly(t *testing.T) {
 			f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running"}
 			for _, action := range []string{"plan", "apply"} {
 				w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/"+action+"?server=jv-family1", body+"&review="+plan.Review)
-				if w.Code != 409 || !strings.Contains(w.Body.String(), "Stop this server normally") || len(f.writes) != 0 || len(f.actions) != 0 {
+				if w.Code != 200 || !strings.Contains(w.Body.String(), `"apply_blocked":true`) || !strings.Contains(w.Body.String(), "Player information is unavailable") || len(f.writes) != 0 || len(f.actions) != 0 {
 					t.Fatal(w.Code, w.Body.String())
 				}
 			}
@@ -636,6 +665,115 @@ func TestSelectedServerSelectionSoftwareMetadata(t *testing.T) {
 			}
 			if !found || strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "/host/") {
 				t.Fatal(w.Body.String())
+			}
+		})
+	}
+}
+
+func TestSelectedSettingsSharedRunningLifecycle(t *testing.T) {
+	for _, body := range []string{
+		"tab=memory&java_memory=5G&container_memory=7G",
+		"tab=gameplay&motd=Changed&max_players=12&game_mode=creative",
+		"tab=crossplay&java_port=25578&bedrock_port=19146&bedrock_enabled=on",
+	} {
+		for _, online := range []int{0, 3} {
+			t.Run(fmt.Sprintf("%s/players=%d", body, online), func(t *testing.T) {
+				app, f := phase7App(t)
+				f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running"}
+				f.playerSnapshot = &api.InstancePlayers{ID: "jv-family1", State: "online", Online: online}
+				body := body + "&csrf=csrf-token"
+				w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", body)
+				var plan struct {
+					Review       string `json:"review"`
+					Confirmation bool   `json:"confirmation_required"`
+					Restart      bool   `json:"restart_required"`
+				}
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.Review == "" || !plan.Restart || plan.Confirmation != (online > 0) || !strings.Contains(w.Body.String(), fmt.Sprintf("Players online: %d", online)) || len(f.settingsEvents) != 0 {
+					t.Fatal("running review", w.Code, w.Body.String(), f.settingsEvents)
+				}
+				body += "&review=" + plan.Review
+				if online > 0 {
+					w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body)
+					if w.Code != 200 || !strings.Contains(w.Body.String(), `"confirmation_required":true`) || len(f.settingsEvents) != 0 {
+						t.Fatal("unconfirmed apply interrupted server", w.Body.String(), f.settingsEvents)
+					}
+					body += "&confirm_players=yes"
+				}
+				w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body)
+				if w.Code != 200 || !strings.Contains(w.Body.String(), `"restarted":true`) || !reflect.DeepEqual(f.settingsEvents, []string{"stop:jv-family1", "apply:jv-family1", "start:jv-family1"}) || f.states["jv-family1"].State != "running" || !reflect.DeepEqual(f.confirmations, []bool{online > 0, false}) {
+					t.Fatal("graceful reviewed lifecycle", w.Code, w.Body.String(), f.settingsEvents, f.confirmations)
+				}
+				if len(f.players) < 2 {
+					t.Fatal("players not rechecked on apply")
+				}
+			})
+		}
+	}
+}
+
+func TestSelectedSettingsApplyRacesAndFailures(t *testing.T) {
+	for _, scenario := range []string{"joined", "joined-at-stop", "unknown", "wrong-player-id", "stopped", "stop-failed", "apply-failed", "stale"} {
+		t.Run(scenario, func(t *testing.T) {
+			app, f := phase7App(t)
+			f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running"}
+			f.playerSnapshot = &api.InstancePlayers{ID: "jv-family1", State: "online"}
+			body := "csrf=csrf-token&tab=memory&java_memory=5G&container_memory=7G"
+			w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", body)
+			var plan struct {
+				Review string `json:"review"`
+			}
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.Review == "" {
+				t.Fatal(w.Body.String())
+			}
+			switch scenario {
+			case "joined":
+				f.playerSnapshot.Online = 2
+			case "joined-at-stop":
+				f.stopConfirmation = 2
+			case "unknown":
+				f.playerSnapshot.State = "unknown"
+			case "wrong-player-id":
+				f.playerSnapshot.ID = "jv-kids001"
+			case "stopped":
+				f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "stopped"}
+			case "stop-failed":
+				f.lifecycleError = fmt.Errorf("graceful stop failed")
+			case "apply-failed":
+				f.putError = fmt.Errorf("configuration rollback completed")
+			case "stale":
+				c := f.runtimes["jv-family1"]
+				c.MOTD = "Changed externally"
+				f.runtimes["jv-family1"] = c
+			}
+			w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body+"&review="+plan.Review)
+			switch scenario {
+			case "joined", "joined-at-stop":
+				if w.Code != 200 || !strings.Contains(w.Body.String(), `"confirmation_required":true`) || !strings.Contains(w.Body.String(), "Players online: 2") || len(f.writes) != 0 || f.states["jv-family1"].State != "running" {
+					t.Fatal(w.Code, w.Body.String(), f.settingsEvents)
+				}
+				if scenario == "joined" && len(f.actions) != 0 {
+					t.Fatal("known players were interrupted")
+				}
+			case "unknown", "wrong-player-id":
+				if w.Code != 200 || !strings.Contains(w.Body.String(), `"apply_blocked":true`) || len(f.settingsEvents) != 0 {
+					t.Fatal(w.Code, w.Body.String(), f.settingsEvents)
+				}
+			case "stopped":
+				if w.Code != 200 || !strings.Contains(w.Body.String(), `"applied":true`) || f.states["jv-family1"].State != "stopped" || !reflect.DeepEqual(f.settingsEvents, []string{"apply:jv-family1"}) {
+					t.Fatal(w.Code, w.Body.String(), f.settingsEvents)
+				}
+			case "stop-failed":
+				if w.Code < 400 || len(f.writes) != 0 || !reflect.DeepEqual(f.settingsEvents, []string{"stop:jv-family1"}) {
+					t.Fatal(w.Code, w.Body.String(), f.settingsEvents)
+				}
+			case "apply-failed":
+				if w.Code < 400 || f.states["jv-family1"].State != "stopped" || !reflect.DeepEqual(f.settingsEvents, []string{"stop:jv-family1", "apply:jv-family1"}) {
+					t.Fatal(w.Code, w.Body.String(), f.settingsEvents)
+				}
+			case "stale":
+				if w.Code != 409 || !strings.Contains(w.Body.String(), "Settings changed since Review. Review this server again.") || len(f.settingsEvents) != 0 {
+					t.Fatal(w.Code, w.Body.String(), f.settingsEvents)
+				}
 			}
 		})
 	}

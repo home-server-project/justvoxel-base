@@ -24,6 +24,10 @@ type selectedMinecraftAPI interface {
 	RenameMinecraftInstance(context.Context, string, string, string) error
 	DeleteMinecraftInstance(context.Context, string, string, string) error
 }
+type selectedSettingsLifecycleAPI interface {
+	MinecraftInstanceActionConfirmed(context.Context, string, string, string, bool) (api.MinecraftActionResponse, error)
+}
+
 type selectedServerContext struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -180,15 +184,10 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 		writeMinecraftWorkspaceError(w, 409, "Settings changed since Review. Review this server again.")
 		return true
 	}
-	// Compare the entire definition so running changes cannot include other settings.
+	// Compare the entire definition so only Start on Boot avoids a restart.
 	bootComparison := current
 	bootComparison.StartOnBoot = next.StartOnBoot
 	bootOnly := current.StartOnBoot != next.StartOnBoot && reflect.DeepEqual(bootComparison, next)
-	state, err := client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
-	if err != nil || state.ID != selected.ID || (state.State != "stopped" && !(bootOnly && state.State == "running")) {
-		writeMinecraftWorkspaceError(w, 409, "Stop this server normally before applying settings.")
-		return true
-	}
 	var oldFields, newFields map[string]any
 	_ = json.Unmarshal(before, &oldFields)
 	_ = json.Unmarshal(after, &newFields)
@@ -198,17 +197,89 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 			changes = append(changes, api.AdminConfigurationChange{Field: field, Label: strings.ReplaceAll(field, "_", " "), Before: fmt.Sprint(oldFields[field]), After: fmt.Sprint(newFields[field])})
 		}
 	}
-	if apply {
-		if err = client.SetMinecraftInstanceConfiguration(r.Context(), session, selected.ID, next); err != nil {
-			a.writeMinecraftWorkspaceAPIError(w, err, "Settings could not be applied.")
+	// Runtime state deliberately stays outside the configuration fingerprint.
+	// A server stopped after Review must never be started by Apply.
+	state, stateErr := client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
+	plan := map[string]any{"ok": true, "applied": false, "review": review, "changes": changes,
+		"server_name": selected.Name, "runtime_state": state.State, "reviewed_settings": true}
+	warnings := []string{"The server stays stopped. Start it normally when ready."}
+	blocked := stateErr != nil || state.ID != selected.ID || (state.State != "stopped" && state.State != "running")
+	if blocked && r.FormValue("tab") == "overview" {
+		writeMinecraftWorkspaceError(w, 409, "Server state is unavailable or changing. Review again before applying settings.")
+		return true
+	}
+	restart := !bootOnly && state.State == "running" && len(changes) > 0
+	confirm := r.FormValue("confirm_players") == "yes"
+	if bootOnly {
+		warnings = []string{"Only Start on Boot changes. The server's current running or stopped state is preserved."}
+	} else if restart && !blocked {
+		players, playerErr := client.MinecraftInstancePlayers(r.Context(), session, selected.ID)
+		if playerErr != nil || players.ID != selected.ID || players.State != "online" || players.Online < 0 {
+			blocked = true
+			warnings = []string{selected.Name + " is running. Player information is unavailable. Review again before applying changes."}
+		} else {
+			plan["online"] = players.Online
+			plan["confirmation_required"] = players.Online > 0
+			warnings = []string{fmt.Sprintf("%s is running. Players online: %d. Applying these changes will restart %s automatically.", selected.Name, players.Online, selected.Name)}
+		}
+	}
+	if stateErr != nil || state.ID != selected.ID || (state.State != "stopped" && state.State != "running") {
+		warnings = []string{"Server state is unavailable or changing. Review again before applying changes."}
+	}
+	plan["warnings"], plan["apply_blocked"], plan["restart_required"] = warnings, blocked, restart
+	if !apply || blocked || (plan["confirmation_required"] == true && !confirm) {
+		writeMinecraftWorkspaceJSON(w, 200, plan)
+		return true
+	}
+	var lifecycle selectedSettingsLifecycleAPI
+	if restart {
+		lifecycle, ok = a.api.(selectedSettingsLifecycleAPI)
+		if !ok {
+			writeMinecraftWorkspaceError(w, 503, "Safe server restart is unavailable. Review again later.")
+			return true
+		}
+		// The normal lifecycle rechecks players under its mutation lock and uses
+		// the established player-aware graceful stop, including warning countdown.
+		stopped, stopErr := lifecycle.MinecraftInstanceActionConfirmed(r.Context(), session, selected.ID, "stop", confirm)
+		if stopErr != nil {
+			a.writeMinecraftWorkspaceAPIError(w, stopErr, "The server could not be stopped safely. Settings were not applied.")
+			return true
+		}
+		if stopped.ConfirmationRequired {
+			plan["confirmation_required"], plan["online"] = true, stopped.Online
+			plan["warnings"] = []string{fmt.Sprintf("%s is running. Players online: %d. Confirm that you want to restart it now.", selected.Name, stopped.Online)}
+			writeMinecraftWorkspaceJSON(w, 200, plan)
+			return true
+		}
+		state, err = client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
+		if !stopped.OK || err != nil || state.ID != selected.ID || state.State != "stopped" {
+			writeMinecraftWorkspaceError(w, 409, "The server's graceful stop could not be verified. Settings were not applied.")
 			return true
 		}
 	}
-	warnings := []string{"The server stays stopped. Start it normally when ready."}
-	if bootOnly {
-		warnings = []string{"Only Start on Boot changes. The server's current running or stopped state is preserved."}
+	if err = client.SetMinecraftInstanceConfiguration(r.Context(), session, selected.ID, next); err != nil {
+		// The existing configuration operation owns rollback/recovery. Never
+		// start a server whose configuration application failed.
+		a.writeMinecraftWorkspaceAPIError(w, err, "Settings could not be applied. The server has not been restarted.")
+		return true
 	}
-	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "applied": apply, "review": review, "changes": changes, "warnings": warnings, "message": "Server settings saved."})
+	if restart {
+		started, startErr := lifecycle.MinecraftInstanceActionConfirmed(r.Context(), session, selected.ID, "start", false)
+		if startErr != nil {
+			a.writeMinecraftWorkspaceAPIError(w, startErr, "Settings were saved, but the server could not start. Check its status before starting it normally.")
+			return true
+		}
+		state, err = client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
+		if !started.OK || err != nil || state.ID != selected.ID || state.State != "running" {
+			writeMinecraftWorkspaceError(w, 409, "Settings were saved, but the server's running state could not be verified. Check its status.")
+			return true
+		}
+	}
+	plan["applied"], plan["message"] = true, "Server settings saved."
+	if restart {
+		plan["restarted"] = true
+	}
+	writeMinecraftWorkspaceJSON(w, 200, plan)
 	return true
 }
 func selectedSettingsOverlay(r *http.Request, current api.InstanceRuntimeSettings) (api.InstanceRuntimeSettings, error) {

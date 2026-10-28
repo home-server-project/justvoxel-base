@@ -4137,14 +4137,13 @@ if (minecraftOpen && minecraftDialog) {
           <label>Bedrock TCP/UDP port<input name="bedrock_port" type="number" min="1" max="65535" required></label>
         </div>
         <label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>
-        <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Minecraft is not restarted automatically for these non-memory changes.</p>
-        <div class="minecraft-crossplay-status"><span data-crossplay-compatibility class="muted">Checking Geyser/Floodgate compatibility…</span><span class="muted">· open</span><button type="button" class="secondary" data-open-version>Version</button></div>`;
+        <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Review shows whether this server will restart.</p>
+        <div class="minecraft-crossplay-status"><span data-crossplay-compatibility class="muted">Checking Geyser/Floodgate compatibility…</span></div>`;
       section.querySelector('[name="java_port"]').value = String(minecraft.java_port || 25565);
       section.querySelector('[name="bedrock_port"]').value = String(minecraft.bedrock_port || 19132);
       section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
       section.querySelector('[name="bedrock_enabled"]').disabled = !["paper", "purpur", "spigot"].includes(minecraft.server_type);
       if (!["paper", "purpur", "spigot"].includes(minecraft.server_type)) section.querySelector('[data-crossplay-compatibility]').textContent = "Managed Bedrock cross-play requires supported server software and verified version compatibility.";
-      section.querySelector('[data-open-version]')?.addEventListener("click", () => document.querySelector("[data-version-open]")?.click());
       requestWorkspaceJSON("/api/version/workspace/status").then((status) => {
         const node = section.querySelector("[data-crossplay-compatibility]");
         if (!node || !status) return;
@@ -4152,6 +4151,11 @@ if (minecraftOpen && minecraftDialog) {
         const toggle = section.querySelector('[name="bedrock_enabled"]');
         toggle.disabled = !status.managed_crossplay_available;
         if (!status.managed_crossplay_available) { node.textContent = "Managed Bedrock cross-play requires supported server software and verified version compatibility."; return; }
+        const shortcut = document.createElement("span");
+        shortcut.className = "minecraft-crossplay-status";
+        shortcut.innerHTML = '<span class="muted">· open</span><button type="button" class="secondary" data-open-version>Version</button>';
+        shortcut.querySelector('[data-open-version]').addEventListener("click", () => document.querySelector("[data-version-open]")?.click());
+        node.parentElement.appendChild(shortcut);
         if (!status.crossplay_enabled) node.textContent = `Cross-play disabled · Minecraft ${installed}.`;
         else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}`;
         else node.textContent = status.reason || "Geyser/Floodgate compatibility is unavailable.";
@@ -4262,12 +4266,21 @@ if (minecraftOpen && minecraftDialog) {
       review.appendChild(messageNode(`Memory remaining outside Minecraft after the configured maximum: ${plan.memory_remaining_mib} MiB.`));
     }
 
+    let playerConfirmation = null;
     if (plan.confirmation_required) {
-      const names = Array.isArray(plan.players) && plan.players.length ? " Connected: " + plan.players.join(", ") + "." : "";
-      review.appendChild(noticeNode(`Players are online. Applying these changes requires a Minecraft restart and will disconnect ${plan.online || 0} player(s).${names}`, "warning"));
-    } else if (plan.memory_restart_required) {
+      const label = document.createElement("label");
+      label.className = "minecraft-native-toggle system-ups-shutdown-switch";
+      const text = document.createElement("span");
+      text.textContent = `Confirm that you want to restart ${plan.server_name || "Minecraft"} now.`;
+      playerConfirmation = document.createElement("input");
+      playerConfirmation.type = "checkbox";
+      playerConfirmation.name = "confirm_players";
+      playerConfirmation.setAttribute("role", "switch");
+      label.append(text, playerConfirmation);
+      review.appendChild(label);
+    } else if (!plan.reviewed_settings && plan.memory_restart_required) {
       review.appendChild(noticeNode("Minecraft will restart automatically for these memory changes after JustVoxel checks for online players.", "warning"));
-    } else if (plan.restart_required) {
+    } else if (!plan.reviewed_settings && plan.restart_required) {
       review.appendChild(noticeNode("The new settings will be saved, but Minecraft will not restart automatically for these non-memory changes.", "warning"));
     }
 
@@ -4283,28 +4296,51 @@ if (minecraftOpen && minecraftDialog) {
     });
     const apply = document.createElement("button");
     apply.type = "button";
-    apply.textContent = plan.confirmation_required ? "Restart Minecraft and apply" : "Apply changes";
+    apply.textContent = "Apply changes";
+    let applying = false;
+    const updateApply = () => { apply.disabled = Boolean(applying || plan.apply_blocked || (playerConfirmation && !playerConfirmation.checked)); };
+    playerConfirmation?.addEventListener("change", updateApply);
+    updateApply();
+    if (plan.apply_blocked) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "secondary";
+      retry.textContent = "Review again";
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        try {
+          const refreshed = await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan", {method: "POST", body: params});
+          if (refreshed) renderSettingsReview(root, refreshed, params, options);
+        } catch (error) {
+          if (!error.staleSelection) review.appendChild(noticeNode(error.message || "Review is unavailable. Try again.", "warning"));
+        } finally { retry.disabled = false; }
+      });
+      actions.appendChild(retry);
+    }
     actions.append(cancel, apply);
     review.appendChild(actions);
     root.prepend(review);
 
     apply.addEventListener("click", async () => {
+      if (apply.disabled) return;
       const selection = globalThis.justVoxelSelectionGeneration.minecraft;
+      applying = true;
+      if (playerConfirmation) playerConfirmation.disabled = true;
       apply.disabled = true;
       cancel.disabled = true;
       if (state) state.textContent = plan.memory_restart_required ? "Applying and restarting Minecraft…" : "Applying…";
       try {
         const applyParams = new URLSearchParams(params);
         if (plan.review) applyParams.set("review", plan.review);
-        if (plan.confirmation_required) applyParams.set("confirm_players", "yes");
+        if (playerConfirmation?.checked) applyParams.set("confirm_players", "yes");
         const result = await requestWorkspaceJSON("/api/minecraft/workspace/settings/apply", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: applyParams.toString(),
         });
         if (!result) return;
-        if (result.confirmation_required && !result.applied) {
-          if (state) state.textContent = "Player confirmation required.";
+        if (!result.applied && (result.confirmation_required || result.apply_blocked)) {
+          if (state) state.textContent = "";
           renderSettingsReview(root, result, params, options);
           return;
         }
@@ -4317,8 +4353,11 @@ if (minecraftOpen && minecraftDialog) {
       } catch (error) {
         if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
         if (options.onError) { await options.onError(error); return; }
-        if (state) state.textContent = error?.message || "Minecraft settings could not be applied.";
-        apply.disabled = false;
+        review.appendChild(noticeNode(error?.message || "Minecraft settings could not be applied.", "warning"));
+        if (state) state.textContent = "";
+        applying = false;
+        if (playerConfirmation) playerConfirmation.disabled = false;
+        updateApply();
         cancel.disabled = false;
       }
     });

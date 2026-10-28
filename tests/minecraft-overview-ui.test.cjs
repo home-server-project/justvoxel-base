@@ -55,7 +55,9 @@ test('Overview uses the setup-style toggle, combined framed Save and compact del
 });
 
 test('Cross-play reuses Version opener inline and diagnostic reports share a scoped gap', () => {
-  assert.match(source, /minecraft-crossplay-status.*data-crossplay-compatibility.*· open.*data-open-version>Version</);
+  const crossplay = between('    } else if (tab === "crossplay")', '    const actions = document.createElement("div");');
+  assert.ok(crossplay.indexOf('if (!status.managed_crossplay_available)') < crossplay.indexOf('shortcut.innerHTML'));
+  assert.match(crossplay, /shortcut.innerHTML = .*· open.*data-open-version>Version</);
   assert.ok(source.includes('node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}`;'));
   assert.match(source, /querySelector\('\[data-open-version\]'\).*document.querySelector\("\[data-version-open\]"\)\?\.click\(\)/);
   assert.match(css, /\.minecraft-crossplay-status\{[^}]*flex-wrap:wrap/);
@@ -79,6 +81,7 @@ class Element {
   }
   append(...nodes) { nodes.forEach(node => { node.parentElement = this; this.children.push(node); }); }
   appendChild(node) { this.append(node); }
+  prepend(node) { node.parentElement = this; this.children.unshift(node); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   setAttribute(key, value) { this.attrs[key] = value; }
   addEventListener(name, fn) { this.events[name] = fn; }
@@ -86,7 +89,9 @@ class Element {
   matches(selector) {
     if (selector.startsWith('[')) {
       const [, key, value] = selector.match(/^\[([^=\]]+)(?:="([^"]*)")?\]$/);
-      return Object.hasOwn(this.attrs, key) && (value === undefined || this.attrs[key] === value);
+      const dataKey = key.startsWith('data-') ? key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : null;
+      const actual = this.attrs[key] ?? (dataKey ? this.dataset[dataKey] : undefined);
+      return actual !== undefined && (value === undefined || actual === value);
     }
     return this.tag === selector;
   }
@@ -434,4 +439,117 @@ test('Running Overview Start on Boot stays enabled and uses reviewed apply witho
   assert.equal(r.reviews.length,0);
   assert.doesNotMatch(r.state.textContent || '', /stays stopped|restart|restarted/i);
   assert.equal(r.content.querySelector('[name="server_running"]').checked,true);
+});
+
+function settingsReviewHarness(plan, result = {applied: true}, tab = 'memory') {
+  const root = new Element('div'), form = new Element('form'), state = {}, calls = [];
+  root.append(form);
+  let refreshed = 0;
+  const context = vm.createContext({
+    URLSearchParams, document: {createElement: tag => new Element(tag)}, state,
+    justVoxelSelectionGeneration: {minecraft: 0},
+    noticeNode: text => Object.assign(new Element('p'), {textContent: text}),
+    messageNode: text => Object.assign(new Element('p'), {textContent: text}),
+    loadCurrentTab: async () => { refreshed++; },
+    requestWorkspaceJSON: async (url, options) => { calls.push({url, body: new URLSearchParams(options.body)}); return result; },
+  });
+  vm.runInContext(between('  const minecraftSettingsReviewValue =', '  const renderSettingsTab =') + '\nglobalThis.render = renderSettingsReview;', context);
+  context.render(root, {changes: [{field: 'java_memory', label: 'Memory', before: '2G', after: '4G'}], ...plan}, new URLSearchParams({tab, csrf: 'csrf-token'}), {form});
+  const card = () => root.children[0];
+  return {root, form, state, calls, card, context, get refreshed() { return refreshed; }};
+}
+const textIn = node => node.all().map(child => child.textContent || '').join(' ');
+const applyIn = node => node.all().find(child => child.tag === 'button' && child.textContent === 'Apply changes');
+
+for (const tab of ['memory', 'gameplay', 'crossplay']) {
+  test(`${tab} uses shared stopped Review card and enabled Apply`, () => {
+    const r = settingsReviewHarness({reviewed_settings: true, review: 'real', warnings: ['The server stays stopped. Start it normally when ready.']}, undefined, tab);
+    assert.match(textIn(r.card()), /Review\s+Proposed changes/);
+    assert.match(textIn(r.card()), /The server stays stopped. Start it normally when ready./);
+    assert.equal(applyIn(r.card()).disabled, false);
+    assert.equal(r.card().all().some(node => node.name === 'confirm_players'), false);
+    assert.equal(r.form.hidden, true);
+    assert.match(source, /const settingsTabs = new Set\(\["memory", "gameplay", "crossplay"\]\)/);
+    assert.match(between('  const renderSettingsTab =', '  const renderPlayers ='), /renderSettingsReview\(root, plan, params\)/);
+  });
+}
+
+for (const online of [0, 3]) {
+  test(`Running Review shows ${online} players and requires actual toggle consent only with players`, async () => {
+    const r = settingsReviewHarness({reviewed_settings: true, review: 'fingerprint', restart_required: true, server_name: 'Paper1', online,
+      confirmation_required: online > 0, warnings: [`Paper1 is running. Players online: ${online}. Applying these changes will restart Paper1 automatically.`]});
+    assert.match(textIn(r.card()), new RegExp(`Paper1 is running. Players online: ${online}`));
+    assert.doesNotMatch(textIn(r.card()), /will not restart automatically/);
+    const apply = applyIn(r.card()), toggle = r.card().all().find(node => node.name === 'confirm_players');
+    assert.equal(apply.disabled, online > 0);
+    assert.equal(Boolean(toggle), online > 0);
+    if (toggle) {
+      assert.equal(toggle.attrs.role, 'switch');
+      assert.match(toggle.parentElement.className, /system-ups-shutdown-switch/);
+      assert.match(textIn(r.card()), /Confirm that you want to restart Paper1 now/);
+      await apply.events.click(); assert.equal(r.calls.length, 0);
+      toggle.checked = true; toggle.events.change(); assert.equal(apply.disabled, false);
+    }
+    await apply.events.click();
+    assert.equal(r.calls.length, 1);
+    assert.equal(r.calls[0].body.get('review'), 'fingerprint');
+    assert.equal(r.calls[0].body.get('confirm_players'), online > 0 ? 'yes' : null);
+  });
+}
+
+test('Apply-time player race replaces Review card with current count and unchecked consent', async () => {
+  const r = settingsReviewHarness({reviewed_settings: true, review: 'fingerprint', restart_required: true, online: 0},
+    {applied: false, reviewed_settings: true, review: 'fingerprint', confirmation_required: true, online: 2, server_name: 'Paper1',
+      warnings: ['Paper1 is running. Players online: 2.'], changes: [{field: 'java_memory', before: '2G', after: '4G'}]});
+  await applyIn(r.card()).events.click();
+  assert.match(textIn(r.card()), /Players online: 2/);
+  assert.equal(applyIn(r.card()).disabled, true);
+  assert.equal(r.card().all().find(node => node.name === 'confirm_players').checked, false);
+  assert.equal(r.calls[0].body.has('confirm_players'), false);
+  assert.equal(r.refreshed, 0);
+  assert.equal(r.state.textContent, '');
+});
+
+test('Unavailable player state stays in Review with disabled Apply and a Review again action', async () => {
+  const r = settingsReviewHarness({reviewed_settings: true, apply_blocked: true, restart_required: true,
+    warnings: ['Player information is unavailable. Review again before applying changes.']});
+  assert.match(textIn(r.card()), /Player information is unavailable/);
+  assert.equal(applyIn(r.card()).disabled, true);
+  await applyIn(r.card()).events.click();
+  assert.equal(r.calls.length, 0);
+  assert.ok(r.card().all().some(node => node.textContent === 'Review again'));
+});
+
+for (const [software, available, enabled] of [['vanilla', false, false], ['fabric', false, false], ['paper', true, false], ['paper', true, true]]) {
+  test(`Cross-play Version shortcut follows capability: ${software}, enabled=${enabled}`, async () => {
+    const context = vm.createContext({
+      document: {createElement: tag => new Element(tag), querySelector: () => null},
+      noticeNode: text => Object.assign(new Element('p'), {textContent: text}),
+      requestWorkspaceJSON: async () => ({managed_crossplay_available: available, crossplay_enabled: enabled, crossplay_compatible: true, installed: '1.21', geyser_supported_version: '1.21'}),
+    });
+    vm.runInContext(between('  const buildSettingsForm =', '  const settingsParams =') + '\nglobalThis.build = buildSettingsForm;', context);
+    const root = context.build('crossplay', {configured: true, minecraft: {server_type: software}});
+    await Promise.resolve();
+    const shortcut = root.querySelector('[data-open-version]');
+    assert.equal(Boolean(shortcut), available);
+    // Both the separator and the opener are inserted together only on capability success.
+    const fragments = root.all().filter(node => node.attrs.class === 'muted' && node.tag === 'span' && node.parentElement === shortcut?.parentElement);
+    assert.equal(fragments.length, available ? 1 : 0);
+  });
+}
+
+test('Reviewed settings reuse confirmed graceful lifecycle and preserve protected RAM policy files', () => {
+  const backend = read('selected_server.go');
+  assert.match(backend, /MinecraftInstanceActionConfirmed\(r.Context\(\), session, selected.ID, "stop", confirm\)/);
+  assert.match(backend, /MinecraftInstanceActionConfirmed\(r.Context\(\), session, selected.ID, "start", false\)/);
+  assert.doesNotMatch(backend, /"kill"|"force"|exec\.Command/);
+  // Pin the protected policy files independently of any RAM controls in app.js.
+  const {createHash} = require('node:crypto');
+  const protectedFiles = {
+    'webui/internal/server/static/settings.js': '1d0bbeac49eea81a7e913f59bc770fb333b9ebb232030d73bc1bb518a05a3801',
+    'mjust/libexec/common.sh': '2e700423e1294f5a47c1b136ee4d6b6e78d6bb525b19fae9d7f5f6e5537f786b',
+  };
+  for (const [path, expected] of Object.entries(protectedFiles)) {
+    assert.equal(createHash('sha256').update(readFileSync(`${__dirname}/../${path}`)).digest('hex'), expected, path);
+  }
 });
