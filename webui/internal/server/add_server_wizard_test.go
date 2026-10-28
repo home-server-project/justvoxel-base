@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -788,5 +790,35 @@ func TestAddServerDisabledStartupSwitchesUseExistingWarnings(t *testing.T) {
 	}
 	if strings.Count(body, `class="memory-status danger"`) != 2 {
 		t.Fatal("missing existing red framed explanations")
+	}
+}
+
+func TestAddServerFetchCancelIsAuthoritativeAndRequiresCSRF(t *testing.T) {
+	for _, suffix := range []string{"/cancel", "/review/cancel"} {
+		for _, csrf := range []string{"csrf-token", "wrong"} {
+			app, _ := newAddServerTestApp(t)
+			_ = recommendedAddReview(t, app, "paper")
+			var body bytes.Buffer
+			form := multipart.NewWriter(&body)
+			if err := form.WriteField("csrf", csrf); err != nil {
+				t.Fatal(err)
+			}
+			if err := form.Close(); err != nil {
+				t.Fatal(err)
+			}
+			r := authenticatedAdminRequest(http.MethodPost, "http://example"+addServerBasePath+suffix, body.String())
+			r.Header.Set("Content-Type", form.FormDataContentType())
+			r.Header.Set("Accept", "application/json")
+			response := httptestResponse(app, r)
+			_, draft := setupDrafts.get(app, "session-token")
+			_, review := setupReviews.get(app, "session-token")
+			if csrf == "csrf-token" {
+				if response.Code != http.StatusNoContent || response.Header().Get("Location") != "" || response.Body.Len() != 0 || draft || review {
+					t.Fatal("fetch cancellation must delete draft/review without response navigation")
+				}
+			} else if response.Code != http.StatusForbidden || !draft || !review {
+				t.Fatal("fetch cancellation bypassed CSRF or discarded state")
+			}
+		}
 	}
 }

@@ -505,7 +505,7 @@ if (versionLauncher && versionDialog) {
         panel.dataset.versionCombinedControls = "";
         const form = document.createElement("form");
         form.className = "version-combined-form";
-        const unsupported = () => !["paper", "purpur"].includes(currentSoftware) || selectedSoftware === currentSoftware;
+        const unsupported = () => !["paper", "purpur", "pufferfish", "leaf"].includes(currentSoftware) || selectedSoftware === currentSoftware;
         const compatibility = document.createElement("p");
         compatibility.dataset.versionCompatibility = "";
         const updateNotice = (result, fallback = "") => {
@@ -541,9 +541,11 @@ if (versionLauncher && versionDialog) {
         for (const [target, name, description] of [
           ["paper", "Paper", "Plugins and managed Bedrock cross-play."],
           ["purpur", "Purpur", "Plugins and managed Bedrock cross-play."],
+          ["pufferfish", "Pufferfish", "Plugins · Cross-play"],
+          ["leaf", "Leaf", "Plugins · Cross-play"],
         ]) {
           const isCurrent = target === currentSoftware;
-          const selectable = ["paper", "purpur"].includes(currentSoftware) && ["paper", "purpur"].includes(target);
+          const selectable = ["paper", "purpur", "pufferfish", "leaf"].includes(currentSoftware) && ["paper", "purpur", "pufferfish", "leaf"].includes(target);
           const change = document.createElement("button");
           change.className = "version-software-choice server-software-card" + (isCurrent ? " is-current is-selected" : selectable ? " secondary" : "");
           const title = document.createElement("strong");

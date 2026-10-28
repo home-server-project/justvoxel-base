@@ -4,7 +4,7 @@
 jv_crossplay_label() { restorecon -F "$1"; }
 jv_crossplay_platform() {
     case "${MINECRAFT_SERVER_TYPE:-paper}" in
-        paper|purpur|spigot) printf spigot ;;
+        paper|purpur|pufferfish|leaf|spigot) printf spigot ;;
         fabric|neoforge) printf '%s' "${MINECRAFT_SERVER_TYPE}" ;;
         *) return 1 ;;
     esac

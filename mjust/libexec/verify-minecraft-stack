@@ -95,10 +95,10 @@ while :; do
     comparison_version="${comparison_version%"${comparison_version##*[![:space:]]}"}"
     [[ ${comparison_version} == 'Checking version, please wait...' ]] || break
     if (( version_wait >= 60 )); then
-        [[ ${MINECRAFT_SERVER_TYPE-paper} == paper || ${MINECRAFT_SERVER_TYPE-paper} == purpur ]] || { echo 'ERROR: Minecraft server software cannot use the local version fallback.' >&2; exit 1; }
+        [[ ${MINECRAFT_SERVER_TYPE-paper} == paper || ${MINECRAFT_SERVER_TYPE-paper} == purpur || ${MINECRAFT_SERVER_TYPE-paper} == pufferfish || ${MINECRAFT_SERVER_TYPE-paper} == leaf ]] || { echo 'ERROR: Minecraft server software cannot use the local version fallback.' >&2; exit 1; }
         status="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
         actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0) | select(contains("\n") | not)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
-        [[ ${actual} =~ ^(Paper|Purpur)\ ([0-9A-Za-z._-]+)$ ]] || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
+        [[ ${actual} =~ ^(Paper|Purpur|Pufferfish|Leaf)\ ([0-9A-Za-z._-]+)$ ]] || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
         actual_software="${BASH_REMATCH[1]}"
         actual_version="${BASH_REMATCH[2]}"
         [[ ${actual_software,,} == "${MINECRAFT_SERVER_TYPE-paper}" ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
@@ -113,7 +113,7 @@ done
 if [[ ${comparison_version} != 'Checking version, please wait...' ]]; then
     printf 'Minecraft version: %s\n' "${version}"
     [[ ${version,,} == *"${MINECRAFT_SERVER_TYPE-paper}"* ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
-    [[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
+    [[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* || ${version} == *'Pufferfish version '* || ${version} == *'Leaf version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
     expected_version="${1:-${MINECRAFT_VERSION}}"
     if [[ ${expected_version} != LATEST ]]; then
         [[ ${expected_version} =~ ^[0-9A-Za-z._-]+$ ]] || exit 1

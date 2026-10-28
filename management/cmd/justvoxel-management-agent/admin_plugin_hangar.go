@@ -62,7 +62,7 @@ func validPluginParent(parent string) bool {
 }
 func hangarPluginPlatform(serverType string) (string, error) {
 	switch serverType {
-	case "paper", "purpur":
+	case "paper", "purpur", "pufferfish", "leaf":
 		return "PAPER", nil
 	}
 	return "", errors.New("No Hangar platform mapping exists for the selected server type")

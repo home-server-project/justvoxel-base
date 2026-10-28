@@ -95,7 +95,7 @@ validate_request_shape() {
       (.server.motd|type == "string") and
       (.server.max_players|type == "number") and
       (.server.bedrock_enabled|type == "boolean") and
-      (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla" or . == "spigot" or . == "forge" or . == "neoforge" or . == "fabric" or . == "quilt" or . == "bedrock"))) and
+      (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "pufferfish" or . == "leaf" or . == "vanilla" or . == "spigot" or . == "forge" or . == "neoforge" or . == "fabric" or . == "quilt" or . == "bedrock"))) and
       ((.minecraft.loader_version // "")|type == "string") and
       (.minecraft.java_memory|type == "string") and
       (.minecraft.container_memory|type == "string") and

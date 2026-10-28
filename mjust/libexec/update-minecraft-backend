@@ -24,7 +24,7 @@ old_image_tag="${MINECRAFT_IMAGE_TAG}"
 target_image_tag="${old_image_tag}"
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 old_server_type="${MINECRAFT_SERVER_TYPE-paper}"
-case "${old_server_type}" in paper|purpur|vanilla|spigot) ;; *)
+case "${old_server_type}" in paper|purpur|pufferfish|leaf|vanilla|spigot) ;; *)
     echo 'ERROR: server updates for this software require separate compatibility support.' >&2
     exit 1 ;;
 esac

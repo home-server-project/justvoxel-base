@@ -102,10 +102,10 @@ async function review(page) {
   await new Promise(resolve => setImmediate(resolve));
 }
 (async () => {
-  for (const current of ["paper", "purpur"]) {
+  for (const current of ["paper", "purpur", "pufferfish", "leaf"]) {
     const page = await open(current);
     const choices = cards(page);
-    assert.deepEqual(choices.map(choice => choice.children[1].children[0].textContent), ["Paper", "Purpur"]);
+    assert.deepEqual(choices.map(choice => choice.children[1].children[0].textContent), ["Paper", "Purpur", "Pufferfish", "Leaf"]);
     assert.ok(!page.content.textContent.includes("Vanilla"));
     assert.ok(!page.content.textContent.includes("Container channel"));
     assert.ok(!page.content.textContent.includes("Check for updates"));

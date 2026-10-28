@@ -15,6 +15,8 @@ func TestJavaServerCapabilities(t *testing.T) {
 	}{
 		{"paper", "PAPER", true, false, true},
 		{"purpur", "PURPUR", true, false, true},
+		{"pufferfish", "PUFFERFISH", true, false, true},
+		{"leaf", "LEAF", true, false, true},
 		{"vanilla", "VANILLA", false, false, false},
 		{"spigot", "SPIGOT", true, false, false},
 		{"forge", "FORGE", false, true, false},
@@ -23,14 +25,14 @@ func TestJavaServerCapabilities(t *testing.T) {
 		{"quilt", "QUILT", false, true, false},
 	} {
 		c, ok := javaServerSoftware(tc.software)
-		if !ok || !validSetupServerType(tc.software) || c.Type != tc.upstream || c.BukkitPlugins != tc.plugins || c.ModLoader != tc.mods || c.PluginsWorkspace != (tc.plugins) || c.ManagedCrossplay != (tc.software == "paper" || tc.software == "purpur" || tc.software == "spigot" || tc.software == "fabric" || tc.software == "neoforge") {
+		if !ok || !validSetupServerType(tc.software) || c.Type != tc.upstream || c.BukkitPlugins != tc.plugins || c.ModLoader != tc.mods || c.PluginsWorkspace != (tc.plugins) || c.ManagedCrossplay != (tc.software == "paper" || tc.software == "purpur" || tc.software == "pufferfish" || tc.software == "leaf" || tc.software == "spigot" || tc.software == "fabric" || tc.software == "neoforge") {
 			t.Fatalf("capabilities for %s: %#v", tc.software, c)
 		}
 		if instanceDefaultName(tc.software) != "JV "+c.Name {
 			t.Fatalf("default name for %s", tc.software)
 		}
-		for _, target := range []string{"paper", "purpur", "vanilla", "spigot", "forge", "neoforge", "fabric", "quilt"} {
-			want := tc.software == target || tc.managed && (target == "paper" || target == "purpur")
+		for _, target := range []string{"paper", "purpur", "pufferfish", "leaf", "vanilla", "spigot", "forge", "neoforge", "fabric", "quilt", "bedrock"} {
+			want := tc.software == target || tc.managed && (target == "paper" || target == "purpur" || target == "pufferfish" || target == "leaf")
 			if javaServerAllowsSwitch(tc.software, target) != want {
 				t.Fatalf("unsafe switch %s -> %s", tc.software, target)
 			}
@@ -293,6 +295,35 @@ func TestNewJavaSelectionRejectedBeforePlanningHelper(t *testing.T) {
 		request.Minecraft.ServerType = software
 		if _, failure := authoritativeAdminSetupPlan(context.Background(), request); failure == nil {
 			t.Fatalf("unsafe %s request accepted", software)
+		}
+	}
+}
+
+func TestPaperForkRuntimeAndPluginCompatibility(t *testing.T) {
+	for _, software := range []string{"pufferfish", "leaf"} {
+		store, ctx, configs := instanceRuntimeFixture(t)
+		configs[0].Software = software
+		configs[0].LoaderVersion = ""
+		files, err := store.renderInstanceRuntimes(ctx, configs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := string(files[0].Environment)
+		if !strings.Contains(env, "TYPE="+strings.ToUpper(software)+"\n") || !strings.Contains(env, "VERSION="+configs[0].Version+"\n") || !strings.Contains(env, "MODRINTH_PROJECTS=paper:viaversion,paper:viabackwards") {
+			t.Fatalf("missing native runtime/capabilities: %s", env)
+		}
+		if strings.Contains(env, "LOADER_VERSION=") || strings.Contains(env, "PAPER_CHANNEL=") {
+			t.Fatal("fork gained a loader or Paper-only channel")
+		}
+		if validateJavaServerSelection(software, "pinned", "1.21.8", "0.1.0", "java21", false) == nil {
+			t.Fatal("fork accepted a loader")
+		}
+		if platform, err := hangarPluginPlatform(software); err != nil || platform != "PAPER" {
+			t.Fatal("missing Hangar mapping")
+		}
+		server := pluginServerContext{ServerType: software, MinecraftVersion: "1.21.8"}
+		if !pluginVersionCompatible(pluginCatalogVersion{GameVersions: []string{"1.21.8"}, Loaders: []string{"paper"}}, server) || pluginVersionCompatible(pluginCatalogVersion{GameVersions: []string{"1.21.7"}, Loaders: []string{"paper"}}, server) || pluginVersionCompatible(pluginCatalogVersion{GameVersions: []string{"1.21.8"}, Loaders: []string{"fabric"}}, server) {
+			t.Fatal("plugin compatibility must still verify both game and platform")
 		}
 	}
 }

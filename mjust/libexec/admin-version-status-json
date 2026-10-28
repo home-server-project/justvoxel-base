@@ -76,7 +76,7 @@ if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${
     available=false
     reason=''
     if [[ -n ${candidate} ]]; then
-        if [[ ${target_type} == spigot ]]; then
+        if [[ ${target_type} == spigot || ${target_type} == pufferfish || ${target_type} == leaf ]]; then
             available=true
             geyser="$(resolve_geyser_supported_java_version || true)"
             if [[ -n ${geyser} ]] && server_crossplay_version_compatible "${candidate}" "${geyser}"; then compatible=true; fi
@@ -143,7 +143,7 @@ if [[ ${bedrock} == yes ]]; then
 fi
 managed_crossplay_available=false
 case "${target_type}" in
-    paper|purpur|spigot) managed_crossplay_available=true ;;
+    paper|purpur|pufferfish|leaf|spigot) managed_crossplay_available=true ;;
     fabric|neoforge)
         if [[ -n ${candidate} && -n ${MINECRAFT_LOADER_VERSION:-} ]] && jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${MINECRAFT_LOADER_VERSION}"; then
             managed_crossplay_available=true
@@ -160,7 +160,7 @@ if [[ ${bedrock} == yes ]]; then
     geyser_state=unavailable
     floodgate_state=unavailable
 fi
-if [[ ${bedrock} == yes && $# -ne 3 && ( ${target_type} == paper || ${target_type} == purpur || ${target_type} == spigot ) ]]; then
+if [[ ${bedrock} == yes && $# -ne 3 && ( ${target_type} == paper || ${target_type} == purpur || ${target_type} == pufferfish || ${target_type} == leaf || ${target_type} == spigot ) ]]; then
     geyser_metadata="$(jv_crossplay_metadata geyser || printf '{}')"
     floodgate_metadata="$(jv_crossplay_metadata floodgate || printf '{}')"
     geyser_state="$(jv_crossplay_artifact_state geyser "${geyser_metadata}")"

@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/static/setup-review.css">
   <script src="/static/app.js" defer></script>
   <script src="/static/setup-operation.js" defer></script>
+  {{if .AddServer}}<link rel="stylesheet" href="/static/add-server-cancelled.css"><script src="/static/add-server-cancel.js" defer></script>{{end}}
 </head>
 <body class="role-administrator setup-body{{if .AddServer}} setup-add-server-review{{end}}{{if ne .SetupMode "recommended"}} setup-advanced{{end}}">
 <header class="setup-header topbar setup-topbar">

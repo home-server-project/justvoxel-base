@@ -169,6 +169,9 @@ func (s *server) pluginContext(w http.ResponseWriter, r *http.Request) (pluginSe
 		out.ServerSoftware = "Paper"
 	case "purpur":
 		out.ServerSoftware = "Purpur"
+	case "pufferfish", "leaf":
+		caps, _ := javaServerSoftware(c.Software)
+		out.ServerSoftware = caps.Name
 	case "spigot":
 		out.ServerSoftware = "Spigot"
 	case "vanilla":
@@ -533,7 +536,7 @@ func pluginLoaders(serverType string) []string {
 	if serverType == "purpur" {
 		return []string{"purpur", "paper", "spigot", "bukkit"}
 	}
-	if serverType == "paper" {
+	if serverType == "paper" || serverType == "pufferfish" || serverType == "leaf" {
 		return []string{"paper", "spigot", "bukkit"}
 	}
 	return nil

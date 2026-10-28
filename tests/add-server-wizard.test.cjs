@@ -53,7 +53,7 @@ test('Add Server Review retains the compact stretched grid without height sizing
   assert.ok(css.includes('.setup-body.setup-add-server-review{height:auto;min-height:100dvh;overflow:visible}'));
 });
 
-test('Add Server exits submit native POST forms with CSRF before loading the completion page', () => {
+test('Add Server retains native POST forms with CSRF for cancellation fallback', () => {
   const wizard = read('templates/setup_wizard.html');
   assert.ok(wizard.includes('<form method="post" action="{{$wizard.BasePath}}/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary setup-dashboard-exit" type="submit">Cancel</button></form>'));
   assert.ok(wizard.includes('formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button>'));
@@ -194,4 +194,101 @@ test('one wizard owns both contexts, stores and software layout', () => {
   assert.ok(!css.includes('setup-entry-add-server'));
   assert.ok(!css.includes('setup-add-server-software-lanes'));
   assert.ok(css.includes('.setup-software-lanes{grid-template-columns:1fr'));
+});
+
+function cancelWizard({ status = 204, fails = false, opener = 'same-origin', review = false, submitterAction = false } = {}) {
+  const events = [], requests = [];
+  let submit;
+  class Element {
+    constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; }
+    appendChild(node) { this.children.push(node); }
+    replaceChildren(...nodes) { this.children = nodes; }
+    setAttribute(name, value) { this[name] = value; }
+    addEventListener(name, listener) { this.listeners[name] = listener; }
+    querySelector() { return null; }
+  }
+  class Form extends Element {
+    constructor() { super('form'); this.method = 'post'; this.action = 'https://example.test/minecraft/servers/add' + (review ? '/review/cancel' : '/cancel'); }
+  }
+  const form = new Form(), button = new Element('button'), body = new Element('body');
+  const cancelAction = form.action;
+  if (submitterAction) form.action = 'https://example.test/minecraft/servers/add/server';
+  button.getAttribute = () => submitterAction ? cancelAction : null;
+  const window = {
+    location: { href: 'https://example.test/minecraft/servers/add', origin: 'https://example.test' },
+    close() { events.push('close'); throw new Error('Browser blocked close'); },
+  };
+  if (opener !== 'absent') window.opener = {
+    closed: false, location: {origin: opener === 'same-origin' ? 'https://example.test' : 'https://other.test'},
+    focus() { events.push('focus'); },
+  };
+  const document = {
+    body, createElement: tag => new Element(tag),
+    addEventListener(name, handler) { assert.equal(name, 'submit'); submit = handler; },
+  };
+  vm.runInNewContext(read('static/add-server-cancel.js'), {
+    window, document, URL, HTMLFormElement: Form,
+    FormData: class { constructor(value) { assert.equal(value, form); this.csrf = 'csrf-token'; } },
+    fetch: async (url, options) => {
+      requests.push({url, options}); events.push('post');
+      if (fails) throw new Error('Network unavailable');
+      return {status};
+    },
+  });
+  return { events, requests, body, button, form, async cancel() {
+    await submit({target: form, submitter: button, preventDefault() { events.push('intercept'); }});
+  } };
+}
+
+test('normal Cancel fetches the real POST/CSRF form without response navigation', async () => {
+  for (const options of [{}, {review: true}, {submitterAction: true}]) {
+    const tab = cancelWizard(options);
+    await tab.cancel();
+    assert.deepEqual(tab.events, ['intercept', 'post', 'focus', 'close']);
+    const {url, options: request} = tab.requests[0];
+    assert.match(url, /\/cancel$/);
+    assert.equal(request.method, 'POST');
+    assert.equal(request.body.csrf, 'csrf-token');
+    assert.equal(request.credentials, 'same-origin');
+    assert.equal(request.headers.Accept, 'application/json');
+    assert.equal(request.redirect, 'error');
+    assert.equal(tab.body.className, 'add-server-cancelled');
+    assert.ok(tab.body.children[0].children.some(node => node.textContent === 'Setup cancelled.'));
+    const retry = tab.body.children[0].children.at(-1);
+    retry.listeners.click();
+    assert.deepEqual(tab.events.slice(-2), ['focus', 'close']);
+  }
+});
+
+test('failed or unconfirmed cancellation remains in wizard with retryable error', async () => {
+  for (const options of [{fails: true}, {status: 403}, {status: 500}, {status: 200}]) {
+    const tab = cancelWizard(options);
+    await tab.cancel();
+    assert.deepEqual(tab.events, ['intercept', 'post']);
+    assert.notEqual(tab.body.className, 'add-server-cancelled');
+    assert.equal(tab.button.disabled, false);
+    assert.match(tab.form.children.at(-1).textContent, /try Cancel again/);
+    await tab.cancel();
+    assert.equal(tab.requests.length, 2);
+  }
+});
+
+test('successful cancellation does not focus an unrelated opener', async () => {
+  for (const opener of ['absent', 'cross-origin']) {
+    const tab = cancelWizard({opener}); await tab.cancel();
+    assert.deepEqual(tab.events, ['intercept', 'post', 'close']);
+  }
+});
+
+test('wizard cancellation and no-JS completion share a small dark page style', () => {
+  for (const template of ['setup_wizard', 'setup_review']) {
+    assert.ok(read(`templates/${template}.html`).includes('/static/add-server-cancel.js'));
+    assert.ok(read(`templates/${template}.html`).includes('/static/add-server-cancelled.css'));
+  }
+  const fallback = read('templates/add_server_cancelled.html');
+  assert.match(fallback, /body class="add-server-cancelled"/);
+  assert.ok(fallback.includes('/static/add-server-cancelled.css'));
+  assert.ok(fallback.includes('Minecraft Servers remains open in your original JustVoxel tab.'));
+  assert.match(read('static/add-server-cancelled.css'), /background:#10141c;color:#e7ebf3/);
+  assert.doesNotMatch(read('static/add-server-cancel.js'), /location\s*=|location\.(assign|replace)|\.submit\(/);
 });

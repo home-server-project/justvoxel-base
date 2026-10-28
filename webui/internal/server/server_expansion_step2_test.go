@@ -90,3 +90,28 @@ func TestUnavailableServerCardsRejectForgedJavaSetup(t *testing.T) {
 		})
 	}
 }
+
+func TestPaperForkChoicesAndSharedPresentation(t *testing.T) {
+	choices := simpleSoftware("plugins")
+	want := []string{"paper", "purpur", "spigot", "pufferfish", "leaf"}
+	if len(choices) != len(want) {
+		t.Fatal("wrong Plugins choices")
+	}
+	for i, choice := range choices {
+		if choice.ID != want[i] || choice.Description != "Plugins · Cross-play" {
+			t.Fatalf("Plugins choice %d: %+v", i, choice)
+		}
+	}
+	for _, tc := range []struct{ id, name string }{{"pufferfish", "Pufferfish"}, {"leaf", "Leaf"}} {
+		if serverSoftware(tc.id) != tc.name || setupServerTypeLabel(tc.id) != tc.name || serverSoftwareIcon(tc.id) != "/static/server-software/"+tc.id+".svg" || !validSetupServerType(tc.id) || !recommendedServerSupportsBedrock(tc.id) {
+			t.Fatalf("missing shared presentation/capability: %s", tc.id)
+		}
+		data, err := assets.ReadFile("static/server-software/" + tc.id + ".svg")
+		if err != nil || !strings.Contains(string(data), `viewBox="0 0 48 48"`) || strings.Contains(string(data), "href=") {
+			t.Fatal("missing original local vector")
+		}
+	}
+	if serverSoftware("unknown") != "Software unavailable" || serverSoftwareIcon("unknown") != "" {
+		t.Fatal("unknown presentation changed")
+	}
+}

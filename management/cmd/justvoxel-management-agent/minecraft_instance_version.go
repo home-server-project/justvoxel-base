@@ -61,7 +61,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 		if !javaServerAllowsSwitch(previous.Runtime.Software, args[2]) {
 			return instanceRuntimeFailure("Software conversion requires a separate supported operation.")
 		}
-		if !containerOnly && previous.Runtime.Software != "paper" && previous.Runtime.Software != "purpur" && previous.Runtime.Software != "vanilla" && (args[2] != previous.Runtime.Software || args[4] != previous.Runtime.Version || args[5] != previous.Runtime.VersionPolicy) {
+		if !containerOnly && !javaServerPaperFamily(previous.Runtime.Software) && previous.Runtime.Software != "vanilla" && (args[2] != previous.Runtime.Software || args[4] != previous.Runtime.Version || args[5] != previous.Runtime.VersionPolicy) {
 			return instanceRuntimeFailure("Version updates for this server software require separate compatibility support.")
 		}
 		snapshot, _, _, err := b.snapshot(ctx)

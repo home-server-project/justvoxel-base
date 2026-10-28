@@ -102,11 +102,11 @@ func (f *exactSetupPreviewAPI) AdminSetupVersionPreview(context.Context, string,
 }
 
 func TestSetupResolutionPinsAndOptionalCrossplay(t *testing.T) {
-	for _, software := range []string{"paper", "purpur", "vanilla", "spigot", "fabric", "neoforge", "forge", "quilt"} {
+	for _, software := range []string{"paper", "purpur", "pufferfish", "leaf", "vanilla", "spigot", "fabric", "neoforge", "forge", "quilt"} {
 		t.Run(software, func(t *testing.T) {
 			_, base := newAddServerTestApp(t)
 			loader := ""
-			if setupNeedsExactRuntime(software) && software != "spigot" {
+			if setupNeedsExactRuntime(software) && software != "spigot" && software != "pufferfish" && software != "leaf" {
 				loader = "0.16.10"
 			}
 			preview := &exactSetupPreviewAPI{addServerTestAPI: base, status: api.AdminVersionStatus{SelectedCandidate: "1.21.8", ImageTag: setupRuntimeImage(software, "1.21.8"), LoaderVersion: loader}}
@@ -216,5 +216,26 @@ func TestSimpleAllJavaSoftwareUsesExistingReview(t *testing.T) {
 				t.Fatal("Simple setup left a moving runtime")
 			}
 		})
+	}
+}
+
+func TestPaperForkSetupRejectsChangedVersionAndLoader(t *testing.T) {
+	for _, software := range []string{"pufferfish", "leaf"} {
+		_, base := newAddServerTestApp(t)
+		preview := &exactSetupPreviewAPI{addServerTestAPI: base, status: api.AdminVersionStatus{SelectedCandidate: "1.21.8", ImageTag: "java21"}}
+		app, err := New(preview, Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		draft := draftFromSetupDefaults(base.defaults, api.AdminStorageDiscovery{})
+		draft.Minecraft.ServerType, draft.Minecraft.VersionPolicy, draft.Minecraft.Version = software, "pinned", "1.21.10"
+		if app.resolveSetupRuntime(context.Background(), "session-token", &draft, false) == nil {
+			t.Fatal("specific Minecraft version silently substituted")
+		}
+		draft.Minecraft.Version = "1.21.8"
+		preview.status.LoaderVersion = "0.16.10"
+		if app.resolveSetupRuntime(context.Background(), "session-token", &draft, false) == nil {
+			t.Fatal("Paper fork accepted loader metadata")
+		}
 	}
 }

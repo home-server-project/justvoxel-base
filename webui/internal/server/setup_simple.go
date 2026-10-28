@@ -15,7 +15,7 @@ type setupSoftwareChoice struct{ ID, Name, Description string }
 func simpleSoftware(family string) []setupSoftwareChoice {
 	switch family {
 	case "plugins":
-		return []setupSoftwareChoice{{"paper", "Paper", "Plugins · Cross-play"}, {"purpur", "Purpur", "Plugins · Cross-play"}, {"spigot", "Spigot", "Plugins · Cross-play"}}
+		return []setupSoftwareChoice{{"paper", "Paper", "Plugins · Cross-play"}, {"purpur", "Purpur", "Plugins · Cross-play"}, {"spigot", "Spigot", "Plugins · Cross-play"}, {"pufferfish", "Pufferfish", "Plugins · Cross-play"}, {"leaf", "Leaf", "Plugins · Cross-play"}}
 	case "mods":
 		return []setupSoftwareChoice{{"fabric", "Fabric", "Mod loader · Cross-play supported when compatible"}, {"neoforge", "NeoForge", "Mod loader · Cross-play supported when compatible"}, {"forge", "Forge", "Mod loader · Java only"}, {"quilt", "Quilt", "Mod loader · Java only"}}
 	case "original":
@@ -123,8 +123,11 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 		if required == "" || status.ImageTag != required {
 			return errors.New("The resolved runtime does not match its Minecraft release.")
 		}
-		if draft.Minecraft.ServerType != "spigot" && !regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}$`).MatchString(status.LoaderVersion) {
+		if draft.Minecraft.ServerType != "spigot" && draft.Minecraft.ServerType != "pufferfish" && draft.Minecraft.ServerType != "leaf" && !regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}$`).MatchString(status.LoaderVersion) {
 			return errors.New("An exact stable loader could not be resolved.")
+		}
+		if (draft.Minecraft.ServerType == "pufferfish" || draft.Minecraft.ServerType == "leaf") && status.LoaderVersion != "" {
+			return errors.New("This server software does not use a loader version.")
 		}
 		draft.Minecraft.RuntimeImageTag, draft.Minecraft.LoaderVersion = required, status.LoaderVersion
 	}

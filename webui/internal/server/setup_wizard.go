@@ -324,7 +324,7 @@ func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
 
 func validSetupServerType(value string) bool {
 	switch value {
-	case "paper", "purpur", "vanilla", "spigot", "fabric", "forge", "neoforge", "quilt", "bedrock":
+	case "paper", "purpur", "pufferfish", "leaf", "vanilla", "spigot", "fabric", "forge", "neoforge", "quilt", "bedrock":
 		return true
 	}
 	return false
@@ -332,7 +332,7 @@ func validSetupServerType(value string) bool {
 
 func recommendedServerSupportsBedrock(serverType string) bool {
 	switch serverType {
-	case "paper", "purpur", "spigot", "fabric", "neoforge":
+	case "paper", "purpur", "pufferfish", "leaf", "spigot", "fabric", "neoforge":
 		return true
 	default:
 		return false
@@ -588,6 +588,10 @@ func (a *App) setupWizardCancel(w http.ResponseWriter, r *http.Request) {
 	setupReviews.delete(a, session)
 	setupDrafts.delete(a, session)
 	if isAddServerRequest(r) {
+		if r.Header.Get("Accept") == "application/json" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		a.renderAdminDiscovery(w, "add_server_cancelled.html", nil)
 		return
 	}

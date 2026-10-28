@@ -55,7 +55,7 @@ if [[ ${values[3]} == false && ${MINECRAFT_SERVER_TYPE} != fabric && ${MINECRAFT
     done
     exit 0
 fi
-[[ ( ${values[3]} == true || ${values[3]} == false ) && ( ${values[4]} == paper || ${values[4]} == purpur || ${values[4]} == spigot || ${values[4]} == fabric || ${values[4]} == neoforge ) ]] || fail
+[[ ( ${values[3]} == true || ${values[3]} == false ) && ( ${values[4]} == paper || ${values[4]} == purpur || ${values[4]} == pufferfish || ${values[4]} == leaf || ${values[4]} == spigot || ${values[4]} == fabric || ${values[4]} == neoforge ) ]] || fail
 mkdir -m0700 -- "${staging}"
 cleanup() {
     local status=$?

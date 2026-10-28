@@ -138,7 +138,7 @@ func TestSharedWizardPresentationAndAllSoftware(t *testing.T) {
 				for _, input := range inputs {
 					got = append(got, input[1])
 				}
-				if !reflect.DeepEqual(got, []string{"paper", "purpur", "spigot", "fabric", "neoforge", "forge", "quilt", "vanilla", "bedrock"}) {
+				if !reflect.DeepEqual(got, []string{"paper", "purpur", "spigot", "pufferfish", "leaf", "fabric", "neoforge", "forge", "quilt", "vanilla", "bedrock"}) {
 					t.Fatalf("Advanced order: %v", got)
 				}
 				for _, field := range []string{"display_name", "start_after_setup", "start_on_boot"} {

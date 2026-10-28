@@ -21,7 +21,7 @@ func TestAddServerSimpleFamilyLanes(t *testing.T) {
 		value, title string
 		software     []string
 	}{
-		{"plugins", "Plugins", []string{"paper", "purpur", "spigot"}},
+		{"plugins", "Plugins", []string{"paper", "purpur", "spigot", "pufferfish", "leaf"}},
 		{"mods", "Mods", []string{"fabric", "neoforge", "forge", "quilt"}},
 		{"original", "Vanilla Java · Bedrock", []string{"vanilla", "bedrock"}},
 	} {
@@ -149,7 +149,7 @@ func TestAddServerAdvancedThreeLanesAndLaunchTarget(t *testing.T) {
 		heading  string
 		software []string
 	}{
-		{"Plugins + managed cross-play", []string{"paper", "purpur", "spigot"}},
+		{"Plugins + managed cross-play", []string{"paper", "purpur", "spigot", "pufferfish", "leaf"}},
 		{"Mod loaders · Cross-play: Fabric · NeoForge", []string{"fabric", "neoforge", "forge", "quilt"}},
 		{"Vanilla Java · Bedrock", []string{"vanilla", "bedrock"}},
 	} {

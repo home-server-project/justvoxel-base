@@ -22,6 +22,10 @@ func javaServerSoftware(software string) (javaServerCapabilities, bool) {
 		return javaServerCapabilities{Type: "PAPER", Name: "Paper", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
 	case "purpur":
 		return javaServerCapabilities{Type: "PURPUR", Name: "Purpur", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
+	case "pufferfish":
+		return javaServerCapabilities{Type: "PUFFERFISH", Name: "Pufferfish", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
+	case "leaf":
+		return javaServerCapabilities{Type: "LEAF", Name: "Leaf", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
 	case "vanilla":
 		return javaServerCapabilities{Type: "VANILLA", Name: "Vanilla"}, true
 	case "spigot":
@@ -46,7 +50,11 @@ func javaServerPluginsWorkspace(software string) bool {
 func javaServerAllowsSwitch(from, to string) bool {
 	_, a := javaServerSoftware(from)
 	_, b := javaServerSoftware(to)
-	return (from == "bedrock" && to == "bedrock") || a && b && (from == to || (from == "paper" || from == "purpur") && (to == "paper" || to == "purpur"))
+	return (from == "bedrock" && to == "bedrock") || a && b && (from == to || javaServerPaperFamily(from) && javaServerPaperFamily(to))
+}
+
+func javaServerPaperFamily(software string) bool {
+	return software == "paper" || software == "purpur" || software == "pufferfish" || software == "leaf"
 }
 
 var javaLoaderVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$`)
@@ -70,7 +78,7 @@ func validateJavaServerSelection(software, policy, version, loader, image string
 	if !c.ModLoader && loader != "" {
 		return errors.New("this server software does not accept a loader version")
 	}
-	if software == "paper" || software == "purpur" || software == "vanilla" {
+	if javaServerPaperFamily(software) || software == "vanilla" {
 		return nil
 	}
 	if policy != "pinned" {
@@ -103,7 +111,7 @@ func javaServerCrossplay(software string) bool {
 
 func javaServerManagedViaVersion(software string) bool {
 	switch software {
-	case "paper", "purpur", "spigot":
+	case "paper", "purpur", "spigot", "pufferfish", "leaf":
 		return true
 	}
 	return false

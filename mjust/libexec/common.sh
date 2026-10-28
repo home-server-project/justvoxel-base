@@ -489,28 +489,28 @@ resolve_latest_stable_paper_version() {
 
 # Fixed Java implementations, with Paper compatibility for pre-existing configs.
 validate_server_type() {
-    case "$1" in paper|purpur|vanilla|spigot|forge|neoforge|fabric|quilt|bedrock) return 0 ;; *) return 1 ;; esac
+    case "$1" in paper|purpur|pufferfish|leaf|vanilla|spigot|forge|neoforge|fabric|quilt|bedrock) return 0 ;; *) return 1 ;; esac
 }
 # Preserve the deployed legacy migration/export integration boundary.
 server_supports_plugins() { [[ ${1:-${MINECRAFT_SERVER_TYPE-paper}} == paper || ${1:-${MINECRAFT_SERVER_TYPE-paper}} == purpur ]]; }
 server_supports_viaversion() {
-    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|spigot) return 0 ;; *) return 1 ;; esac
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|pufferfish|leaf|spigot) return 0 ;; *) return 1 ;; esac
 }
 server_supports_managed_crossplay() {
-    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|spigot|fabric|neoforge) return 0 ;; *) return 1 ;; esac
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|pufferfish|leaf|spigot|fabric|neoforge) return 0 ;; *) return 1 ;; esac
 }
 server_supports_bukkit_plugins() {
-    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|spigot) return 0 ;; *) return 1 ;; esac
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|pufferfish|leaf|spigot) return 0 ;; *) return 1 ;; esac
 }
 server_is_mod_loader() {
     case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in forge|neoforge|fabric|quilt) return 0 ;; *) return 1 ;; esac
 }
 server_allows_in_place_switch() {
     validate_server_type "$1" && validate_server_type "$2" || return 1
-    [[ $1 == "$2" ]] || { [[ $1 == paper || $1 == purpur ]] && [[ $2 == paper || $2 == purpur ]]; }
+    [[ $1 == "$2" ]] || { [[ $1 == paper || $1 == purpur || $1 == pufferfish || $1 == leaf ]] && [[ $2 == paper || $2 == purpur || $2 == pufferfish || $2 == leaf ]]; }
 }
 server_software_display_name() {
-    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper) printf Paper ;; purpur) printf Purpur ;; vanilla) printf Vanilla ;; spigot) printf Spigot ;; forge) printf Forge ;; neoforge) printf NeoForge ;; fabric) printf Fabric ;; quilt) printf Quilt ;; *) return 1 ;; esac
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper) printf Paper ;; purpur) printf Purpur ;; pufferfish) printf Pufferfish ;; leaf) printf Leaf ;; vanilla) printf Vanilla ;; spigot) printf Spigot ;; forge) printf Forge ;; neoforge) printf NeoForge ;; fabric) printf Fabric ;; quilt) printf Quilt ;; *) return 1 ;; esac
 }
 validate_server_capabilities() {
     validate_server_type "${MINECRAFT_SERVER_TYPE-paper}" || { echo 'ERROR: invalid Minecraft server type.' >&2; return 1; }
@@ -525,7 +525,7 @@ validate_java_server_selection() {
     local software="$1" policy="$2" version="$3" loader="$4" image="$5" required_image
     validate_server_type "${software}" || return 1
     case "${software}" in
-        paper|purpur|vanilla) [[ -z ${loader} ]]; return ;;
+        paper|purpur|pufferfish|leaf|vanilla) [[ -z ${loader} ]]; return ;;
     esac
     [[ ${policy} == pinned ]] || return 1
     if [[ ${version} =~ ^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$ ]]; then
@@ -542,6 +542,43 @@ validate_java_server_selection() {
     fi
 }
 
+# Verify the artifact that the runtime will actually select. Paper compatibility
+# never establishes availability of a Pufferfish or Leaf Minecraft release.
+paper_fork_version_available() {
+    local software="$1" version="$2" branch metadata build
+    [[ ${version} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+    case "${software}" in
+        pufferfish)
+            branch="$(cut -d. -f1,2 <<< "${version}")"
+            curl --connect-timeout 3 --max-time 12 -fsSL \
+                "https://ci.pufferfish.host/job/Pufferfish-${branch}/lastSuccessfulBuild/api/json" |
+                jq -e --arg version "${version}" '
+                    .result == "SUCCESS" and
+                    (.number | type == "number" and . > 0 and floor == .) and
+                    any(.artifacts[]; .fileName as $name |
+                        (["pufferfish-paperclip-" + $version + "-R0.1-SNAPSHOT-mojmap.jar",
+                          "pufferfish-paperclip-" + $version + "-R0.1-SNAPSHOT-reobf.jar"] | index($name) != null) and
+                        (.relativePath | type == "string" and length > 0 and
+                            (split("/") | all(.[]; . != ".." and . != "")) and (endswith("/" + $name) or . == $name)))' >/dev/null
+            ;;
+        leaf)
+            metadata="$(curl --connect-timeout 3 --max-time 12 -fsSL \
+                "https://api.leafmc.one/v2/projects/leaf/versions/${version}")" || return 1
+            build="$(jq -er --arg version "${version}" '
+                select(.project_id == "leaf" and .version == $version) |
+                .builds | select(type == "array" and length > 0 and
+                    all(.[]; type == "number" and . > 0 and floor == .)) | max' <<< "${metadata}")" || return 1
+            curl --connect-timeout 3 --max-time 12 -fsSL \
+                "https://api.leafmc.one/v2/projects/leaf/versions/${version}/builds/${build}" |
+                jq -e --arg version "${version}" --argjson build "${build}" '
+                    .project_id == "leaf" and .version == $version and .build == $build and
+                    .downloads.application.name == ("leaf-" + $version + "-" + ($build | tostring) + ".jar") and
+                    (.downloads.application.sha256 | type == "string" and test("^[a-fA-F0-9]{64}$"))' >/dev/null
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 # Verify an exact pair with the selected project's own metadata/artifact
 # repository. No release synthesis, third-party jars, or alternate loader.
 java_server_version_available() {
@@ -551,6 +588,10 @@ java_server_version_available() {
     # Require the exact game release as well as the exact implementation pair.
     curl --connect-timeout 3 --max-time 8 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e --arg version "${version}" '
         any(.versions[]; .id == $version and .type == "release")' >/dev/null || return 1
+    if [[ ${software} == pufferfish || ${software} == leaf ]]; then
+        [[ -z ${loader} ]] && paper_fork_version_available "${software}" "${version}"
+        return
+    fi
     if [[ ${software} == spigot ]]; then
         [[ -z ${loader} ]] || return 1
         [[ ${version} != 26.* ]] || java_class=69
@@ -603,7 +644,7 @@ java_server_version_available() {
 resolve_setup_loader() {
     local software="$1" game="$2" metadata prefix
     case "${software}" in
-        spigot) return 0 ;;
+        spigot|pufferfish|leaf) return 0 ;;
         fabric|quilt)
             local api=https://meta.fabricmc.net/v2
             [[ ${software} != quilt ]] || api=https://meta.quiltmc.org/v3
@@ -670,7 +711,7 @@ server_version_available() {
         paper) paper_version_build_channel "${version}" >/dev/null ;;
         purpur) purpur_metadata | jq -e --arg v "${version}" '.versions | index($v) != null' >/dev/null ;;
         vanilla) vanilla_metadata | jq -e --arg v "${version}" 'any(.versions[]; .id == $v and .type == "release")' >/dev/null ;;
-        spigot|forge|neoforge|fabric|quilt) java_server_version_available "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION:-}" ;;
+        pufferfish|leaf|spigot|forge|neoforge|fabric|quilt) java_server_version_available "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION:-}" ;;
         *) return 1 ;;
     esac
 }
@@ -682,6 +723,7 @@ resolve_recommended_server_version() {
         paper) resolve_latest_stable_paper_version ;;
         purpur) purpur_metadata | jq -er '.metadata.current' ;;
         vanilla) vanilla_metadata | jq -er '.latest.release' ;;
+        pufferfish|leaf) resolve_setup_java_runtime "${MINECRAFT_SERVER_TYPE}" recommended '' | jq -er .game ;;
         *) return 1 ;;
     esac
 }
@@ -689,7 +731,7 @@ resolve_latest_server_version() {
     case "${MINECRAFT_SERVER_TYPE-paper}" in
         paper) resolve_latest_available_paper_version ;;
         purpur) purpur_metadata | jq -er '.versions | sort_by(split(".") | map(tonumber)) | last' ;;
-        vanilla) resolve_recommended_server_version ;;
+        vanilla|pufferfish|leaf) resolve_recommended_server_version ;;
         *) return 1 ;;
     esac
 }

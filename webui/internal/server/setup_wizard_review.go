@@ -454,6 +454,8 @@ func setupServerTypeLabel(value string) string {
 		return "Purpur"
 	case "spigot":
 		return "Spigot"
+	case "pufferfish", "leaf":
+		return serverSoftware(value)
 	case "vanilla":
 		return "Vanilla"
 	case "fabric":

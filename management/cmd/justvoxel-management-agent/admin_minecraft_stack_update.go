@@ -76,7 +76,7 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 		instanceRuntimeError(w, err, id)
 		return
 	}
-	if software := record.Runtime.Software; software != "paper" && software != "purpur" && software != "vanilla" && software != "spigot" {
+	if software := record.Runtime.Software; !javaServerPaperFamily(software) && software != "vanilla" && software != "spigot" {
 		writeError(w, http.StatusConflict, "Server updates for this software require separate compatibility support")
 		return
 	}

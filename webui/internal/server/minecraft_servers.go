@@ -52,6 +52,10 @@ func serverSoftware(value string) string {
 		return "Paper"
 	case "purpur":
 		return "Purpur"
+	case "pufferfish":
+		return "Pufferfish"
+	case "leaf":
+		return "Leaf"
 	case "vanilla":
 		return "Vanilla"
 	case "spigot":
@@ -73,7 +77,7 @@ func serverSoftware(value string) string {
 
 func serverSoftwareIcon(value string) string {
 	switch strings.ToLower(value) {
-	case "vanilla", "paper", "purpur", "spigot", "bedrock", "fabric", "forge", "neoforge", "quilt":
+	case "vanilla", "paper", "purpur", "pufferfish", "leaf", "spigot", "bedrock", "fabric", "forge", "neoforge", "quilt":
 		return "/static/server-software/" + strings.ToLower(value) + ".svg"
 	default:
 		return ""

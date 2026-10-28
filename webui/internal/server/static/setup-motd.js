@@ -7,7 +7,7 @@ if (setupMOTD && setupMOTDAutomatic) {
   const updatePlaceholder = () => {
     if (setupMOTDAutomatic.value !== "true") return;
     const selected = Array.from(softwareChoices).find((choice) => choice.checked);
-    const software = { paper: "Paper", purpur: "Purpur", vanilla: "Vanilla", spigot: "Spigot" }[selected?.value];
+    const software = { paper: "Paper", purpur: "Purpur", pufferfish: "Pufferfish", leaf: "Leaf", vanilla: "Vanilla", spigot: "Spigot" }[selected?.value];
     if (software) {
       setupMOTD.placeholder = `Automatic: JustVoxel ${software} Minecraft <resolved version> Server`;
     }

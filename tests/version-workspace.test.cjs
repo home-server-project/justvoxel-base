@@ -423,9 +423,9 @@ test('selection generation detaches scheduled update watching without cancelling
   assert.ok(requests.every(url=>url.startsWith('/api/version/workspace/update-operation?')));
 });
 
- test('Switch exposes only reviewed Paper/Purpur changes without image controls', async () => {
+ test('Switch exposes only reviewed Paper-family changes without image controls', async () => {
   const page = await softwareReview({}, { online: 3 });
-  assert.deepEqual(page.cards.map(node => node.children[1].children[0].textContent), ['Paper', 'Purpur']);
+  assert.deepEqual(page.cards.map(node => node.children[1].children[0].textContent), ['Paper', 'Purpur', 'Pufferfish', 'Leaf']);
   assert.equal(page.form.all().some(node => node.tag === 'select'), false);
   assert.doesNotMatch(softwareSource, /Vanilla|vanilla|Check for updates|custom_tag|name="channel"|image_tag:|Container channel/);
   assert.equal(page.consent.checked, false); assert.equal(page.apply.disabled, true);
@@ -647,3 +647,23 @@ test('Old container restore selection and retention callbacks cannot submit for 
  await restore.listeners.click();await save.listeners.click();radio.listeners.change();
  assert.ok(!page.calls.some(call=>call.url==='/api/version/container/update'||call.url==='/api/version/container/retention'));
 });
+
+ test('all four Paper-compatible types can select each other and Spigot stays blocked', async () => {
+  const family = ['paper', 'purpur', 'pufferfish', 'leaf'];
+  for (const current of family) {
+    for (const target of family.filter(value => value !== current)) {
+      const page = softwareWorkspace({current});
+      page.click(target); await page.review();
+      const apply = page.find('Apply changes');
+      const consent = page.consent();
+      assert.ok(consent, `${current} -> ${target} can be reviewed`);
+      consent.checked = true; consent.listeners.change();
+      await apply.listeners.click();
+      assert.equal(page.calls.find(call => call.body).body.get('server_type'), target);
+    }
+  }
+  for (const current of ['spigot', 'vanilla', 'fabric', 'forge', 'neoforge', 'quilt', 'bedrock']) {
+    const page = softwareWorkspace({current});
+    assert.ok(page.cards.every(node => node.disabled));
+  }
+ });
