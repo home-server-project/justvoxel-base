@@ -147,7 +147,11 @@ else: sys.exit(2)
         self.run_helper('system-update-reboot-worker', JV_UPDATE_REBOOT_BACKUP='yes')
         self.assertEqual(self.changed('stop'), [])
         self.assertEqual(self.changed('start'), [])
-        self.assertFalse(any(c[0]=='management-agent' for c in self.calls()))
+        self.assertEqual([c for c in self.calls() if c[0]=='management-agent'], [
+            ['management-agent', 'system-update-activate',
+             'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'],
+        ])
+        self.assertEqual([c for c in self.calls() if c[:2]==['management-agent', 'instance-version-backup']], [])
         self.assertIn(['systemctl', 'reboot'], self.calls())
 
     def test_status_and_only_running_prepared(self):
