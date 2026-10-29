@@ -204,13 +204,16 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 	oldBackup := instanceBackupStorageCommand
 	t.Cleanup(func() { instanceBackupStorageCommand = oldBackup })
 	instanceBackupStorageCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-		if len(args) != 5 || args[2] != instanceBackupHelper || args[4] != "jv-a1b2c3" {
+		if command != "nsenter" || len(args) < 5 || args[0] != "--mount=/proc/1/ns/mnt" || args[1] != "--" || args[2] != instanceBackupHelper || args[4] != "jv-a1b2c3" {
 			t.Fatalf("wrong backup target: %s %v", command, args)
 		}
 		if args[3] == "preflight" {
+			if len(args) != 5 {
+				t.Fatal(args)
+			}
 			return nil, nil
 		}
-		if args[3] != "create" {
+		if args[3] != "create" || len(args) != 6 || args[5] != "JV Paper" {
 			t.Fatal(args)
 		}
 		f.commands = append(f.commands, "instance-backup create jv-a1b2c3")
