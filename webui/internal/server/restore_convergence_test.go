@@ -269,8 +269,13 @@ func TestSelectedRestoreWorkspaceProgressAndBusy(t *testing.T) {
 					t.Fatalf("%s: unexpected progress/polling markup: %s", marker, body)
 				}
 			}
-			if tc.state == "idle" && !tc.recovery && !strings.Contains(body, "Restore: Ready") {
-				t.Fatal("idle summary missing", body)
+			if tc.state == "idle" && !tc.recovery {
+				if !strings.Contains(body, `class="backup-library-section"`) {
+					t.Fatal("idle Backup Library missing", body)
+				}
+				if strings.Contains(body, "Restore: Ready") {
+					t.Fatal("stale idle restore summary remains", body)
+				}
 			}
 		})
 	}

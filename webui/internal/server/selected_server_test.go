@@ -257,13 +257,26 @@ func TestSelectedBackupsReuseAndTarget(t *testing.T) {
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
-		if strings.Contains(w.Body.String(), "data-backup-delete-selected") || strings.Contains(w.Body.String(), "Change destination") {
-			t.Fatal("legacy privileged controls escaped")
+		body := w.Body.String()
+		for _, want := range []string{`data-selected-server-id="jv-family1"`, `data-backup-delete-selected disabled>Delete</button>`} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("selected-server Backups missing %q", want)
+			}
+		}
+		for _, forbidden := range []string{"Change destination", "data-backup-server-filter", "data-backup-import", ">Delete selected</button>", `action="/workspace/backups/backup"`, `action="/workspace/backups/automatic/plan"`} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("global or legacy privileged control escaped: %q", forbidden)
+			}
 		}
 	}
 	for _, want := range []string{"jv-family1:inventory", "jv-family1:configure", "jv-family1:now", "jv-family1:restore/status"} {
 		if !strings.Contains(strings.Join(f.backupCalls, "|"), want) {
 			t.Fatal(want)
+		}
+	}
+	for _, call := range f.backupCalls {
+		if !strings.HasPrefix(call, "jv-family1:") {
+			t.Fatal("Backups requested another server", call)
 		}
 	}
 	f.backupInventoryID = "jv-kids001"

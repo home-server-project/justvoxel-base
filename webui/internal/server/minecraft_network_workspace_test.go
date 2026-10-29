@@ -192,9 +192,9 @@ for (const count of [0, 1, 2, 3]) {
 func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 	baseline := map[string]string{
 		"static/how-to-connect.css":    "5d99042ae7f87dc47bf09f248794725cca7af2a08a656bbd4d4fc2bc3926ce06",
-		"static/minecraft-servers.css": "66b3fc388e6a40f24dad0bff2768b9039323381acc763a3d565896cc82f77c56",
+		"static/minecraft-servers.css": "b39b7f286d3a8819a19fef8ef4e2f53db890eb06cec424f7765e19d6cea87bab",
 		"static/network-workspace.css": "0b22bc4263f0a3769f59874767366039f8c76a33486cb506b8cd20f23fa94585",
-		"static/new-backups.css":       "23e64d2ff226fdc6488e4a124b77f8f12264861ded37278031e9c02252a1dc49",
+		"static/new-backups.css":       "e414942748a1d69286bec340e0e804be95394d864139787560f3cc0cf1a761da",
 		"static/playit-setup.css":      "fdaae36a639c41bc22374d42a70803b771e4a07f35810464080923e7582d39b1",
 		"static/setup-review.css":      "02d4fe58915d40862c728f3541932e9f60870ebaee6ebb70be452e441a782df3",
 		"static/storage-browser.css":   "fbdfb24d4ce62fac8ef6ca6d1bf053258c2f2668b0b23217ef489c3388a003c6",

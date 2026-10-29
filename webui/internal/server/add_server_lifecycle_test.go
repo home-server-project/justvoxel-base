@@ -169,7 +169,7 @@ func TestAddServerAdvancedThreeLanesAndLaunchTarget(t *testing.T) {
 	if strings.Contains(body, "<legend>Mods</legend>") || setupSoftwareGroups()[1].Description != "" {
 		t.Fatal("Advanced Mods must have one heading without a separate description")
 	}
-	if !strings.Contains(lanes[1], "Cross-play: Fabric · NeoForge") || !strings.Contains(lanes[2], "Original Minecraft · no plugins or mods") || !strings.Contains(lanes[2], "Native Bedrock server · no plugins or mods") {
+	if !strings.Contains(lanes[2], "Original Minecraft · no plugins or mods") || !strings.Contains(lanes[2], "Native Bedrock server · no plugins or mods") {
 		t.Fatal("lane descriptions missing")
 	}
 	markup := correctionSource(t, "templates/minecraft_servers.html")

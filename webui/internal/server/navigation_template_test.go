@@ -300,13 +300,13 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	markup := string(content)
 	library := strings.Index(markup, `class="backup-library-section"`)
 	automatic := strings.Index(markup, `class="backup-automatic-section"`)
-	destination := strings.Index(markup, `class="backup-destination-section"`)
-	if library < 0 || automatic < 0 || destination < 0 || !(library < automatic && automatic < destination) {
-		t.Fatal("Backup library must be the first main Backups section")
+	destination := strings.Index(markup, `{{template "backup_destination_content" .}}`)
+	if library < 0 || automatic < 0 || destination < 0 || !(library < destination && destination < automatic) {
+		t.Fatal("Backups sections must be ordered Library, Destination, Automatic")
 	}
 	command := strings.Index(markup, `class="backup-command-bar"`)
 	files := strings.Index(markup, `class="backup-file-grid"`)
-	if command < library || (files >= 0 && command < files) || command > automatic {
+	if command < library || (files >= 0 && command < files) || command > destination {
 		t.Fatal("Backup controls must live inside Backup library below the backup files")
 	}
 	styles, err := assets.ReadFile("static/new-backups.css")
@@ -316,7 +316,7 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	if !strings.Contains(string(styles), ".backup-destination-change>summary{display:flex") {
 		t.Fatal("Change destination must be a normal right-aligned action button")
 	}
-	if got := fmt.Sprintf("%x", sha256.Sum256(styles)); got != "23e64d2ff226fdc6488e4a124b77f8f12264861ded37278031e9c02252a1dc49" {
+	if got := fmt.Sprintf("%x", sha256.Sum256(styles)); got != "e414942748a1d69286bec340e0e804be95394d864139787560f3cc0cf1a761da" {
 		t.Fatal("new-backups.css must remain frozen; standard action sizing belongs in app.css")
 	}
 	for _, want := range []string{

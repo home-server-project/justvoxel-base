@@ -18,7 +18,9 @@ func TestBackupsWorkspaceSelectedServerPreservesArchiveReferences(t *testing.T) 
 	for _, want := range []string{
 		`data-selected-server-id="jv-family1"`,
 		`data-backup-size-bytes="1"`,
-		`value="minecraft-family-2026-01-01-1200.tar.gz"`,
+		`value="Paper1-backup-paper-2026-10-28-0831.tar.gz"`,
+		`data-backup-restore-id="Paper1-backup-paper-2026-10-28-0831.tar.gz"`,
+		`data-backup-delete-ref="jv-family1/Paper1-backup-paper-2026-10-28-0831.tar.gz"`,
 		`data-backup-visible-count`,
 		`data-backup-visible-size`,
 		`data-backup-filter-empty`,
@@ -70,6 +72,7 @@ const cards = ids.map((id, i) => ({
 }));
 const boxes = ids.map((id, i) => ({
   value: id,
+  dataset: { backupDeleteRef: id },
   checked: false,
   closest() { return cards[i]; },
   addEventListener(_, fn) { this.changed = fn; },
