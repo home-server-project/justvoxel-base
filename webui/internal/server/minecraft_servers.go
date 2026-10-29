@@ -16,7 +16,7 @@ import (
 type minecraftServerSummary struct {
 	Name, URL, Software, Version, State, ConfigurationError string
 	ContextID, SoftwareIcon                                 string
-	JavaMemory, ContainerMemory, StateClass                 string
+	JavaMemory, ContainerMemory, StateClass, CardHealth     string
 	Running, CanSwitch, CanConfigureBoot                    bool
 	JavaPort, BedrockPort                                   int
 	ConfigurationAvailable, BedrockEnabled                  bool
@@ -87,27 +87,33 @@ func serverSoftwareIcon(value string) string {
 func (s *minecraftServerSummary) setState(state string) {
 	// Presentation of authoritative states only; no runtime inference here.
 	s.StateClass = "warning"
+	s.CardHealth = "error"
 	switch strings.ToLower(state) {
 	case "running":
+		s.CardHealth = "success"
 		s.State = "Running"
 		s.StateClass = "success"
 		s.Running, s.CanSwitch, s.CanConfigureBoot = true, true, true
 		s.CanStop = true
 		s.CanRestart = true
 	case "stopped":
+		s.CardHealth = "neutral"
 		s.State = "Stopped"
 		s.StateClass = "error"
 		s.CanSwitch, s.CanConfigureBoot = true, true
 		s.CanStart = true
 	case "starting":
+		s.CardHealth = "warning"
 		s.State = "Starting"
 	case "stopping":
+		s.CardHealth = "warning"
 		s.State = "Stopping"
 	case "failed":
 		s.State = "Failed"
 		s.StateClass = "error"
 		s.CanStart = true
 	case "configured":
+		s.CardHealth = "neutral"
 		s.State = "Configured"
 	case "recovery_required":
 		s.State = "Recovery required"
@@ -175,7 +181,7 @@ func (a *App) independentServerInventory(ctx context.Context, session string) ([
 }
 
 func (a *App) independentServerSummary(ctx context.Context, session string, instance api.RegisteredMinecraftInstance) minecraftServerSummary {
-	s := minecraftServerSummary{ContextID: instance.ID, Name: instance.DisplayName, URL: serverOverviewURL(instance.ID), Software: "Software unavailable", Version: "Version unavailable", State: "Status unavailable", StateClass: "warning"}
+	s := minecraftServerSummary{ContextID: instance.ID, Name: instance.DisplayName, URL: serverOverviewURL(instance.ID), Software: "Software unavailable", Version: "Version unavailable", State: "Status unavailable", StateClass: "warning", CardHealth: "error"}
 	if s.Name == "" {
 		s.Name = "Minecraft server"
 	}

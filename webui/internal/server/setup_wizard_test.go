@@ -526,7 +526,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 	if strings.Contains(body, "Future multi-instance placeholder") {
 		t.Fatal("obsolete naming placeholder remains")
 	}
-	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", `name="display_name"`, `value="Minecraft server"`, "Family", "Maximum players", "Plugins &#43; managed cross-play", "Mod loaders · Cross-play: Fabric · NeoForge", "Vanilla Java · Bedrock", "Paper", "Technical name: MOTD"} {
+	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", `name="display_name"`, `value="Minecraft server"`, "Family", "Maximum players", "Plugins · Cross-play", "Mod loaders · Cross-play", "Vanilla Java · Bedrock", "Paper", "Technical name: MOTD"} {
 		if want == "Family" {
 			continue
 		}

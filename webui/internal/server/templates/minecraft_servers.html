@@ -25,15 +25,14 @@
   <section class="minecraft-server-inventory" data-server-csrf="{{.CSRF}}">
   <nav class="minecraft-workspace-tabs minecraft-server-arrange-toolbar" aria-label="Minecraft Servers actions">
     <a href="{{if .Configured}}/minecraft/servers/add?new=1{{else}}/setup{{end}}"{{if .Configured}} target="justvoxel-add-server"{{end}}>Add Server</a>
+    <button type="button" data-minecraft-network-open>Network</button>
     <button type="button" data-server-arrange hidden>Rearrange</button>
     <button type="button" data-server-arrange-done hidden>Done</button>
-    <a href="/?workspace=migration&amp;tab=import" data-server-import>Import</a>
-    <button type="button" data-minecraft-network-open>Network</button>
   </nav>
   <p class="notice error" role="status" data-server-feedback hidden></p>
   <div class="minecraft-server-entries">
     {{range .Servers}}
-    <article class="panel minecraft-server-card" data-minecraft-server-card data-server-id="{{.ContextID}}" data-server-name="{{.Name}}">
+    <article class="panel minecraft-server-card minecraft-server-health-{{.CardHealth}}" data-minecraft-server-card data-server-id="{{.ContextID}}" data-server-name="{{.Name}}">
       <div class="minecraft-server-heading"><h2>{{.Name}}</h2><strong class="minecraft-server-state {{.StateClass}}">{{.State}}</strong></div>
       <div class="minecraft-server-software-row"><p class="muted">{{if .SoftwareIcon}}<img class="minecraft-server-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}<span>{{.Software}} · {{.Version}}</span></p>
         <details class="storage-action-menu minecraft-server-more" data-server-normal-actions>
@@ -42,6 +41,7 @@
             <a href="/?workspace=minecraft&amp;server={{.ContextID}}" data-server-workspace="minecraft">Settings</a>
             <a href="/?workspace=backups&amp;server={{.ContextID}}" data-server-workspace="backups">Backups</a>
             <a href="/?workspace=version&amp;server={{.ContextID}}" data-server-workspace="version">Version</a>
+            <a href="/?workspace=migration&amp;server={{.ContextID}}" data-server-workspace="migration">Migration</a>
             <a href="/?workspace=plugins&amp;server={{.ContextID}}" data-server-workspace="plugins">Plugins</a>
             <button type="button" data-server-invite>Invite friends</button>
             <a href="/minecraft/how-to-connect?server={{.ContextID}}" target="_blank" rel="noopener">How to connect</a>

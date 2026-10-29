@@ -149,8 +149,8 @@ func TestAddServerAdvancedThreeLanesAndLaunchTarget(t *testing.T) {
 		heading  string
 		software []string
 	}{
-		{"Plugins + managed cross-play", []string{"paper", "purpur", "spigot", "pufferfish", "leaf"}},
-		{"Mod loaders · Cross-play: Fabric · NeoForge", []string{"fabric", "neoforge", "forge", "quilt"}},
+		{"Plugins · Cross-play", []string{"paper", "purpur", "spigot", "pufferfish", "leaf"}},
+		{"Mod loaders · Cross-play", []string{"fabric", "neoforge", "forge", "quilt"}},
 		{"Vanilla Java · Bedrock", []string{"vanilla", "bedrock"}},
 	} {
 		renderedLane := html.UnescapeString(lanes[i])

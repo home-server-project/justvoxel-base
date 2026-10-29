@@ -439,12 +439,16 @@ WebUI, restore operation, version-upgrade permission, daemon, or automatic retry
 
 The existing configured backup-storage root is reused. Each independent instance
 writes directly into `<backup-root>/<immutable-id>/`. New archives are named
-`instance-backup-<software>-YYYY-MM-DD-HHMM[-collision].tar.gz`, with an adjacent
-`.meta.json`. The distinct prefix is intentional: legacy restore discovery scans
-all ID folders for `minecraft-*.tar.gz`. Independent backups must stay outside
-that legacy discovery/restore contract until Phase 4B can check their original
-instance. Existing archives are neither renamed nor moved. Friendly names never
-form paths. The archive contains `data/` and its Minecraft files, without adding
+`<server-name>-backup-<software>-YYYY-MM-DD-HHMM[-collision].tar.gz`, with an adjacent
+`.meta.json`. The registered display name at creation is preserved exactly,
+including case and spaces. Renaming a server does not rename its backups.
+Historical `instance-backup-<software>-YYYY-MM-DD-HHMM[-collision].tar.gz`
+archives remain accepted by inventory, retention and same-instance Restore.
+Existing archives are neither renamed nor moved. Friendly names form only the
+validated archive basename, never a directory. Metadata binds the immutable ID,
+creation-time name, software, version, basename and integrity hashes. Reviewed
+deletion uses `<immutable-id>/<archive-basename>` while Restore uses the basename.
+The archive contains `data/` and its Minecraft files, without adding
 an Instance ID or private host runtime configuration to the world.
 
 Private settings and status are separate from Quadlets in the existing private

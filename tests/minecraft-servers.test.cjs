@@ -10,6 +10,8 @@ const ids = ['jv-family1', 'jv-kids001', 'jv-new0001'];
 // Small DOM fixture for the page script's native buttons, visibility and moves.
 class Element {
   constructor(selector, dataset = {}) {
+    const classes = new Set();
+    this.classList = {toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }, contains(name) { return classes.has(name); }};
     this.selector = selector;
     this.dataset = dataset;
     this.children = [];
@@ -477,8 +479,9 @@ test('Inventory action lane is between workspace header and body, without tab ro
   assert.match(actions, /class="minecraft-workspace-tabs minecraft-server-arrange-toolbar"/);
   assert.doesNotMatch(actions, /role="tab|aria-selected/);
   assert.ok(actions.indexOf('>Add Server<') < actions.indexOf('>Rearrange<'));
-  assert.ok(actions.indexOf('>Rearrange<') < actions.indexOf('>Import<'));
-  assert.match(actions, /href="\/\?workspace=migration&amp;tab=import"/);
+  assert.ok(actions.indexOf('>Add Server<') < actions.indexOf('>Network<'));
+  assert.ok(actions.indexOf('>Network<') < actions.indexOf('>Rearrange<'));
+  assert.doesNotMatch(actions, /Import|data-server-import/);
   // The fragment retains the lane for standalone pages; workspace mounting moves it.
   assert.ok(template.indexOf('<section class="minecraft-server-inventory"') < template.indexOf(actions));
 });
@@ -701,63 +704,10 @@ test('card software icon is small, proportional and precedes the existing text',
   assert.match(css, /\.minecraft-server-software-row>p \{[^}]*align-items: baseline/);
 });
 
-function importHarness(launcherAvailable = true) {
-  const link = new Element('[data-server-import]');
-  link.href = '/?workspace=migration&tab=import';
-  const location = {href: 'https://justvoxel.test/?workspace=minecraft-servers&operation=stale&server=jv-kids001'};
-  const replacements = [], launches = [];
-  const state = {keep: true};
-  const context = vm.createContext({
-    URL,
-    root: {querySelector: selector => selector === '[data-server-import]' ? link : null},
-    document: {querySelector: selector => {
-      assert.equal(selector, '[data-migration-open]');
-      return launcherAvailable ? {click() { launches.push(new URL(location.href)); }} : null;
-    }},
-    window: {location, history: {state, replaceState(value, title, destination) {
-      assert.equal(value, state); assert.equal(title, '');
-      replacements.push(destination); location.href = destination.href;
-    }}},
-  });
-  const start = source.indexOf("  const importLink = root.querySelector('[data-server-import]');");
-  const end = source.indexOf('\n  };', start);
-  assert.ok(start >= 0 && end > start);
-  vm.runInContext(source.slice(start, end), context);
-  const click = (fields = {}) => {
-    const event = {button: 0, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...fields};
-    link.listeners.click[0].handler(event); return event;
-  };
-  return {link, location, replacements, launches, click};
-}
-
-test('Import keeps Dashboard alive, replaces URL state and clicks the existing launcher', () => {
-  const f = importHarness();
-  assert.equal(f.click().defaultPrevented, true);
-  assert.equal(f.replacements.length, 1); assert.equal(f.launches.length, 1);
-  const destination = f.launches[0];
-  assert.equal(destination.searchParams.get('workspace'), 'migration');
-  assert.equal(destination.searchParams.get('tab'), 'import');
-  assert.equal(destination.searchParams.has('operation'), false);
-  assert.equal(destination.searchParams.get('server'), 'jv-kids001');
-  assert.equal(f.link.href, '/?workspace=migration&tab=import');
-  assert.doesNotMatch(source, /location\.(?:reload|assign|replace)\s*\(|location\.href\s*=/);
+test('Migration is scoped per server and the global Import launcher is removed', () => {
   const template = readFileSync(`${root}templates/minecraft_servers.html`, 'utf8');
-  assert.match(template, /href="\/\?workspace=migration&amp;tab=import" data-server-import>Import<\/a>/);
-  const p = page();
-  p.initialize();
-  assert.equal(p.arrange.listeners.click.length, 1);
-});
-
-test('Import preserves modified, middle and prevented clicks and missing-launcher fallback', () => {
-  for (const fields of [{ctrlKey:true}, {metaKey:true}, {shiftKey:true}, {altKey:true}, {button:1}, {button:2}, {defaultPrevented:true}]) {
-    const f = importHarness();
-    const event = f.click(fields);
-    assert.equal(event.defaultPrevented, !!fields.defaultPrevented);
-    assert.equal(f.replacements.length, 0); assert.equal(f.launches.length, 0);
-  }
-  const f = importHarness(false);
-  assert.equal(f.click().defaultPrevented, false);
-  assert.equal(f.replacements.length, 0); assert.equal(f.launches.length, 0);
+  assert.match(template, /href="\/\?workspace=migration&amp;server={{\.ContextID}}" data-server-workspace="migration">Migration<\/a>/);
+  assert.doesNotMatch(template + source, /data-server-import|const importLink/);
 });
 
 // Deterministic clock/network fixture; no real polling timers or browser storage.
@@ -897,13 +847,13 @@ test('disconnection stops the shared timer and outstanding reads never update re
   assert.equal(replacement.intervals.length, 1);
 });
 
-const stateRow = (id, state, state_class, running, can_switch) => ({id, state, state_class, running, can_switch});
+const stateRow = (id, state, state_class, running, can_switch, card_health) => ({id, state, state_class, running, can_switch, card_health});
 
 for (const transition of [
-  ['Starting', stateRow(ids[0], 'Running', 'success', true, true), 'Unavailable'],
-  ['Stopping', stateRow(ids[0], 'Stopped', 'error', false, true), '---'],
-  ['Running', stateRow(ids[0], 'Failed', 'error', false, false), 'Unavailable'],
-  ['Stopped', stateRow(ids[0], 'Starting', 'warning', false, false), 'Unavailable'],
+  ['Starting', stateRow(ids[0], 'Running', 'success', true, true, 'success'), 'Unavailable'],
+  ['Stopping', stateRow(ids[0], 'Stopped', 'error', false, true, 'neutral'), '---'],
+  ['Running', stateRow(ids[0], 'Failed', 'error', false, false, 'error'), 'Unavailable'],
+  ['Stopped', stateRow(ids[0], 'Starting', 'warning', false, false, 'warning'), 'Unavailable'],
 ]) {
   test(`live lifecycle updates ${transition[0]} -> ${transition[1].state} in place without RAM`, async () => {
     const [initial, row, ram] = transition;
@@ -917,6 +867,8 @@ for (const transition of [
     assert.equal(f.cards[0], card);
     assert.equal(card.querySelector('.minecraft-server-state'), status);
     assert.equal(status.textContent, row.state);
+    assert.equal(card.classList.contains(`minecraft-server-health-${row.card_health}`), true);
+    assert.equal(['success', 'neutral', 'warning', 'error'].filter(health => card.classList.contains(`minecraft-server-health-${health}`)).length, 1);
     assert.equal(status.className, `minecraft-server-state ${row.state_class}`);
     assert.equal(running.checked, row.running);
     assert.equal(running.disabled, !row.can_switch);
@@ -940,7 +892,7 @@ test('live lifecycle and RAM share one response and preserve graph history acros
   assert.equal(f.value(0), '0 MB');
   f.responses.push(row('Running', true, true, 50)); await f.tick();
   assert.equal(f.points(0), '112,9 116,6');
-  f.responses.push([stateRow(ids[0], 'Stopped', 'error', false, true)]); await f.tick();
+  f.responses.push([stateRow(ids[0], 'Stopped', 'error', false, true, 'neutral')]); await f.tick();
   assert.equal(f.value(0), '---');
   assert.equal(f.points(0), undefined);
   f.responses.push(row('Running', true, true, 50)); await f.tick();
@@ -949,7 +901,7 @@ test('live lifecycle and RAM share one response and preserve graph history acros
 
 test('memory-only rows and poll failures never infer or overwrite lifecycle state', async () => {
   const f = liveMemoryHarness(['Starting']);
-  f.responses.push([stateRow(ids[0], 'Running', 'success', true, true)]);
+  f.responses.push([stateRow(ids[0], 'Running', 'success', true, true, 'success')]);
   f.start(); await f.settle();
   for (const response of [[memoryRow(ids[0], 100)], [], new Error('offline'), [stateRow('jv-other01', 'Stopped', 'error', false, true)]]) {
     f.responses.push(response); await f.tick();

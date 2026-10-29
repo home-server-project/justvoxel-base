@@ -2,6 +2,9 @@
 .minecraft-server-inventory { min-width: 0; container-type: inline-size; }
 .minecraft-server-inventory .minecraft-server-entries { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,420px),420px)); align-items: start; gap: 1rem; }
 .minecraft-server-inventory .minecraft-server-card { box-sizing: border-box; display: flex; flex-direction: column; gap: .85rem; width: 100%; min-width: 0; margin: 0; padding: 1rem; border: 1px solid var(--jv-border-strong); border-radius: var(--jv-radius); background: var(--jv-surface); box-shadow: 0 5px 14px color-mix(in srgb,var(--jv-text) 12%,transparent); }
+.minecraft-server-inventory .minecraft-server-card.minecraft-server-health-success { border-color: var(--jv-success); box-shadow: 0 5px 14px color-mix(in srgb,var(--jv-success) 25%,transparent); }
+.minecraft-server-inventory .minecraft-server-card.minecraft-server-health-warning { border-color: var(--jv-warning); box-shadow: 0 5px 14px color-mix(in srgb,var(--jv-warning) 25%,transparent); }
+.minecraft-server-inventory .minecraft-server-card.minecraft-server-health-error { border-color: var(--jv-error); box-shadow: 0 5px 14px color-mix(in srgb,var(--jv-error) 25%,transparent); }
 .minecraft-server-card :is(h2,p) { margin: 0; overflow-wrap: anywhere; }
 .minecraft-server-card h2 { min-width: 0; font-size: 1.15rem; }
 .minecraft-server-heading,.minecraft-server-software-row { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }

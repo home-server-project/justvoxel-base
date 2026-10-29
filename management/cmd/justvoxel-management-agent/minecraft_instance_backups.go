@@ -109,7 +109,27 @@ func (b *instanceRuntimeBackend) backupStatus(id string) (instanceBackupStatus, 
 	return v, err
 }
 func (b *instanceRuntimeBackend) backupStorage(ctx context.Context, action, id string) ([]byte, error) {
-	out, err := instanceBackupStorageCommand(ctx, "nsenter", "--mount=/proc/1/ns/mnt", "--", instanceBackupHelper, action, id)
+	args := []string{"--mount=/proc/1/ns/mnt", "--", instanceBackupHelper, action, id}
+	if action == "create" {
+		// Use the same registry presentation as inventory, including deployed
+		// identities whose default name has no optional name record yet.
+		instances, err := b.identities().listInstances("")
+		if err != nil {
+			return nil, instanceRuntimeFailure("Registered backup name is unavailable.")
+		}
+		name := ""
+		for _, instance := range instances {
+			if instance.ID == id {
+				name = instance.DisplayName
+				break
+			}
+		}
+		if valid, err := validateInstanceName(name); err != nil || valid == "" || valid != name {
+			return nil, instanceRuntimeFailure("Registered backup name is unavailable.")
+		}
+		args = append(args, name)
+	}
+	out, err := instanceBackupStorageCommand(ctx, "nsenter", args...)
 	if err != nil {
 		return nil, instanceRuntimeFailure("Instance backup storage, capacity, archive verification, or publication failed.")
 	}

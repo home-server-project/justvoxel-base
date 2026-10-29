@@ -23,6 +23,7 @@ type backupsWorkspaceAutomaticForm struct {
 
 type backupsWorkspaceBackupView struct {
 	ID             string
+	DeleteRef      string
 	DisplayName    string
 	SizeBytes      uint64
 	CreatedLabel   string

@@ -127,7 +127,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 		t.Fatalf("status %d: %s", response.Code, body)
 	}
 	previous := -1
-	for _, label := range []string{`>Add Server</a>`, `>Rearrange</button>`, `>Done</button>`, `>Import</a>`, `>Network</button>`, "<h2>family Survival</h2>", "<h2>Kids Creative</h2>"} {
+	for _, label := range []string{`>Add Server</a>`, `>Network</button>`, `>Rearrange</button>`, `>Done</button>`, "<h2>family Survival</h2>", "<h2>Kids Creative</h2>"} {
 		index := strings.Index(body, label)
 		if index <= previous {
 			t.Fatalf("wrong order/missing %s", label)
@@ -146,7 +146,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 	if len(f.actions) != 0 || f.action != "" {
 		t.Fatal("inventory mutated runtime")
 	}
-	if strings.Contains(body, "minecraft-add-server-card") || !strings.Contains(body, `href="/?workspace=migration&amp;tab=import"`) {
+	if strings.Contains(body, "minecraft-add-server-card") || strings.Contains(body, `data-server-import`) || strings.Contains(body, `>Import</a>`) {
 		t.Fatal("incorrect action bar", body)
 	}
 	cards, err := os.ReadFile("static/minecraft-servers.css")
@@ -164,7 +164,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 func TestMinecraftServerCardsLiveRAMInitialValues(t *testing.T) {
 	app, _ := newServerInventoryApp(t)
 	body := inventoryRequest(app, "GET", "", "").Body.String()
-	cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card".*?</article>`).FindAllString(body, -1)
+	cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card minecraft-server-health-[a-z]+".*?</article>`).FindAllString(body, -1)
 	if len(cards) != 2 {
 		t.Fatal("incorrect inventory")
 	}
@@ -188,7 +188,7 @@ func TestMinecraftServerCardsLiveRAMInitialValues(t *testing.T) {
 func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 	app, f := newServerInventoryApp(t)
 	body := inventoryRequest(app, "GET", "", "").Body.String()
-	cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card".*?</article>`).FindAllString(body, -1)
+	cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card minecraft-server-health-[a-z]+".*?</article>`).FindAllString(body, -1)
 	if len(cards) != 2 {
 		t.Fatal("incorrect inventory", body)
 	}
@@ -208,14 +208,14 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 			t.Fatal("software/menu row", row)
 		}
 		previous := -1
-		for _, label := range []string{">Settings</a>", ">Backups</a>", ">Version</a>", ">Plugins</a>", ">Invite friends</button>", ">How to connect</a>", ">Delete server</button>"} {
+		for _, label := range []string{">Settings</a>", ">Backups</a>", ">Version</a>", ">Migration</a>", ">Plugins</a>", ">Invite friends</button>", ">How to connect</a>", ">Delete server</button>"} {
 			index := strings.Index(row, label)
 			if index <= previous {
 				t.Errorf("missing/out-of-order %s", label)
 			}
 			previous = index
 		}
-		for _, workspace := range []string{"minecraft", "backups", "version", "plugins"} {
+		for _, workspace := range []string{"minecraft", "backups", "version", "migration", "plugins"} {
 			if !strings.Contains(row, `href="/?workspace=`+workspace+`&amp;server=`+id+`" data-server-workspace="`+workspace+`"`) {
 				t.Errorf("missing selected %s", workspace)
 			}
@@ -234,11 +234,11 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 		running := regexp.MustCompile(`<input[^>]*data-server-running[^>]*>`).FindString(card)
 		boot := regexp.MustCompile(`<input[^>]*data-server-boot[^>]*>`).FindString(card)
 		if i == 0 {
-			if !strings.Contains(running, " checked") || !strings.Contains(boot, " checked") || !strings.Contains(card, `minecraft-server-state success`) || !strings.Contains(row, "data-server-restart") {
+			if !strings.Contains(card, `minecraft-server-health-success`) || !strings.Contains(running, " checked") || !strings.Contains(boot, " checked") || !strings.Contains(card, `minecraft-server-state success`) || !strings.Contains(row, "data-server-restart") {
 				t.Error("running configuration lost", card)
 			}
 		} else {
-			if strings.Contains(running, " checked") || strings.Contains(boot, " checked") || !strings.Contains(card, `minecraft-server-state error`) || strings.Contains(row, "data-server-restart") {
+			if !strings.Contains(card, `minecraft-server-health-neutral`) || strings.Contains(running, " checked") || strings.Contains(boot, " checked") || !strings.Contains(card, `minecraft-server-state error`) || strings.Contains(row, "data-server-restart") {
 				t.Error("stopped configuration lost", card)
 			}
 		}
@@ -623,7 +623,7 @@ func TestMinecraftServerCardAuthoritativeConnectionPorts(t *testing.T) {
 			}
 		}
 		body := inventoryRequest(app, "GET", "", "").Body.String()
-		cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card".*?</article>`).FindAllString(body, -1)
+		cards := regexp.MustCompile(`(?s)<article class="panel minecraft-server-card minecraft-server-health-[a-z]+".*?</article>`).FindAllString(body, -1)
 		if len(cards) != 2 {
 			t.Fatal(body)
 		}
@@ -644,7 +644,7 @@ func TestMinecraftServerCardAuthoritativeConnectionPorts(t *testing.T) {
 		}
 		f.connectionErrors = map[string]bool{"jv-kids001": true}
 		body = inventoryRequest(app, "GET", "", "").Body.String()
-		cards = regexp.MustCompile(`(?s)<article class="panel minecraft-server-card".*?</article>`).FindAllString(body, -1)
+		cards = regexp.MustCompile(`(?s)<article class="panel minecraft-server-card minecraft-server-health-[a-z]+".*?</article>`).FindAllString(body, -1)
 		if strings.Contains(cards[1], ">25566</strong>") || strings.Contains(cards[1], ">19134</strong>") || strings.Count(cards[1], "<strong>Unavailable</strong>") < 2 || !strings.Contains(cards[1], "data-server-running") {
 			t.Fatal("connection failure guessed ports or changed controls", cards[1])
 		}

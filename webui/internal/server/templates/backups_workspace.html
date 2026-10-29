@@ -1,6 +1,4 @@
 {{define "backups_workspace.html"}}<div class="new-backups-shell backups-workspace-content" data-backups-workspace-root data-selected-server-id="{{.SelectedServer}}">
-  {{if .SelectedServer}}<p><strong>{{.SelectedName}}</strong> · Backup: {{.SelectedBackupStatus}} · Restore: {{.SelectedRestoreStatus}}</p>
-  {{end}}
   {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
   {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
 
@@ -21,7 +19,7 @@
     <div class="backup-file-grid" role="list">
       {{range .Backups}}
       <label class="backup-file-card backup-file-selectable" role="listitem" data-backup-card data-backup-size-bytes="{{.SizeBytes}}">
-        <input class="backup-file-checkbox" type="checkbox" value="{{.ID}}" data-backup-select aria-label="Select {{.ID}}">
+        <input class="backup-file-checkbox" type="checkbox" value="{{.ID}}" data-backup-select data-backup-restore-id="{{.ID}}" data-backup-delete-ref="{{if .DeleteRef}}{{.DeleteRef}}{{else}}{{.ID}}{{end}}" aria-label="Select {{if .DisplayName}}{{.DisplayName}}{{else}}{{.ID}}{{end}}">
         <div class="backup-file-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11H4z"></path><path d="M15 4v5h5"></path><path d="M8 14h8M8 17h6"></path></svg>
         </div>
@@ -48,8 +46,10 @@
         <div><span>Backups</span><strong data-backup-visible-count>{{.BackupCount}}</strong></div>
         <div><span>Total size</span><strong data-backup-visible-size>{{.TotalSize}}</strong></div>
         <div><span>Selected</span><strong data-backup-selected-count>0</strong></div>
+        {{if .SelectedServer}}<div><span>Status</span><strong>{{.SelectedBackupStatus}}</strong></div>{{end}}
       </div>
       <div class="backup-command-actions">
+        {{if .SelectedServer}}<button class="danger" type="button" data-backup-delete-selected disabled>Delete</button>{{end}}
         <button type="button" data-backup-restore-selected data-restore-busy="{{if and .SelectedRestoreProgress .SelectedRestoreProgress.Busy}}1{{else}}0{{end}}" disabled>Restore selected</button>
         {{if not .SelectedServer}}<button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>{{end}}
         <form method="post" action="/workspace/backups/backup{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">
@@ -131,6 +131,8 @@
   </section>
   {{end}}
 
+  {{if .DestinationWorkspace}}{{template "backup_destination_content" .}}{{end}}
+
   <section class="backup-automatic-section">
     <div class="section-heading backup-automatic-heading">
       <div><p class="eyebrow">Automatic backups</p><h2>Schedule & retention</h2></div>
@@ -173,7 +175,6 @@
     {{end}}
   </section>
 
-  {{if .DestinationWorkspace}}{{template "backup_destination_content" .}}{{end}}
 
 
   <dialog class="backup-restore-dialog" data-backup-restore-dialog>

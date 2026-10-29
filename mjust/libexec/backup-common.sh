@@ -5,7 +5,7 @@ if ! declare -F jv_exact_mount_identity >/dev/null; then
 fi
 
 # Filename labels describe the Minecraft server, not the local JustVoxel Instance ID.
-# The friendly server name can be added when named instances are supported.
+# This label belongs to the legacy Minecraft archive contract.
 jv_archive_server_label() {
     local server_type="${MINECRAFT_SERVER_TYPE:-paper}"
     server_type="${server_type,,}"
@@ -29,7 +29,22 @@ jv_backup_valid_archive_ref() {
     if jv_backup_valid_archive_id "${ref}"; then return 0; fi
     [[ ${ref} =~ ^(jv-[a-z0-9]{6,12})/([^/]+)$ ]] || return 1
     filename="${BASH_REMATCH[2]}"
-    jv_backup_valid_archive_id "${filename}"
+    jv_backup_valid_archive_id "${filename}" || jv_instance_backup_valid_archive_id "${filename}"
+}
+
+# Independent archives keep the registered spelling. Permit only the existing
+# friendly-name alphabet and a bounded basename; never accept a path here.
+jv_instance_backup_valid_archive_id() {
+    python3 - "$1" <<'PYNAME'
+import re, sys, unicodedata
+filename = sys.argv[1]
+m = re.fullmatch(r"(?P<name>.{1,64})-backup-(?P<software>[a-z][a-z0-9-]{0,70})-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz", filename)
+if not m or len(filename.encode('utf-8')) > 245:
+    sys.exit(1)
+name = m['name']
+valid = name == name.strip() and name not in ('.', '..') and all(unicodedata.category(c)[0] in 'LNM' or c in " ._-'()" for c in name)
+sys.exit(0 if valid else 1)
+PYNAME
 }
 
 jv_backup_archive_ref() {

@@ -17,7 +17,8 @@ class Element {
     this.checked = false;
     this.disabled = false;
   }
-  append(...children) { children.forEach((child) => { child.parent = this; this.children.push(child); }); }
+  get firstChild() { return this.children[0]; }
+  append(...children) { children.forEach((child) => { if (child.parent) child.parent.children = child.parent.children.filter(node => node !== child); child.parent = this; this.children.push(child); }); }
   appendChild(child) { this.append(child); }
   insertBefore(child, reference) {
     const index = this.children.indexOf(reference);
@@ -566,6 +567,9 @@ test('Container retention is numeric, missing defaults to one and empty saves on
  const page=containerWorkspace({retentionCount:undefined});await page.mount();
  const number=page.content.all().find(node=>node.tag==='input'&&node.type==='number');
  const save=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Save');
+ const lane=page.content.all().find(node=>node.className==='version-container-history-heading');
+ assert.equal(number.parent.parent,lane);assert.equal(save.parent,lane);
+ assert.equal(lane.parent.children[0],lane);
  assert.equal(number.value,'1');assert.equal(number.min,'0');assert.equal(number.step,'1');
  assert.ok(!page.content.all().some(node=>node.tag==='select'));
  number.value='';await save.listeners.click();

@@ -118,7 +118,7 @@ func (f *phase7API) MinecraftInstanceBackups(_ context.Context, _, id, action st
 		if f.backupInventoryID != "" {
 			owner = f.backupInventoryID
 		}
-		b, _ := json.Marshal(map[string]any{"id": id, "backups": []map[string]any{{"id": owner, "archive": "minecraft-family-2026-01-01-1200.tar.gz", "size": 1}}})
+		b, _ := json.Marshal(map[string]any{"id": id, "backups": []map[string]any{{"id": owner, "archive": "Paper1-backup-paper-2026-10-28-0831.tar.gz", "size": 1}}})
 		return b, nil
 	case "restore/status":
 		b, _ := json.Marshal(map[string]any{"id": id, "state": "idle"})
@@ -776,5 +776,29 @@ func TestSelectedSettingsApplyRacesAndFailures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSelectedBackupsPhysicalFilenameAndDeleteReference(t *testing.T) {
+	app, _ := phase7App(t)
+	w := phase7Request(app, "GET", "/workspace/backups?server=jv-family1", "")
+	body := w.Body.String()
+	if w.Code != 200 {
+		t.Fatal(w.Code, body)
+	}
+	archive := "Paper1-backup-paper-2026-10-28-0831.tar.gz"
+	for _, want := range []string{`data-backup-restore-id="` + archive + `"`, `data-backup-delete-ref="jv-family1/` + archive + `"`, `>` + archive + `</strong>`, `data-backup-delete-selected disabled>Delete</button>`, `<span>Status</span><strong>idle</strong>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(body, " · Backup:") || strings.Contains(body, " · Restore:") {
+		t.Fatal("loose status lane remains")
+	}
+	library := strings.Index(body, `id="backup-library"`)
+	destination := strings.Index(body, `class="backup-destination-section"`)
+	automatic := strings.Index(body, `class="backup-automatic-section"`)
+	if library < 0 || (destination >= 0 && !(library < destination && destination < automatic)) || automatic <= library {
+		t.Fatal("backup cards out of order")
 	}
 }

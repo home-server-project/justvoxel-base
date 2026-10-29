@@ -194,7 +194,7 @@ func decodeLiveMemory(t *testing.T, response *httptest.ResponseRecorder) []map[s
 	for _, row := range rows {
 		for key := range row {
 			switch key {
-			case "id", "state", "state_class", "running", "can_switch", "usage_bytes", "limit_bytes":
+			case "id", "state", "state_class", "card_health", "running", "can_switch", "usage_bytes", "limit_bytes":
 			default:
 				t.Errorf("unexpected response field: %s", key)
 			}
@@ -230,7 +230,16 @@ func TestMinecraftLiveMemoryAuthoritativeState(t *testing.T) {
 			app.minecraftContainersURL = ":invalid"
 			f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: tc.state}
 			rows := decodeLiveMemory(t, httptestResponse(app, authenticatedAdminRequest("GET", liveMemoryPath, "")))
-			want := map[string]any{"id": "jv-family1", "state": tc.display, "state_class": tc.class, "running": tc.running, "can_switch": tc.canSwitch}
+			health := "error"
+			switch tc.state {
+			case "running":
+				health = "success"
+			case "stopped", "configured":
+				health = "neutral"
+			case "starting", "stopping":
+				health = "warning"
+			}
+			want := map[string]any{"card_health": health, "id": "jv-family1", "state": tc.display, "state_class": tc.class, "running": tc.running, "can_switch": tc.canSwitch}
 			if len(rows) != 2 || !reflect.DeepEqual(rows[0], want) {
 				t.Fatalf("rows = %#v, want first row %#v", rows, want)
 			}

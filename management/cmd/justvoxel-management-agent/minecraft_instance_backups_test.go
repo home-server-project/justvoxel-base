@@ -46,9 +46,12 @@ func newInstanceBackupFixture(t *testing.T) *instanceBackupFixture {
 	x.server.operations = openTestOperationStore(t)
 	base := f.backend.command
 	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-		if command == "nsenter" && len(args) == 5 && args[2] == instanceBackupHelper {
+		if command == "nsenter" && (len(args) == 5 || len(args) == 6) && args[2] == instanceBackupHelper {
 			if args[4] != f.configs[0].ID && args[4] != f.configs[1].ID {
 				t.Fatal("foreign storage", args)
+			}
+			if args[3] == "create" && (len(args) != 6 || args[5] == "" || args[5] == args[4]) {
+				t.Fatal("missing registered backup name", args)
 			}
 			x.storage = append(x.storage, args[3]+":"+args[4])
 			if args[3] == x.failStage {

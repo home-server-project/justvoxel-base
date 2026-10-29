@@ -509,7 +509,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 @media(max-width:430px){.setup-simple-choices,.setup-software-groups .setup-server-types{grid-template-columns:1fr}}
 
 /* Shared family lanes and a reserved desktop Simple content area. */
-.setup-entry-wizard .setup-simple-families{grid-template-columns:1fr}
+.setup-entry-wizard .setup-simple-families{grid-template-columns:1fr;grid-auto-rows:1fr}
 .setup-entry-wizard .setup-simple-families .server-software-copy strong{font-size:1rem}
 .setup-entry-wizard .setup-simple-families .server-software-copy small,.setup-entry-wizard .setup-simple-families .setup-family-items{font-size:.82rem}
 .setup-entry-wizard .setup-family-items{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem}
@@ -520,7 +520,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 :is(.server-software-icon img,.setup-family-items img)[src$="/paper.svg"]{transform:scale(.82);transform-origin:center}
 :is(.server-software-icon img,.setup-family-items img)[src$="/purpur.svg"]{transform:scale(.90);transform-origin:center}
 .setup-entry-wizard [data-simple-setup]{display:flex;flex:1;flex-direction:column;gap:.5rem;margin-top:0}
-.setup-entry-wizard .setup-simple-content{min-height:21rem}
+.setup-entry-wizard .setup-simple-content{min-height:27rem}
 .setup-entry-wizard .setup-simple-actions,.setup-entry-wizard [data-simple-setup]>button{margin-top:auto}
 .setup-entry-wizard .setup-terminal-note form{margin:0}
 
@@ -533,7 +533,8 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 
 /* Both setup contexts use the approved three full-width software lanes. */
 .setup-software-lanes{grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}
-.setup-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;align-content:start;min-width:0;margin:0}
+.setup-software-lanes .setup-server-types{grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:1fr;align-content:start;min-width:0;margin:0}
+.setup-wizard-panel .setup-software-lanes .setup-server-type.server-software-card{min-height:9rem}
 .setup-wizard-panel .setup-software-lanes .setup-server-types legend{font-size:.9rem}
 @media(max-width:1000px){
   .setup-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}

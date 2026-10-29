@@ -41,7 +41,7 @@
     const serverIDs = new Set();
     backupCards.forEach((card) => {
       const id = card.querySelector("[data-backup-select]")?.value || "";
-      const match = /^(jv-[a-z0-9]{6,12})\/minecraft-/.exec(id);
+      const match = /^(jv-[a-z0-9]{6,12})\/[^/]+$/.exec(id);
       card.dataset.backupServer = match ? match[1] : "legacy";
       if (match) serverIDs.add(match[1]);
     });
@@ -55,8 +55,11 @@
       });
     }
 
+    function selectedBoxes() {
+      return checkboxes.filter((box) => box.checked && !box.closest("[data-backup-card]")?.hidden);
+    }
     function selectedIDs() {
-      return checkboxes.filter((box) => box.checked && !box.closest("[data-backup-card]")?.hidden).map((box) => box.value);
+      return selectedBoxes().map((box) => box.dataset.backupDeleteRef || box.value);
     }
 
     function updateSelection() {
@@ -113,8 +116,9 @@
     restoreButton?.addEventListener("click", () => {
       const ids = selectedIDs();
       if (ids.length !== 1 || !restoreDialog || restoreBusy) return;
-      if (restoreID) restoreID.value = ids[0];
-      if (restoreName) restoreName.textContent = ids[0];
+      const archive = selectedBoxes()[0].dataset.backupRestoreId || selectedBoxes()[0].value;
+      if (restoreID) restoreID.value = archive;
+      if (restoreName) restoreName.textContent = archive;
       restoreDialog.showModal();
     });
     restoreClose?.addEventListener("click", closeRestoreDialog);
@@ -184,7 +188,7 @@
           const row = document.createElement("div");
           row.className = "backup-delete-review-item";
           const name = document.createElement("code");
-          name.textContent = backup.id;
+          name.textContent = backup.id.split("/").pop();
           const size = document.createElement("span");
           size.textContent = formatBytes(backup.size_bytes);
           row.append(name, size);
@@ -271,7 +275,7 @@
           confirmation: entered,
         });
         const deleted = Number(payload.deleted || reviewedPlan.count || 0);
-        const workspaceURL = "/workspace/backups?result=deleted&count=" + encodeURIComponent(String(deleted));
+        const workspaceURL = "/workspace/backups?result=deleted&count=" + encodeURIComponent(String(deleted)) + (root.dataset?.selectedServerId ? "&server=" + encodeURIComponent(root.dataset.selectedServerId) : "");
         if (window.JustVoxelBackupsWorkspace?.reload) {
           await window.JustVoxelBackupsWorkspace.reload(workspaceURL);
         } else {

@@ -571,3 +571,16 @@ func TestIndependentRestoreMissingReviewedConfirmationCannotPrepare(t *testing.T
 		}
 	}
 }
+
+func TestInstanceRestoreArchiveBasenames(t *testing.T) {
+	for _, name := range []string{restoreTestArchive, "Paper1-backup-paper-2026-10-28-0831.tar.gz", "Family's Server-backup-paper-2026-10-28-0831-2.tar.gz", "家族のサーバー-backup-paper-2026-10-28-0831.tar.gz"} {
+		if !validInstanceRestoreArchive(name) {
+			t.Errorf("valid archive rejected: %q", name)
+		}
+	}
+	for _, name := range []string{"../Paper1-backup-paper-2026-10-28-0831.tar.gz", "/Paper1-backup-paper-2026-10-28-0831.tar.gz", "jv-family1/Paper1-backup-paper-2026-10-28-0831.tar.gz", "bad\nname-backup-paper-2026-10-28-0831.tar.gz", "Paper1-backup-paper-2026-10-28-0831.tar.gz.partial"} {
+		if validInstanceRestoreArchive(name) {
+			t.Errorf("unsafe archive accepted: %q", name)
+		}
+	}
+}

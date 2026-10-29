@@ -19,7 +19,17 @@ import (
 
 const instanceRestoreHelper = "/usr/libexec/justvoxel/mjust/instance-restore"
 
-var instanceRestoreArchivePattern = regexp.MustCompile(`^instance-backup-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz$`)
+var instanceRestoreArchivePattern = regexp.MustCompile(`^(.{1,64})-backup-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz$`)
+
+func validInstanceRestoreArchive(archive string) bool {
+	match := instanceRestoreArchivePattern.FindStringSubmatch(archive)
+	if len(match) == 0 || len(archive) > 245 {
+		return false
+	}
+	name, err := validateInstanceName(match[1])
+	return err == nil && name != "" && name == match[1]
+}
+
 var instanceRestoreActive atomic.Bool
 var instanceRestoreActiveID atomic.Pointer[string]
 var instanceRestoreExclusionPath = "/run/justvoxel-minecraft-restore-exclusion.lock"
@@ -78,7 +88,7 @@ func (b *instanceRuntimeBackend) restoreJournal(id string) (instanceRestoreJourn
 	if err != nil {
 		return j, err
 	}
-	if instanceDecode(raw, &j) != nil || j.Schema != 1 || j.ID != id || !regexp.MustCompile(`^[a-f0-9]{32}$`).MatchString(j.Transaction) || !instanceSHA256Pattern.MatchString(j.ConfigSHA256) || len(j.Original) != 2 || len(j.Parent) != 2 || !instanceRestoreArchivePattern.MatchString(j.Archive) {
+	if instanceDecode(raw, &j) != nil || j.Schema != 1 || j.ID != id || !regexp.MustCompile(`^[a-f0-9]{32}$`).MatchString(j.Transaction) || !instanceSHA256Pattern.MatchString(j.ConfigSHA256) || len(j.Original) != 2 || len(j.Parent) != 2 || !validInstanceRestoreArchive(j.Archive) {
 		return j, errInstanceRecovery
 	}
 	return j, nil
@@ -132,7 +142,7 @@ func (b *instanceRuntimeBackend) restoreStorage(ctx context.Context, action, id,
 }
 func (b *instanceRuntimeBackend) planInstanceRestore(ctx context.Context, id, archive string) (instanceRestorePlan, error) {
 	var plan instanceRestorePlan
-	if !instanceRestoreArchivePattern.MatchString(archive) || len(archive) > 160 {
+	if !validInstanceRestoreArchive(archive) {
 		return plan, instanceRuntimeFailure("Invalid independent archive identifier.")
 	}
 	record, err := b.readRecord(id)

@@ -168,6 +168,16 @@ class IndependentRestore(unittest.TestCase):
         self.restore('plan',identity='jv-bbbbbb',ok=False)
         self.restore('plan',archive='minecraft-paper-2026-01-01-0000.tar.gz',ok=False)
 
+    def test_historical_archive_names_remain_restorable(self):
+        folder=self.backups/'jv-aaaaaa'
+        old='instance-backup-paper-2026-10-15-1200.tar.gz'
+        (folder/self.archive).rename(folder/old)
+        (folder/(self.archive+'.meta.json')).unlink()
+        self.item['archive']=old
+        self.private(folder/(old+'.meta.json'),json.dumps(self.item))
+        self.archive=old
+        self.assertEqual(self.plan()['integrity'],'verified')
+
     def test_sha_truncation_and_malformed_tar(self):
         self.assertEqual(self.plan()['integrity'],'verified')
         path=self.backups/'jv-aaaaaa'/self.archive;original=path.read_bytes()
@@ -197,6 +207,7 @@ class IndependentRestore(unittest.TestCase):
         m=json.loads(meta.read_text());m['name']='changed';self.private(meta,json.dumps(m))
         self.restore('prepare',plan['fingerprint'],ok=False)
         self.assertFalse((self.configs/'jv-aaaaaa/restore-journal.json').exists())
+        self.private(meta,json.dumps(self.item))
         plan=self.plan();(self.backups/'jv-aaaaaa'/self.archive).unlink()
         self.restore('prepare',plan['fingerprint'],ok=False)
         self.assertEqual((self.data/'level.dat').read_bytes(),b'original at restore time')

@@ -211,7 +211,7 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 				}
 				size := uint64(item.Size)
 				total += size
-				data.Backups = append(data.Backups, backupsWorkspaceBackupView{ID: item.Archive, DisplayName: item.Archive, SizeBytes: size, Size: humanBytes(size), CreatedLabel: item.Created, Version: item.Version})
+				data.Backups = append(data.Backups, backupsWorkspaceBackupView{ID: item.Archive, DeleteRef: selected.ID + "/" + item.Archive, DisplayName: item.Archive, SizeBytes: size, Size: humanBytes(size), CreatedLabel: item.Created, Version: item.Version})
 			}
 			data.BackupCount = len(data.Backups)
 			data.TotalSize = humanBytes(total)
@@ -223,9 +223,6 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 	}
 	if call("status", nil, &status) {
 		data.SelectedBackupStatus = status.State
-		if status.Message != "" {
-			data.SelectedBackupStatus += " · " + status.Message
-		}
 	}
 	if progress, err := readSelectedRestore(r.Context(), client, session, selected.ID); err != nil {
 		data.Error = "Restore status or identity could not be verified."

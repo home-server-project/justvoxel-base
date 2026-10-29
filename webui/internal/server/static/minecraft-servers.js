@@ -98,19 +98,6 @@
   }
   updateBounds();
   initializeLiveMemory(list, cards);
-  const importLink = root.querySelector('[data-server-import]');
-  importLink?.addEventListener('click', event => {
-    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    const launcher = document.querySelector('[data-migration-open]');
-    if (!launcher) return;
-    event.preventDefault();
-    const destination = new URL(window.location.href);
-    destination.searchParams.set('workspace', 'migration');
-    destination.searchParams.set('tab', 'import');
-    destination.searchParams.delete('operation');
-    window.history.replaceState(window.history.state, '', destination);
-    launcher.click();
-  });
   };
   function initializeLiveMemory(list, cards) {
     const history = new Map();
@@ -126,6 +113,9 @@
         const tile = card.querySelector('[data-server-ram]');
         if (row && typeof row.state === 'string' && typeof row.state_class === 'string'
             && typeof row.running === 'boolean' && typeof row.can_switch === 'boolean') {
+          if (['neutral', 'success', 'warning', 'error'].includes(row.card_health)) {
+            for (const health of ['neutral', 'success', 'warning', 'error']) card.classList.toggle(`minecraft-server-health-${health}`, health === row.card_health);
+          }
           const status = card.querySelector('.minecraft-server-state');
           if (status) {
             status.textContent = row.state;
@@ -331,7 +321,7 @@
       link.addEventListener('click', event => {
         if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || isArranging()) return;
         const workspace = link.dataset.serverWorkspace;
-        const selector = {minecraft: '[data-minecraft-open]', backups: '[data-backups-open]', version: '[data-version-open]', plugins: '[data-plugins-open]'}[workspace];
+        const selector = {minecraft: '[data-minecraft-open]', backups: '[data-backups-open]', version: '[data-version-open]', plugins: '[data-plugins-open]', migration: '[data-migration-open]'}[workspace];
         const launcher = selector && document.querySelector(selector);
         if (!launcher || typeof globalThis.justVoxelSelectServer !== 'function') return;
         event.preventDefault();

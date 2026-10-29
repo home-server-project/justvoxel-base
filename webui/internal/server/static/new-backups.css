@@ -216,13 +216,16 @@
 @media(prefers-color-scheme:light){.backup-workflow-review-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 30px 90px #0003}.backup-workflow-review-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}.backup-server-filter{color:#596873}.backup-server-filter select{background:#fff;color:#1a2025;border-color:#cbd4da}}
 
 /* Compact workspace sections while keeping review and destructive controls visible. */
-.backups-workspace-content{container-type:inline-size;min-width:0}
+.backups-workspace-content{container-type:inline-size;min-width:0;padding-top:0;display:flex;flex-direction:column;min-height:100%;box-sizing:border-box}
+.backups-workspace-content>.backup-library-section{flex:1 0 auto;display:flex;flex-direction:column}
+.backups-workspace-content .backup-file-grid{flex:1;align-content:start}
+.backups-workspace-content .backup-library-section>.backup-command-bar{margin-top:auto}
 .backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section,.backup-restore-review,.backup-restore-progress){margin:.45rem 0;padding:.6rem .7rem}
 .backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section) .section-heading{margin-bottom:.35rem}
 .backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section) .section-heading>div:first-child{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap}
 .backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section) .eyebrow{margin:0}
 .backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section) h2{margin:0;font-size:1rem}
-.backups-workspace-content .backup-file-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));gap:.4rem;max-height:210px;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem}
+.backups-workspace-content .backup-file-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));gap:.4rem;max-height:none;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem}
 .backups-workspace-content .backup-file-card{grid-template-columns:42px 30px minmax(0,1fr) auto;gap:.45rem;min-height:56px;padding:.4rem .5rem}
 .backups-workspace-content .backup-file-copy :is(strong,span,small){white-space:normal;overflow-wrap:anywhere}
 .backups-workspace-content .backup-file-icon{width:30px;height:30px}

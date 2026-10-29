@@ -16,6 +16,7 @@ var minecraftContainerName = regexp.MustCompile(`^minecraft-(jv-[a-z0-9]{6,12})$
 type minecraftLiveMemory struct {
 	ID         string   `json:"id"`
 	State      string   `json:"state,omitempty"`
+	CardHealth string   `json:"card_health,omitempty"`
 	StateClass string   `json:"state_class,omitempty"`
 	Running    *bool    `json:"running,omitempty"`
 	CanSwitch  *bool    `json:"can_switch,omitempty"`
@@ -52,7 +53,7 @@ func (a *App) minecraftServersLiveMemory(w http.ResponseWriter, r *http.Request)
 				if err == nil && status.ID == instance.ID {
 					var summary minecraftServerSummary
 					summary.setState(status.State)
-					row.State, row.StateClass = summary.State, summary.StateClass
+					row.State, row.StateClass, row.CardHealth = summary.State, summary.StateClass, summary.CardHealth
 					row.Running, row.CanSwitch = &summary.Running, &summary.CanSwitch
 				}
 			}

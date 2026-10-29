@@ -1831,3 +1831,7 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
   .minecraft-network .minecraft-network-welcome-lane input{flex-basis:10rem}
   .minecraft-network .minecraft-player-input{flex-basis:10rem}
 }
+
+.version-container-history-heading{display:flex;align-items:center;flex-wrap:wrap;gap:var(--jv-space-sm);margin-bottom:var(--jv-space-sm)}
+.version-container-history-heading>h2{margin:0;margin-right:auto}
+.version-container-history-heading .version-container-retention{flex-wrap:wrap}

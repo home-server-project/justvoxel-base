@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 0077
 fail() { echo 'ERROR: instance backup prerequisite or storage operation failed.' >&2; exit 1; }
-[[ $EUID == 0 && $# == 2 && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+[[ $EUID == 0 && ( $# == 2 || ( $# == 3 && $1 == create ) ) && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
 action=$1 id=$2
 if [[ ${action} == run ]]; then
     # Local root peer authentication; no token, cookie, or runtime secret.
@@ -21,14 +21,23 @@ if [[ ${action} != inventory ]]; then
     [[ ${#fields[@]} == 8 && ${fields[0]} == "${id}" ]] || fail
     /usr/libexec/justvoxel/mjust/instance-runtime-prerequisites validate "${fields[@]}" >/dev/null 2>&1 || fail
 fi
-python3 - "${action}" "${id}" <<'PY'
-import datetime, errno, gzip, hashlib, json, os, re, secrets, stat, sys, tarfile
+python3 - "${action}" "${id}" "${3:-}" <<'PY'
+import datetime, errno, gzip, hashlib, json, os, re, secrets, stat, sys, tarfile, unicodedata
 
-action, identity = sys.argv[1:]
+action, identity, creation_name = sys.argv[1:]
 root = os.environ['JV_INSTANCE_BACKUP_ROOT']
 config_root = '/etc/justvoxel/instances'
 registry = '/var/lib/justvoxel/instances'
-archive_pattern = re.compile(r'^instance-backup-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz$')
+archive_pattern = re.compile(r'(?P<name>.{1,64})-backup-(?P<software>[a-z][a-z0-9-]{0,70})-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz')
+
+def valid_backup_name(name):
+    return (isinstance(name, str) and 1 <= len(name) <= 64 and name == name.strip()
+            and name not in ('.', '..') and all(unicodedata.category(c)[0] in 'LNM' or c in " ._-'()" for c in name))
+
+def valid_archive(filename):
+    match = archive_pattern.fullmatch(filename)
+    return bool(match and len(filename.encode('utf-8')) <= 245 and valid_backup_name(match['name']))
+
 sha_pattern = re.compile(r'^[a-f0-9]{64}$')
 metadata_keys = {'schema','id','name','software','version','created','archive','size','configuration_sha256','sha256'}
 
@@ -68,7 +77,7 @@ def private(path, limit=65536):
         os.close(fd)
 
 def validate_meta(fd, filename):
-    if not archive_pattern.fullmatch(filename) or len(filename) > 160:
+    if not valid_archive(filename):
         raise ValueError('name')
     m = json.loads(read_at(fd, filename + '.meta.json'))
     if not isinstance(m,dict):
@@ -82,6 +91,9 @@ def validate_meta(fd, filename):
         raise ValueError('loader')
     if not isinstance(m['name'],str) or len(m['name']) > 64 or any(ord(c)<32 for c in m['name']):
         raise ValueError('description')
+    match = archive_pattern.fullmatch(filename)
+    if match['software'] != m['software'] or (match['name'] != 'instance' and match['name'] != m['name']):
+        raise ValueError('archive metadata binding')
     if not isinstance(m['created'],str) or len(m['created']) != 20:
         raise ValueError('created')
     datetime.datetime.strptime(m['created'], '%Y-%m-%dT%H:%M:%SZ')
@@ -98,7 +110,7 @@ def inventory(fd):
     if len(entries) > 10000:
         raise ValueError('inventory bound')
     for filename in entries:
-        if not archive_pattern.fullmatch(filename):
+        if not valid_archive(filename):
             continue
         try:
             result.append(validate_meta(fd, filename))
@@ -161,7 +173,7 @@ try:
             except FileNotFoundError:
                 pass
             else:
-                if journal['schema'] != 1 or journal['id'] != identity or not archive_pattern.fullmatch(journal['archive']):
+                if journal['schema'] != 1 or journal['id'] != identity or not valid_archive(journal['archive']):
                     raise ValueError('restore journal')
                 if journal['stage'] not in ('completed','rolled_back'):
                     pinned = journal['archive']
@@ -208,10 +220,20 @@ try:
                     if software not in ('paper','purpur','pufferfish','leaf','vanilla','spigot','forge','neoforge','fabric','quilt','bedrock'):
                         raise ValueError('software')
                     now = datetime.datetime.now(datetime.timezone.utc)
-                    base = 'instance-backup-' + software + '-' + now.strftime('%Y-%m-%d-%H%M')
+                    name = creation_name
+                    if not name:
+                        presentation = json.loads(private(registry + '/names/' + identity + '.json'))
+                        if presentation['id'] != identity:
+                            raise ValueError('name identity')
+                        name = presentation['display_name']
+                    if not valid_backup_name(name):
+                        raise ValueError('name')
+                    base = name + '-backup-' + software + '-' + now.strftime('%Y-%m-%d-%H%M')
                     filename = None
                     for suffix in [''] + ['-' + str(n) for n in range(2,1000)]:
                         candidate = base + suffix + '.tar.gz'
+                        if not valid_archive(candidate):
+                            raise ValueError('archive name length')
                         if not os.path.lexists(candidate) and not os.path.lexists(candidate + '.meta.json'):
                             filename = candidate
                             break
@@ -244,13 +266,6 @@ try:
                     digest = hashlib.sha256()
                     with open(tmp,'rb') as stream:
                         while block := stream.read(1024*1024): digest.update(block)
-                    name = ''
-                    names_dir = registry + '/names'
-                    if os.path.lexists(names_dir + '/' + identity + '.json'):
-                        presentation = json.loads(private(names_dir + '/' + identity + '.json'))
-                        if presentation['id'] != identity:
-                            raise ValueError('name identity')
-                        name = presentation['display_name']
                     m = dict(schema=1,id=identity,name=name,software=software,version=record['runtime']['version'],
                              created=now.strftime('%Y-%m-%dT%H:%M:%SZ'),archive=filename,size=os.stat(tmp).st_size,
                              configuration_sha256=hashlib.sha256(record_raw).hexdigest(),sha256=digest.hexdigest())

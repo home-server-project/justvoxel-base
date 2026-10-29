@@ -21,10 +21,10 @@ done
 for id in ../minecraft-paper-2026-10-09-1506.tar.gz minecraft-paper-2026-10-09-1506.tar.gz.partial minecraft-paper-2026-10-09-1506.tar.gz/../other minecraft-bad.tar.gz; do
     if jv_backup_valid_archive_id "${id}"; then echo "ERROR: unsafe archive name accepted: ${id}" >&2; exit 1; fi
 done
-for id in jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/minecraft-2026-09-15-043000.tar.gz; do
+for id in 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Family Server-backup-paper-2026-10-28-0831-2.tar.gz' 'jv-abc123/家族-backup-paper-2026-10-28-0831.tar.gz' jv-abc123/instance-backup-paper-2026-10-28-0831.tar.gz jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/minecraft-2026-09-15-043000.tar.gz; do
     jv_backup_valid_archive_ref "${id}" || { echo "ERROR: valid instance backup ref rejected: ${id}" >&2; exit 1; }
 done
-for id in jv-abc123/../minecraft-paper-2026-10-09-1506.tar.gz other/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/nested/minecraft-paper-2026-10-09-1506.tar.gz; do
+for id in '/jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/../Paper1-backup-paper-2026-10-28-0831.tar.gz' 'other/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz/extra' 'jv-abc123/bad!name-backup-paper-2026-10-28-0831.tar.gz' jv-abc123/../minecraft-paper-2026-10-09-1506.tar.gz other/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/nested/minecraft-paper-2026-10-09-1506.tar.gz; do
     if jv_backup_valid_archive_ref "${id}"; then echo "ERROR: unsafe backup ref accepted: ${id}" >&2; exit 1; fi
 done
 [[ "$(MINECRAFT_SERVER_TYPE=purpur jv_archive_server_label)" == minecraft-purpur ]] || { echo 'ERROR: configured Minecraft type missing from archive label' >&2; exit 1; }

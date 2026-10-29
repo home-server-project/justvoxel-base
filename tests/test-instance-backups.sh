@@ -55,11 +55,13 @@ else:
         self.source = self.source.replace('/var/lib/justvoxel/instances',str(self.registry))
         self.source = self.source.replace('/etc/justvoxel/minecraft-backup.env',str(self.root/'backup.env'))
         self.config()
+        (self.registry/'names').mkdir(mode=0o700)
         for identity in ('jv-aaaaaa','jv-bbbbbb'):
             directory=self.configs/identity;directory.mkdir(mode=0o700)
             data=self.root/'storage/minecraft-instances'/identity/'data';data.mkdir(parents=True)
             (data/'level.dat').write_bytes((identity+' world').encode())
             self.private(self.registry/(identity+'.json'),json.dumps({'id':identity}))
+            self.private(self.registry/'names'/(identity+'.json'),json.dumps({'id':identity,'display_name':'Paper1' if identity == 'jv-aaaaaa' else 'Other Server'}))
             self.private(directory/'config.json',json.dumps(dict(runtime=dict(id=identity,uid=1000,gid=1000,software='paper',version='1.21.4',rcon_password='private-runtime-secret'),storage=dict(root=str(self.root/'storage'),data_path=str(data),mount_point='',uuid='',source=''))))
             self.private(directory/'backup-settings.json',json.dumps(dict(enabled=False,time='04:00',retention=2)))
 
@@ -89,6 +91,66 @@ else:
         r=json.loads(path.read_text())
         r['backups']=dict(type='nfs' if source else 'system',root=str(root),path=str(root/identity),mount_point=str(root) if source else '',uuid='',source=source)
         self.private(path,json.dumps(r))
+
+    def test_physical_names_rename_collision_and_historical_retention(self):
+        self.run_helper('create')
+        first=self.inventory()[0]
+        self.assertTrue(first['archive'].startswith('Paper1-backup-paper-'))
+        self.assertEqual(first['name'],'Paper1')
+        self.assertTrue((self.backups/'jv-aaaaaa'/first['archive']).is_file())
+        self.run_helper('create')
+        self.assertEqual(len({m['archive'] for m in self.inventory()}),2)
+        self.private(self.registry/'names/jv-aaaaaa.json',json.dumps({'id':'jv-aaaaaa','display_name':"家族's Server"}))
+        self.run_helper('create')
+        items=self.inventory()
+        self.assertTrue(any(m['archive'].startswith("家族's Server-backup-paper-") for m in items))
+        self.assertTrue(any(m['archive']==first['archive'] and m['name']=='Paper1' for m in items))
+        # Historical archives and metadata retain their original physical names.
+        folder=self.backups/'jv-aaaaaa'
+        old='instance-backup-paper-2000-01-01-0000.tar.gz'
+        (folder/first['archive']).rename(folder/old)
+        (folder/(first['archive']+'.meta.json')).unlink()
+        first.update(archive=old,created='2000-01-01T00:00:00Z')
+        self.private(folder/(old+'.meta.json'),json.dumps(first))
+        self.assertTrue(any(m['archive']==old for m in self.inventory()))
+        self.run_helper('retain')
+        self.assertFalse((folder/old).exists())
+        self.assertFalse((folder/(old+'.meta.json')).exists())
+
+    def delete_metadata(self, ref):
+        source=(REPO/'mjust/libexec/admin-backup-delete-common.sh').read_text()
+        function=source[source.index('backup_delete_instance_metadata() {'):source.index('backup_delete_archive_path() {')]
+        function=function.replace('/etc/justvoxel/instances',str(self.configs))
+        return subprocess.run(['bash','-c',function+'\nbackup_delete_instance_metadata "$1" "$2"','fixture',str(self.backups),ref],capture_output=True).returncode == 0
+
+    def test_delete_requires_owned_metadata_and_preserves_restore_selection(self):
+        self.run_helper('create')
+        item=self.inventory()[0]
+        folder=self.backups/'jv-aaaaaa'
+        archive=folder/item['archive']
+        meta=folder/(item['archive']+'.meta.json')
+        ref='jv-aaaaaa/'+item['archive']
+        self.assertTrue(self.delete_metadata(ref))
+        damaged=dict(item,id='jv-bbbbbb');self.private(meta,json.dumps(damaged))
+        self.assertFalse(self.delete_metadata(ref))
+        self.private(meta,json.dumps(item))
+        meta.unlink();meta.symlink_to(self.configs/'jv-aaaaaa/config.json')
+        self.assertFalse(self.delete_metadata(ref))
+        meta.unlink();self.private(meta,json.dumps(item))
+        archive.rename(folder/'saved');archive.symlink_to(folder/'saved')
+        self.assertFalse(self.delete_metadata(ref))
+        archive.unlink();(folder/'saved').rename(archive)
+        journal=dict(schema=1,id='jv-aaaaaa',archive=item['archive'],stage='recovery_required')
+        self.private(self.configs/'jv-aaaaaa/restore-journal.json',json.dumps(journal))
+        self.assertFalse(self.delete_metadata(ref))
+        journal['stage']='rolled_back'
+        self.private(self.configs/'jv-aaaaaa/restore-journal.json',json.dumps(journal))
+        self.assertTrue(self.delete_metadata(ref))
+        self.assertTrue(archive.exists());self.assertTrue(meta.exists())
+        old='instance-backup-paper-2026-10-28-0831.tar.gz'
+        archive.rename(folder/old);meta.unlink();item['archive']=old
+        self.private(folder/(old+'.meta.json'),json.dumps(item))
+        self.assertTrue(self.delete_metadata('jv-aaaaaa/'+old))
 
     def test_java_server_backup_identity_and_loader_pin(self):
         path=self.configs/'jv-aaaaaa/config.json'

@@ -238,8 +238,8 @@ type setupSoftwareGroup struct {
 
 func setupSoftwareGroups() []setupSoftwareGroup {
 	return []setupSoftwareGroup{
-		{Name: "Plugins + managed cross-play", Software: simpleSoftware("plugins")},
-		{Name: "Mod loaders · Cross-play: Fabric · NeoForge", Software: simpleSoftware("mods")},
+		{Name: "Plugins · Cross-play", Software: simpleSoftware("plugins")},
+		{Name: "Mod loaders · Cross-play", Software: simpleSoftware("mods")},
 		{Name: "Vanilla Java · Bedrock", Software: simpleSoftware("original")},
 	}
 }

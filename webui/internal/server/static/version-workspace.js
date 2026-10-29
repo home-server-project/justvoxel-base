@@ -286,8 +286,10 @@ if (versionLauncher && versionDialog) {
     const retentionTitle = document.createElement("span"); retentionTitle.textContent = "Keep previous images:";
     const retention = document.createElement("input"); retention.type = "number"; retention.min = "0"; retention.step = "1"; retention.value = "1"; retention.disabled = true;
     const saveRetention = document.createElement("button"); saveRetention.type = "button"; saveRetention.textContent = "Save"; saveRetention.disabled = true;
-    retentionLabel.append(retentionTitle, retention); controls.append(retentionLabel, saveRetention);
+    retentionLabel.append(retentionTitle, retention);
     const library = card("Previous container images"); library.className += " version-container-history backup-library-section";
+    const historyHeading = document.createElement("div"); historyHeading.className = "version-container-history-heading";
+    historyHeading.append(library.firstChild, retentionLabel, saveRetention); library.appendChild(historyHeading);
     const images = document.createElement("div"); images.className = "backup-file-grid";
     const footer = document.createElement("div"); footer.className = "backup-library-summary";
     const summary = document.createElement("span");
