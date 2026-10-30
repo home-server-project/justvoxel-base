@@ -110,6 +110,19 @@ var verifyMinecraftContainerCurrent = func(ctx context.Context, id string) error
 	return exec.CommandContext(ctx, minecraftContainerHelper, "--instance", id, "verify").Run()
 }
 
+var errContainerRuntimeRecovery = errors.New("selected runtime recovery could not be verified")
+
+func recoverAndVerifyMinecraftContainerCurrent(ctx context.Context, id string) error {
+	pending, err := instanceRuntimes.pending(id)
+	if err == nil && pending {
+		err = instanceRuntimes.recover(ctx, id)
+	}
+	if err != nil {
+		return errors.Join(errContainerRuntimeRecovery, err)
+	}
+	return verifyMinecraftContainerCurrent(ctx, id)
+}
+
 func (s *server) adminMinecraftContainerStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
@@ -217,6 +230,16 @@ func executeMinecraftContainerUpdate(ctx context.Context, s *server, id string, 
 	if err != nil {
 		_, transitionErr := s.operations.transition(id, operationNeedsAttention, "update_failed", "Update stopped. Check the details below. You can keep the current version or try again.")
 		err = errors.Join(err, transitionErr)
+		if transitionErr == nil {
+			// Persist the failure before proving safety, independently of the update deadline.
+			verifyCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			verifyErr := recoverAndVerifyMinecraftContainerCurrent(verifyCtx, request.InstanceID)
+			cancel()
+			if verifyErr == nil {
+				_, transitionErr = s.operations.transition(id, operationResolved, "resolved", "Container update stopped. Current runtime verified and kept automatically. No update was retried.")
+			}
+			err = errors.Join(err, verifyErr, transitionErr)
+		}
 	} else {
 		if _, err = s.operations.transition(id, operationVerifying, "verifying", "Selected image verification completed."); err != nil {
 			return err
@@ -285,16 +308,12 @@ func (s *server) adminMinecraftContainerUpdateAcknowledge(w http.ResponseWriter,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	pending, recoveryErr := instanceRuntimes.pending(id)
-	if recoveryErr == nil && pending {
-		recoveryErr = instanceRuntimes.recover(ctx, id)
-	}
-	if recoveryErr != nil {
-		writeError(w, 409, "Selected runtime recovery could not be verified. Keep this operation for review.")
-		return
-	}
-	if verifyMinecraftContainerCurrent(ctx, id) != nil {
-		writeError(w, 409, "Current container runtime could not be verified. Keep this operation for review.")
+	if err := recoverAndVerifyMinecraftContainerCurrent(ctx, id); err != nil {
+		if errors.Is(err, errContainerRuntimeRecovery) {
+			writeError(w, 409, "Selected runtime recovery could not be verified. Keep this operation for review.")
+		} else {
+			writeError(w, 409, "Current container runtime could not be verified. Keep this operation for review.")
+		}
 		return
 	}
 	resolved, err := s.operations.transition(journal.OperationID, operationResolved, "resolved", "Current version kept. No restart or update was retried.")

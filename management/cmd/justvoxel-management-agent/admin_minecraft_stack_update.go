@@ -172,6 +172,16 @@ func executeMinecraftStackUpdate(ctx context.Context, s *server, operationID str
 		if _, transitionErr := s.operations.transition(operationID, operationNeedsAttention, "update_failed", message); transitionErr != nil {
 			return errors.Join(err, transitionErr)
 		}
+		// A stopped update remains a failure even when its current runtime is safe.
+		verifyCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		verifyCtx = context.WithValue(verifyCtx, instanceVersionKey{}, request.InstanceID)
+		verifyErr := verifyMinecraftStack(verifyCtx)
+		cancel()
+		var transitionErr error
+		if verifyErr == nil {
+			_, transitionErr = s.operations.transition(operationID, operationResolved, "resolved", "Server update stopped. Current Minecraft runtime verified and kept automatically. No update was retried.")
+		}
+		err = errors.Join(err, verifyErr, transitionErr)
 	} else {
 		if _, err := s.operations.transition(operationID, operationVerifying, "verifying", "Server runtime verification completed."); err != nil {
 			return err
