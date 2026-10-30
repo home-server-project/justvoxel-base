@@ -21,10 +21,11 @@ env:
   RECHUNK_MAX_LAYERS: '127'
   OCI_LAYER_LIMIT: '128'
   HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable
+  MANAGEMENT_PACKAGE: ghcr.io/home-server-project/justvoxel-management-agent:testing
 
 jobs:
   source-tests:
-    name: Source and management tests
+    name: Source tests
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -34,7 +35,7 @@ jobs:
         with:
           ref: testing
 
-      - name: Set up Go
+      - name: Set up Go for WebUI source tests
         uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
         with:
           go-version: '1.25.x'
@@ -46,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libpam0g-dev libpwquality-dev ripgrep podman
+          sudo apt-get install -y ripgrep podman
 
       - name: Run shell and mjust regression tests
         shell: bash
@@ -128,17 +129,6 @@ jobs:
             node --check "${script}"
           done
 
-      - name: Build and test management agent source
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd management
-          go mod download
-          CGO_ENABLED=1 go vet ./...
-          CGO_ENABLED=1 go test ./...
-          CGO_ENABLED=1 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
-          /tmp/management-agent version
-
   build:
     name: Build JustVoxel Base testing
     needs: [source-tests]
@@ -173,6 +163,18 @@ jobs:
         with:
           cosign-release: 'v3.1.3'
 
+      - name: Login to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.docker"
+          printf '%s' "${GHCR_TOKEN}" | podman login \
+            --authfile "${HOME}/.docker/config.json" \
+            ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          chmod 600 "${HOME}/.docker/config.json"
+
       - name: Verify Home Server Base stable signature
         shell: bash
         run: |
@@ -196,13 +198,89 @@ jobs:
           [[ "${management_api}" == "v1" ]]
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Build management agent on Home Server Base 10
+      - name: Resolve Management package inputs
+        id: management-inputs
         shell: bash
+        run: |
+          set -euo pipefail
+          base_digest="$(skopeo inspect --authfile "${HOME}/.docker/config.json" --raw "docker://${HOME_SERVER_BASE_IMAGE}" | sha256sum | cut -d ' ' -f 1)"
+          [[ "${base_digest}" =~ ^[0-9a-f]{64}$ ]]
+          base_identity="${HOME_SERVER_BASE_IMAGE}@sha256:${base_digest}"
+          # Git tree entries include paths, modes and blob IDs, never timestamps.
+          input_identity="$({
+            git ls-tree -r -z HEAD -- management templates mjust system_files \
+              build_files/build-common.sh \
+              build_files/build-management-agent.sh \
+              build_files/management-agent-package.Containerfile \
+              tests/run-pam-integration-alma.sh
+            printf '%s\0' "${base_identity}" 'management-api=v1'
+          } | sha256sum | cut -d ' ' -f 1)"
+          echo "identity=${input_identity}" >> "${GITHUB_OUTPUT}"
+          echo "base=${base_identity}" >> "${GITHUB_OUTPUT}"
+
+      - name: Inspect internal Management package
+        id: management-package
+        shell: bash
+        env:
+          INPUT_IDENTITY: ${{ steps.management-inputs.outputs.identity }}
+          BASE_IDENTITY: ${{ steps.management-inputs.outputs.base }}
+        run: |
+          set -euo pipefail
+          metadata="${RUNNER_TEMP}/management-package.json"
+          inspect_log="${RUNNER_TEMP}/management-package-inspect.log"
+          echo 'rebuild=true' >> "${GITHUB_OUTPUT}"
+          if skopeo inspect --authfile "${HOME}/.docker/config.json" \
+            "docker://${MANAGEMENT_PACKAGE}" >"${metadata}" 2>"${inspect_log}"; then
+            if jq -e --arg input "${INPUT_IDENTITY}" --arg base "${BASE_IDENTITY}" '
+              .Labels["io.home-server-project.justvoxel.management-input"] == $input and
+              .Labels["io.home-server-project.justvoxel.management-base"] == $base and
+              .Labels["io.home-server-project.justvoxel.management-api"] == "v1"
+            ' "${metadata}" >/dev/null; then
+              digest="$(jq -r '.Digest' "${metadata}")"
+              [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+              package_ref="${MANAGEMENT_PACKAGE%:*}@${digest}"
+              if cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null; then
+                echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+                echo 'rebuild=false' >> "${GITHUB_OUTPUT}"
+              else
+                echo 'Management package signature verification failed; package is not reusable and will be rebuilt from source.'
+              fi
+            fi
+          else
+            # GHCR can deny inspection before the package has been created.
+            # Rebuild from source; any authentication/publish failure remains fatal.
+            echo 'No readable Management package metadata; rebuilding.'
+          fi
+
+      - name: Verify and extract reusable Management Agent
+        if: steps.management-package.outputs.rebuild == 'false'
+        shell: bash
+        env:
+          DIGEST: ${{ steps.management-package.outputs.digest }}
+        run: |
+          set -euo pipefail
+          package_ref="${MANAGEMENT_PACKAGE%:*}@${DIGEST}"
+          cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null
+          sudo podman pull --authfile "${HOME}/.docker/config.json" "${package_ref}"
+          container="$(sudo podman create "${package_ref}" /unused)"
+          trap 'sudo podman rm "${container}" >/dev/null' EXIT
+          mkdir -p build_artifacts/management
+          sudo podman cp "${container}:/artifacts/management-agent" build_artifacts/management/management-agent
+          sudo chmod 0755 build_artifacts/management/management-agent
+          test -f build_artifacts/management/management-agent
+          test -x build_artifacts/management/management-agent
+
+      - name: Rebuild and validate Management Agent on Home Server Base 10
+        if: steps.management-package.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          BASE_IDENTITY: ${{ steps.management-inputs.outputs.base }}
         run: |
           set -euo pipefail
           mkdir -p build_artifacts/management
           sudo podman run --rm \
             --pull=always \
+            --authfile "${HOME}/.docker/config.json" \
             --security-opt=label=disable \
             -v "${PWD}:/repo:ro" \
             -v "${PWD}/system_files/usr/libexec/justvoxel:/system_files/usr/libexec/justvoxel:ro" \
@@ -210,30 +288,63 @@ jobs:
             -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
             -v "${PWD}/build_artifacts/management:/out" \
             "${HOME_SERVER_BASE_IMAGE}" \
-            /bin/bash -c '
-              set -euo pipefail
-              dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
-              mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
-              cp -a /repo/management /repo/templates /repo/mjust /repo/system_files /repo/build_files /work/
-              cd /work/management
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off go mod tidy
-              dirty=0
-              diff -u /repo/management/go.mod /work/management/go.mod || dirty=1
-              diff -u /repo/management/go.sum /work/management/go.sum || dirty=1
-              if (( dirty != 0 )); then
-                echo "ERROR: AlmaLinux Go requires module metadata changes shown above." >&2
-                exit 1
-              fi
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go test -mod=readonly ./...
-              # Adapt the runner working directory without changing the source script.
-              HOME=/tmp/go-home \
-              GOCACHE=/tmp/go-build-cache \
-              GOPATH=/tmp/go-path \
-              GOENV=off \
-              bash <(sed "s|^cd /work$|cd /work/management|" /run-pam-integration-alma.sh)
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
-            '
+            /bin/bash /repo/build_files/build-management-agent.sh
+          # Fail if the stable channel moved while validation was running.
+          base_digest="$(skopeo inspect --authfile "${HOME}/.docker/config.json" --raw "docker://${HOME_SERVER_BASE_IMAGE}" | sha256sum | cut -d ' ' -f 1)"
+          [[ "${BASE_IDENTITY}" == "${HOME_SERVER_BASE_IMAGE}@sha256:${base_digest}" ]]
           sudo chmod 0755 build_artifacts/management/management-agent
+          test -f build_artifacts/management/management-agent
+          test -x build_artifacts/management/management-agent
+
+      - name: Publish internal Management package
+        id: management-push
+        if: steps.management-package.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          INPUT_IDENTITY: ${{ steps.management-inputs.outputs.identity }}
+          BASE_IDENTITY: ${{ steps.management-inputs.outputs.base }}
+        run: |
+          set -euo pipefail
+          sudo podman build --format oci \
+            --build-arg "MANAGEMENT_INPUT_IDENTITY=${INPUT_IDENTITY}" \
+            --build-arg "HOME_SERVER_BASE_IDENTITY=${BASE_IDENTITY}" \
+            --build-arg "SOURCE_COMMIT=${GITHUB_SHA}" \
+            --tag "${MANAGEMENT_PACKAGE}" \
+            --file "${GITHUB_WORKSPACE}/build_files/management-agent-package.Containerfile" \
+            build_artifacts/management
+          sudo podman push --authfile "${HOME}/.docker/config.json" \
+            --digestfile "${RUNNER_TEMP}/management-package.digest" "${MANAGEMENT_PACKAGE}"
+          digest="$(cat "${RUNNER_TEMP}/management-package.digest")"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign and verify internal Management package digest
+        if: steps.management-package.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          DIGEST: ${{ steps.management-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          package_ref="${MANAGEMENT_PACKAGE%:*}@${DIGEST}"
+          cosign sign -y \
+            --new-bundle-format=false \
+            --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY "${package_ref}"
+          cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null
+
+      - name: Record Management result
+        id: management
+        shell: bash
+        env:
+          REBUILD: ${{ steps.management-package.outputs.rebuild }}
+        run: |
+          set -euo pipefail
+          if [[ "${REBUILD}" == 'true' ]]; then
+            echo 'result=rebuilt' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'result=reused' >> "${GITHUB_OUTPUT}"
+          fi
 
       - name: Build JustVoxel Base
         shell: bash
@@ -315,18 +426,6 @@ jobs:
               bootc container lint --fatal-warnings
             '
 
-      - name: Login to GHCR
-        shell: bash
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p "${HOME}/.docker"
-          printf '%s' "${GHCR_TOKEN}" | podman login \
-            --authfile "${HOME}/.docker/config.json" \
-            ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
-          chmod 600 "${HOME}/.docker/config.json"
-
       - name: Push testing Base image
         id: push
         shell: bash
@@ -396,6 +495,8 @@ jobs:
         if: always()
         shell: bash
         env:
+          MANAGEMENT_IDENTITY: ${{ steps.management-inputs.outputs.identity }}
+          MANAGEMENT_RESULT: ${{ steps.management.outputs.result }}
           LAYERS: ${{ steps.rechunk.outputs.layers }}
           DIGEST: ${{ steps.push.outputs.digest }}
           WEBUI_VERSION: ${{ steps.webui.outputs.version }}
@@ -406,6 +507,9 @@ jobs:
             echo "- Home Server Base input: ${HOME_SERVER_BASE_IMAGE}"
             echo "- WebUI: ${WEBUI_VERSION:-unresolved}"
             echo "- Management API: v1"
+            echo "- Internal Management package: ${MANAGEMENT_PACKAGE}"
+            echo "- Management input: ${MANAGEMENT_IDENTITY:0:12}"
+            echo "- Management Agent: ${MANAGEMENT_RESULT:-incomplete}"
             echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
             echo "- Moving tag: ${IMAGE_REPOSITORY}:${CURRENT_TAG}"
             echo "- Immutable tag: ${IMAGE_REPOSITORY}:${BUILD_TAG:-n/a}"
