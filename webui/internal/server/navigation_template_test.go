@@ -969,6 +969,38 @@ func TestBackupsWorkspaceCompactLibraryLayout(t *testing.T) {
 			t.Fatalf("New Backups styling missing %q", want)
 		}
 	}
+
+	baseContent, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every link in the height chain must flex, including the loading wrapper.
+	for _, contract := range []struct {
+		css      string
+		selector string
+		contains []string
+	}{
+		{string(baseContent), ".backups-workspace-body", []string{"display:flex", "flex-direction:column", "flex:1", "min-height:0", "overflow:auto"}},
+		{string(baseContent), ".backups-workspace-body>[data-backups-workspace-content]", []string{"display:flex", "flex-direction:column", "flex:1", "min-height:0"}},
+		{string(baseContent), ".backups-workspace-body .backups-workspace-content", []string{"display:flex", "flex-direction:column", "flex:1", "min-height:0"}},
+		{string(baseContent), ".backups-workspace-body .backups-workspace-content>.backup-library-section", []string{"flex:1 1 auto", "min-height:0", "display:flex", "flex-direction:column"}},
+		{string(baseContent), ".backups-workspace-body .backups-workspace-content>:is(.backup-destination-section,.backup-automatic-section)", []string{"flex:none"}},
+		{string(baseContent), ".backups-workspace-body .backups-workspace-content .backup-file-grid", []string{"flex:1", "min-height:0", "overflow-y:auto"}},
+	} {
+		rules := regexp.MustCompile(regexp.QuoteMeta(contract.selector)+`\{([^}]*)\}`).FindAllStringSubmatch(contract.css, -1)
+		var declarations string
+		for _, rule := range rules {
+			declarations += rule[1] + ";"
+		}
+		for _, want := range contract.contains {
+			if !strings.Contains(declarations, want) {
+				t.Errorf("%s missing %s", contract.selector, want)
+			}
+		}
+		if regexp.MustCompile(`position\s*:\s*(absolute|fixed)|(?:min-|max-)?height\s*:[^;}]*(?:[0-9](?:px|d?vh)|100%)`).MatchString(declarations) {
+			t.Errorf("%s must use normal flex sizing, got %s", contract.selector, declarations)
+		}
+	}
 }
 
 func TestNewBackupsMobileLibraryStaysSingleColumn(t *testing.T) {

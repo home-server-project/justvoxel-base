@@ -68,20 +68,39 @@ func (b *instanceRuntimeBackend) containerHistory(id string) (containerImageHist
 func retainedImageReference(id, digest string) string {
 	return "localhost/justvoxel-retained/" + id + ":" + strings.TrimPrefix(digest, "sha256:")
 }
-func (b *instanceRuntimeBackend) inspectRetainedImage(ctx context.Context, ref, digest string) (int64, error) {
-	data, err := b.command(ctx, "podman", "image", "inspect", ref, "--format", "{{.Digest}} {{.Size}}")
+
+type localContainerImage struct {
+	ID     string
+	Digest string
+	Size   int64
+}
+
+func (b *instanceRuntimeBackend) inspectLocalContainerImage(ctx context.Context, ref string) (localContainerImage, error) {
+	data, err := b.command(ctx, "podman", "image", "inspect", ref, "--format", "{{.Id}}|{{.Digest}}|{{.Size}}")
 	if err != nil {
-		return 0, err
+		return localContainerImage{}, err
 	}
-	fields := strings.Fields(string(data))
-	if len(fields) != 2 || fields[0] != digest {
-		return 0, errors.New("retained image identity changed")
+	fields := strings.Split(strings.TrimSpace(string(data)), "|")
+	if len(fields) != 3 || !instanceSHA256Pattern.MatchString(strings.TrimPrefix(fields[0], "sha256:")) {
+		return localContainerImage{}, errors.New("invalid local image identity")
 	}
-	size, err := strconv.ParseInt(fields[1], 10, 64)
+	size, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil || size < 0 {
-		return 0, errors.New("invalid retained image size")
+		return localContainerImage{}, errors.New("invalid retained image size")
 	}
-	return size, nil
+	return localContainerImage{ID: strings.TrimPrefix(fields[0], "sha256:"), Digest: fields[1], Size: size}, nil
+}
+
+func (b *instanceRuntimeBackend) inspectRetainedImage(ctx context.Context, ref string, size int64) (localContainerImage, error) {
+	image, err := b.inspectLocalContainerImage(ctx, ref)
+	if err != nil {
+		return image, err
+	}
+	// A private local tag's digest is not its original registry identity.
+	if image.Size != size {
+		return image, errors.New("retained image size changed")
+	}
+	return image, nil
 }
 func rotateContainerHistory(h containerImageHistory, old *retainedContainerImage, selected string) containerImageHistory {
 	images := []retainedContainerImage{}
@@ -147,7 +166,7 @@ func (b *instanceRuntimeBackend) saveContainerHistory(ctx context.Context, id st
 			}
 			return err
 		}
-		if _, err = b.inspectRetainedImage(ctx, ref, image.Digest); err != nil {
+		if _, err = b.inspectRetainedImage(ctx, ref, image.Size); err != nil {
 			return err
 		}
 		if _, err = b.command(ctx, "podman", "untag", ref); err != nil {
@@ -170,8 +189,11 @@ func containerHistoryCommand(ctx context.Context, args []string) error {
 	if os.Geteuid() != 0 || len(args) < 2 || !instanceIDPattern.MatchString(args[1]) {
 		return errInstanceID
 	}
+	return instanceRuntimes.containerHistoryCommand(ctx, args)
+}
+
+func (b *instanceRuntimeBackend) containerHistoryCommand(ctx context.Context, args []string) error {
 	action, id := args[0], args[1]
-	b := instanceRuntimes
 	record, err := b.readRecord(id)
 	if err != nil {
 		return err
@@ -206,7 +228,7 @@ func containerHistoryCommand(ctx context.Context, args []string) error {
 			if image.Digest == selected {
 				continue
 			}
-			if _, err = b.inspectRetainedImage(ctx, retainedImageReference(id, image.Digest), image.Digest); err != nil {
+			if _, err = b.inspectRetainedImage(ctx, retainedImageReference(id, image.Digest), image.Size); err != nil {
 				return err
 			}
 			visible = append(visible, image)
@@ -235,13 +257,26 @@ func containerHistoryCommand(ctx context.Context, args []string) error {
 				repo = "docker.io/itzg/minecraft-bedrock-server"
 			}
 			source := repo + "@" + args[2]
-			size, err := b.inspectRetainedImage(ctx, source, args[2])
+			sourceImage, err := b.inspectLocalContainerImage(ctx, source)
 			if err != nil {
 				return err
 			}
+			if sourceImage.Digest != args[2] {
+				return errors.New("source image registry identity changed")
+			}
 			ref := retainedImageReference(id, args[2])
+			verifyRetained := func() error {
+				retained, err := b.inspectRetainedImage(ctx, ref, sourceImage.Size)
+				if err != nil {
+					return err
+				}
+				if retained.ID != sourceImage.ID {
+					return errors.New("retained image identity changed")
+				}
+				return nil
+			}
 			if _, err = b.command(ctx, "podman", "image", "exists", ref); err == nil {
-				if _, err = b.inspectRetainedImage(ctx, ref, args[2]); err != nil {
+				if err = verifyRetained(); err != nil {
 					return err
 				}
 			} else {
@@ -253,10 +288,10 @@ func containerHistoryCommand(ctx context.Context, args []string) error {
 					return err
 				}
 			}
-			if _, err = b.inspectRetainedImage(ctx, ref, args[2]); err != nil {
+			if err = verifyRetained(); err != nil {
 				return err
 			}
-			old = &retainedContainerImage{Digest: args[2], Image: repo + ":" + record.Runtime.ImageTag, Size: size, RetainedAt: time.Now().UTC()}
+			old = &retainedContainerImage{Digest: args[2], Image: repo + ":" + record.Runtime.ImageTag, Size: sourceImage.Size, RetainedAt: time.Now().UTC()}
 		}
 		return b.saveContainerHistory(ctx, id, rotateContainerHistory(h, old, args[3]))
 	}

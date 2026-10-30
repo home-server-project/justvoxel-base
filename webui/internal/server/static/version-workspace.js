@@ -250,6 +250,7 @@ if (versionLauncher && versionDialog) {
     });
   };
   let containerCompleted = null;
+  let containerSubmitted = null;
   const containerLabel = (value) => ({ up_to_date: "Up to date", update_available: "Update available", image_missing: "Download required", restart_needed: "Restart required", unavailable: "Unable to check" })[value] || "Unable to check";
   const renderContainer = async (ticket, selection, message) => {
     const current = () => ticket === sequence && selection === globalThis.justVoxelSelectionGeneration.version && currentTab === "container";
@@ -277,9 +278,9 @@ if (versionLauncher && versionDialog) {
     const actions = document.createElement("div"); actions.className = "version-container-row version-container-actions";
     actions.dataset.containerRow = "actions";
     const statusLine = line("Status:", "Checking…");
-    const update = document.createElement("button"); update.type = "button"; update.textContent = "Update now"; update.disabled = true;
+    const update = document.createElement("button"); update.type = "button"; update.textContent = "Update"; update.disabled = true;
     const actionLane = document.createElement("div"); actionLane.className = "version-container-action-lane";
-    actionLane.appendChild(update); actions.append(statusLine, actionLane);
+    actionLane.appendChild(update); actions.appendChild(statusLine);
     const retentionLabel = document.createElement("label"); retentionLabel.className = "version-container-retention";
     const retentionTitle = document.createElement("span"); retentionTitle.textContent = "Keep previous images";
     const retention = document.createElement("input"); retention.type = "number"; retention.min = "1"; retention.max = "2"; retention.step = "1"; retention.value = "1"; retention.disabled = true;
@@ -287,6 +288,7 @@ if (versionLauncher && versionDialog) {
     controls.appendChild(retentionLabel);
     const restart = toggle("Restart server now");
     const backup = toggle("Create backup before restart");
+    controls.appendChild(actionLane);
     const library = document.createElement("section"); library.className = "version-container-history backup-library-section";
     const historyHeading = document.createElement("h2"); historyHeading.textContent = "Previous container images";
     library.appendChild(historyHeading);
@@ -318,7 +320,7 @@ if (versionLauncher && versionDialog) {
       backup.disabled = busy || !plan.running || (!actionable && !(plan.previous_images || []).length);
       retention.disabled = busy;
       restore.disabled = busy || !selectedDigest || !plan.restore_fingerprint;
-      if (!plan.running) restart.checked = backup.checked = false;
+      if (!plan.running && !containerSubmitted) restart.checked = backup.checked = false;
       update.disabled = busy || !retentionValid() || (!containerAction() && !retentionDirty());
     };
     retention.addEventListener("input", () => {
@@ -375,6 +377,7 @@ if (versionLauncher && versionDialog) {
         if (!current()) return;
         if (!result.operation?.operation_id) throw new Error("Container update tracking is unavailable. Refresh to check its status.");
         containerCompleted = null;
+        containerSubmitted = { selection, operationID: result.operation.operation_id, restart: restartNow, backup: body.get("backup_before_restart") === "yes" };
         operation = result.operation;
         operationKinds.set(operation.operation_id, "container");
         progress.replaceChildren(operationFrame(operation));
@@ -438,7 +441,12 @@ if (versionLauncher && versionDialog) {
       helper.hidden = status.running || status.state === "unavailable";
       helper.textContent = "The new image will be used on the next server start.";
       operation = pending.operation || containerCompleted;
-      busy = Boolean(pending.operation);
+      busy = Boolean(operation && !["succeeded", "resolved"].includes(operation.state));
+      if (containerSubmitted && (containerSubmitted.selection !== selection || containerSubmitted.operationID !== operation?.operation_id || ["succeeded", "resolved"].includes(operation?.state))) containerSubmitted = null;
+      if (containerSubmitted) {
+        restart.checked = containerSubmitted.restart;
+        backup.checked = containerSubmitted.backup;
+      }
       terminal.textContent = status.state === "unavailable" ? "Unable to check the selected container image." : `Checking ${status.image}...\n${containerLabel(status.state)}.`;
       if (operation) {
         operationKinds.set(operation.operation_id, "container");
@@ -455,10 +463,10 @@ if (versionLauncher && versionDialog) {
               const body = new URLSearchParams({ csrf, operation_id: operation.operation_id });
               await request("/api/version/container/acknowledge", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
               if (!current()) return;
-              containerCompleted = null; await render();
+              containerCompleted = null; containerSubmitted = null; await render();
             } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; acknowledge.disabled = false; }
           });
-          actionLane.replaceChildren(acknowledge, update);
+          footer.replaceChildren(summary, acknowledge);
         } else if (!["succeeded", "resolved"].includes(operation.state)) void watch(operation.operation_id);
       }
       sync();
@@ -768,6 +776,7 @@ if (versionLauncher && versionDialog) {
     updateOperation = "";
     completedOperation = null;
     containerCompleted = null;
+    containerSubmitted = null;
     operationKinds.clear();
     content.replaceChildren();
     if (versionDialog.open) void render();

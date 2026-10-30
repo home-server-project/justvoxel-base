@@ -471,7 +471,7 @@ class ContainerElement extends Element {
   get textContent() { return (this.ownText || '') + this.children.map(child => child.textContent).join(' '); }
   set innerHTML(_) { throw new Error('Container output must use textContent'); }
 }
-function containerWorkspace({status = 'up_to_date', running = true, pending, statusReply, traceReply, selected = 'jv-family1', previousImages = [], retentionCount = 1, retentionReply} = {}) {
+function containerWorkspace({status = 'up_to_date', running = true, pending, statusReply, traceReply, selected = 'jv-family1', previousImages = [], retentionCount = 1, retentionReply, operationReply} = {}) {
   const calls = [], timers = [], renders = [];
   const content = new ContainerElement('div');
   const context = vm.createContext({
@@ -487,10 +487,10 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
     request: async (url,options) => {
       calls.push({url,body:options?.body});
       if(url==='/api/version/container/status') return statusReply ? statusReply() : {instance_id:selected,server_name:'22222',image:'docker.io/itzg/minecraft-server:stable',state:status,running,plan_fingerprint:status==='unavailable'?'':'reviewed',restore_fingerprint:'local-reviewed',keep_previous_images:retentionCount,previous_images:previousImages};
-      if(url.startsWith('/api/version/container/operation')) return {operation:pending};
+      if(url.startsWith('/api/version/container/operation')) return {operation:operationReply ? operationReply(url) : pending};
       if(url==='/api/minecraft/workspace/snapshot') return {players:{online:0}};
       if(url==='/api/version/container/retention') return retentionReply ? retentionReply() : {ok:true};
-      if(url==='/api/version/container/acknowledge') return {operation:{state:'resolved'}};
+      if(url==='/api/version/container/acknowledge') { pending = undefined; return {operation:{state:'resolved'}}; }
       if(url==='/api/version/container/update') return {operation:{operation_id:'container-1',state:'running'}};
       throw new Error(url);
     },
@@ -503,7 +503,7 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
   vm.runInContext(source.slice(start,end)+'\nglobalThis.mount = renderContainer;',context);
   return {context,content,calls,timers,renders,mount:()=>context.mount(context.sequence,context.justVoxelSelectionGeneration.version,''),
     toggles:()=>content.all().filter(node=>node.tag==='input'&&node.type==='checkbox'),
-    update:()=>content.all().find(node=>node.tag==='button'&&node.textContent==='Update now'),
+    update:()=>content.all().find(node=>node.tag==='button'&&node.textContent==='Update'),
     terminal:()=>content.all().find(node=>'containerTerminal' in node.dataset)};
 }
 for(const [status,label,disabled] of [['up_to_date','Up to date',true],['update_available','Update available',false],['image_missing','Download required',false],['unavailable','Unable to check',true]]) {
@@ -578,7 +578,16 @@ test('Container combines controls and previous images in one outer card with sep
  assert.ok(!history.className.includes('panel'));
  assert.ok(!history.all().includes(retentionInput(page)));
  assert.ok(!page.content.all().some(node=>node.tag==='button'&&node.textContent==='Save'));
- assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Keep previous images','Restart server now','Create backup before restart']);
+ assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Keep previous images','Restart server now','Create backup before restart','Update']);
+ const lane=controls.children[3];
+ assert.equal(lane.className,'version-container-action-lane');
+ assert.equal(page.update().parent,lane);
+ assert.equal(page.update().textContent,'Update');
+ assert.equal(controls.children.at(-1),lane);
+ const actions=panel.children.find(node=>node.dataset.containerRow==='actions');
+ assert.equal(actions.children.length,1);
+ assert.match(actions.textContent,/^Status: /);
+ assert.ok(!actions.all().includes(page.update()));
  assert.equal(retentionInput(page).parent,controls.children[0]);
  assert.equal(page.terminal().parent,root);assert.equal(root.children.at(-1),page.terminal());
  assert.ok(!panel.all().includes(page.terminal()));
@@ -589,8 +598,16 @@ test('Container combines controls and previous images in one outer card with sep
  assert.equal(restore.parent.className,'backup-library-summary');
  assert.equal(restore.parent.parent,history);assert.equal(history.children.at(-1),restore.parent);
  assert.match(cssRule('.version-container-retention input'),/width:3\.25rem;flex:none/);
- assert.match(cssRule('.version-container-panel .version-container-controls'),/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/grid-template-columns:max-content max-content minmax\(max-content,1fr\) minmax\(0,max-content\)/);
  assert.match(cssRule('.version-container-panel .version-container-controls'),/background:var\(--jv-surface-sunken\)/);
+ assert.match(cssRule('.version-container-panel .version-container-controls>label'),/flex-direction:row;align-items:center/);
+ assert.match(cssRule('.version-container-panel .version-container-controls>label'),/white-space:nowrap/);
+ assert.match(cssRule('.version-container-controls>label>span'),/font-size:inherit/);
+ assert.doesNotMatch(cssRule('.version-container-controls>label>span'),/font-size:\s*\.75rem/);
+ assert.match(cssRule('.version-container-controls>:is(label+label,.version-container-action-lane)'),/border-left:1px solid var\(--jv-border\)/);
+ assert.match(cssRule('.version-container-controls>.version-container-action-lane'),/justify-content:flex-end/);
+ assert.match(cssRule('.version-container-panel'),/container-type:inline-size/);
+ assert.match(css,/@container\(max-width:700px\)\{\.version-container-panel \.version-container-controls\{grid-template-columns:minmax\(0,1fr\)\}/);
  assert.match(css,/@media\(max-width:700px\)\{\.version-container-panel \.version-container-controls\{grid-template-columns:minmax\(0,1fr\)\}/);
  assert.match(cssRule('.version-container-history .backup-library-summary'),/justify-content:space-between/);
 });
@@ -684,14 +701,20 @@ test('Container lists real previous images and exact selection enables restore',
  assert.match(empty.content.textContent,/0 images/);
  assert.equal(empty.content.all().find(node=>node.textContent==='Restore selected').disabled,true);
 });
-test('Container keep-current action shares the Update-now lane',async()=>{
+test('Container keep-current action replaces Restore selected in the history footer',async()=>{
  const page=containerWorkspace({status:'update_available',pending:{operation_id:'failed-update',state:'needs_attention'}});await page.mount();
  const keep=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Keep current version');
- assert.ok(keep);assert.equal(keep.parent,page.update().parent);
- assert.deepEqual(keep.parent.children.map(node=>node.textContent),['Keep current version','Update now']);
+ assert.ok(keep);assert.equal(keep.parent.className,'backup-library-summary');
+ assert.equal(keep.parent.children[0].textContent,'0 images');
+ assert.equal(keep.parent.children.at(-1),keep);
+ assert.ok(!page.content.all().some(node=>node.tag==='button'&&node.textContent==='Restore selected'));
+ assert.deepEqual(page.update().parent.children,[page.update()]);
  assert.ok(!page.content.textContent.includes('Verify and keep current server'));
  await keep.listeners.click();
  assert.ok(page.calls.some(call=>call.url==='/api/version/container/acknowledge'));
+ await page.mount();
+ assert.ok(page.content.all().some(node=>node.tag==='button'&&node.textContent==='Restore selected'));
+ assert.ok(!page.content.all().some(node=>node.tag==='button'&&node.textContent==='Keep current version'));
 });
 test('Container output grows inside a responsive workspace',()=>{
  assert.match(cssRule('.version-container-workspace'),/display:flex;flex:1;flex-direction:column;min-height:0/);
@@ -753,3 +776,48 @@ test('Old container restore selection and retention callbacks cannot submit for 
     assert.ok(page.cards.every(node => node.disabled));
   }
  });
+
+test('Container rebuild preserves submitted switches only for the same unresolved operation and selection',async()=>{
+ for (const submittedBackup of [false,true]) {
+  let operation;
+  const page=containerWorkspace({status:'update_available', operationReply:()=>operation});
+  await page.mount();
+  page.toggles()[0].checked=true;
+  page.toggles()[1].checked=submittedBackup;
+  await page.update().listeners.click();
+  const post=page.calls.find(call=>call.url==='/api/version/container/update');
+  assert.equal(post.body.get('restart_now'),'yes');
+  assert.equal(post.body.get('backup_before_restart'),submittedBackup?'yes':'no');
+  for(const state of ['running','needs_attention','failed']) {
+   operation={operation_id:'container-1',state};
+   await page.mount();
+   assert.deepEqual(page.toggles().map(node=>node.checked),[true,submittedBackup]);
+   assert.ok(page.toggles().every(node=>node.disabled));
+  }
+  operation={operation_id:'other-operation',state:'running'};
+  await page.mount();
+  assert.deepEqual(page.toggles().map(node=>node.checked),[false,false]);
+ }
+});
+test('Container submitted switches clear on success, resolution, fresh state and server selection',async()=>{
+ for(const finished of ['succeeded','resolved','fresh','selection']) {
+  let operation;
+  let running=true;
+  const page=containerWorkspace({status:'update_available', operationReply:()=>operation,
+   statusReply:()=>({state:'update_available',running,plan_fingerprint:'reviewed',previous_images:[]})});
+  await page.mount();page.toggles()[0].checked=true;
+  await page.update().listeners.click();
+  operation={operation_id:'container-1',state:'running'};
+  running=false;
+  await page.mount();
+  assert.deepEqual(page.toggles().map(node=>node.checked),[true,false]);
+  if(finished==='selection') page.context.justVoxelSelectionGeneration.version++;
+  else if(finished==='fresh') operation=undefined;
+  else operation.state=finished;
+  await page.mount();
+  assert.deepEqual(page.toggles().map(node=>node.checked),[false,false]);
+  operation={operation_id:'container-1',state:'needs_attention'};
+  await page.mount();
+  assert.deepEqual(page.toggles().map(node=>node.checked),[false,false]);
+ }
+});

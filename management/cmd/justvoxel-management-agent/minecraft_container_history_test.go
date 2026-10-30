@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -63,7 +65,7 @@ func TestContainerHistoryPerInstanceDurabilityAndReferenceOnlyCleanup(t *testing
 			t.Fatal(cmd)
 		}
 		if args[0] == "image" && args[1] == "inspect" {
-			return []byte(old.Digest + " 1024"), nil
+			return []byte("sha256:" + strings.Repeat("a", 64) + "|" + old.Digest + "|1024"), nil
 		}
 		return nil, nil
 	}
@@ -126,7 +128,7 @@ func TestContainerHistoryRejectsMalformedAndRetriesInterruptedCleanup(t *testing
 	fail := true
 	b.command = func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		if args[0] == "image" && args[1] == "inspect" {
-			return []byte(old.Digest + " 1024"), nil
+			return []byte("sha256:" + strings.Repeat("a", 64) + "|" + old.Digest + "|1024"), nil
 		}
 		if args[0] == "untag" && fail {
 			return nil, errors.New("busy")
@@ -150,3 +152,148 @@ func TestContainerHistoryRejectsMalformedAndRetriesInterruptedCleanup(t *testing
 		t.Fatal("cleanup retry failed")
 	}
 }
+
+// Podman can report different digests for two references to the same local ID.
+func TestContainerHistoryLocalTagIdentity(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		for _, invalid := range []string{"", "different-id", "size", "malformed", "missing", "source-digest"} {
+			t.Run(fmt.Sprintf("existing=%t/%s", existing, invalid), func(t *testing.T) {
+				f := newInstanceActivationFixture(t)
+				f.activateBoth()
+				b := f.backend
+				id := f.configs[0].ID
+				old, selected := historyImage(0), historyImage(1)
+				record, err := b.readRecord(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record.Runtime.ImageDigest = selected.Digest
+				dir, _, _ := b.paths(id)
+				if err = b.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+					t.Fatal(err)
+				}
+				ref := retainedImageReference(id, old.Digest)
+				localID := strings.Repeat("a", 64)
+				tagged := existing
+				bad := invalid
+				calls := []string{}
+				b.command = func(_ context.Context, cmd string, args ...string) ([]byte, error) {
+					calls = append(calls, cmd+" "+strings.Join(args, " "))
+					switch strings.Join(args[:2], " ") {
+					case "image exists":
+						if args[2] != ref {
+							t.Fatal("unexpected reference", args)
+						}
+						if !tagged {
+							return nil, historyImageMissing{}
+						}
+						return nil, nil
+					case "image inspect":
+						if args[2] == "docker.io/itzg/minecraft-server@"+old.Digest {
+							digest := old.Digest
+							if bad == "source-digest" {
+								digest = selected.Digest
+							}
+							return []byte(localID + "|" + digest + "|1024"), nil
+						}
+						if args[2] != ref {
+							t.Fatal("unexpected reference", args)
+						}
+						switch bad {
+						case "different-id":
+							return []byte("sha256:" + strings.Repeat("b", 64) + "|" + selected.Digest + "|1024"), nil
+						case "size":
+							return []byte(localID + "|" + selected.Digest + "|2048"), nil
+						case "malformed":
+							return []byte("invalid|digest|1024"), nil
+						case "missing":
+							return nil, errors.New("missing retained reference")
+						}
+						return []byte(localID + "|" + selected.Digest + "|1024"), nil
+					}
+					if args[0] == "tag" {
+						tagged = true
+						return nil, nil
+					}
+					if args[0] == "untag" && len(args) == 2 && args[1] == ref {
+						tagged = false
+						return nil, nil
+					}
+					t.Fatal("unexpected command", calls[len(calls)-1])
+					return nil, nil
+				}
+				err = b.containerHistoryCommand(context.Background(), []string{"record", id, old.Digest, selected.Digest})
+				if invalid != "" {
+					if err == nil {
+						t.Fatal("invalid image accepted")
+					}
+					if _, err = os.Stat(b.containerHistoryPath(id)); !errors.Is(err, os.ErrNotExist) {
+						t.Fatal("failed record created history", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(b.containerHistoryPath(id))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var persisted containerImageHistory
+				if err = json.Unmarshal(data, &persisted); err != nil || len(persisted.PreviousImages) != 1 || persisted.PreviousImages[0].Digest != old.Digest {
+					t.Fatalf("registry identity lost: %s %v", data, err)
+				}
+				// Capture status JSON, which must preserve the registry digest too.
+				output, err := os.CreateTemp(t.TempDir(), "status")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer output.Close()
+				stdout := os.Stdout
+				os.Stdout = output
+				err = b.containerHistoryCommand(context.Background(), []string{"status", id})
+				os.Stdout = stdout
+				if err != nil {
+					t.Fatal(err)
+				}
+				statusData, err := os.ReadFile(output.Name())
+				if err != nil || !strings.Contains(string(statusData), old.Digest) {
+					t.Fatal("status lost old digest", string(statusData), err)
+				}
+				// Later status and cleanup must reject changed size or invalid/missing tags.
+				restoreHistory := func() {
+					t.Helper()
+					if err := os.WriteFile(b.containerHistoryPath(id), data, 0600); err != nil {
+						t.Fatal(err)
+					}
+					tagged = true
+				}
+				for _, corruption := range []string{"size", "malformed", "missing"} {
+					restoreHistory()
+					bad = corruption
+					if err = b.containerHistoryCommand(context.Background(), []string{"status", id}); err == nil {
+						t.Fatal("status accepted", bad)
+					}
+					restoreHistory()
+					bad = corruption
+					if err = b.saveContainerHistory(context.Background(), id, containerImageHistory{PendingRemoval: persisted.PreviousImages}); err == nil {
+						t.Fatal("cleanup accepted", bad)
+					}
+				}
+				restoreHistory()
+				bad = ""
+				if err = b.containerHistoryCommand(context.Background(), []string{"retention", id, "0"}); err != nil {
+					t.Fatal(err)
+				}
+				if tagged || calls[len(calls)-1] != "podman untag "+ref {
+					t.Fatal("cleanup did not untag exact private reference", calls)
+				}
+			})
+		}
+	}
+}
+
+type historyImageMissing struct{}
+
+func (historyImageMissing) Error() string { return "image missing" }
+func (historyImageMissing) ExitCode() int { return 1 }
