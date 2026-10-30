@@ -49,6 +49,14 @@ Appliance image validation checks the `playit` RPM, `/usr/bin/playit`, `/usr/bin
 
 `mjust net` option three provides Playit status, activation/deactivation and initial setup through the packaged `playit setup` CLI. Account and tunnel management remains at https://playit.gg/account/.
 
+## Minecraft Network plugins
+
+JustVoxel consumes `ghcr.io/home-server-project/minecraft-network-plugins:stable`
+through a Containerfile package stage. Home Server Packages owns the build,
+upstream tracking and provenance. JustVoxel installs its `/artifacts/limboapi.jar`
+and `/artifacts/justvoxel-lobby.jar` runtime artifacts into
+`/usr/lib/justvoxel/minecraft-network/`.
+
 ## Container and appliance runtime
 
 The Base includes the tools required for the containerized Minecraft workload and JustVoxel management layer:

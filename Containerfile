@@ -4,10 +4,12 @@ ARG JUSTVOXEL_VM_REPOSITORY=ghcr.io/home-server-project/justvoxel-vm
 ARG SUPERFILE_PACKAGE_IMAGE=ghcr.io/home-server-project/superfile:stable
 ARG PLAYIT_PACKAGE_IMAGE=ghcr.io/home-server-project/playit:stable
 ARG GLANCES_PACKAGE_IMAGE=ghcr.io/home-server-project/glances:stable
+ARG MINECRAFT_NETWORK_PACKAGE_IMAGE=ghcr.io/home-server-project/minecraft-network-plugins:stable
 
 FROM ${SUPERFILE_PACKAGE_IMAGE} AS superfile-package
 FROM ${GLANCES_PACKAGE_IMAGE} AS glances-package
 FROM ${PLAYIT_PACKAGE_IMAGE} AS playit-package
+FROM ${MINECRAFT_NETWORK_PACKAGE_IMAGE} AS minecraft-network-package
 
 FROM scratch AS ctx
 COPY build_files /build_files
@@ -20,6 +22,8 @@ COPY mjust /mjust
 COPY --from=superfile-package /rpms /superfile-rpms
 COPY --from=glances-package /rpms /glances-rpms
 COPY --from=playit-package /rpms /playit-rpms
+COPY --from=minecraft-network-package /artifacts/limboapi.jar /minecraft-network-artifacts/limboapi.jar
+COPY --from=minecraft-network-package /artifacts/justvoxel-lobby.jar /minecraft-network-artifacts/justvoxel-lobby.jar
 COPY cosign.pub /cosign.pub
 
 FROM ${HOME_SERVER_BASE_IMAGE} AS justvoxel-base

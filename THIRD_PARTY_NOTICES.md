@@ -42,8 +42,11 @@ starts an instance.
 ## Optional Minecraft Network
 
 The optional network uses the itzg Velocity proxy image and verified proxy
-plugins. LimboAPI and the repository-built JustVoxel Lobby plugin are compiled
-and baked into the bootc image with pinned hash evidence. Geyser, Floodgate, and
+plugins. The two baked JARs, LimboAPI and JustVoxel Lobby, come from the Home
+Server Packages stable artifact
+`ghcr.io/home-server-project/minecraft-network-plugins:stable`. Home Server
+Packages owns their build, upstream tracking and provenance; JustVoxel consumes
+the runtime artifacts. Geyser, Floodgate, and
 Global Whitelist are downloaded and verified by the appliance's managed artifact
 workflow. The Velocity server JAR used to compile JustVoxel Lobby is temporary and
 is not bundled as a second runtime.
@@ -53,9 +56,10 @@ is not bundled as a second runtime.
 - LimboAPI: https://github.com/Elytrium/LimboAPI
 - Global Whitelist: https://github.com/UrAvgCode/global-whitelist
 
-Exact versions, hashes, and the temporary LimboAPI compatibility pin are recorded
-in [`docs/minecraft-network.md`](docs/minecraft-network.md) and the image build
-metadata.
+LimboAPI compatibility and build provenance are maintained by Home Server
+Packages in `packages/minecraft-network-plugins/`. JustVoxel package consumption
+and runtime artifact verification are described in
+[`docs/minecraft-network.md`](docs/minecraft-network.md).
 
 ## Appliance tools and remote access
 

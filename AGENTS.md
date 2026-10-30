@@ -274,7 +274,6 @@ Important areas:
 - `templates/`: generated/runtime configuration templates
 - `build_files/`: image composition and build logic
 - `tests/`: source-level integration and regression tests
-- `velocity-lobby/`: the JustVoxel Velocity lobby/server-selector plugin
 - `docs/`: architecture and user/developer documentation
 - `Containerfile`: bootc image definition
 

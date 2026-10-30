@@ -115,20 +115,20 @@ test('missing, closed or cross-origin opener and browser policy leave closing sa
 
 test('desktop Simple sizing is reserved without scroll and released at the paired-card breakpoint', () => {
   const css = read('static/setup.css');
-  assert.ok(css.includes('.setup-entry-wizard .setup-simple-content{min-height:21rem}'));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-content{min-height:27rem}'));
   assert.ok(css.includes('@media(max-width:760px){\n  .setup-entry-wizard .setup-simple-content{min-height:0}'));
   assert.ok(css.includes('.setup-entry-wizard .setup-simple-actions,.setup-entry-wizard [data-simple-setup]>button{margin-top:auto}'));
   const simpleRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /setup-simple|data-simple-setup/.test(selector));
   for (const [, , declarations] of simpleRules) assert.doesNotMatch(declarations, /overflow\s*:\s*(auto|scroll|hidden)/);
 });
 
-test('Advanced Add Server uses full-width lanes with four, two, then one column', () => {
+test('Advanced Add Server uses full-width lanes with five, two, then one column', () => {
   const css = read('static/setup.css');
   assert.ok(css.includes('.setup-software-lanes{grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}'));
-  assert.ok(css.includes('.setup-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr))'));
+  assert.ok(css.includes('.setup-software-lanes .setup-server-types{grid-template-columns:repeat(5,minmax(0,1fr))'));
   assert.ok(css.includes('@media(max-width:1000px){\n  .setup-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}'));
   assert.ok(css.includes('@media(max-width:430px){\n  .setup-software-lanes .setup-server-types{grid-template-columns:1fr}'));
-  assert.ok(css.includes('.setup-software-lanes .setup-server-types{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:auto;align-content:start;min-width:0;margin:0}'));
+  assert.ok(css.includes('.setup-software-lanes .setup-server-types{grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:1fr;align-content:start;min-width:0;margin:0}'));
   assert.ok(css.includes('.setup-server-types{grid-auto-rows:1fr}'));
   assert.ok(css.includes('.setup-wizard-panel .setup-software-lanes .setup-server-types legend{font-size:.9rem}'));
 });
@@ -140,6 +140,12 @@ test('Add Server Simple software and Advanced share card proportions and typogra
   assert.ok(css.includes(`${shared} .server-software-icon,${shared} .server-software-icon img{width:40px;min-width:40px;height:40px}`));
   assert.ok(css.includes(`${shared} .server-software-copy strong{font-size:1rem}`));
   assert.ok(css.includes(`${shared} .server-software-copy small{font-size:.82rem}`));
+  // Advanced must retain the shared compact height without a later sizing override.
+  const advancedCardRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selector]) => selector.includes('.setup-software-lanes') && selector.includes('.server-software-card'));
+  const heights = advancedCardRules.flatMap(([, , declarations]) =>
+    [...declarations.matchAll(/(?:^|;)\s*((?:(?:min|max)-)?(?:height|block-size)\s*:[^;]+)/g)].map(([, declaration]) => declaration.trim()));
+  assert.deepEqual(heights, ['min-height:104px']);
 });
 
 test('shared setup normalizes only Paper and Purpur artwork while preserving icon slots', () => {
@@ -158,7 +164,7 @@ test('shared setup normalizes only Paper and Purpur artwork while preserving ico
 
 test('Add Server family readability is scoped without changing the family layout', () => {
   const css = read('static/setup.css');
-  assert.ok(css.includes('.setup-entry-wizard .setup-simple-families{grid-template-columns:1fr}'));
+  assert.ok(css.includes('.setup-entry-wizard .setup-simple-families{grid-template-columns:1fr;grid-auto-rows:1fr}'));
   assert.ok(css.includes('.setup-entry-wizard .setup-simple-families .server-software-copy strong{font-size:1rem}'));
   assert.ok(css.includes('.setup-entry-wizard .setup-simple-families .server-software-copy small,.setup-entry-wizard .setup-simple-families .setup-family-items{font-size:.82rem}'));
   assert.ok(css.includes('.setup-entry-wizard .setup-simple-families .setup-family-items img{width:24px;height:24px}'));

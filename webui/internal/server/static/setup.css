@@ -534,7 +534,6 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 /* Both setup contexts use the approved three full-width software lanes. */
 .setup-software-lanes{grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}
 .setup-software-lanes .setup-server-types{grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:1fr;align-content:start;min-width:0;margin:0}
-.setup-wizard-panel .setup-software-lanes .setup-server-type.server-software-card{min-height:9rem}
 .setup-wizard-panel .setup-software-lanes .setup-server-types legend{font-size:.9rem}
 @media(max-width:1000px){
   .setup-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}

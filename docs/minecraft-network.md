@@ -136,32 +136,18 @@ new players to an arbitrary backend.
 Velocity uses `docker.io/itzg/mc-proxy:java25` with `TYPE=VELOCITY`. Java 25 is
 required by the lobby plugins and Global Whitelist 1.2.1.
 
-LimboAPI stable 1.1.26 is too old for current Velocity protocol 777 / Minecraft
-26.3. JustVoxel temporarily pins Elytrium's official
-[dev-build bfef579](https://github.com/Elytrium/LimboAPI/releases/tag/dev-build),
-published specifically for Minecraft 26.3 support. Every image build acquires the
-exact release asset, verifies its size and pinned SHA-256, and records provenance
-in `limboapi-release.json`. JustVoxel does not follow arbitrary or latest
-development builds. Remove this compatibility pin when Elytrium publishes a normal
-stable release supporting the current protocol.
+JustVoxel consumes
+`ghcr.io/home-server-project/minecraft-network-plugins:stable` through a
+Containerfile package stage. Home Server Packages owns the JustVoxel Lobby
+source, LimboAPI compatibility tracking and acquisition, Velocity/Floodgate
+compile dependencies, Java/Gradle build, validation, upstream tracking and
+provenance. JustVoxel does not build these artifacts itself; the stable channel
+tag is the package contract.
 
-The image workflows provision Java 25 before invoking the build helper; the
-helper reports a prerequisite error if Java is missing or cannot run.
-With Java 25, the JustVoxel plugin compiles against that verified local JAR as a
-compile-only dependency, with Velocity and Floodgate/Cumulus supplied at runtime.
-The lobby retains one narrow `PluginMessagePacket` bridge for Floodgate form
-responses: while LimboAPI owns the player's Limbo session, it exposes built-in
-Velocity packets through `onGeneric(Object)`. The bridge passes form responses
-to Floodgate's normal event handling. The build resolves the latest stable
-Velocity server JAR from the official [PaperMC downloads API](https://docs.papermc.io/misc/downloads-service/),
-verifies its SHA-256, and uses it only as a temporary compile-only dependency.
-The public Velocity API and annotation processor use that same resolved version.
-The server JAR is never bundled into JustVoxel Lobby or installed as a second
-runtime Velocity; runtime continues to use the maintained itzg image above.
-The helper produces `limboapi.jar`, `justvoxel-lobby.jar`, `SHA256SUMS` and
-`limboapi-release.json`; image composition verifies
-their hashes and installs root-owned mode-0644 copies under
-`/usr/lib/justvoxel/minecraft-network/`. Appliances copy these baked JARs into the
+Image composition copies `/artifacts/limboapi.jar` and
+`/artifacts/justvoxel-lobby.jar` from the package and installs non-empty,
+root-owned mode-0644 copies under `/usr/lib/justvoxel/minecraft-network/`.
+Appliances copy these baked JARs into the
 private artifact cache and verify all managed JAR hashes before Velocity startup.
 On a bootc image update, the baked LimboAPI and JustVoxel Lobby artifacts refresh
 from the newly deployed image after the existing private artifact set has been

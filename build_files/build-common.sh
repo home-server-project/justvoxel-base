@@ -109,12 +109,11 @@ fi
 install -m0755 /ctx/build_artifacts/management/management-agent /usr/libexec/justvoxel/management-agent
 install -m0755 /ctx/build_artifacts/webui/justvoxel-webui /usr/libexec/justvoxel/justvoxel-webui
 install -d -m0755 /usr/lib/justvoxel
-# Build-produced, SHA-256 verified plugins are baked into the immutable image.
-(cd /ctx/build_artifacts/minecraft-network && sha256sum --check SHA256SUMS)
+# Home Server Packages runtime plugins are baked into the immutable image.
 install -d -m0755 /usr/lib/justvoxel/minecraft-network
 for network_plugin in limboapi justvoxel-lobby; do
-    [[ -s "/ctx/build_artifacts/minecraft-network/${network_plugin}.jar" ]]
-    install -o0 -g0 -m0644 "/ctx/build_artifacts/minecraft-network/${network_plugin}.jar" "/usr/lib/justvoxel/minecraft-network/${network_plugin}.jar"
+    [[ -s "/ctx/minecraft-network-artifacts/${network_plugin}.jar" ]]
+    install -o0 -g0 -m0644 "/ctx/minecraft-network-artifacts/${network_plugin}.jar" "/usr/lib/justvoxel/minecraft-network/${network_plugin}.jar"
 done
 install -m0644 /ctx/build_artifacts/webui/webui-release.json /usr/lib/justvoxel/webui-release.json
 jq -e '.management_api == "v1" and (.version | type == "string" and length > 0) and (.source_commit | test("^[0-9a-f]{40}$")) and (.build_date | type == "string" and length > 0) and (.go_version | type == "string" and length > 0) and (has("artifact_sha256") | not) and (has("release_tag") | not)' /usr/lib/justvoxel/webui-release.json >/dev/null
