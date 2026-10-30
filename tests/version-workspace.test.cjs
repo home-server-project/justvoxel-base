@@ -471,7 +471,7 @@ class ContainerElement extends Element {
   get textContent() { return (this.ownText || '') + this.children.map(child => child.textContent).join(' '); }
   set innerHTML(_) { throw new Error('Container output must use textContent'); }
 }
-function containerWorkspace({status = 'up_to_date', running = true, pending, statusReply, traceReply, selected = 'jv-family1', previousImages = [], retentionCount = 1} = {}) {
+function containerWorkspace({status = 'up_to_date', running = true, pending, statusReply, traceReply, selected = 'jv-family1', previousImages = [], retentionCount = 1, retentionReply} = {}) {
   const calls = [], timers = [], renders = [];
   const content = new ContainerElement('div');
   const context = vm.createContext({
@@ -489,7 +489,7 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
       if(url==='/api/version/container/status') return statusReply ? statusReply() : {instance_id:selected,server_name:'22222',image:'docker.io/itzg/minecraft-server:stable',state:status,running,plan_fingerprint:status==='unavailable'?'':'reviewed',restore_fingerprint:'local-reviewed',keep_previous_images:retentionCount,previous_images:previousImages};
       if(url.startsWith('/api/version/container/operation')) return {operation:pending};
       if(url==='/api/minecraft/workspace/snapshot') return {players:{online:0}};
-      if(url==='/api/version/container/retention') return {ok:true};
+      if(url==='/api/version/container/retention') return retentionReply ? retentionReply() : {ok:true};
       if(url==='/api/version/container/acknowledge') return {operation:{state:'resolved'}};
       if(url==='/api/version/container/update') return {operation:{operation_id:'container-1',state:'running'}};
       throw new Error(url);
@@ -563,24 +563,105 @@ test('Container stale status and stale trace cannot replace a new selection',asy
 });
 
 const retainedImage = digest => ({digest,image:'docker.io/itzg/minecraft-server:stable',retained_at:'2026-10-27T12:00:00Z',size:1048576});
-test('Container retention is numeric, missing defaults to one and empty saves one',async()=>{
- const page=containerWorkspace({retentionCount:undefined});await page.mount();
- const number=page.content.all().find(node=>node.tag==='input'&&node.type==='number');
- const save=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Save');
- const lane=page.content.all().find(node=>node.className==='version-container-history-heading');
- assert.equal(number.parent.parent,lane);assert.equal(save.parent,lane);
- assert.equal(lane.parent.children[0],lane);
- assert.equal(number.value,'1');assert.equal(number.min,'0');assert.equal(number.step,'1');
+const retentionInput = page => page.content.all().find(node=>node.type==='number');
+const changeRetention = (page,value) => {const input=retentionInput(page);input.value=value;input.listeners.input();};
+test('Container combines controls and previous images in one outer card with separate untitled output',async()=>{
+ const page=containerWorkspace();await page.mount();
+ const root=page.content.children[0];
+ const panel=root.children[0];
+ const history=panel.children.find(node=>node.className==='version-container-history backup-library-section');
+ const controls=panel.children.find(node=>node.dataset.containerRow==='controls');
+ assert.equal(panel.children[0].textContent,'Minecraft container');
+ assert.equal(root.children.filter(node=>node.tag==='section').length,1);
+ assert.ok(history);assert.equal(history.children[0].tag,'h2');
+ assert.equal(history.children[0].textContent,'Previous container images');
+ assert.ok(!history.className.includes('panel'));
+ assert.ok(!history.all().includes(retentionInput(page)));
+ assert.ok(!page.content.all().some(node=>node.tag==='button'&&node.textContent==='Save'));
+ assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Keep previous images','Restart server now','Create backup before restart']);
+ assert.equal(retentionInput(page).parent,controls.children[0]);
+ assert.equal(page.terminal().parent,root);assert.equal(root.children.at(-1),page.terminal());
+ assert.ok(!panel.all().includes(page.terminal()));
+ assert.deepEqual(page.content.all().filter(node=>node.tag==='h2').map(node=>node.textContent),['Minecraft container','Previous container images']);
+ assert.doesNotMatch(page.content.textContent,/Console|Installed|Recommended|Geyser|Floodgate|ViaVersion|Minecraft update/);
+ assert.match(history.textContent,/No previous container images\./);
+ const restore=history.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
+ assert.equal(restore.parent.className,'backup-library-summary');
+ assert.equal(restore.parent.parent,history);assert.equal(history.children.at(-1),restore.parent);
+ assert.match(cssRule('.version-container-retention input'),/width:3\.25rem;flex:none/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/background:var\(--jv-surface-sunken\)/);
+ assert.match(css,/@media\(max-width:700px\)\{\.version-container-panel \.version-container-controls\{grid-template-columns:minmax\(0,1fr\)\}/);
+ assert.match(cssRule('.version-container-history .backup-library-summary'),/justify-content:space-between/);
+});
+test('Container retention is limited to one or two and missing defaults to one',async()=>{
+ const page=containerWorkspace({statusReply:()=>({state:'up_to_date'})});await page.mount();
+ const number=retentionInput(page);
+ assert.equal(number.value,'1');assert.equal(number.min,'1');assert.equal(number.max,'2');assert.equal(number.step,'1');
  assert.ok(!page.content.all().some(node=>node.tag==='select'));
- number.value='';await save.listeners.click();
- const sent=page.calls.find(call=>call.url==='/api/version/container/retention');
- assert.equal(sent.body.get('keep_previous_images'),'1');assert.equal(sent.body.get('csrf'),'csrf');
- for(const invalid of ['-1','1.5','one']){
-  const invalidPage=containerWorkspace();await invalidPage.mount();
-  invalidPage.content.all().find(node=>node.type==='number').value=invalid;
-  await invalidPage.content.all().find(node=>node.tag==='button'&&node.textContent==='Save').listeners.click();
-  assert.ok(!invalidPage.calls.some(call=>call.url==='/api/version/container/retention'));
+ for(const valid of ['1','2']){
+  const validPage=containerWorkspace({retentionCount:valid==='1'?2:1});await validPage.mount();
+  changeRetention(validPage,valid);assert.equal(validPage.update().disabled,false);
+  await validPage.update().listeners.click();
+  const sent=validPage.calls.find(call=>call.url==='/api/version/container/retention');
+  assert.equal(sent.body.get('keep_previous_images'),valid);assert.equal(sent.body.get('csrf'),'csrf');
  }
+ for(const invalid of ['','0','3','12345','-1','1.5','one','Infinity','NaN']){
+  const invalidPage=containerWorkspace({status:'update_available'});await invalidPage.mount();
+  changeRetention(invalidPage,invalid);
+  assert.equal(invalidPage.update().disabled,true);
+  await invalidPage.update().listeners.click();
+  assert.ok(!invalidPage.calls.some(call=>call.body));
+  assert.equal(invalidPage.context.state.textContent,'Keep previous images must be 1 or 2.');
+ }
+});
+test('Container retention dirty state enables the single apply action and resets when reverted',async()=>{
+ const page=containerWorkspace();await page.mount();
+ assert.equal(page.update().disabled,true);
+ changeRetention(page,'2');assert.equal(page.update().disabled,false);
+ changeRetention(page,'1');assert.equal(page.update().disabled,true);
+ await page.update().listeners.click();assert.ok(!page.calls.some(call=>call.body));
+});
+test('Container retention-only apply saves and refreshes without update or restart',async()=>{
+ for(const status of ['up_to_date','restart_needed','unavailable']){
+  const page=containerWorkspace({status});await page.mount();
+  changeRetention(page,'2');await page.update().listeners.click();
+  assert.deepEqual(page.calls.filter(call=>call.body).map(call=>call.url),['/api/version/container/retention']);
+  assert.ok(!page.calls.some(call=>call.url==='/api/minecraft/workspace/snapshot'));
+  assert.equal(page.renders.length,1);
+ }
+});
+test('Container update-only preserves fingerprint and restart and backup choices',async()=>{
+ const page=containerWorkspace({status:'update_available'});await page.mount();
+ const [restart,backup]=page.toggles();backup.checked=true;backup.listeners.change();
+ assert.equal(restart.checked,true);
+ await page.update().listeners.click();
+ const posts=page.calls.filter(call=>call.body);assert.equal(posts.length,1);
+ assert.equal(posts[0].url,'/api/version/container/update');
+ assert.equal(posts[0].body.get('plan_fingerprint'),'reviewed');
+ assert.equal(posts[0].body.get('restart_now'),'yes');assert.equal(posts[0].body.get('backup_before_restart'),'yes');
+});
+test('Container combined apply persists retention before the existing update',async()=>{
+ const page=containerWorkspace({status:'update_available'});await page.mount();
+ changeRetention(page,'2');await page.update().listeners.click();
+ assert.deepEqual(page.calls.filter(call=>call.body).map(call=>call.url),['/api/version/container/retention','/api/version/container/update']);
+ const body=page.calls.find(call=>call.url==='/api/version/container/update').body;
+ assert.equal(body.get('plan_fingerprint'),'reviewed');assert.equal(body.get('restart_now'),'no');
+});
+test('Container failed retention save stops combined apply and shows the bounded error',async()=>{
+ const page=containerWorkspace({status:'update_available',retentionReply:()=>{throw new Error('Retention save failed.');}});await page.mount();
+ changeRetention(page,'2');await page.update().listeners.click();
+ assert.deepEqual(page.calls.filter(call=>call.body).map(call=>call.url),['/api/version/container/retention']);
+ assert.equal(page.context.state.textContent,'Retention save failed.');assert.equal(page.update().disabled,false);
+ assert.equal(page.renders.length,0);
+});
+test('Container selection change during retention save prevents the following update',async()=>{
+ let finish;
+ const page=containerWorkspace({status:'update_available',retentionReply:()=>new Promise(resolve=>{finish=resolve;})});await page.mount();
+ changeRetention(page,'2');const saving=page.update().listeners.click();
+ assert.equal(page.update().disabled,true);
+ page.context.justVoxelSelectionGeneration.version++;finish({ok:true});await saving;
+ assert.ok(!page.calls.some(call=>call.url==='/api/version/container/update'));assert.equal(page.renders.length,0);
 });
 test('Container lists real previous images and exact selection enables restore',async()=>{
  const digest='sha256:'+'a'.repeat(64);
@@ -646,9 +727,10 @@ test('Old container restore selection and retention callbacks cannot submit for 
  const radio=page.content.all().find(node=>node.type==='radio');
  radio.checked=true;radio.listeners.change();
  const restore=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
- const save=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Save');
+ changeRetention(page,'2');
+ const apply=page.update();
  page.context.justVoxelSelectionGeneration.version++;
- await restore.listeners.click();await save.listeners.click();radio.listeners.change();
+ await restore.listeners.click();await apply.listeners.click();radio.listeners.change();
  assert.ok(!page.calls.some(call=>call.url==='/api/version/container/update'||call.url==='/api/version/container/retention'));
 });
 

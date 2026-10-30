@@ -77,7 +77,7 @@ func TestVersionStackUIUsesSafeStackStateAndSingleReview(t *testing.T) {
 		"Keep current version",
 		"Current version kept. Review changes again when ready.",
 		"Previous container images",
-		"Keep previous images:",
+		"Keep previous images",
 		"Restore selected",
 		`up_to_date: "Up to date"`,
 		`waiting_for_compatibility: "Waiting for compatibility"`,

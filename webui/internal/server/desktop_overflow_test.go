@@ -21,6 +21,7 @@ func TestDesktopWorkspaceViewportBounds(t *testing.T) {
 const assert = require("node:assert/strict");
 const window = { innerHeight: 800 };
 const document = { documentElement: { clientWidth: 1200 }, querySelector: () => ({ getBoundingClientRect: () => ({ bottom: 44 }) }) };
+const getComputedStyle = () => ({ fontSize: "16px", getPropertyValue: () => ".45rem" });
 const workspaceCompactQuery = { matches: false };
 function makeWindow(left, top, width, height) {
   const style = { left: left + "px", top: top + "px", width: width + "px", height: height + "px", setProperty(key, value) { this[key] = value; } };
@@ -33,7 +34,7 @@ function makeWindow(left, top, width, height) {
 ` + script[start:end] + `
 function assertFits(element) {
   const rect = element.getBoundingClientRect();
-  assert(rect.left >= 8 && rect.top >= 52);
+  assert(rect.left >= 8 && rect.top >= 51);
   assert(rect.left + rect.width <= document.documentElement.clientWidth - 8);
   assert(rect.top + rect.height <= window.innerHeight - 8);
 }

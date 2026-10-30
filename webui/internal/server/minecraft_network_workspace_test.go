@@ -84,7 +84,7 @@ func TestMinecraftNetworkWorkspaceArchitecture(t *testing.T) {
 	fragment := read("templates/minecraft_network.html")
 	minecraftSection := strings.Split(strings.Split(header, `<span class="control-section-label">Minecraft</span>`)[1], `</section>`)[0]
 	previous := -1
-	for _, label := range []string{"Minecraft Servers", "Minecraft Settings", "How to connect", "Version", "Plugins", "Network"} {
+	for _, label := range []string{"Minecraft Settings", "Minecraft Servers", "Minecraft Update", "Minecraft Network", "Backups", "Migration", "Plugins", "How to connect"} {
 		position := strings.Index(minecraftSection, "<strong>"+label+"</strong>")
 		if position <= previous {
 			t.Fatalf("Minecraft launcher order: %s", label)

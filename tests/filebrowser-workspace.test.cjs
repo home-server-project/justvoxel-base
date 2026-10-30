@@ -12,9 +12,9 @@ const mounts = read('management/cmd/justvoxel-management-agent/filebrowser_mount
 const proxy = read('webui/internal/server/filebrowser.go');
 const config = JSON.parse(read('system_files/usr/share/justvoxel/filebrowser/config.yaml'));
 
-test('Files follows Migration in the existing two-column Storage & Data grid', () => {
-  const section = header.match(/<span class="control-section-label">Storage &amp; Data<\/span>([\s\S]*?)<\/section>/)[1];
-  assert.deepEqual([...section.matchAll(/data-(storage|backups|migration|files)-open/g)].map(m=>m[1]), ['storage','backups','migration','files']);
+test('File Browser follows Storage in the two-column System grid', () => {
+  const section = header.match(/<span class="control-section-label">System<\/span>([\s\S]*?)<\/section>/)[1];
+  assert.deepEqual([...section.matchAll(/data-(storage|files|terminal)-open/g)].map(m=>m[1]), ['storage','files','terminal']);
   assert.match(section, /control-tile nav-admin-only[^>]*data-files-open/);
   assert.match(section, /control-tile-grid/);
 });

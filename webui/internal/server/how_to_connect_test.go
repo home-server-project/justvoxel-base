@@ -277,7 +277,7 @@ func TestConnectionGuidePlayitMapping(t *testing.T) {
 }
 func TestConnectionGuideControlCenterAndSafety(t *testing.T) {
 	header, _ := assets.ReadFile("templates/header.html")
-	if !strings.Contains(string(header), `class="control-tile" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
+	if !strings.Contains(string(header), `class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
 		t.Fatal("safe read-only launcher missing")
 	}
 	js, _ := assets.ReadFile("static/how-to-connect.js")

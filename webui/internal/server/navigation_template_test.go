@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -34,13 +35,13 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		t.Fatal("Control Center navigation missing")
 	}
 	navigation := markup[navigationStart : navigationStart+navigationEnd]
-	for _, heading := range []string{"Session &amp; power", "Minecraft", "System", "Storage &amp; Data"} {
+	for _, heading := range []string{"Session &amp; power", "Minecraft", "System"} {
 		if !strings.Contains(markup, `<span class="control-section-label">`+heading+`</span>`) {
 			t.Fatalf("missing Control Center group %s", heading)
 		}
 	}
 	previous := -1
-	for _, heading := range []string{"Session &amp; power", "Minecraft", "System", "Storage &amp; Data"} {
+	for _, heading := range []string{"Session &amp; power", "Minecraft", "System"} {
 		position := strings.Index(markup, `<span class="control-section-label">`+heading+`</span>`)
 		if position <= previous {
 			t.Fatalf("Control Center group %s is out of order", heading)
@@ -626,7 +627,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"const workspaceTopInset = () => {", "Math.round((topbar?.getBoundingClientRect().bottom || 0) + 8)", "const minTop = workspaceTopInset();"} {
+	for _, want := range []string{"const workspaceTopInset = () => {", `document.querySelector(".control-center")`, `rootStyle.getPropertyValue("--jv-panel-gap")`, "Math.round((anchor?.getBoundingClientRect().bottom || 0) + gap)", "const minTop = workspaceTopInset();"} {
 		if !strings.Contains(string(appJS), want) {
 			t.Fatalf("workspace clearance below the floating panel missing %q", want)
 		}
@@ -1185,5 +1186,77 @@ func TestQuickLookMinecraftSharedSelectorPlacement(t *testing.T) {
 	}
 	if !strings.Contains(tile[actions:selector], `</details>`) {
 		t.Fatal("actions menu moved outside heading")
+	}
+}
+
+func TestApprovedControlCenterLayout(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup, styles := string(header), string(css)
+	if strings.Contains(markup, "Storage &amp; Data") {
+		t.Fatal("Storage & Data must be merged into Minecraft and System")
+	}
+	for heading, labels := range map[string][]string{
+		"Minecraft": {"Minecraft Settings", "Minecraft Servers", "Minecraft Update", "Minecraft Network", "Backups", "Migration", "Plugins", "How to connect"},
+		"System":    {"System Settings", "System Monitor", "System Update", "System Network", "Storage", "File Browser", "Terminal"},
+	} {
+		section := strings.Split(strings.Split(markup, `<span class="control-section-label">`+heading+`</span>`)[1], `</section>`)[0]
+		matches := regexp.MustCompile(`<strong>([^<]+)</strong>`).FindAllStringSubmatch(section, -1)
+		var got []string
+		for _, match := range matches {
+			got = append(got, match[1])
+		}
+		if strings.Join(got, "|") != strings.Join(labels, "|") {
+			t.Fatalf("%s menu order: %v", heading, got)
+		}
+	}
+	for id, label := range map[string]string{"version": "Minecraft Update", "system": "System Settings", "network": "System Network", "files": "File Browser"} {
+		if !strings.Contains(markup, `<h2 id="`+id+`-workspace-title">`+label+`</h2>`) ||
+			!strings.Contains(markup, `data-workspace-window="`+id+`"`) ||
+			!strings.Contains(markup, `data-`+id+`-open`) {
+			t.Fatalf("display label or original workspace identity missing: %s", id)
+		}
+	}
+	if !strings.Contains(markup, `<a class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
+		t.Fatal("How to connect must reuse shared button styling and retain its destination")
+	}
+	for _, rule := range regexp.MustCompile(`(?m)^\.control-center-heading\{([^}]*)\}`).FindAllStringSubmatch(styles, -1) {
+		if strings.Contains(rule[1], "border-bottom:") || strings.Contains(rule[1], "border:") {
+			t.Fatal("Control Center heading must not have a divider before Session & Power")
+		}
+	}
+	headingGap := strings.Split(strings.Split(markup, `<h2>Control Center</h2>`)[1], `<section class="control-section control-session">`)[0]
+	if strings.Contains(headingGap, "<hr") {
+		t.Fatal("extra divider before Session & Power")
+	}
+	if !strings.Contains(styles, `.control-tile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))`) {
+		t.Fatal("desktop menu must retain two columns")
+	}
+	terminal := regexp.MustCompile(`<button[^>]*data-terminal-open[^>]*>`).FindString(markup)
+	if terminal != `<button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-terminal-open title="Open a command-line session on JustVoxel">` {
+		t.Fatal("Terminal must remain a normal menu tile with its role restrictions")
+	}
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(styles, -1) {
+		if (strings.Contains(rule[1], "control-tile") || strings.Contains(rule[1], "data-terminal-open")) && strings.Contains(rule[2], "grid-column") {
+			t.Fatal("menu tiles must occupy one normal grid cell")
+		}
+	}
+	for _, want := range []string{`:root{--jv-panel-gap:.45rem}`, `top:calc(100% + var(--jv-panel-gap))`} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("shared Control Center/workspace top gap missing: %s", want)
+		}
+	}
+	if !strings.Contains(string(script), `element.style.top = workspaceTopInset() + "px";`) {
+		t.Fatal("new desktop windows must start at the Control Center top offset")
 	}
 }

@@ -1791,8 +1791,10 @@ const workspaceWindowZMax = 900;
 const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
 
 const workspaceTopInset = () => {
-  const topbar = document.querySelector(".topbar");
-  return Math.max(8, Math.round((topbar?.getBoundingClientRect().bottom || 0) + 8));
+  const anchor = document.querySelector(".control-center") || document.querySelector(".topbar");
+  const rootStyle = getComputedStyle(document.documentElement);
+  const gap = parseFloat(rootStyle.getPropertyValue("--jv-panel-gap")) * parseFloat(rootStyle.fontSize);
+  return Math.max(8, Math.round((anchor?.getBoundingClientRect().bottom || 0) + gap));
 };
 
 const clampWorkspaceWindow = (element) => {
@@ -1857,7 +1859,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
     if (!Number.isFinite(saved.left) || !Number.isFinite(saved.top)) {
       const rect = element.getBoundingClientRect();
       element.style.left = Math.max(8, Math.round((document.documentElement.clientWidth - rect.width) / 2)) + "px";
-      element.style.top = Math.max(workspaceTopInset(), Math.round((window.innerHeight - rect.height) / 2)) + "px";
+      element.style.top = workspaceTopInset() + "px";
     }
     clampWorkspaceWindow(element);
     persistGeometry();

@@ -264,7 +264,7 @@ if (versionLauncher && versionDialog) {
     const imageLine = line("Image:", "Checking…");
     identity.append(serverLine, imageLine);
     const controls = document.createElement("div");
-    controls.className = "version-container-row";
+    controls.className = "version-container-row version-container-controls";
     controls.dataset.containerRow = "controls";
     const toggle = (text) => {
       const label = document.createElement("label");
@@ -274,8 +274,6 @@ if (versionLauncher && versionDialog) {
       input.checked = false; input.disabled = true;
       label.append(title, input); controls.appendChild(label); return input;
     };
-    const restart = toggle("Restart server now");
-    const backup = toggle("Create backup before restart");
     const actions = document.createElement("div"); actions.className = "version-container-row version-container-actions";
     actions.dataset.containerRow = "actions";
     const statusLine = line("Status:", "Checking…");
@@ -283,13 +281,15 @@ if (versionLauncher && versionDialog) {
     const actionLane = document.createElement("div"); actionLane.className = "version-container-action-lane";
     actionLane.appendChild(update); actions.append(statusLine, actionLane);
     const retentionLabel = document.createElement("label"); retentionLabel.className = "version-container-retention";
-    const retentionTitle = document.createElement("span"); retentionTitle.textContent = "Keep previous images:";
-    const retention = document.createElement("input"); retention.type = "number"; retention.min = "0"; retention.step = "1"; retention.value = "1"; retention.disabled = true;
-    const saveRetention = document.createElement("button"); saveRetention.type = "button"; saveRetention.textContent = "Save"; saveRetention.disabled = true;
+    const retentionTitle = document.createElement("span"); retentionTitle.textContent = "Keep previous images";
+    const retention = document.createElement("input"); retention.type = "number"; retention.min = "1"; retention.max = "2"; retention.step = "1"; retention.value = "1"; retention.disabled = true;
     retentionLabel.append(retentionTitle, retention);
-    const library = card("Previous container images"); library.className += " version-container-history backup-library-section";
-    const historyHeading = document.createElement("div"); historyHeading.className = "version-container-history-heading";
-    historyHeading.append(library.firstChild, retentionLabel, saveRetention); library.appendChild(historyHeading);
+    controls.appendChild(retentionLabel);
+    const restart = toggle("Restart server now");
+    const backup = toggle("Create backup before restart");
+    const library = document.createElement("section"); library.className = "version-container-history backup-library-section";
+    const historyHeading = document.createElement("h2"); historyHeading.textContent = "Previous container images";
+    library.appendChild(historyHeading);
     const images = document.createElement("div"); images.className = "backup-file-grid";
     const footer = document.createElement("div"); footer.className = "backup-library-summary";
     const summary = document.createElement("span");
@@ -301,33 +301,30 @@ if (versionLauncher && versionDialog) {
     const progress = document.createElement("div");
     const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = "";
     terminal.textContent = "Checking the selected container image…";
-    panel.append(identity, controls, actions, helper);
-    root.append(panel, library, progress, terminal);
+    panel.append(identity, controls, actions, helper, library);
+    root.append(panel, progress, terminal);
     if (!current()) return;
     content.replaceChildren(root);
     let plan = { state: "unavailable", running: false };
     let operation;
     let busy = true;
+    let persistedRetention = "1";
+    const retentionValid = () => /^[12]$/.test(retention.value);
+    const retentionDirty = () => retention.value !== persistedRetention;
+    const containerAction = () => ["update_available", "image_missing", "restart_needed"].includes(plan.state) && Boolean(plan.plan_fingerprint) && (plan.state !== "restart_needed" || restart.checked);
     const sync = () => {
       const actionable = ["update_available", "image_missing", "restart_needed"].includes(plan.state) && Boolean(plan.plan_fingerprint);
       restart.disabled = busy || !actionable || !plan.running;
       backup.disabled = busy || !plan.running || (!actionable && !(plan.previous_images || []).length);
-      retention.disabled = saveRetention.disabled = busy;
+      retention.disabled = busy;
       restore.disabled = busy || !selectedDigest || !plan.restore_fingerprint;
       if (!plan.running) restart.checked = backup.checked = false;
-      update.disabled = busy || !actionable || (plan.state === "restart_needed" && !restart.checked);
+      update.disabled = busy || !retentionValid() || (!containerAction() && !retentionDirty());
     };
-    saveRetention.addEventListener("click", async () => {
-      if (!current() || saveRetention.disabled) return;
-      const value = retention.value === "" ? "1" : retention.value;
-      if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(Number(value))) { state.textContent = "Keep previous images must be a non-negative integer."; return; }
-      busy = true; sync();
-      try {
-        const body = new URLSearchParams({ csrf, keep_previous_images: value });
-        await request("/api/version/container/retention", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
-        if (!current()) return;
-        await render();
-      } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; busy = false; sync(); }
+    retention.addEventListener("input", () => {
+      if (!current() || busy) return;
+      state.textContent = retentionValid() ? "" : "Keep previous images must be 1 or 2.";
+      sync();
     });
     backup.addEventListener("change", () => { if (backup.checked) restart.checked = true; sync(); });
     restart.addEventListener("change", () => { if (!restart.checked) backup.checked = false; sync(); });
@@ -389,7 +386,27 @@ if (versionLauncher && versionDialog) {
         await render(failure.message);
       }
     };
-    update.addEventListener("click", () => submit(false));
+    update.addEventListener("click", async () => {
+      if (!current() || busy) return;
+      if (!retentionValid()) { state.textContent = "Keep previous images must be 1 or 2."; return; }
+      if (update.disabled) return;
+      if (retentionDirty()) {
+        const value = retention.value;
+        busy = true; sync();
+        try {
+          const body = new URLSearchParams({ csrf, keep_previous_images: value });
+          await request("/api/version/container/retention", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+          if (!current()) return;
+          persistedRetention = value;
+          if (!containerAction()) { await render(); return; }
+          busy = false; sync();
+        } catch (failure) {
+          if (!current() || failure.staleSelection) return;
+          state.textContent = failure.message; busy = false; sync(); return;
+        }
+      }
+      await submit(false);
+    });
     restore.addEventListener("click", () => submit(true));
     try {
       const [status, pending] = await Promise.all([
@@ -398,7 +415,8 @@ if (versionLauncher && versionDialog) {
       ]);
       if (!current()) return;
       plan = status;
-      retention.value = String(status.keep_previous_images ?? 1);
+      persistedRetention = String(status.keep_previous_images ?? 1);
+      retention.value = persistedRetention;
       const retained = Array.isArray(status.previous_images) ? status.previous_images : [];
       let totalSize = 0;
       for (const image of retained) {
