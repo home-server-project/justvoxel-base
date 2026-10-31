@@ -7,9 +7,9 @@ func (a *App) providerLoginPage(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		if _, err := a.api.Status(r.Context(), c.Value); err == nil {
 			if mustChange(r) {
-				http.Redirect(w, r, "/password", http.StatusSeeOther)
+				http.Redirect(w, r, oauthContinuePath("/password", oauthContinuation(r)), http.StatusSeeOther)
 			} else {
-				http.Redirect(w, r, "/", http.StatusSeeOther)
+				http.Redirect(w, r, oauthResumePath(oauthContinuation(r)), http.StatusSeeOther)
 			}
 			return
 		}
@@ -26,5 +26,6 @@ func (a *App) providerLoginPage(w http.ResponseWriter, r *http.Request) {
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
 		Message:       message,
+		OAuthRequest:  oauthContinuation(r),
 	})
 }

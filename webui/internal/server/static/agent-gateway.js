@@ -21,11 +21,13 @@
     find('[data-gateway-overview]').hidden = name !== 'overview';
     details.hidden = name !== 'settings';
     find('[data-gateway-help]').hidden = name !== 'help';
+    find('[data-gateway-connections]').setAttribute('aria-selected', String(name === 'overview' || (name === 'settings' && Boolean(selectedID))));
     find('[data-gateway-help-open]').setAttribute('aria-selected', String(name === 'help'));
     find('[data-gateway-add]').setAttribute('aria-selected', String(name === 'settings' && !selectedID));
+    content.scrollTop = 0;
   };
   const showOverview = () => { if (busy) return; selectedID = ''; details.replaceChildren(); showSurface('overview'); };
-  const levelLabel = level => ({1: 'Level 1 — Read Only', 2: 'Level 2 — Basic Management', 3: 'Level 3 — Full Management', 4: 'Level 4 — Full System Control'}[level] || 'Unknown access level');
+  const levelLabel = level => ({1: 'Level 1', 2: 'Level 2', 3: 'Level 3', 4: 'Level 4'}[level] || 'Unknown access level');
   const providers = new Map([
     ['OpenAI', {icon: 'openai', label: 'OpenAI · ChatGPT & Codex'}],
     ['Claude', {icon: 'claude', label: 'Claude'}],
@@ -35,6 +37,7 @@
     ['Other AI / MCP app', {label: 'Other AI / MCP app'}],
     ['Automation / REST API', {label: 'Automation / REST API'}],
   ]);
+  const providerAuthMode = purpose => providers.get(purpose)?.icon ? 'oauth_local' : 'token';
   const legacyPurposes = new Map([['AI Agent', 'AI assistant'], ['API Client', 'Automation or app'], ['Other', 'Other']]);
   const purposeLabel = purpose => providers.get(purpose)?.label || legacyPurposes.get(purpose) || purpose || 'Other AI / MCP app';
   const providerIcon = purpose => {
@@ -46,7 +49,7 @@
     return icon;
   };
   const activityLabel = value => value ? new Date(value).toLocaleString() : 'No activity yet';
-  const scopeLabel = connection => connection.all_instances ? 'All Minecraft servers' : (connection.instance_ids || []).map(id => {
+  const scopeLabel = connection => connection.all_instances ? 'All servers' : (connection.instance_ids || []).map(id => {
     const instance = instances.find(item => item.id === id);
     return instance ? (instance.display_name || instance.name || 'Minecraft server') : 'Unavailable server';
   }).join(', ') || 'No servers selected';
@@ -77,7 +80,7 @@
     catch (_) { tokenDialog.querySelector('[data-gateway-copy-status]').textContent = 'Copy is unavailable here. Select and copy the token manually.'; }
   });
   const showTokenOnce = result => {
-    if (!result.token) return;
+    if (result.connection?.auth_mode === 'oauth_local' || !result.token) return;
     clearToken();
     tokenNode.textContent = result.token;
     result.token = ''; // Never retain a credential in the connection registry or browser storage.
@@ -110,17 +113,14 @@
       const inventory = await response.json();
       if (ticket !== generation) return;
       snapshot = next; instances = inventory.servers || [];
-      gatewaySwitch.checked = snapshot.enabled;
-      find('[data-gateway-state]').textContent = `Gateway ${snapshot.enabled ? 'Enabled' : 'Disabled'}`;
-      find('[data-gateway-summary]').textContent = `${snapshot.connections.length} connections · ${snapshot.connections.filter(c => c.enabled).length} enabled`;
-      renderCards();
+      showGatewayState(snapshot.enabled);
       const selected = snapshot.connections.find(c => c.id === selectedID);
       if (surface === 'settings' && selected) renderSettings(selected);
       else if (surface === 'settings' && selectedID) { selectedID = ''; details.replaceChildren(); showSurface('overview'); }
       message('');
     } catch (error) { message(error.message); }
   };
-  const mutate = async payload => {
+  const mutate = async (payload, onFailure) => {
     if (busy) return;
     busy = true;
     const controls = [...dialog.querySelectorAll('button, input, select')];
@@ -129,9 +129,9 @@
     try {
       const result = await send(payload);
       if (result.connection?.id) { selectedID = result.connection.id; showSurface('settings'); }
-      showTokenOnce(result);
+      if (result.connection?.auth_mode !== 'oauth_local') showTokenOnce(result);
       await load();
-    } catch (error) { message(error.message); }
+    } catch (error) { if (onFailure) onFailure(); message(error.message); }
     finally { busy = false; controls.forEach((control, index) => { control.disabled = disabled[index]; }); }
   };
   levelDialog.querySelector('form').addEventListener('submit', event => {
@@ -141,24 +141,40 @@
     levelDialog.close();
     mutate(payload);
   });
+  const showGatewayState = enabled => {
+    gatewaySwitch.checked = enabled;
+    find('[data-gateway-state]').textContent = `Gateway ${enabled ? 'Enabled' : 'Disabled'}`;
+    find('[data-gateway-summary]').textContent = `${snapshot.connections.length} connections · ${snapshot.connections.filter(c => enabled && c.enabled).length} enabled`;
+    renderCards(enabled);
+  };
   gatewaySwitch.addEventListener('change', () => {
+    if (busy) return;
     const enabled = gatewaySwitch.checked;
-    gatewaySwitch.checked = snapshot.enabled;
-    mutate({action: 'enable', enabled});
+    const previous = snapshot.enabled;
+    showGatewayState(enabled);
+    mutate({action: 'enable', enabled}, () => showGatewayState(previous));
   });
-  const renderCards = () => {
+  const renderCards = (gatewayEnabled = snapshot.enabled) => {
     cards.replaceChildren();
-    if (!snapshot.connections.length) cards.append(text('p', 'No connections yet. Select Add Connection to get started.'));
+    if (!snapshot.connections.length) cards.append(text('p', 'No connections yet. Select Add to get started.'));
     for (const connection of snapshot.connections) {
-      const card = text('article', ''); card.className = 'panel minecraft-server-card'; card.dataset.gatewayConnection = connection.id;
+      const active = gatewayEnabled && connection.enabled;
+      const card = text('article', ''); card.className = `panel minecraft-server-card minecraft-server-health-${active ? 'success' : 'neutral'}`; card.dataset.gatewayConnection = connection.id;
       const heading = text('div', ''); heading.className = 'minecraft-server-heading';
-      const state = text('strong', connection.enabled ? 'Enabled' : 'Disabled'); state.className = 'minecraft-server-state';
-      const identity = text('div', ''); identity.className = 'gateway-connection-identity';
-      const summary = text('div', ''); summary.append(text('h2', connection.name), text('p', purposeLabel(connection.purpose)));
-      identity.append(providerIcon(connection.purpose), summary);
-      heading.append(identity, state); card.append(heading);
-      card.append(text('p', levelLabel(connection.level)), text('p', scopeLabel(connection)));
-      const activity = text('div', ''); activity.append(text('p', 'Last activity'), text('p', activityLabel(connection.last_activity))); card.append(activity);
+      const state = text('strong', active ? 'Enabled' : 'Disabled'); state.className = `minecraft-server-state ${active ? 'success' : 'neutral'}`;
+      heading.append(text('h2', connection.name), state); card.append(heading);
+      const identity = text('div', ''); identity.className = 'minecraft-server-software-row';
+      const provider = text('p', ''); provider.className = 'muted';
+      provider.append(providerIcon(connection.purpose), text('span', purposeLabel(connection.purpose)));
+      identity.append(provider); card.append(identity);
+      const metrics = text('div', ''); metrics.className = 'minecraft-server-metrics';
+      const auth = connection.auth_mode === 'oauth' || connection.auth_mode === 'oauth_local' ? 'OAuth' : 'Token';
+      for (const [label, value] of [['Access', levelLabel(connection.level)], ['Scope', scopeLabel(connection)], ['Auth', auth]]) {
+        const metric = text('div', ''); metric.append(text('span', label), text('strong', value)); metrics.append(metric);
+      }
+      card.append(metrics);
+      const activity = text('div', ''); activity.className = 'gateway-card-activity';
+      activity.append(text('span', 'Last activity'), text('p', activityLabel(connection.last_activity))); card.append(activity);
       const actions = text('div', ''); actions.className = 'action-row gateway-card-actions';
       const button = text('button', 'Settings'); button.type = 'button'; button.className = 'secondary';
       button.addEventListener('click', () => { if (busy) return; selectedID = connection.id; renderSettings(connection); });
@@ -168,10 +184,11 @@
   const renderSettings = connection => {
     const c = structuredClone(connection);
     details.replaceChildren(document.querySelector('[data-gateway-settings-template]').content.cloneNode(true));
-    showSurface('settings');
     const form = details.querySelector('form');
     const field = name => form.elements.namedItem(name);
-    form.querySelector('[data-gateway-settings-title]').textContent = c.id ? `${c.name} — settings` : 'Add Connection';
+    const heading = form.querySelector('[data-gateway-settings-title]');
+    heading.hidden = !c.id;
+    heading.textContent = c.id ? `${c.name} — settings` : '';
     for (const name of ['name', 'level']) field(name).value = c[name] ?? '';
     // Keep custom purposes from deployed connections without interpreting them as markup or asset paths.
     if (c.purpose && !providers.has(c.purpose)) {
@@ -188,7 +205,6 @@
     form.querySelector('[data-gateway-save]').textContent = c.id ? 'Apply' : 'Create';
     form.querySelector('[data-gateway-advanced]').hidden = !c.id;
     for (const selector of ['[data-gateway-status]', '[data-gateway-actions]', '[data-gateway-live-note]']) form.querySelector(selector).hidden = !c.id;
-    form.querySelectorAll('[data-gateway-back]').forEach(button => button.addEventListener('click', showOverview));
     field('enabled').checked = Boolean(c.enabled);
     field('server_scope').value = c.all_instances ? 'all' : 'selected';
     if (c.expires_at) {
@@ -196,6 +212,7 @@
       field('expires_at').value = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     }
     const oauthMode = Boolean(c.id) && c.auth_mode === 'oauth';
+    const localOAuth = Boolean(c.id) && c.auth_mode === 'oauth_local';
     const oauthFields = form.querySelector('[data-gateway-oauth]');
     if (oauthMode) {
       form.querySelector('[data-gateway-advanced]').append(oauthFields);
@@ -214,16 +231,34 @@
     if (!known.size) instanceOptions.append(text('p', 'No Minecraft servers are available to choose.'));
     const sync = () => {
       form.querySelector('[data-gateway-scope]').hidden = (field('server_scope').value === 'all');
-      for (const action of ['rotate', 'revoke']) form.querySelector(`[data-gateway-${action}]`).hidden = !c.id || oauthMode;
+      for (const action of ['rotate', 'revoke']) form.querySelector(`[data-gateway-${action}]`).hidden = !c.id || c.auth_mode !== 'token';
     };
     form.querySelectorAll('input[name="server_scope"]').forEach(input => input.addEventListener('change', sync)); sync();
+    if (localOAuth) {
+      const onboarding = text('section', '');
+      const identity = text('div', ''); identity.className = 'gateway-connection-identity';
+      identity.append(providerIcon(c.purpose), text('h3', c.name));
+      onboarding.append(identity, text('h4', 'Ready to connect'), text('p', 'MCP address'));
+      const address = location.origin + '/mcp/' + encodeURIComponent(c.id);
+      const row = text('div', ''); row.className = 'gateway-address';
+      const copy = text('button', 'Copy address'); copy.type = 'button'; copy.className = 'secondary';
+      const copied = text('p', ''); copied.setAttribute('role', 'status');
+      copy.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(address); copied.textContent = 'Address copied.'; }
+        catch (_) { copied.textContent = 'Copy is unavailable here. Select and copy the address manually.'; }
+      });
+      row.append(text('code', address), copy);
+      onboarding.append(row, copied, text('h4', 'Authentication'), text('p', 'Sign in with JustVoxel'), text('p', `When ${c.purpose || 'your app'} connects, JustVoxel will open the secure sign-in and approval page.`));
+      if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) onboarding.append(text('p', 'Remote AI providers require a reachable HTTPS MCP address.'));
+      form.querySelector('[data-gateway-settings-title]').after(onboarding);
+    }
     const safeDetails = form.querySelector('[data-gateway-safe-details]');
     if (c.id) {
       for (const [name, value] of [['Connection ID', c.id], ['Safe credential fingerprint', c.fingerprint || 'None'], ['Created', c.created_at], ['Updated', c.updated_at]]) {
         safeDetails.append(text('dt', name), text('dd', value || 'Unavailable'));
       }
       const status = form.querySelector('[data-gateway-status-details]');
-      const credentialStatus = c.auth_mode === 'oauth' ? 'OAuth configured' : c.fingerprint ? 'Token issued' : 'No active token';
+      const credentialStatus = localOAuth ? 'Sign in with JustVoxel' : c.auth_mode === 'oauth' ? 'OAuth configured' : c.fingerprint ? 'Token issued' : 'No active token';
       status.append(text('dt', 'Last activity'), text('dd', activityLabel(c.last_activity)), text('dt', 'Credential status'), text('dd', credentialStatus));
       if (c.expires_at) status.append(text('dt', 'Expiration'), text('dd', new Date(c.expires_at).toLocaleString()));
     }
@@ -238,7 +273,7 @@
     form.addEventListener('submit', event => {
       event.preventDefault();
       if (busy || !form.reportValidity()) return;
-      const updated = {...c, name: field('name').value.trim(), purpose: field('purpose').value.trim(), auth_mode: c.id ? c.auth_mode : 'token', level: Number(field('level').value), enabled: field('enabled').checked, all_instances: (field('server_scope').value === 'all')};
+      const updated = {...c, name: field('name').value.trim(), purpose: field('purpose').value.trim(), auth_mode: c.id ? c.auth_mode : providerAuthMode(field('purpose').value.trim()), level: Number(field('level').value), enabled: field('enabled').checked, all_instances: (field('server_scope').value === 'all')};
       updated.instance_ids = updated.all_instances ? [] : [...form.querySelectorAll('input[name="instance_ids"]:checked')].map(input => input.value);
       if (field('expires_at').value) updated.expires_at = new Date(field('expires_at').value).toISOString();
       else delete updated.expires_at;
@@ -248,14 +283,15 @@
       if (updated.level === 4 && c.level !== 4) requestLevel4(payload);
       else mutate(payload);
     });
+    showSurface('settings');
   };
   find('[data-gateway-add]').addEventListener('click', () => {
     if (busy) return;
     selectedID = '';
-    renderSettings({name: '', purpose: 'OpenAI', auth_mode: 'token', level: 1, enabled: true, all_instances: true, instance_ids: []});
+    renderSettings({name: '', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true, instance_ids: []});
   });
+  find('[data-gateway-connections]').addEventListener('click', showOverview);
   find('[data-gateway-help-open]').addEventListener('click', () => { if (!busy) showSurface('help'); });
-  find('[data-gateway-help]').querySelector('[data-gateway-back]').addEventListener('click', showOverview);
   for (const button of dialog.querySelectorAll('[data-gateway-copy-address]')) {
     button.addEventListener('click', async () => {
       const status = find('[data-gateway-address-status]');

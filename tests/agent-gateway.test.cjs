@@ -13,7 +13,9 @@ class Node {
   constructor(tag, value = '') { this.tagName = tag; this.textContent = value; this.children = []; this.dataset = {}; this.listeners = {}; }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
+  after(...children) { this.afterChildren = children; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
+  setAttribute(name, value) { this[name] = value; }
 }
 
 test('workspace reuses movable workspace infrastructure and primary-only Control Center tile', () => {
@@ -27,7 +29,7 @@ test('workspace reuses movable workspace infrastructure and primary-only Control
 });
 
 test('multiple independent cards select their own immutable connection settings', () => {
-  const start = js.indexOf('  const renderCards = () => {');
+  const start = js.indexOf('  const renderCards = ');
   const end = js.indexOf('  const renderSettings = ', start);
   assert.ok(start > 0 && end > start);
   const cards = new Node('div');
@@ -37,12 +39,12 @@ test('multiple independent cards select their own immutable connection settings'
     {id: 'third', name: '<script>untrusted label</script>', level: 2, enabled: true, auth_mode: 'token'},
   ];
   const selected = [];
-  const context = vm.createContext({snapshot: {connections}, cards, busy: false, selectedID: '', renderSettings: c => selected.push(c.id), providerIcon: () => new Node('img'), purposeLabel: value => value || 'Other', levelLabel: value => `Level ${value}`, scopeLabel: () => 'All Minecraft servers', activityLabel: value => value || 'No activity yet', text: (tag, value) => new Node(tag, value)});
+  const context = vm.createContext({snapshot: {enabled: true, connections}, cards, busy: false, selectedID: '', renderSettings: c => selected.push(c.id), providerIcon: () => new Node('img'), purposeLabel: value => value || 'Other', levelLabel: value => `Level ${value}`, scopeLabel: () => 'All Minecraft servers', activityLabel: value => value || 'No activity yet', text: (tag, value) => new Node(tag, value)});
   vm.runInContext(js.slice(start, end) + '\nrenderCards();', context);
   assert.equal(cards.children.length, 3);
   for (const [index, card] of cards.children.entries()) {
     assert.equal(card.dataset.gatewayConnection, connections[index].id);
-    assert.equal(card.children[0].children[0].children[1].children[0].textContent, connections[index].name);
+    assert.equal(card.children[0].children[0].textContent, connections[index].name);
     card.children.at(-1).children[0].listeners.click();
     assert.equal(context.selectedID, connections[index].id);
   }
@@ -118,12 +120,20 @@ const overview = workspace.slice(workspace.indexOf('<section data-gateway-overvi
 const help = workspace.slice(workspace.indexOf('<section data-gateway-help hidden>'));
 const form = header.slice(header.indexOf('<template data-gateway-settings-template>'), header.indexOf('<dialog class="minecraft-delete-dialog" data-gateway-level4-dialog'));
 
-test('compact top lane orders Add Connection before Connection help above the default card overview', () => {
-  const lane = workspace.match(/<nav class="minecraft-workspace-tabs"[^>]*>([\s\S]*?)<\/nav>/)[1];
-  assert.ok(lane.indexOf('data-gateway-add') < lane.indexOf('data-gateway-help-open'));
+test('top lane has Connections, Add, Help and a persistent right-aligned Gateway switch', () => {
+  const lane = workspace.match(/<nav class="minecraft-workspace-tabs gateway-navigation"[^>]*>([\s\S]*?)<\/nav>/)[1];
+  assert.deepEqual([...lane.matchAll(/<button[^>]*>([^<]+)<\/button>/g)].map(match => match[1]), ['Connections', 'Add', 'Help']);
+  assert.match(lane, /data-gateway-connections aria-selected="true"/);
+  assert.equal((workspace.match(/data-gateway-enabled/g) || []).length, 1);
+  assert.match(lane, /gateway-global-switch/);
+  assert.ok(lane.indexOf('data-gateway-help-open') < lane.indexOf('data-gateway-enabled'));
+  assert.doesNotMatch(overview + help + form, /data-gateway-enabled/);
   assert.ok(workspace.indexOf('</nav>') < workspace.indexOf('data-gateway-overview'));
   assert.match(overview, /minecraft-server-inventory/);
   assert.match(overview, /minecraft-server-entries" data-gateway-cards/);
+  assert.ok(js.includes("if (!snapshot.connections.length) cards.append(text('p', 'No connections yet. Select Add to get started.'))"));
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.match(css, /gateway-navigation \.gateway-global-switch \{[^}]*margin-left: auto/);
   assert.doesNotMatch(overview, /<form|data-gateway-overview hidden/);
   assert.match(workspace, /data-gateway-details hidden/);
   assert.match(workspace, /data-gateway-help hidden/);
@@ -145,8 +155,16 @@ test('cards contain human summaries while technical fields and endpoints stay of
   assert.ok(help.indexOf('Developer integration') < help.indexOf('data-gateway-openapi'));
 });
 
-test('help explains all access levels and connection choices in plain language', () => {
-  for (const phrase of ['Choose your app', 'OpenAI — ChatGPT &amp; Codex', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'Other AI / MCP app', 'Automation / REST API', 'Level 1 — Read Only', 'Cannot change anything.', 'Level 2 — Basic Management', 'Stop is not included.', 'Level 3 — Full Management', 'Level 4 — Full System Control', 'Only enable this for a connection you fully trust.', 'JustVoxel connection token', 'Never expose port 8099 directly to the public Internet.']) assert.ok(help.includes(phrase), phrase);
+test('help uses compact sections and a comparison table with collapsed developer details', () => {
+  for (const section of ['Getting started', 'Providers / connection types', 'Access levels', 'Minecraft scope', 'Connection / login', 'Remote access']) assert.ok(help.includes(`<h3>${section}</h3>`), section);
+  assert.match(help, /<ol class="gateway-help-steps">/);
+  assert.equal((help.match(/<li>/g) || []).length, 5);
+  const table = help.match(/<table[\s\S]*?<\/table>/)[0];
+  for (const label of ['Level', 'Name', 'Can do', 'Read Only', 'Basic Management', 'Full Management', 'Full System']) assert.ok(table.includes(`>${label}<`), label);
+  assert.equal((table.match(/<tr>/g) || []).length, 5);
+  assert.match(help, /No level can manage AI\/API connection permissions, user accounts, or Factory Reset/);
+  assert.match(help, /Remote\/cloud AI clients need a reachable HTTPS MCP address/);
+  assert.match(help, /Never expose port 8099 directly to the public Internet/);
 });
 
 test('provider cards replace the purpose dropdown with one OpenAI choice for ChatGPT and Codex', () => {
@@ -155,7 +173,7 @@ test('provider cards replace the purpose dropdown with one OpenAI choice for Cha
   assert.equal((form.match(/<strong>OpenAI<\/strong>/g) || []).length, 1);
   assert.match(form, /<strong>OpenAI<\/strong><small>ChatGPT &amp; Codex<\/small>/);
   assert.doesNotMatch(form, /<select name="purpose"|name="auth_mode"|Connection method|OAuth — Advanced|What do you want to call it/);
-  for (const phrase of ['>Name</span>', 'What will use this connection?', 'How much access should it have?', 'Which Minecraft servers?', 'All servers', 'Choose servers']) assert.ok(form.includes(phrase), phrase);
+  for (const phrase of ['>Name</span>', 'What will use this connection?', 'Access level', 'Which Minecraft servers?', 'All servers', 'Choose servers']) assert.ok(form.includes(phrase), phrase);
   assert.match(form, /class="gateway-provider-grid"/);
   for (const asset of ['openai', 'claude', 'grok', 'googlegemini', 'githubcopilot']) {
     assert.ok(form.includes(`/static/ai-providers/${asset}.svg`));
@@ -167,14 +185,14 @@ test('provider cards replace the purpose dropdown with one OpenAI choice for Cha
   const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
   assert.match(css, /gateway-provider-card:has\(input:checked\)/);
   assert.match(css, /gateway-provider-card:has\(input:focus-visible\)/);
-  assert.match(css, /repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(css, /gateway-provider-grid \{ display: flex; flex-wrap: wrap;/);
   assert.match(css, /@media \(max-width: 520px\)/);
 });
 
-test('normal creation uses the existing purpose field and always uses a token', () => {
-  assert.match(js, /renderSettings\(\{name: '', purpose: 'OpenAI', auth_mode: 'token', level: 1, enabled: true, all_instances: true, instance_ids: \[\]\}\)/);
+test('normal creation uses the existing purpose field and provider authentication', () => {
+  assert.match(js, /renderSettings\(\{name: '', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true, instance_ids: \[\]\}\)/);
   assert.match(js, /purpose: field\('purpose'\)\.value\.trim\(\)/);
-  assert.match(js, /auth_mode: c\.id \? c\.auth_mode : 'token'/);
+  assert.match(js, /auth_mode: c\.id \? c\.auth_mode : providerAuthMode\(field\('purpose'\)\.value\.trim\(\)\)/);
   assert.doesNotMatch(js, /field\('auth_mode'\)/);
   assert.match(js, /querySelector\('\[data-gateway-advanced\]'\)\.hidden = !c\.id/);
 });
@@ -194,7 +212,7 @@ test('provider presentation uses safe text and a fixed local generic icon for cu
   assert.equal(context.label(custom), custom);
   assert.equal(context.icon(custom).src, '/static/justvoxel-logo.png');
   assert.equal(context.icon(custom).alt, '');
-  assert.match(js, /text\('p', purposeLabel\(connection\.purpose\)\)/);
+  assert.match(js, /text\('span', purposeLabel\(connection\.purpose\)\)/);
   assert.match(js, /text\('strong', purposeLabel\(c\.purpose\)\)/);
   assert.doesNotMatch(js, /innerHTML|insertAdjacentHTML/);
 });
@@ -209,13 +227,13 @@ test('OAuth settings remain editable only for an existing OAuth connection', () 
   for (const section of ['Status', 'Actions', 'Advanced details', 'Connection ID', 'Safe credential fingerprint']) assert.ok((form + js).includes(section));
 });
 
-test('normal help is provider first and technical integration is collapsed at the bottom', () => {
+test('normal help keeps raw endpoints and integration details collapsed at the bottom', () => {
   const normal = help.slice(0, help.indexOf('<details class="panel"><summary>Developer integration'));
-  assert.doesNotMatch(normal, /OAuth|JWKS|issuer|audience|subject|client ID/);
+  assert.doesNotMatch(normal, /OAuth|JWKS|issuer|audience|subject|client ID|data-gateway-mcp|data-gateway-rest/);
   assert.match(help, /<details class="panel"><summary>Developer integration<\/summary>/);
   assert.doesNotMatch(help, /<details[^>]* open/);
-  assert.ok(help.indexOf('Remote access and security') < help.indexOf('Developer integration'));
-  for (const phrase of ['supported OpenAI MCP connection', 'Claude custom connector', 'supported Grok custom MCP connector', 'user’s account/application', 'configuring a custom MCP server', 'compatible Streamable HTTP MCP client', 'REST address and JustVoxel connection token', 'account, plan or subscription, and network access']) assert.ok(normal.includes(phrase), phrase);
+  assert.ok(help.indexOf('Remote access') < help.indexOf('Developer integration'));
+  for (const phrase of ['supported OpenAI MCP connection', 'Claude custom connector', 'supported Grok custom MCP connector', 'account/application', 'custom MCP server', 'compatible MCP client', 'REST address and JustVoxel connection token', 'account, plan or subscription, and network access']) assert.ok(normal.includes(phrase), phrase);
 });
 
 test('System Control Center keeps Terminal bottom-left and connections bottom-right', () => {
@@ -257,7 +275,9 @@ function settingsHarness(connection) {
   const requests = [];
   const confirmations = [];
   const context = vm.createContext({
-    details, structuredClone, busy: false, instances: [], showSurface() {}, showOverview() {},
+    details, structuredClone, busy: false, instances: [],
+    location: {origin: 'https://voxel.example', protocol: 'https:', hostname: 'voxel.example'}, navigator: {clipboard: {async writeText() {}}},
+    content: node('[data-gateway-content]'), find: node,
     document: {createElement: tag => new Node(tag), querySelector: () => ({content: {cloneNode() { return new Node('form'); }}})},
     text: (tag, value) => new Node(tag, value), activityLabel: value => value || 'No activity yet',
     mutate: payload => requests.push(payload), requestLevel4: payload => confirmations.push(payload),
@@ -266,14 +286,19 @@ function settingsHarness(connection) {
   const rendererStart = js.indexOf('  const renderSettings =');
   const rendererEnd = js.indexOf("  find('[data-gateway-add]').addEventListener", rendererStart);
   const renderer = js.slice(rendererStart, rendererEnd);
-  vm.runInContext(helpers + renderer + '\nglobalThis.render = renderSettings;', context);
-  context.render(connection);
-  return {node, field, requests, confirmations, submit() { settings.listeners.submit({preventDefault() {}}); }};
+  const surfaces = js.slice(js.indexOf("  let selectedID ="), js.indexOf('  const levelLabel ='));
+  const navigation = js.slice(rendererEnd, js.indexOf("  for (const button of dialog.querySelectorAll('[data-gateway-copy-address]'))", rendererEnd));
+  details.hidden = true;
+  node('[data-gateway-overview]').hidden = false;
+  node('[data-gateway-help]').hidden = true;
+  vm.runInContext(surfaces + helpers + renderer + navigation + '\nglobalThis.render = renderSettings;', context);
+  if (connection) context.render(connection);
+  return {node, field, details, requests, confirmations, submit() { settings.listeners.submit({preventDefault() {}}); }};
 }
 
-test('new provider selections submit a token connection and keep OAuth fields out of the form', () => {
+test('branded providers submit local OAuth while generic MCP and automation retain tokens', () => {
   for (const purpose of ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'Other AI / MCP app', 'Automation / REST API']) {
-    // Even an unexpected caller-supplied mode cannot enable OAuth on creation.
+    // Existing external OAuth cannot be selected through new connection creation.
     const h = settingsHarness({name: 'My AI Assistant', purpose: 'OpenAI', auth_mode: 'oauth', level: 1, enabled: true, all_instances: true, instance_ids: []});
     assert.equal(h.node('[data-gateway-oauth]').removed, true);
     assert.equal(h.node('[data-gateway-advanced]').hidden, true);
@@ -281,7 +306,7 @@ test('new provider selections submit a token connection and keep OAuth fields ou
     h.submit();
     assert.equal(h.requests.length, 1);
     assert.equal(h.requests[0].action, 'create');
-    assert.equal(h.requests[0].connection.auth_mode, 'token');
+    assert.equal(h.requests[0].connection.auth_mode, ['Other AI / MCP app', 'Automation / REST API'].includes(purpose) ? 'token' : 'oauth_local');
     assert.equal(h.requests[0].connection.purpose, purpose);
     assert.equal(h.requests[0].connection.oauth, undefined);
     assert.equal(h.requests[0].connection.level, 1);
@@ -323,4 +348,271 @@ test('token settings hide OAuth and retain credential actions and Level 4 confir
   assert.equal(h.confirmations.length, 1);
   assert.equal(h.confirmations[0].connection.level, 4);
   assert.equal(h.confirmations[0].connection.auth_mode, 'token');
+});
+
+
+test('first Add Connection click from overview opens the populated add surface and tabs switch both ways', () => {
+  const h = settingsHarness();
+  const add = h.node('[data-gateway-add]');
+  const help = h.node('[data-gateway-help-open]');
+  const connections = h.node('[data-gateway-connections]');
+  assert.equal(h.node('[data-gateway-overview]').hidden, false);
+  assert.equal(h.details.hidden, true);
+  for (let visit = 0; visit < 3; visit++) {
+    // Surface changes must also expose the start of the form after scrolling.
+    h.node('[data-gateway-content]').scrollTop = 400;
+    add.listeners.click();
+    assert.equal(h.details.hidden, false);
+    assert.equal(h.details.children.length, 1);
+    assert.equal(h.node('[data-gateway-overview]').hidden, true);
+    assert.equal(h.node('[data-gateway-help]').hidden, true);
+    assert.equal(add['aria-selected'], 'true');
+    assert.equal(help['aria-selected'], 'false');
+    assert.equal(h.node('[data-gateway-content]').scrollTop, 0);
+    assert.equal(h.field('name').value, '');
+    assert.equal(h.field('level').value, 1);
+    assert.equal(h.node('[data-gateway-settings-title]').hidden, true);
+    assert.equal(h.node('[data-gateway-settings-title]').textContent, '');
+    assert.equal(h.node('[data-gateway-save]').textContent, 'Create');
+    help.listeners.click();
+    assert.equal(h.details.hidden, true);
+    assert.equal(h.node('[data-gateway-help]').hidden, false);
+    assert.equal(h.node('[data-gateway-overview]').hidden, true);
+    assert.equal(add['aria-selected'], 'false');
+    assert.equal(help['aria-selected'], 'true');
+    connections.listeners.click();
+    assert.equal(h.node('[data-gateway-overview]').hidden, false);
+    assert.equal(h.details.hidden, true);
+    assert.equal(h.node('[data-gateway-help]').hidden, true);
+    assert.equal(connections['aria-selected'], 'true');
+    add.listeners.click();
+    connections.listeners.click();
+    assert.equal(h.node('[data-gateway-overview]').hidden, false);
+  }
+});
+
+test('approved add form has a shared name/access row and no duplicate heading or back navigation', () => {
+  assert.doesNotMatch(workspace + form, /Back to connections/);
+  assert.doesNotMatch(form, /<h[1-6][^>]*>Add Connection<\/h[1-6]>/);
+  const row = form.match(/<div class="gateway-name-access-row">([\s\S]*?)<\/div>/)[1];
+  assert.match(row, /name="name" placeholder="My AI Assistant"/);
+  assert.match(row, />Access level<\/span><select name="level"/);
+  const ordered = ['gateway-name-access-row', 'data-gateway-purpose-label', 'data-gateway-providers', 'Which Minecraft servers?', 'name="enabled"', 'gateway-save'];
+  for (let i = 1; i < ordered.length; i++) assert.ok(form.indexOf(ordered[i - 1]) < form.indexOf(ordered[i]));
+  assert.match(form, /gateway-save"><button type="submit" data-gateway-save>Create/);
+  assert.doesNotMatch(form + js, /data-gateway-back/);
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.match(css, /\.gateway-name-access-row \{[^}]*grid-template-columns: minmax\(0, 3fr\) minmax\(0, 2fr\)/);
+  assert.match(css, /@media \(max-width: 520px\) \{\s*\[data-agent-gateway-dialog\] \.gateway-name-access-row \{ grid-template-columns: minmax\(0, 1fr\)/);
+});
+
+test('gateway toggle updates immediately and failed mutation restores either previous state with existing feedback', async () => {
+  for (const previous of [false, true]) {
+    const gatewaySwitch = new Node('input');
+    gatewaySwitch.checked = previous;
+    const state = new Node('strong', `Gateway ${previous ? 'Enabled' : 'Disabled'}`);
+    const feedback = new Node('p');
+    let rejectSave;
+    let request;
+    const context = vm.createContext({
+      gatewaySwitch, snapshot: {enabled: previous, connections: []}, busy: false,
+      dialog: {querySelectorAll: () => [gatewaySwitch]},
+      find: selector => selector === '[data-gateway-state]' ? state : new Node('p'),
+      send: payload => { request = payload; return new Promise((resolve, reject) => { rejectSave = reject; }); },
+      message: value => { feedback.textContent = value; },
+      renderCards() {}, showTokenOnce() {}, load() { throw new Error('Failed saves must not reload'); },
+    });
+    const mutation = js.slice(js.indexOf('  const mutate ='), js.indexOf("  levelDialog.querySelector('form').addEventListener"));
+    const toggle = js.slice(js.indexOf('  const showGatewayState ='), js.indexOf('  const renderCards ='));
+    vm.runInContext(mutation + toggle, context);
+    gatewaySwitch.checked = !previous;
+    gatewaySwitch.listeners.change();
+    assert.equal(gatewaySwitch.checked, !previous);
+    assert.equal(state.textContent, `Gateway ${!previous ? 'Enabled' : 'Disabled'}`);
+    assert.equal(gatewaySwitch.disabled, true);
+    assert.equal(request.action, 'enable');
+    assert.equal(request.enabled, !previous);
+    rejectSave(new Error('Save failed'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(gatewaySwitch.checked, previous);
+    assert.equal(state.textContent, `Gateway ${previous ? 'Enabled' : 'Disabled'}`);
+    assert.equal(feedback.textContent, 'Save failed');
+    assert.equal(Boolean(gatewaySwitch.disabled), false);
+  }
+});
+
+
+test('local OAuth onboarding shows the connection-specific address without credential actions', () => {
+  const h = settingsHarness({id: 'jvc_example', name: 'Home Server AI', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 2, enabled: true, all_instances: true});
+  const onboarding = h.node('[data-gateway-settings-title]').afterChildren[0];
+  const descendants = node => [node, ...node.children.flatMap(descendants)];
+  const nodes = descendants(onboarding);
+  for (const value of ['Ready to connect', 'MCP address', 'https://voxel.example/mcp/jvc_example', 'Copy address', 'Sign in with JustVoxel', 'When OpenAI connects, JustVoxel will open the secure sign-in and approval page.']) assert.ok(nodes.some(node => node.textContent === value), value);
+  assert.equal(h.node('[data-gateway-rotate]').hidden, true);
+  assert.equal(h.node('[data-gateway-revoke]').hidden, true);
+  assert.equal(h.node('[data-gateway-oauth]').removed, true);
+  h.submit();
+  assert.equal(h.requests[0].connection.auth_mode, 'oauth_local');
+  assert.match(js, /if \(result\.connection\?\.auth_mode !== 'oauth_local'\) showTokenOnce\(result\)/);
+});
+
+test('local OAuth can never show the raw token popup', () => {
+  const start = js.indexOf('  const showTokenOnce = result => {');
+  const end = js.indexOf('  const closeLevel4', start);
+  let shown = 0;
+  const context = vm.createContext({tokenNode: new Node('pre'), tokenDialog: {showModal() { shown++; }}, clearToken() {}});
+  vm.runInContext(js.slice(start, end) + '\nglobalThis.show = showTokenOnce;', context);
+  context.show({connection: {auth_mode: 'oauth_local'}, token: 'must-not-be-displayed'});
+  assert.equal(shown, 0);
+});
+
+test('OAuth login rechecks existing strict cookies without changing normal login or cookie policy', () => {
+  const login = readFileSync(`${base}webui/internal/server/templates/login.html`, 'utf8');
+  const resume = readFileSync(`${base}webui/internal/server/static/oauth-login.js`, 'utf8');
+  assert.match(login, /\{\{if \.OAuthRequest\}\}<script src="\/static\/oauth-login\.js" defer><\/script>\{\{end\}\}/);
+  assert.match(resume, /fetch\('\/api\/session-info'/);
+  assert.match(resume, /credentials: 'same-origin'/);
+  assert.match(resume, /location\.replace\('\/oauth\/authorize\?request='/);
+  assert.doesNotMatch(resume, /password|localStorage|sessionStorage|console\./);
+});
+
+
+test('effective cards follow Gateway state without changing connection enabled flags', () => {
+  const connection = {id: 'one', name: 'Assistant', enabled: true};
+  const cards = new Node('div');
+  const context = vm.createContext({snapshot: {enabled: false, connections: [connection]}, cards,
+    providerIcon: () => new Node('img'), purposeLabel: () => 'OpenAI', levelLabel: () => 'Read Only',
+    scopeLabel: () => 'All Minecraft servers', activityLabel: () => 'No activity yet',
+    text: (tag, value) => new Node(tag, value)});
+  const start = js.indexOf('  const renderCards =');
+  const end = js.indexOf('  const renderSettings =', start);
+  vm.runInContext(js.slice(start, end) + '\nglobalThis.render = renderCards;', context);
+  const state = () => cards.children[0].children[0].children[1].textContent;
+  const assertVisualState = active => {
+    assert.equal(cards.children[0].className, `panel minecraft-server-card minecraft-server-health-${active ? 'success' : 'neutral'}`);
+    assert.equal(cards.children[0].children[0].children[1].className, `minecraft-server-state ${active ? 'success' : 'neutral'}`);
+  };
+  context.render();
+  assert.equal(state(), 'Disabled');
+  assertVisualState(false);
+  assert.equal(connection.enabled, true);
+  context.render(true);
+  assert.equal(state(), 'Enabled');
+  assertVisualState(true);
+  context.render(false);
+  assert.equal(state(), 'Disabled');
+  assertVisualState(false);
+  assert.equal(connection.enabled, true);
+  context.render(true);
+  assert.equal(state(), 'Enabled');
+  assertVisualState(true);
+  assert.equal(connection.enabled, true);
+  connection.enabled = false;
+  context.render(true);
+  assert.equal(state(), 'Disabled');
+  assertVisualState(false);
+  assert.match(js, /renderCards\(enabled\)/);
+  const toggle = js.slice(js.indexOf('  const showGatewayState ='), start);
+  assert.doesNotMatch(toggle, /connection\.enabled\s*=|connections\s*=/);
+});
+
+test('connection cards reuse server hierarchy and compact human-readable data for every auth type', () => {
+  const cards = new Node('div');
+  const connection = {id: 'immutable-id', name: '<Assistant>', purpose: 'OpenAI', level: 2, enabled: true, all_instances: true};
+  const context = vm.createContext({
+    snapshot: {enabled: true, connections: [connection]}, cards, instances: [],
+    document: {createElement: tag => new Node(tag)},
+    text: (tag, value) => new Node(tag, value),
+  });
+  const helpers = js.slice(js.indexOf('  const levelLabel ='), js.indexOf('  let pendingLevel4'));
+  const renderer = js.slice(js.indexOf('  const renderCards ='), js.indexOf('  const renderSettings ='));
+  vm.runInContext(helpers + renderer + '\nglobalThis.render = renderCards;', context);
+  for (const [mode, label] of [['token', 'Token'], ['oauth', 'OAuth'], ['oauth_local', 'OAuth']]) {
+    connection.auth_mode = mode;
+    context.render();
+    const card = cards.children[0];
+    assert.equal(card.dataset.gatewayConnection, 'immutable-id');
+    const [heading, identity, metrics, activity, actions] = card.children;
+    assert.equal(heading.className, 'minecraft-server-heading');
+    assert.deepEqual(heading.children.map(node => node.textContent), ['<Assistant>', 'Enabled']);
+    assert.equal(identity.className, 'minecraft-server-software-row');
+    assert.equal(identity.children[0].children[0].src, '/static/ai-providers/openai.svg');
+    assert.equal(identity.children[0].children[1].textContent, 'OpenAI · ChatGPT & Codex');
+    assert.equal(metrics.className, 'minecraft-server-metrics');
+    assert.deepEqual(metrics.children.map(metric => metric.children.map(node => node.textContent)), [
+      ['Access', 'Level 2'], ['Scope', 'All servers'], ['Auth', label],
+    ]);
+    assert.equal(activity.className, 'gateway-card-activity');
+    assert.deepEqual(activity.children.map(node => node.textContent), ['Last activity', 'No activity yet']);
+    assert.equal(actions.children[0].textContent, 'Settings');
+    assert.equal(actions.children[0].type, 'button');
+  }
+  connection.all_instances = false;
+  connection.instance_ids = ['jv-example'];
+  connection.last_activity = '2026-10-30T12:00:00Z';
+  context.instances.push({id: 'jv-example', display_name: 'Survival'});
+  context.render();
+  assert.equal(cards.children[0].children[2].children[1].children[1].textContent, 'Survival');
+  assert.equal(cards.children[0].children[3].children[1].textContent, new Date(connection.last_activity).toLocaleString());
+});
+
+test('connection cards inherit the existing Minecraft Server responsive grid and state styles', () => {
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  const serverCSS = readFileSync(`${base}webui/internal/server/static/minecraft-servers.css`, 'utf8');
+  const serverTemplate = readFileSync(`${base}webui/internal/server/templates/minecraft_servers.html`, 'utf8');
+  assert.match(header, /href="\/static\/minecraft-servers\.css"/);
+  assert.match(overview, /class="minecraft-server-inventory"><div class="minecraft-server-entries" data-gateway-cards/);
+  assert.match(serverCSS, /\.minecraft-server-inventory \.minecraft-server-entries \{ display: grid; grid-template-columns: repeat\(auto-fill,minmax\(min\(100%,420px\),420px\)\)/);
+  assert.match(serverCSS, /@container \(max-width: 600px\)[^\n]*grid-template-columns: min\(100%,420px\)/);
+  assert.match(serverTemplate, /minecraft-server-health-\{\{\.CardHealth\}\}/);
+  assert.match(serverCSS, /\.minecraft-server-card\.minecraft-server-health-success \{ border-color: var\(--jv-success\)/);
+  assert.match(serverCSS, /\.minecraft-server-state\.success \{ color: var\(--jv-success\)/);
+  assert.match(serverCSS, /\.minecraft-server-metrics span \{[^}]*text-transform: uppercase/);
+  assert.match(css, /\.gateway-card-activity > span \{[^}]*text-transform: uppercase/);
+  assert.doesNotMatch(css, /\[data-gateway-cards\]|\.minecraft-server-(?:inventory|entries|card|heading)/);
+  assert.doesNotMatch(css, /flex:\s*0 0 320px|width:\s*320px|height:\s*300px/);
+});
+
+test('provider assets are transparent and generic providers reuse the application logo', () => {
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  const icon = css.match(/\.gateway-provider-icon \{([^}]+)\}/)[1];
+  assert.match(icon, /background: transparent/);
+  assert.doesNotMatch(icon, /#fff|white|border-radius/);
+  for (const purpose of ['Other AI / MCP app', 'Automation / REST API']) {
+    assert.ok(form.includes(`value="${purpose}"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png"`));
+  }
+  for (const [asset, fill] of [['openai', '#FFFFFF'], ['claude', '#D97757'], ['githubcopilot', '#FFFFFF'], ['googlegemini', 'url(#gemini)']]) {
+    const svg = readFileSync(`${base}webui/internal/server/static/ai-providers/${asset}.svg`, 'utf8');
+    assert.ok(svg.includes(`fill="${fill}"`));
+  }
+  const grok = readFileSync(`${base}webui/internal/server/static/ai-providers/grok.svg`, 'utf8');
+  assert.doesNotMatch(grok, /<foreignObject|fill="#050505"/);
+});
+
+test('sections are unframed and provider cards retain fixed wrapping tracks', () => {
+  assert.doesNotMatch(form, /<fieldset|<legend/);
+  assert.match(form, /role="group" aria-labelledby="gateway-provider-label"/);
+  assert.match(form, /role="group" aria-labelledby="gateway-scope-label"/);
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.ok(css.includes('gateway-provider-grid { display: flex; flex-wrap: wrap;'));
+  assert.match(css, /gateway-provider-card \{[^}]*flex: 0 0 224px;[^}]*height: 88px;[^}]*cursor: pointer/);
+  assert.doesNotMatch(css, /repeat\(|grid-template-columns: repeat/);
+  for (const card of form.matchAll(/<label class="gateway-provider-card">([\s\S]*?)<\/label>/g)) assert.match(card[1], /<input type="radio" name="purpose"/);
+  assert.match(css, /@container gateway \(max-width: 520px\)/);
+  assert.match(css, /\[data-gateway-details\][\s\S]*?max-width: 64rem/);
+});
+
+test('normal actions match authentication type and maintenance stays under Advanced', () => {
+  const actions = form.slice(form.indexOf('<section data-gateway-actions'), form.indexOf('<p data-gateway-live-note'));
+  assert.deepEqual([...actions.matchAll(/<button[^>]*>([^<]+)<\/button>/g)].map(match => match[1]), ['Rotate token', 'Revoke token', 'Delete']);
+  assert.doesNotMatch(actions, /allowance|usage limits|Reset restart/);
+  const advanced = form.match(/<details data-gateway-advanced[\s\S]*?<\/details>/)[0];
+  assert.match(advanced, /data-gateway-allowance>Reset usage limits/);
+  assert.match(advanced, /Reset the restart and backup usage limits for this connection/);
+  for (const auth_mode of ['token', 'oauth_local']) {
+    const h = settingsHarness({id: 'one', name: 'App', purpose: 'OpenAI', auth_mode, level: 1, enabled: true, all_instances: true});
+    for (const action of ['rotate', 'revoke']) assert.equal(h.node(`[data-gateway-${action}]`).hidden, auth_mode !== 'token');
+    h.node('[data-gateway-allowance]').listeners.click();
+    assert.equal(h.requests[0].action, 'reset-allowance');
+  }
 });

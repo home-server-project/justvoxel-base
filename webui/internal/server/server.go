@@ -67,6 +67,7 @@ type dashboardOperationAPI interface {
 }
 
 type pageData struct {
+	OAuthRequest        string
 	DashboardURL        string
 	ConnectionGuide     *connectionGuide
 	ConnectionServers   []selectedServerContext
@@ -220,6 +221,7 @@ func (a *App) loginPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
@@ -235,7 +237,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 			msg = "Invalid administrator credentials"
 		}
 		w.WriteHeader(status)
-		a.render(w, "login.html", pageData{Title: "Sign in", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, Error: msg})
+		a.render(w, "login.html", pageData{Title: "Sign in", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, Error: msg, OAuthRequest: oauthContinuation(r)})
 		return
 	}
 	if result.ManagementAPI != "" && result.ManagementAPI != a.config.ManagementAPI {
@@ -251,11 +253,11 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	a.setCookie(w, csrfCookie, csrf, false)
 	if result.MustChange {
 		a.setCookie(w, mustChangeCookie, "1", true)
-		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		http.Redirect(w, r, oauthContinuePath("/password", oauthContinuation(r)), http.StatusSeeOther)
 		return
 	}
 	a.clearCookie(w, mustChangeCookie, true)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, oauthResumePath(oauthContinuation(r)), http.StatusSeeOther)
 }
 
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {

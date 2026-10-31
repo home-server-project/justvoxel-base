@@ -310,14 +310,21 @@ Add Connection replaces the overview with **Name**, recognizable provider cards,
 access level, Minecraft server scope and Enabled. **OpenAI** is one card for
 **ChatGPT & Codex**; the other choices are Claude, Grok, Gemini, GitHub Copilot,
 Other AI / MCP app and Automation / REST API. Defaults are OpenAI, Level 1,
-all servers and Enabled. Normal creation automatically uses a scoped JustVoxel
-connection token, with no authentication-method selector or OAuth creation path.
-Select Create, copy the token once, then Done.
+all servers and Enabled. Branded providers use JustVoxel OAuth login, with no
+authentication-method selector. Select Create, then copy the connection-specific
+`https://<host>/mcp/<ConnectionID>` address from Settings into the provider/app.
+It opens normal JustVoxel sign-in and consent; sign in as the primary `voxel`
+administrator, review the configured permissions and select Allow. Tokens reach
+the client automatically and are never shown to the user. Other AI / MCP app and
+Automation / REST API retain one-time manual token creation and copying.
 
-Settings opens the selected connection with primary controls, status, token and
-allowance actions. **Advanced details** contains identifiers, fingerprint,
+Settings opens the selected connection with primary controls, status and
+allowance actions. Branded local OAuth settings show **Ready to connect**, their
+MCP address with Copy, and **Sign in with JustVoxel**; token records keep rotation
+and revocation actions. **Advanced details** contains identifiers, fingerprint,
 timestamps and optional expiration. Existing OAuth connections retain editable
-technical fields under **Developer integration** inside Advanced details; token
+technical fields under **Developer integration** inside Advanced details as
+compatibility/admin functionality; they are not migrated. Local OAuth and token
 connections show no OAuth fields. Unknown existing provider labels display safely
 with the generic local icon. Back or Cancel returns to the overview.
 
@@ -342,7 +349,11 @@ revokes/deletes every connection and returns the gateway to disabled before
 cleanup. The reset review includes this consequence even if cleanup later fails.
 
 The local HTTP default remains unencrypted. Keep port 8099 off the public Internet
-and arrange trusted HTTPS/VPN access for remote clients. Provider/application and
+and arrange trusted HTTPS/VPN access for remote clients. Local OAuth uses OAuth
+2.1 authorization code with PKCE S256 and requires HTTPS presentation. Remote AI
+providers require a reachable HTTPS MCP address; a private LAN address is not
+reachable by cloud providers. No AI provider model API key is required. No tunnel
+or Internet exposure is configured automatically. Provider/application and
 package/subscription support determine actual connectivity; JustVoxel does not
 need a provider model API key to expose MCP/REST. See
 [AI-API-CONNECTIONS.md](AI-API-CONNECTIONS.md) for the full guide.

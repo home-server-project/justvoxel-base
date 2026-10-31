@@ -14,6 +14,7 @@ type authenticationAPI interface {
 }
 
 type passwordPageData struct {
+	OAuthRequest       string
 	Title              string
 	Version            string
 	ManagementAPI      string
@@ -32,7 +33,7 @@ func (a *App) authAPI() (authenticationAPI, bool) {
 func (a *App) providerPasswordPage(w http.ResponseWriter, r *http.Request) {
 	session, ok := sessionFromRequest(r)
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
 		return
 	}
 	client, ok := a.authAPI()
@@ -43,7 +44,7 @@ func (a *App) providerPasswordPage(w http.ResponseWriter, r *http.Request) {
 	status, err := client.AuthStatus(r.Context(), session)
 	if errors.Is(err, api.ErrUnauthorized) {
 		a.clearSessionCookies(w)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
 		return
 	}
 	if err != nil {
@@ -55,19 +56,24 @@ func (a *App) providerPasswordPage(w http.ResponseWriter, r *http.Request) {
 		Version:            a.config.Version,
 		ManagementAPI:      a.config.ManagementAPI,
 		CSRF:               csrfFromRequest(r),
+		OAuthRequest:       oauthContinuation(r),
 		MinimumPasswordLen: status.MinimumPasswordLen,
 		SystemMode:         status.Mode == "system",
 	})
 }
 
 func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
-	if !a.validCSRF(r) {
+	validCSRF := a.validCSRF(r)
+	if oauthContinuation(r) != "" {
+		validCSRF = a.oauthValidCSRF(r)
+	}
+	if !validCSRF {
 		http.Error(w, "invalid CSRF token", http.StatusForbidden)
 		return
 	}
 	session, ok := sessionFromRequest(r)
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
 		return
 	}
 	client, ok := a.authAPI()
@@ -78,7 +84,7 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 	status, err := client.AuthStatus(r.Context(), session)
 	if errors.Is(err, api.ErrUnauthorized) {
 		a.clearSessionCookies(w)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
 		return
 	}
 	if err != nil {
@@ -96,6 +102,7 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 			Version:            a.config.Version,
 			ManagementAPI:      a.config.ManagementAPI,
 			CSRF:               csrfFromRequest(r),
+			OAuthRequest:       oauthContinuation(r),
 			MinimumPasswordLen: status.MinimumPasswordLen,
 			SystemMode:         status.Mode == "system",
 			Error:              "New passwords must match and meet the host system password policy.",
@@ -106,7 +113,7 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 	if err := a.api.ChangePassword(r.Context(), session, currentPassword, newPassword); err != nil {
 		if errors.Is(err, api.ErrUnauthorized) {
 			a.clearSessionCookies(w)
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
 			return
 		}
 		message := "Password change was rejected by the host system password policy."
@@ -119,6 +126,7 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 			Version:            a.config.Version,
 			ManagementAPI:      a.config.ManagementAPI,
 			CSRF:               csrfFromRequest(r),
+			OAuthRequest:       oauthContinuation(r),
 			MinimumPasswordLen: status.MinimumPasswordLen,
 			SystemMode:         status.Mode == "system",
 			Error:              message,
@@ -127,7 +135,7 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.clearSessionCookies(w)
-	http.Redirect(w, r, "/login?message=password-changed", http.StatusSeeOther)
+	http.Redirect(w, r, oauthContinuePath("/login?message=password-changed", oauthContinuation(r)), http.StatusSeeOther)
 }
 
 func (a *App) renderPassword(w http.ResponseWriter, data passwordPageData) {

@@ -23,11 +23,16 @@ choose **OpenAI** (ChatGPT & Codex), **Claude**, **Grok**, **Gemini**, **GitHub
 Copilot**, **Other AI / MCP app**, or **Automation / REST API**. OpenAI is one card
 for both ChatGPT and Codex. The default is OpenAI, Level 1 — Read Only, all
 Minecraft servers, and Enabled. Choose the permissions and servers, then select
-**Create**. Normal setup automatically uses a scoped JustVoxel connection token;
-there is no authentication-method choice and OAuth is not part of normal
-creation. Copy the token from the one-time dialog, then select **Done**.
+**Create**. OpenAI, Claude, Grok, Gemini and GitHub Copilot use normal JustVoxel
+OAuth login. Settings shows **Ready to connect**, a connection-specific MCP
+address and **Sign in with JustVoxel**. Copy the address into the AI app; sign in
+normally as the primary `voxel` administrator and select **Allow** after reviewing
+the connection permissions. The client receives tokens automatically; users never
+copy an access token. Other AI / MCP app and Automation / REST API still issue a
+scoped token in the one-time dialog. There is no authentication-method selector.
 Provider selection is a label stored in the existing purpose field and does not
-change permissions or automatically configure the provider.
+change permissions or automatically configure the provider. For new connections,
+the branded choice selects local OAuth; existing authentication modes stay unchanged.
 
 **Settings** groups the primary controls, status and actions. It shows credential
 status and expiration when configured, and offers token rotation/revocation,
@@ -60,8 +65,8 @@ There is no additional daemon, listener, container, database engine, or manageme
 engine. The privileged Agent is never exposed directly to the network. The Agent
 owns connection records, authorization, token digests, OAuth bindings, path
 selectors, audit records and allowance accounting in the existing private SQLite
-identity/state database. Schema migration 5 extends that database without
-replacing browser accounts or sessions.
+identity/state database. Schema migrations 5 and 6 extend that database without
+replacing browser accounts, sessions or existing connection credentials.
 
 One explicit capability catalog in the Agent defines REST routes, MCP tools,
 minimum levels and instance requirements. Both transports dispatch those catalog
@@ -81,11 +86,17 @@ Use your appliance WebUI origin (scheme, host and port) with these paths:
 
 | Interface | Path | Authentication |
 | --- | --- | --- |
-| MCP Streamable HTTP | `/mcp` | Connection bearer credential |
+| MCP Streamable HTTP (branded local OAuth) | `/mcp/<ConnectionID>` | Automatically issued local OAuth bearer |
+| MCP Streamable HTTP (legacy) | `/mcp` | Scoped token or existing external OAuth bearer |
 | REST | `/api/v1` | Connection bearer credential |
 | OpenAPI 3.1.2 | `/api/v1/openapi.json` | Connection bearer credential |
 | RFC 9728 metadata | `/.well-known/oauth-protected-resource/mcp` | Public discovery |
 | Root metadata alias | `/.well-known/oauth-protected-resource` | Public discovery |
+| Connection resource metadata | `/.well-known/oauth-protected-resource/mcp/<ConnectionID>` | Public HTTPS discovery |
+| Authorization server metadata | `/.well-known/oauth-authorization-server` | Public HTTPS discovery |
+| Public client registration | `/oauth/register` | Public HTTPS registration; no client secret |
+| Sign-in and consent | `/oauth/authorize` | Normal browser login; primary `voxel` approval |
+| Code exchange / refresh | `/oauth/token` | Public client binding, PKCE and opaque credentials |
 
 OpenAPI is filtered to the connection's current capabilities. Each operation has
 `x-justvoxel-min-level` and `x-justvoxel-all-instances` annotations. It is generated
@@ -104,23 +115,25 @@ a cached tool name cannot preserve a higher permission. JustVoxel does not add
 prompts, resources, model sampling, or model-provider credentials.
 
 A generic MCP client needs the `/mcp` URL, Streamable HTTP support and a supported
-way to send its bearer credential. OAuth clients additionally need compatibility
-with the configured external authorization server and resource metadata flow.
-There is no JustVoxel client registration or authorization/token endpoint.
+way to send its bearer credential. Existing external OAuth clients additionally
+need compatibility with their configured issuer and resource metadata flow.
+Branded local OAuth connections use the JustVoxel registration, authorization
+and token endpoints; existing external OAuth continues to use its configured issuer.
 
 ## Create and use a scoped API token
 
-1. Select **Add Connection**, enter a **Name** and choose the provider card.
+1. Select **Add Connection**, enter a **Name** and choose **Other AI / MCP app**
+   or **Automation / REST API**.
 2. Choose the least access level needed and all or selected Minecraft servers.
 3. Select **Create**. For Level 4, complete the existing special confirmation first.
 4. Copy the JustVoxel connection token once, store it securely in the client, then
-   select **Done**. Normal setup automatically uses a token.
+   select **Done**. This applies to Other AI / MCP app and Automation / REST API.
 5. Use the MCP address for AI apps or the REST address for automation. Enable the
    gateway when ready. Send `Authorization: Bearer …` on each request.
 
 Optional expiration remains editable in the existing connection's **Advanced
-details**. OAuth is not offered during normal creation. Existing OAuth records
-remain manageable through **Developer integration** without migration.
+details**. Existing external OAuth records remain manageable through
+**Developer integration** without migration.
 
 Tokens use the `jvapi_` prefix and 256 random bits. Only a SHA-256 digest and a
 safe fingerprint/last characters are persisted. Authentication compares digests
@@ -185,13 +198,40 @@ with the switch, then select **Enable Level 4**. The final button stays disabled
 until both are satisfied. Cancel leaves the saved permission unchanged.
 Only the authenticated primary human administrator can approve this transition.
 
+## Branded providers: JustVoxel sign-in
+
+New branded connections use `oauth_local`, separate from existing external
+`oauth` and scoped `token` modes. Their exact resource is
+`https://<host>/mcp/<ConnectionID>`; the ID is public routing information, not a
+credential. Copy that address from Settings into the provider/app, sign in using
+the normal JustVoxel login, review the configured access level and Minecraft
+scope, then select **Allow**. Only the primary human `voxel` administrator can
+approve. No model-provider API key is required, and no JustVoxel access token is
+shown or copied by the user.
+
+The OAuth 2.1 flow uses authorization code plus mandatory PKCE S256. Public
+clients register exact HTTPS redirects or native-client HTTP loopback redirects
+(`localhost`, `127.0.0.1`, `[::1]`); no client secret is issued. Pending requests
+expire after ten minutes; authorization codes expire after five minutes and are
+atomically consumed once. Codes, one-hour access tokens and thirty-day refresh
+tokens are stored only as SHA-256 digests. Refresh rotates its token immediately.
+Tokens bind the client, connection and exact resource, while each MCP request
+loads the current enabled state, access level and Minecraft instance scope.
+Disabling/deleting a connection or disabling the gateway denies the next request.
+
+Discovery and authorization require an external HTTPS presentation. Remote AI
+providers require a reachable HTTPS MCP address; cloud providers cannot reach a
+private LAN address by default. This feature configures no tunnel, proxy, VPN or
+public exposure. Provider/application/account/subscription support still varies.
+JustVoxel advertises no local JWKS (access tokens are opaque) or CIMD support.
+
 ## Developer integration: OAuth resource-server configuration
 
-JustVoxel is an OAuth **resource server**, not an authorization server. It does
-not turn the `voxel` password into access tokens. Bring an external standards-based
-authorization server that can issue signed JWT access tokens for JustVoxel.
-Opaque tokens/introspection and automatic unknown-identity enrollment are not
-supported by this implementation.
+Existing `auth_mode=oauth` records remain compatibility/admin functionality:
+JustVoxel acts as a resource server for their external issuer and JWKS binding.
+These records are not migrated to `oauth_local`. Bring an external standards-based
+authorization server issuing signed JWT access tokens for these connections;
+external opaque-token introspection remains unsupported.
 
 For each OAuth connection, explicitly configure:
 
@@ -278,7 +318,8 @@ or Connected state. Refresh to read current activity and settings.
 
 Once reviewed Full Factory Reset commits to execution, the Agent first durably
 disables the gateway and deletes **all** connections, token digests, OAuth bindings,
-usage and opaque selectors, before destructive cleanup. This covers every level,
+usage and opaque selectors, plus all local OAuth requests, codes, access/refresh
+token digests and registered gateway clients, before destructive cleanup. This covers every level,
 authentication mode and enabled state. A later reset failure/Needs Attention does
 not restore old credentials, and retries cannot resurrect them. Connection
 administration is blocked while reset remains active/needs attention. Complete or

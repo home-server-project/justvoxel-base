@@ -76,7 +76,7 @@ func validateGatewayConnection(c gatewayConnection) error {
 		return errors.New("choose all instances or selected instances")
 	}
 	switch c.AuthMode {
-	case "token":
+	case "token", "oauth_local":
 		if c.OAuth != nil {
 			return errors.New("token connections cannot have OAuth bindings")
 		}
@@ -304,6 +304,9 @@ func (s *webUIStore) gatewayFactoryRevoke() error {
 	if _, err = tx.Exec(`DELETE FROM gateway_connections`); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(`DELETE FROM gateway_oauth_clients`); err != nil {
+		return err
+	}
 	if err = insertAuditEventTx(tx, s.now(), session{Username: systemAdminUsername, Role: roleAdministrator}, "factory_reset_gateway_revocation", "gateway", true, ""); err != nil {
 		return err
 	}
@@ -323,7 +326,7 @@ func (c gatewayConnection) allowsInstance(id string) bool {
 	}
 	return false
 }
-func (s *webUIStore) gatewayAuthenticate(token string) (gatewayConnection, error) {
+func (s *webUIStore) gatewayAuthenticate(token string, resources ...string) (gatewayConnection, error) {
 	empty := gatewayConnection{}
 	if len(token) > 16384 || token == "" {
 		return empty, errGatewayCredential
@@ -333,7 +336,20 @@ func (s *webUIStore) gatewayAuthenticate(token string) (gatewayConnection, error
 		return empty, errGatewayCredential
 	}
 	var matched []gatewayConnection
-	if strings.HasPrefix(token, "jvapi_") {
+	if strings.HasPrefix(token, "jvoa_") {
+		if len(resources) != 1 || resources[0] == "" {
+			return empty, errGatewayCredential
+		}
+		var id string
+		if err = s.db.QueryRow(`SELECT connection_id FROM gateway_oauth_access WHERE digest=? AND resource=? AND expires>?`, gatewayDigest(token), resources[0], s.now().Unix()).Scan(&id); err != nil {
+			return empty, errGatewayCredential
+		}
+		for _, c := range snapshot.Connections {
+			if c.ID == id && c.AuthMode == "oauth_local" {
+				matched = append(matched, c)
+			}
+		}
+	} else if strings.HasPrefix(token, "jvapi_") {
 		digest := gatewayDigest(token)
 		var id string
 		var stored []byte
@@ -356,6 +372,9 @@ func (s *webUIStore) gatewayAuthenticate(token string) (gatewayConnection, error
 		return empty, errGatewayCredential
 	}
 	c := matched[0]
+	if len(resources) > 0 && resources[0] != "" && c.AuthMode != "oauth_local" {
+		return empty, errGatewayCredential
+	}
 	if !c.Enabled || (c.ExpiresAt != nil && !s.now().Before(*c.ExpiresAt)) {
 		return empty, errGatewayCredential
 	}

@@ -81,7 +81,7 @@ func TestGatewayMigrationFromExistingIdentityStore(t *testing.T) {
 		t.Fatal("migration altered existing browser identity")
 	}
 	var version int
-	if err = upgraded.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 5 {
+	if err = upgraded.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 6 {
 		t.Fatalf("migration version %d: %v", version, err)
 	}
 }

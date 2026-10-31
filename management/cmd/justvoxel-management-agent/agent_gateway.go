@@ -144,6 +144,7 @@ type gatewayResult struct {
 }
 
 func registerGatewayRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("POST /v1/gateway/oauth", s.gatewayLocalOAuth)
 	mux.HandleFunc("GET /v1/gateway/catalog", s.gatewayCatalog)
 	mux.HandleFunc("POST /v1/gateway/execute", s.gatewayExecute)
 	mux.HandleFunc("GET /v1/gateway/metadata", s.gatewayMetadata)
@@ -161,7 +162,7 @@ func (s *server) gatewayCatalog(w http.ResponseWriter, r *http.Request) {
 	s.gatewayMu.RLock()
 	defer s.gatewayMu.RUnlock()
 
-	c, e := s.store.gatewayAuthenticate(gatewayBearer(r))
+	c, e := s.store.gatewayAuthenticate(gatewayBearer(r), r.URL.Query().Get("resource"))
 	if e != nil {
 		writeError(w, 401, "external authentication required")
 		return
@@ -245,7 +246,7 @@ func (s *server) gatewayExecute(w http.ResponseWriter, r *http.Request) {
 	s.gatewayMu.RLock()
 	defer s.gatewayMu.RUnlock()
 
-	c, e := s.store.gatewayAuthenticate(gatewayBearer(r))
+	c, e := s.store.gatewayAuthenticate(gatewayBearer(r), r.URL.Query().Get("resource"))
 	if e != nil {
 		writeError(w, 401, "external authentication required")
 		return

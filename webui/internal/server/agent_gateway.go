@@ -29,6 +29,14 @@ func (a *App) registerAgentGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/", a.gatewayREST)
 	mux.HandleFunc("PUT /api/v1/", a.gatewayREST)
 	mux.HandleFunc("POST /mcp", a.gatewayMCP)
+	mux.HandleFunc("POST /mcp/{connection}", a.gatewayMCP)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp/{connection}", a.oauthResourceMetadata)
+	mux.HandleFunc("OPTIONS /.well-known/oauth-protected-resource/mcp/{connection}", a.oauthResourceMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", a.oauthMetadata)
+	mux.HandleFunc("POST /oauth/register", a.oauthRegister)
+	mux.HandleFunc("GET /oauth/authorize", a.oauthAuthorize)
+	mux.HandleFunc("POST /oauth/authorize", a.oauthAuthorize)
+	mux.HandleFunc("POST /oauth/token", a.oauthToken)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", a.gatewayResourceMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", a.gatewayResourceMetadata)
 	mux.HandleFunc("OPTIONS /.well-known/oauth-protected-resource/mcp", a.gatewayResourceMetadata)
@@ -53,6 +61,9 @@ func (a *App) gatewayOrigin(r *http.Request) string {
 func (a *App) gatewayUnauthorized(w http.ResponseWriter, r *http.Request) {
 	// Quote the URL; never echo bearer values or backend error strings.
 	metadata := a.gatewayOrigin(r) + "/.well-known/oauth-protected-resource/mcp"
+	if id := r.PathValue("connection"); oauthConnectionPattern.MatchString(id) {
+		metadata += "/" + id
+	}
 	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+strings.ReplaceAll(metadata, `"`, "")+`", scope="justvoxel:connect"`)
 	gatewayJSON(w, 401, map[string]any{"error": map[string]string{"code": "authentication_required", "message": "A valid enabled JustVoxel connection is required."}})
 }
@@ -61,6 +72,14 @@ func (a *App) gatewayAuthenticate(w http.ResponseWriter, r *http.Request) (exter
 	if !ok {
 		gatewayJSON(w, 503, map[string]string{"error": "gateway_unavailable"})
 		return nil, "", api.GatewayCatalog{}, false
+	}
+	if id := r.PathValue("connection"); id != "" {
+		local, supported := a.api.(gatewayOAuthAPI)
+		if !supported || !oauthConnectionPattern.MatchString(id) || !strings.HasPrefix(a.gatewayOrigin(r), "https://") {
+			a.gatewayUnauthorized(w, r)
+			return nil, "", api.GatewayCatalog{}, false
+		}
+		client = gatewayResourceClient{externalGatewayAPI: client, oauth: local, resource: a.gatewayOrigin(r) + "/mcp/" + id}
 	}
 	h := r.Header.Get("Authorization")
 	if !strings.HasPrefix(h, "Bearer ") || len(h) > 16400 {

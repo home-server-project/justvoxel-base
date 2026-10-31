@@ -1,15 +1,44 @@
-/* AI & API Connections only; reuse the Minecraft Servers cards and action lane. */
+/* AI & API Connections: shared workspace tabs and Plugins card presentation. */
+[data-agent-gateway-dialog] { container: gateway-window / inline-size; }
 [data-agent-gateway-dialog] [hidden] { display: none !important; }
 [data-agent-gateway-dialog] [data-gateway-feedback]:empty { display: none; }
+[data-agent-gateway-dialog] .system-workspace-body { container: gateway / inline-size; }
+[data-agent-gateway-dialog] .gateway-navigation { align-items: center; gap: .2rem; overflow: visible; }
+[data-agent-gateway-dialog] .gateway-navigation > button { padding-inline: .5rem; }
+[data-agent-gateway-dialog] .gateway-navigation .gateway-global-switch { margin-left: auto; gap: .4rem; white-space: nowrap; font-size: .86rem; }
+[data-agent-gateway-dialog] .gateway-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 [data-agent-gateway-dialog] .gateway-summary { display: grid; gap: .35rem; }
 [data-agent-gateway-dialog] .gateway-summary p { margin: 0; }
 [data-agent-gateway-dialog] .gateway-switch { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0; }
 [data-agent-gateway-dialog] .gateway-switch input { flex: none; margin: 0; }
 [data-agent-gateway-dialog] .gateway-card-actions { justify-content: flex-end; margin-top: auto; }
-[data-agent-gateway-dialog] .minecraft-server-card { margin: 0; padding: 1rem; }
+[data-agent-gateway-dialog] .gateway-card-activity { display: grid; gap: .3rem; }
+[data-agent-gateway-dialog] .gateway-card-activity > span { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--jv-muted); }
+[data-agent-gateway-dialog] .gateway-card-actions > button { cursor: pointer; }
+[data-agent-gateway-dialog] [data-gateway-details],
+[data-agent-gateway-dialog] [data-gateway-help] { box-sizing: border-box; width: 100%; max-width: 64rem; }
+[data-agent-gateway-dialog] [data-gateway-settings] > section,
+[data-agent-gateway-dialog] .gateway-primary > section { min-width: 0; }
+[data-agent-gateway-dialog] [data-gateway-settings] h4 { margin: 0 0 .5rem; }
+[data-agent-gateway-dialog] [data-gateway-status-details],
+[data-agent-gateway-dialog] [data-gateway-safe-details] { margin: .4rem 0; }
+[data-agent-gateway-dialog] [data-gateway-advanced] > label { display: grid; gap: .35rem; max-width: 24rem; margin-top: .65rem; }
+[data-agent-gateway-dialog] [data-gateway-help] h3 { margin: 0 0 .6rem; font-size: 1rem; }
+[data-agent-gateway-dialog] [data-gateway-help] p { margin: .6rem 0; }
+[data-agent-gateway-dialog] .gateway-help-steps { padding-left: 1.4rem; margin: .5rem 0; }
+[data-agent-gateway-dialog] .gateway-help-steps li { margin: .3rem 0; }
+[data-agent-gateway-dialog] .gateway-help-providers { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: .5rem .85rem; margin: 0; }
+[data-agent-gateway-dialog] .gateway-help-providers dd { margin: 0; }
+[data-agent-gateway-dialog] .gateway-table-scroll { max-width: 100%; overflow-x: auto; }
+[data-agent-gateway-dialog] .gateway-access-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+[data-agent-gateway-dialog] .gateway-access-table :is(th, td) { padding: .45rem .6rem; border: 1px solid var(--jv-border-strong); text-align: left; vertical-align: top; }
+[data-agent-gateway-dialog] .gateway-access-table th { background: var(--jv-surface-sunken); }
 [data-agent-gateway-dialog] .gateway-primary,
 [data-agent-gateway-dialog] [data-gateway-settings],
 [data-agent-gateway-dialog] [data-gateway-oauth] { display: grid; gap: .85rem; min-width: 0; }
+[data-agent-gateway-dialog] .gateway-name-access-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: .85rem; min-width: 0; }
+[data-agent-gateway-dialog] .gateway-name-access-row > label { min-width: 0; }
+[data-agent-gateway-dialog] .gateway-name-access-row > label,
 [data-agent-gateway-dialog] .gateway-primary > label,
 [data-agent-gateway-dialog] [data-gateway-oauth] label { display: grid; gap: .35rem; margin: 0; }
 [data-agent-gateway-dialog] .gateway-primary > .gateway-switch { display: flex; }
@@ -18,24 +47,34 @@
 [data-agent-gateway-dialog] .gateway-save { justify-content: flex-end; }
 [data-agent-gateway-dialog] .gateway-address { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 [data-agent-gateway-dialog] :is(code, dd, h3, p) { overflow-wrap: anywhere; }
-[data-agent-gateway-dialog] :is(fieldset, input, select) { min-width: 0; max-width: 100%; }
+[data-agent-gateway-dialog] :is(input, select) { min-width: 0; max-width: 100%; }
 [data-agent-gateway-dialog] small { color: var(--jv-muted); }
-/* Provider choices follow the local server-software card pattern. */
-[data-agent-gateway-dialog] .gateway-provider-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
-[data-agent-gateway-dialog] .gateway-provider-card { position: relative; display: flex; align-items: center; gap: .65rem; min-width: 0; min-height: 80px; padding: .7rem; margin: 0; border: 1px solid var(--jv-border-strong); border-radius: var(--jv-radius); background: var(--jv-surface-sunken); cursor: pointer; }
+/* Labels keep the entire fixed-size card selectable with native radio keys. */
+[data-agent-gateway-dialog] .gateway-provider-grid { display: flex; flex-wrap: wrap; gap: .65rem; }
+[data-agent-gateway-dialog] .gateway-provider-card { position: relative; display: flex; align-items: center; gap: .65rem; box-sizing: border-box; flex: 0 0 224px; width: 224px; max-width: 100%; min-width: 0; height: 88px; padding: .7rem; margin: 0; border: 1px solid var(--jv-border-strong); border-radius: var(--jv-radius); background: var(--jv-surface-sunken); cursor: pointer; }
 [data-agent-gateway-dialog] .gateway-provider-card > span { display: grid; gap: .2rem; min-width: 0; overflow-wrap: anywhere; }
 [data-agent-gateway-dialog] .gateway-provider-card small { font-weight: 400; }
 [data-agent-gateway-dialog] .gateway-provider-card:has(input:checked) { border-color: var(--jv-success); background: color-mix(in srgb, var(--jv-success) 18%, var(--jv-surface-sunken)); }
 [data-agent-gateway-dialog] .gateway-provider-card:has(input:focus-visible) { outline: 2px solid var(--jv-accent); outline-offset: 2px; }
 [data-agent-gateway-dialog] .gateway-provider-card > input[type=radio] { position: absolute; width: 1px; min-width: 0; height: 1px; min-height: 0; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-[data-agent-gateway-dialog] .gateway-provider-icon { flex: none; width: 36px; height: 36px; object-fit: contain; padding: 4px; border-radius: 6px; background: #fff; }
+[data-agent-gateway-dialog] .gateway-provider-icon { flex: none; width: 36px; height: 36px; object-fit: contain; padding: 0; background: transparent; }
 [data-agent-gateway-dialog] .gateway-connection-identity { display: flex; align-items: center; gap: .7rem; min-width: 0; }
 [data-agent-gateway-dialog] .gateway-connection-identity > div { min-width: 0; }
 [data-agent-gateway-dialog] .gateway-connection-identity :is(h2, p) { margin: 0; }
 [data-agent-gateway-dialog] .gateway-connection-identity p { color: var(--jv-muted); margin-top: .25rem; }
-@media (max-width: 850px) {
-  [data-agent-gateway-dialog] .gateway-provider-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (hover: hover) and (pointer: fine) {
+  [data-agent-gateway-dialog] .gateway-provider-card:hover { border-color: var(--jv-success); background: color-mix(in srgb, var(--jv-success) 18%, var(--jv-surface-sunken)); }
 }
 @media (max-width: 520px) {
-  [data-agent-gateway-dialog] .gateway-provider-grid { grid-template-columns: minmax(0, 1fr); }
+  [data-agent-gateway-dialog] .gateway-name-access-row { grid-template-columns: minmax(0, 1fr); }
+}
+@container gateway (max-width: 520px) {
+  [data-agent-gateway-dialog] .gateway-name-access-row { grid-template-columns: minmax(0, 1fr); }
+  [data-agent-gateway-dialog] .gateway-help-providers { grid-template-columns: minmax(0, 1fr); gap: .25rem; }
+  [data-agent-gateway-dialog] .gateway-help-providers dd { margin-bottom: .5rem; }
+}
+@container gateway-window (max-width: 400px) {
+  [data-agent-gateway-dialog] .gateway-navigation { padding-inline: .4rem; }
+  [data-agent-gateway-dialog] .gateway-navigation > button { padding-inline: .35rem; font-size: .78rem; }
+  [data-agent-gateway-dialog] .gateway-navigation .gateway-global-switch { font-size: .78rem; gap: .3rem; }
 }

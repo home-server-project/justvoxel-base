@@ -93,3 +93,46 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewayNavigationKeepsSwitchOutsideSurfaces(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	start := strings.Index(markup, `data-agent-gateway-dialog`)
+	end := strings.Index(markup, `<template data-gateway-settings-template>`)
+	if start < 0 || end <= start {
+		t.Fatal("AI connections workspace missing")
+	}
+	workspace := markup[start:end]
+	lane := regexp.MustCompile(`(?s)<nav class="minecraft-workspace-tabs gateway-navigation"[^>]*>(.*?)</nav>`).FindStringSubmatch(workspace)
+	if len(lane) != 2 {
+		t.Fatal("AI connections shared navigation lane missing")
+	}
+	buttons := regexp.MustCompile(`<button[^>]*>([^<]+)</button>`).FindAllStringSubmatch(lane[1], -1)
+	want := []string{"Connections", "Add", "Help"}
+	if len(buttons) != len(want) {
+		t.Fatal("AI connections must have exactly three navigation tabs")
+	}
+	for i, label := range want {
+		if buttons[i][1] != label {
+			t.Errorf("tab %d: got %q, want %q", i, buttons[i][1], label)
+		}
+	}
+	if !strings.Contains(lane[1], `data-gateway-connections aria-selected="true"`) || !strings.Contains(lane[1], `gateway-global-switch`) || !strings.Contains(lane[1], `data-gateway-enabled`) {
+		t.Error("Connections must be the default tab with Gateway in the same lane")
+	}
+	body := workspace[strings.Index(workspace, `</nav>`)+len(`</nav>`):]
+	if strings.Contains(body, `data-gateway-enabled`) || strings.Count(workspace, `data-gateway-enabled`) != 1 {
+		t.Error("Gateway must remain outside Connections, Add/Settings, and Help surfaces")
+	}
+	formEnd := strings.Index(markup[end:], `<dialog class="minecraft-delete-dialog" data-gateway-level4-dialog`)
+	if formEnd < 0 {
+		t.Fatal("AI connection settings template missing")
+	}
+	form := markup[end : end+formEnd]
+	if strings.Contains(workspace+form, "Back to connections") || strings.Contains(form, "data-gateway-back") {
+		t.Error("AI connections must use top navigation without back controls")
+	}
+}
