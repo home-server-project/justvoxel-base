@@ -142,3 +142,33 @@ func TestGatewayNavigationKeepsSwitchOutsideSurfaces(t *testing.T) {
 		t.Error("AI connections must use top navigation without back controls")
 	}
 }
+
+func TestGatewaySettingsCompactComposition(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	match := regexp.MustCompile(`(?s)<template data-gateway-settings-template>(.*?)</template>`).FindStringSubmatch(markup)
+	if len(match) != 2 {
+		t.Fatal("connection settings template missing")
+	}
+	form := match[1]
+	if strings.Contains(form, "data-gateway-settings-title") || strings.Contains(form, "Choose servers") {
+		t.Error("Add and Settings must omit redundant headings and the old scope choice")
+	}
+	if strings.Count(form, "data-gateway-all-servers") != 1 || !regexp.MustCompile(`(?s)class="gateway-server-lane" data-gateway-scope data-gateway-instance-options>\s*<label[^>]*><input[^>]*role="switch"[^>]*data-gateway-all-servers`).MatchString(form) {
+		t.Error("All servers must be the first switch in the individual server lane")
+	}
+	previous := -1
+	for _, marker := range []string{"gateway-name-access-row", "data-gateway-providers", "gateway-server-lane", "data-gateway-status hidden", "gateway-actions-lane", "data-gateway-delete", "data-gateway-live-note", "data-gateway-save", "data-gateway-advanced hidden"} {
+		index := strings.Index(form, marker)
+		if index <= previous {
+			t.Errorf("missing or out-of-order settings element: %s", marker)
+		}
+		previous = index
+	}
+	if !regexp.MustCompile(`(?s)<details data-gateway-advanced hidden>.*</details>\s*</form>\s*$`).MatchString(form) {
+		t.Error("Advanced details must be collapsed and last")
+	}
+}

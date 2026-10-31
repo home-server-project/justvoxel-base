@@ -264,7 +264,6 @@
   </dialog>
   <template data-gateway-settings-template>
     <form data-gateway-settings>
-      <h3 data-gateway-settings-title hidden>Connection settings</h3>
       <section class="gateway-primary">
         <div class="gateway-name-access-row">
           <label><span data-gateway-name-label>Name</span><input name="name" placeholder="My AI Assistant" required maxlength="100" autocomplete="off"></label>
@@ -282,32 +281,35 @@
           </div>
         </section>
         <section role="group" aria-labelledby="gateway-scope-label"><h4 id="gateway-scope-label">Which Minecraft servers?</h4>
-          <label class="gateway-choice"><input type="radio" name="server_scope" value="all" checked>All servers</label>
-          <label class="gateway-choice"><input type="radio" name="server_scope" value="selected">Choose servers</label>
-          <div data-gateway-scope hidden><div data-gateway-instance-options></div></div>
+          <input type="hidden" name="server_scope" value="all">
+          <div class="gateway-server-lane" data-gateway-scope data-gateway-instance-options>
+            <label class="gateway-server-item gateway-all-servers"><input class="date-time-switch" type="checkbox" role="switch" data-gateway-all-servers checked><span>All servers</span></label>
+          </div>
         </section>
         <label class="gateway-switch"><span>Enabled</span><input class="date-time-switch" type="checkbox" role="switch" name="enabled"></label>
       </section>
       <section data-gateway-status hidden><div data-gateway-status-details></div></section>
+      <div class="gateway-actions-lane">
+        <div class="action-row gateway-credential-actions" data-gateway-actions hidden>
+          <button type="button" class="danger" data-gateway-delete>Delete</button><button type="button" class="secondary" data-gateway-rotate>Rotate token</button><button type="button" class="secondary" data-gateway-revoke>Revoke token</button>
+        </div>
+        <p data-gateway-live-note hidden>Changes apply to the next request. Operations already accepted may finish.</p>
+        <div class="action-row gateway-save"><button type="submit" data-gateway-save>Create</button></div>
+      </div>
       <details data-gateway-advanced hidden><summary>Advanced details</summary>
-        <label>Expiration (optional, your local time)<input type="datetime-local" name="expires_at"></label>
+        <label>Expiration<input type="datetime-local" name="expires_at" title="Optional, your local time"></label>
         <dl data-gateway-safe-details></dl>
+        <section data-gateway-oauth hidden><h4>Developer integration</h4>
+          <p>Use the details supplied by your app or sign-in service. Never paste access tokens or private keys here.</p>
+          <label>Issuer (HTTPS)<input name="issuer" type="url"><small>The address of the service that issues access tokens.</small></label>
+          <label>Audience / resource (HTTPS)<input name="audience" type="url"><small>The protected JustVoxel address the token is intended for.</small></label>
+          <label>JWKS URL (HTTPS)<input name="jwks_uri" type="url"><small>The service’s public signing keys address.</small></label>
+          <label>Required scope<input name="scope" value="justvoxel:connect" readonly><small>The permission the app must request.</small></label>
+          <label>Subject binding<input name="subject" maxlength="512" autocomplete="off"><small>The exact user identity allowed to connect.</small></label>
+          <label>Client binding<input name="client_id" maxlength="512" autocomplete="off"><small>The exact app identity allowed to connect.</small></label>
+          <p>Provide at least one binding. If you provide both, both must match.</p>
+        </section>
       </details>
-      <section data-gateway-oauth hidden><h4>Developer integration</h4>
-        <p>Use the details supplied by your app or sign-in service. Never paste access tokens or private keys here.</p>
-        <label>Issuer (HTTPS)<input name="issuer" type="url"><small>The address of the service that issues access tokens.</small></label>
-        <label>Audience / resource (HTTPS)<input name="audience" type="url"><small>The protected JustVoxel address the token is intended for.</small></label>
-        <label>JWKS URL (HTTPS)<input name="jwks_uri" type="url"><small>The service’s public signing keys address.</small></label>
-        <label>Required scope<input name="scope" value="justvoxel:connect" readonly><small>The permission the app must request.</small></label>
-        <label>Subject binding<input name="subject" maxlength="512" autocomplete="off"><small>The exact user identity allowed to connect.</small></label>
-        <label>Client binding<input name="client_id" maxlength="512" autocomplete="off"><small>The exact app identity allowed to connect.</small></label>
-        <p>Provide at least one binding. If you provide both, both must match.</p>
-      </section>
-      <section data-gateway-actions hidden><h4>Actions</h4><div class="action-row">
-        <button type="button" class="secondary" data-gateway-rotate>Rotate token</button><button type="button" class="secondary" data-gateway-revoke>Revoke token</button><button type="button" class="danger" data-gateway-delete>Delete</button>
-      </div></section>
-      <p data-gateway-live-note hidden>Changes apply to the next request. Operations already accepted may finish.</p>
-      <div class="action-row gateway-save"><button type="submit" data-gateway-save>Create</button></div>
     </form>
   </template>
   <dialog class="minecraft-delete-dialog" data-gateway-level4-dialog aria-labelledby="gateway-level4-title">

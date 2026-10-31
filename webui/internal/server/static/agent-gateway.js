@@ -219,45 +219,50 @@
     const url = new URL(address);
     const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
     const octets = host.split('.').map(Number);
-    return url.protocol === 'http:' || host === 'localhost' || host.endsWith('.localhost') || host === '::1' ||
-      host.startsWith('fc') && host.includes(':') || host.startsWith('fd') && host.includes(':') || host.startsWith('fe80:') ||
+    return host === 'localhost' || host.endsWith('.localhost') || host === '::1' ||
+      host.includes(':') && (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) ||
       (octets.length === 4 && (octets[0] === 127 || octets[0] === 10 ||
         octets[0] === 192 && octets[1] === 168 || octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31));
   };
+  const secureAddress = address => new URL(address).protocol === 'https:';
   const renderProviderGuide = (host, purpose, address, options = {}) => {
     const mode = options.mode || 'ChatGPT';
     const automation = purpose === 'Automation / REST API';
     host.replaceChildren();
-    const identity = text('div', ''); identity.className = 'gateway-connection-identity';
-    const titles = text('div', '');
-    const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Custom connector', Grok: 'Custom MCP connector', Gemini: 'Custom connected app', 'GitHub Copilot': 'Copilot CLI'}[purpose];
-    titles.append(text('h3', purpose));
-    if (subtitle) titles.append(text('p', subtitle));
-    identity.append(providerIcon(purpose), titles); host.append(identity);
-    if (options.ready) host.append(text('h4', 'Ready to connect'));
-    const copyBlock = (value, label) => {
+    if (!options.settings) {
+      const identity = text('div', ''); identity.className = 'gateway-connection-identity';
+      const titles = text('div', '');
+      const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Custom connector', Grok: 'Custom MCP connector', Gemini: 'Custom connected app', 'GitHub Copilot': 'Copilot CLI'}[purpose];
+      titles.append(text('h3', purpose));
+      if (subtitle) titles.append(text('p', subtitle));
+      identity.append(providerIcon(purpose), titles); host.append(identity);
+    }
+    const copyBlock = (value, label, caption) => {
       const row = text('div', ''); row.className = 'gateway-address';
       const copy = text('button', label); copy.type = 'button'; copy.className = 'secondary';
       const status = text('p', ''); status.setAttribute('role', 'status');
       const field = document.createElement('input');
       field.type = 'text'; field.readOnly = true; field.value = value;
-      field.className = 'gateway-copy-field'; field.setAttribute('aria-label', label === 'Copy command' ? 'Command' : 'Address');
+      field.className = 'gateway-copy-field'; field.setAttribute('aria-label', caption || (label === 'Copy command' ? 'Command' : 'Address'));
       field.addEventListener('click', () => field.select());
       copy.addEventListener('click', () => copyText(value, field, status));
+      if (caption) row.append(text('span', caption));
       row.append(field, copy); host.append(row, status);
     };
-    host.append(text('h4', automation ? 'REST API address' : 'MCP address'));
-    if (options.pending) host.append(text('p', 'Create the connection, then copy its MCP address from Settings.'));
-    else if (options.help && !automation && providers.get(purpose)?.icon) host.append(text('p', 'Copy the connection-specific MCP address from Settings.'));
-    else copyBlock(address, 'Copy');
-    host.append(text('h4', 'How to connect'));
+    const addressLabel = automation ? 'REST API address' : 'MCP address';
+    if (!options.settings) host.append(text('h4', addressLabel));
+    if (options.help && !automation && providers.get(purpose)?.icon) host.append(text('p', 'Copy the connection-specific MCP address from Settings.'));
+    else copyBlock(address, 'Copy', options.settings ? addressLabel : undefined);
+    const toolbar = options.settings ? text('div', '') : host;
+    if (options.settings) { toolbar.className = 'gateway-guide-toolbar'; host.append(toolbar); }
+    toolbar.append(text('h4', 'How to connect'));
     if (purpose === 'OpenAI') {
       const tabs = text('div', ''); tabs.className = 'gateway-guide-modes'; tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', 'OpenAI app');
       for (const choice of ['ChatGPT', 'Codex']) {
         const button = text('button', choice); button.type = 'button'; button.className = 'secondary'; button.setAttribute('aria-pressed', String(choice === mode));
         button.addEventListener('click', () => renderProviderGuide(host, purpose, address, {...options, mode: choice})); tabs.append(button);
       }
-      host.append(tabs);
+      toolbar.append(tabs);
     }
     const steps = values => {
       const list = text('ol', ''); list.className = 'gateway-help-steps';
@@ -267,27 +272,71 @@
       const box = text('aside', ''); box.className = warning ? 'notice warning' : 'notice';
       box.append(text('strong', title), text('p', body)); host.append(box); return box;
     };
-    const commandAddress = options.help || options.pending ? '<MCP_URL>' : address;
+    if (options.settings) {
+      const inline = (value, warning = false) => {
+        const line = text('p', value); line.className = warning ? 'gateway-inline-note gateway-inline-warning' : 'gateway-inline-note'; host.append(line);
+      };
+      const official = {
+        OpenAI: mode === 'Codex' ? 'https://developers.openai.com/learn/docs-mcp' : 'https://developers.openai.com/api/docs/guides/custom-mcp-server',
+        Claude: 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp',
+        Grok: 'https://docs.x.ai/grok/connectors', Gemini: 'https://support.google.com/gemini/answer/17209137',
+        'GitHub Copilot': 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
+      }[purpose];
+      if (official) {
+        const link = text('a', 'Official setup guide ↗'); link.href = official; link.target = '_blank'; link.rel = 'noopener noreferrer'; toolbar.append(link);
+      }
+      if (purpose === 'OpenAI' && mode === 'ChatGPT') {
+        steps(['In ChatGPT add a custom MCP server.', 'Paste this JustVoxel MCP address.', 'Complete JustVoxel sign-in and approval.', 'Create/install the connection.']);
+        if (localAddress(address)) inline('ⓘ Local MCP address — use reachable HTTPS or ChatGPT Secure MCP Tunnel.');
+        else if (!secureAddress(address)) inline('ⓘ Use reachable HTTPS or ChatGPT Secure MCP Tunnel.');
+      } else if (purpose === 'OpenAI') {
+        copyBlock(`codex mcp add justvoxel --url ${address}`, 'Copy command');
+        host.append(text('p', 'Verify: codex mcp list'), text('p', 'Codex opens JustVoxel OAuth sign-in when required.'));
+        inline('ⓘ LAN address is usable when this Codex machine can reach JustVoxel.');
+      } else if (purpose === 'Claude') {
+        steps(['Customize → Connectors → Add custom connector.', 'Paste this JustVoxel MCP address.', 'Choose OAuth client: Register automatically.', 'Complete JustVoxel sign-in and approval.']);
+        inline('ⓘ Claude remote connectors need an address reachable from Anthropic infrastructure.');
+      } else if (purpose === 'Grok') {
+        steps(['grok.com/connectors → New Connector → Custom.', 'Paste this JustVoxel MCP address.', 'Complete JustVoxel authentication.']);
+        inline(localAddress(address) ? '⚠ Grok requires a publicly reachable secure endpoint or tunnel.' : 'ⓘ Grok requires a publicly reachable secure MCP endpoint.', localAddress(address));
+      } else if (purpose === 'Gemini') {
+        steps(['Settings → Connected Apps.', 'Add a custom app.', 'Paste this JustVoxel MCP address.', 'Complete JustVoxel authentication.']);
+        inline('Requirements: 18+ · United States · Personal Google Account · Keep Activity · English');
+      } else if (purpose === 'GitHub Copilot') {
+        copyBlock(`copilot mcp add --transport http justvoxel ${address}`, 'Copy command');
+        host.append(text('p', 'Authentication: /mcp auth justvoxel'), text('p', 'Interactive: /mcp add'));
+        inline('ⓘ Copilot CLI may use this LAN address when it can reach JustVoxel.');
+        inline('Cloud agent/code review do not currently support remote OAuth MCP servers.');
+      } else if (automation) {
+        steps(['Copy the one-time JustVoxel API token.', 'Store it securely; it is shown only once.', 'Send it as the connection credential.', 'Requests use this connection’s access level and Minecraft scope.']);
+      } else {
+        steps(['Add a remote Streamable HTTP MCP server.', 'Paste this JustVoxel MCP address.', 'Complete JustVoxel authentication with your client.']);
+        inline('ⓘ Local clients can use LAN; cloud-client requirements vary.');
+      }
+      return;
+    }
+    const commandAddress = options.help ? '<MCP_URL>' : address;
     let guide;
     if (purpose === 'OpenAI' && mode === 'ChatGPT') {
       steps(['Open ChatGPT on the web and open Plugins.', 'Select +, then Add custom MCP server.', 'Enter a name and paste the JustVoxel MCP address.', 'Configure the authentication offered by JustVoxel.', 'Review the risk warning and select “I understand and want to continue”.', 'Complete the normal JustVoxel sign-in and approval when ChatGPT starts authentication.', 'Create as a plugin, then install the plugin.']);
-      if (localAddress(address)) note('Local address detected', 'ChatGPT cloud cannot connect directly to this local address. Use a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.', true);
-      else note('Network access', 'ChatGPT cloud needs a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.');
+      if (localAddress(address)) note('Local MCP address', 'ChatGPT cloud cannot reach this LAN address directly. Use a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.');
+      else if (!secureAddress(address)) note('HTTPS endpoint', 'ChatGPT cloud needs a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.');
       guide = 'https://developers.openai.com/api/docs/guides/custom-mcp-server';
     } else if (purpose === 'OpenAI') {
       copyBlock(`codex mcp add justvoxel --url ${commandAddress}`, 'Copy command');
       host.append(text('p', 'Verify the connection:'), text('code', 'codex mcp list'));
       host.append(text('p', 'Codex opens the JustVoxel OAuth flow when authentication is required. Codex CLI and IDE share MCP configuration.'));
-      note('Network access', 'This address can work with Codex when the computer running Codex can reach JustVoxel.');
+      note('Network access', 'This LAN address can work when the computer running Codex can reach JustVoxel.');
       guide = 'https://developers.openai.com/learn/docs-mcp';
     } else if (purpose === 'Claude') {
       steps(['Open Customize → Connectors.', 'Add a custom connector.', 'Enter a name and the JustVoxel MCP address, then Continue.', 'Review the detected authentication settings and choose Sign in now or Sign in when needed.', 'Under OAuth client choose Register automatically.', 'Select Add to add the connector.', 'Claude starts the OAuth flow and opens JustVoxel sign-in and approval.']);
       note('OAuth client: Register automatically', 'JustVoxel currently supports Dynamic Client Registration.');
-      note('Network access', 'Claude remote connectors require an address reachable by Claude.', localAddress(address));
+      if (localAddress(address)) note('Remote connector network access', 'Claude remote connectors need an MCP address reachable from Anthropic infrastructure.');
       guide = 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp';
     } else if (purpose === 'Grok') {
       steps(['Open grok.com/connectors.', 'Select New Connector.', 'Select Custom.', 'Enter the JustVoxel MCP address.', 'Complete JustVoxel authentication.']);
-      note('Remote access required', 'Grok requires custom MCP servers to be reachable over the public Internet.' + (localAddress(address) ? ' This JustVoxel address is local-only and cannot be reached directly by Grok.' : ''), true);
+      if (localAddress(address)) note('Public endpoint required', 'Grok cannot reach this private LAN address directly. Use an appropriate publicly reachable secure endpoint or tunnel.', true);
+      else note('Remote connector network access', 'Grok requires a publicly reachable secure MCP endpoint.');
       guide = 'https://docs.x.ai/grok/connectors';
     } else if (purpose === 'Gemini') {
       steps(['Open gemini.google.com.', 'Open Settings → Connected Apps (or Personal Intelligence → Connected Apps).', 'Under Custom apps, select Add a custom app.', 'Enter the JustVoxel MCP address.', 'Select Next.', 'Complete JustVoxel authentication.']);
@@ -296,21 +345,20 @@
       for (const requirement of ['Age 18+', 'United States', 'Personal Google Account', 'Keep Activity enabled', 'English', 'Initial setup in Gemini web']) list.append(text('li', '✓ ' + requirement));
       availability.append(list);
       host.append(text('p', 'JustVoxel supports Dynamic Client Registration, so manual OAuth client credentials under Advanced features should not normally be required.'));
-      note('Network access', 'Gemini remote custom apps require a reachable MCP endpoint.', localAddress(address));
       guide = 'https://support.google.com/gemini/answer/17209137';
     } else if (purpose === 'GitHub Copilot') {
       copyBlock(`copilot mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
       host.append(text('p', 'If authentication or re-authentication is required, open browser sign-in with:'), text('code', '/mcp auth justvoxel'));
       host.append(text('p', 'Interactive setup is also available:'), text('code', '/mcp add'));
       note('Network access', 'Copilot CLI can use this LAN address when the machine running Copilot can reach JustVoxel.');
-      note('Compatibility', 'Copilot cloud agent and Copilot code review currently do not support remote OAuth MCP servers. IDE MCP support varies by IDE and configuration.', true);
+      note('Compatibility', 'Copilot cloud agent and Copilot code review currently do not support remote OAuth MCP servers. IDE MCP support varies by IDE and configuration.');
       guide = 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers';
     } else if (automation) {
       host.append(text('h4', 'Authentication'), text('p', 'JustVoxel API token'));
       steps(['Create the connection.', 'Copy the one-time scoped JustVoxel API token.', 'Store it securely; the token is shown only once.', 'Send it as the connection credential from the automation or client.', 'Requests remain limited by the configured JustVoxel access level and Minecraft scope.']);
     } else {
       steps(['Add a remote Streamable HTTP MCP server in a compatible client.', 'Use this MCP address.', 'Complete the authentication method supported by that client; use the JustVoxel token for token connections.', 'Confirm the connection permissions in JustVoxel.']);
-      note('Network access', 'Cloud clients need a reachable endpoint. Local clients may use a LAN endpoint if they can reach JustVoxel.');
+      note('Network access', 'Local clients may use a LAN endpoint if they can reach JustVoxel. Cloud clients depend on their own network requirements.');
     }
     if (guide) {
       const link = text('a', 'Official setup guide ↗'); link.href = guide; link.target = '_blank'; link.rel = 'noopener noreferrer'; host.append(link);
@@ -336,25 +384,16 @@
     details.replaceChildren(document.querySelector('[data-gateway-settings-template]').content.cloneNode(true));
     const form = details.querySelector('form');
     const field = name => form.elements.namedItem(name);
+    form.className = c.id ? 'gateway-edit-settings' : 'gateway-add-settings';
+    const top = form.querySelector('.gateway-name-access-row');
+    const enabled = form.querySelector('.gateway-switch');
+    const enabledRow = text('div', ''); enabledRow.className = 'gateway-enabled-control';
+    enabledRow.append(text('span', 'Enabled'), enabled);
+    top.append(enabledRow);
     if (c.id) {
-      form.className = 'gateway-edit-settings';
-      const top = form.querySelector('.gateway-name-access-row');
-      const enabled = form.querySelector('.gateway-switch');
-      const enabledRow = text('div', ''); enabledRow.className = 'gateway-enabled-control';
-      enabledRow.append(text('span', 'Enabled'), enabled);
-      top.append(enabledRow);
       const expiration = field('expires_at').closest('label');
       expiration.className = 'gateway-expiration'; top.after(expiration);
-      const choices = text('div', ''); choices.className = 'gateway-scope-choices';
-      const scope = form.querySelector('[aria-labelledby="gateway-scope-label"]');
-      scope.querySelector('h4').after(choices);
-      scope.querySelectorAll('.gateway-choice').forEach(choice => choices.append(choice));
-      // Advanced stays last; the existing external OAuth fields are moved into it below.
-      form.append(form.querySelector('[data-gateway-advanced]'));
     }
-    const heading = form.querySelector('[data-gateway-settings-title]');
-    heading.hidden = !c.id;
-    heading.textContent = c.id ? `${c.name} — settings` : '';
     for (const name of ['name', 'level']) field(name).value = c[name] ?? '';
     // Keep custom purposes from deployed connections without interpreting them as markup or asset paths.
     if (c.purpose && !providers.has(c.purpose)) {
@@ -373,13 +412,14 @@
     for (const selector of ['[data-gateway-status]', '[data-gateway-actions]', '[data-gateway-live-note]']) form.querySelector(selector).hidden = !c.id;
     field('enabled').checked = Boolean(c.enabled);
     const syncEnabled = () => {
-      if (!c.id) return;
       const label = form.querySelector('.gateway-switch span');
       label.textContent = field('enabled').checked ? 'Enabled' : 'Disabled';
       label.className = field('enabled').checked ? 'gateway-enabled-success' : 'gateway-enabled-danger';
     };
     field('enabled').addEventListener('change', syncEnabled); syncEnabled();
     field('server_scope').value = c.all_instances ? 'all' : 'selected';
+    const allServers = form.querySelector('[data-gateway-all-servers]');
+    allServers.checked = Boolean(c.all_instances);
     if (c.expires_at) {
       const date = new Date(c.expires_at);
       field('expires_at').value = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -397,38 +437,36 @@
     const known = new Map(instances.map(instance => [instance.id, instance.display_name || instance.name || 'Minecraft server']));
     for (const id of c.instance_ids || []) if (!known.has(id)) known.set(id, 'Unavailable server');
     for (const [id, name] of known) {
-      const label = text('label', c.id ? '' : name); label.className = c.id ? 'gateway-server-item' : 'gateway-choice';
+      const label = text('label', ''); label.className = 'gateway-server-item';
       const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.name = 'instance_ids'; checkbox.value = id; checkbox.checked = (c.instance_ids || []).includes(id);
-      if (c.id) {
-        checkbox.className = 'date-time-switch'; checkbox.setAttribute('role', 'switch');
-        const icon = document.createElement('img'); icon.className = 'minecraft-server-software-icon'; icon.alt = '';
-        icon.src = instances.find(instance => instance.id === id)?.software_icon || '/static/justvoxel-logo.png';
-        label.append(checkbox, icon, text('span', name));
-      } else label.prepend(checkbox);
+      checkbox.className = 'date-time-switch'; checkbox.setAttribute('role', 'switch');
+      const icon = document.createElement('img'); icon.className = 'minecraft-server-software-icon'; icon.alt = '';
+      icon.src = instances.find(instance => instance.id === id)?.software_icon || '/static/justvoxel-logo.png';
+      label.append(checkbox, icon, text('span', name));
       instanceOptions.append(label);
     }
     if (!known.size) instanceOptions.append(text('p', 'No Minecraft servers are available to choose.'));
     const sync = () => {
-      const all = field('server_scope').value === 'all';
-      form.querySelector('[data-gateway-scope]').hidden = !c.id && all;
-      if (c.id) {
-        instanceOptions.setAttribute('aria-disabled', String(all));
-        instanceOptions.querySelectorAll('input').forEach(input => { input.disabled = all; });
-      }
+      const all = allServers.checked;
+      field('server_scope').value = all ? 'all' : 'selected';
+      form.querySelector('[data-gateway-scope]').hidden = false;
+      instanceOptions.querySelectorAll('input[name="instance_ids"]').forEach(input => { input.disabled = all; });
       for (const action of ['rotate', 'revoke']) form.querySelector(`[data-gateway-${action}]`).hidden = !c.id || c.auth_mode !== 'token';
     };
-    form.querySelectorAll('input[name="server_scope"]').forEach(input => input.addEventListener('change', sync)); sync();
-    const onboarding = text('section', ''); onboarding.className = 'gateway-guide';
-    onboarding.setAttribute('aria-live', 'polite');
-    form.querySelector(c.id ? '.gateway-primary' : '[data-gateway-settings-title]').after(onboarding);
-    const previewProvider = () => {
-      const purpose = field('purpose').value;
-      const automation = purpose === 'Automation / REST API';
-      const address = location.origin + (automation ? '/api/v1' : localOAuth ? '/mcp/' + encodeURIComponent(c.id) : '/mcp');
-      renderProviderGuide(onboarding, purpose, address, {ready: Boolean(c.id), pending: !c.id && providerAuthMode(purpose) === 'oauth_local'});
-    };
-    form.querySelectorAll('input[name="purpose"]').forEach(input => input.addEventListener('change', previewProvider));
-    previewProvider();
+    allServers.addEventListener('change', sync); sync();
+    if (c.id) {
+      const onboarding = text('section', ''); onboarding.className = 'gateway-guide gateway-settings-guide';
+      onboarding.setAttribute('aria-live', 'polite');
+      form.querySelector('[data-gateway-status]').after(onboarding);
+      const previewProvider = () => {
+        const purpose = field('purpose').value;
+        const automation = purpose === 'Automation / REST API';
+        const address = location.origin + (automation ? '/api/v1' : localOAuth ? '/mcp/' + encodeURIComponent(c.id) : '/mcp');
+        renderProviderGuide(onboarding, purpose, address, {settings: true});
+      };
+      form.querySelectorAll('input[name="purpose"]').forEach(input => input.addEventListener('change', previewProvider));
+      previewProvider();
+    }
     const safeDetails = form.querySelector('[data-gateway-safe-details]');
     if (c.id) {
       for (const [name, value] of [['Connection ID', c.id], ['Safe credential fingerprint', c.fingerprint || 'None'], ['Created', settingsDate(c.created_at)], ['Updated', settingsDate(c.updated_at)]]) {

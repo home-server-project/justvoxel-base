@@ -19,7 +19,7 @@ class Node {
     }
   }
   prepend(...children) { this.children.unshift(...children); children.forEach(child => { child.parentNode = this; }); }
-  querySelectorAll(selector) { return this.children.flatMap(child => [...(selector === 'input' && child.tagName === 'input' ? [child] : []), ...child.querySelectorAll(selector)]); }
+  querySelectorAll(selector) { return this.children.flatMap(child => [...((selector === 'input' || selector === 'input[name="instance_ids"]' && child.name === 'instance_ids') && child.tagName === 'input' ? [child] : []), ...child.querySelectorAll(selector)]); }
   closest() { return this.parentNode; }
   focus() { this.focused = true; }
   select() { this.selected = true; this.selectionStart = 0; this.selectionEnd = this.value.length; }
@@ -185,7 +185,7 @@ test('provider cards replace the purpose dropdown with one OpenAI choice for Cha
   assert.equal((form.match(/<strong>OpenAI<\/strong>/g) || []).length, 1);
   assert.match(form, /<strong>OpenAI<\/strong><small>ChatGPT &amp; Codex<\/small>/);
   assert.doesNotMatch(form, /<select name="purpose"|name="auth_mode"|Connection method|OAuth — Advanced|What do you want to call it/);
-  for (const phrase of ['>Name</span>', 'What will use this connection?', 'Access level', 'Which Minecraft servers?', 'All servers', 'Choose servers']) assert.ok(form.includes(phrase), phrase);
+  for (const phrase of ['>Name</span>', 'What will use this connection?', 'Access level', 'Which Minecraft servers?', 'All servers']) assert.ok(form.includes(phrase), phrase);
   assert.match(form, /class="gateway-provider-grid"/);
   for (const asset of ['openai', 'claude', 'grok', 'googlegemini', 'githubcopilot']) {
     assert.ok(form.includes(`/static/ai-providers/${asset}.svg`));
@@ -197,7 +197,7 @@ test('provider cards replace the purpose dropdown with one OpenAI choice for Cha
   const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
   assert.match(css, /gateway-provider-card:has\(input:checked\)/);
   assert.match(css, /gateway-provider-card:has\(input:focus-visible\)/);
-  assert.match(css, /gateway-provider-grid \{ display: flex; flex-wrap: wrap;/);
+  assert.match(css, /gateway-provider-grid \{ display: grid;/);
   assert.match(css, /@media \(max-width: 520px\)/);
 });
 
@@ -236,7 +236,7 @@ test('OAuth settings remain editable only for an existing OAuth connection', () 
   assert.match(js, /if \(updated.auth_mode === 'oauth'\) updated.oauth = Object.fromEntries/);
   assert.match(form, /data-gateway-oauth hidden><h4>Developer integration/);
   for (const name of ['issuer', 'audience', 'jwks_uri', 'scope', 'subject', 'client_id']) assert.ok(form.includes(`name="${name}"`));
-  for (const section of ['STATUS', 'Actions', 'Advanced details', 'Connection ID', 'Safe credential fingerprint']) assert.ok((form + js).includes(section));
+  for (const section of ['STATUS', 'Advanced details', 'Connection ID', 'Safe credential fingerprint']) assert.ok((form + js).includes(section));
 });
 
 test('normal help keeps raw endpoints and integration details collapsed at the bottom', () => {
@@ -261,6 +261,8 @@ test('AI workspace retains the shared header hierarchy, refresh and close contro
 
 // Exercise the settings renderer and submit listener without a browser or secrets.
 function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
+  const created = [];
+  const create = (tag, value = '') => { const element = new Node(tag, value); created.push(element); return element; };
   const nodes = new Map();
   const node = selector => {
     if (!nodes.has(selector)) {
@@ -280,18 +282,11 @@ function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
   settings.elements = {namedItem: field};
   settings.querySelector = node;
   const providerRadio = new Node('input');
-  const scopeRadio = new Node('input');
   settings.querySelectorAll = selector => {
     if (selector === 'input[name="purpose"]') return [providerRadio];
-    if (selector === 'input[name="server_scope"]') return [scopeRadio];
     if (selector === 'input[name="instance_ids"]:checked') return node('[data-gateway-instance-options]').querySelectorAll('input').filter(input => input.checked);
     return [];
   };
-  const scope = node('[aria-labelledby="gateway-scope-label"]');
-  const scopeHeading = new Node('h4');
-  const scopeChoices = [new Node('label'), new Node('label')];
-  scope.querySelector = () => scopeHeading;
-  scope.querySelectorAll = () => scopeChoices;
   settings.reportValidity = () => true;
   const details = new Node('section');
   details.querySelector = () => settings;
@@ -301,8 +296,8 @@ function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
     details, structuredClone, busy: false, instances: inventory, snapshot: {enabled: gatewayEnabled},
     URL, location: {origin: 'https://voxel.example', protocol: 'https:', hostname: 'voxel.example'}, navigator: {clipboard: {async writeText() {}}},
     content: node('[data-gateway-content]'), find: node,
-    document: {createElement: tag => new Node(tag), querySelector: () => ({content: {cloneNode() { return new Node('form'); }}})},
-    text: (tag, value) => new Node(tag, value), activityLabel: value => value || 'No activity yet',
+    document: {createElement: create, querySelector: () => ({content: {cloneNode() { return new Node('form'); }}})},
+    text: create, activityLabel: value => value || 'No activity yet',
     mutate: payload => requests.push(payload), requestLevel4: payload => confirmations.push(payload),
   });
   const helpers = js.slice(js.indexOf('  const providers ='), js.indexOf('  const activityLabel'));
@@ -316,7 +311,7 @@ function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
   node('[data-gateway-help]').hidden = true;
   vm.runInContext(surfaces + helpers + renderer + navigation + '\nglobalThis.render = renderSettings;', context);
   if (connection) context.render(connection);
-  return {node, field, details, settings, requests, confirmations, scope(value) { field('server_scope').value = value; scopeRadio.listeners.change(); }, preview(purpose) { field('purpose').value = purpose; providerRadio.listeners.change(); }, submit() { settings.listeners.submit({preventDefault() {}}); }};
+  return {node, field, details, settings, created, requests, confirmations, scope(value) { const toggle = node('[data-gateway-all-servers]'); toggle.checked = value === 'all'; toggle.listeners.change(); }, preview(purpose) { field('purpose').value = purpose; providerRadio.listeners.change?.(); }, submit() { settings.listeners.submit({preventDefault() {}}); }};
 }
 
 test('branded providers submit local OAuth while generic MCP and automation retain tokens', () => {
@@ -394,8 +389,7 @@ test('first Add Connection click from overview opens the populated add surface a
     assert.equal(h.node('[data-gateway-content]').scrollTop, 0);
     assert.equal(h.field('name').value, '');
     assert.equal(h.field('level').value, 1);
-    assert.equal(h.node('[data-gateway-settings-title]').hidden, true);
-    assert.equal(h.node('[data-gateway-settings-title]').textContent, '');
+    assert.doesNotMatch(form + js, /data-gateway-settings-title|— settings/);
     assert.equal(h.node('[data-gateway-save]').textContent, 'Create');
     help.listeners.click();
     assert.equal(h.details.hidden, true);
@@ -420,7 +414,7 @@ test('approved add form has a shared name/access row and no duplicate heading or
   const row = form.match(/<div class="gateway-name-access-row">([\s\S]*?)<\/div>/)[1];
   assert.match(row, /name="name" placeholder="My AI Assistant"/);
   assert.match(row, />Access level<\/span><select name="level"/);
-  const ordered = ['gateway-name-access-row', 'data-gateway-purpose-label', 'data-gateway-providers', 'Which Minecraft servers?', 'name="enabled"', 'gateway-save'];
+  const ordered = ['gateway-name-access-row', 'data-gateway-purpose-label', 'data-gateway-providers', 'Which Minecraft servers?', 'gateway-save'];
   for (let i = 1; i < ordered.length; i++) assert.ok(form.indexOf(ordered[i - 1]) < form.indexOf(ordered[i]));
   assert.match(form, /gateway-save"><button type="submit" data-gateway-save>Create/);
   assert.doesNotMatch(form + js, /data-gateway-back/);
@@ -467,10 +461,10 @@ test('gateway toggle updates immediately and failed mutation restores either pre
 
 test('local OAuth onboarding shows the connection-specific address without credential actions', () => {
   const h = settingsHarness({id: 'jvc_example', name: 'Home Server AI', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 2, enabled: true, all_instances: true});
-  const onboarding = h.node('.gateway-primary').afterChildren[0];
+  const onboarding = h.node('[data-gateway-status]').afterChildren[0];
   const descendants = node => [node, ...node.children.flatMap(descendants)];
   const nodes = descendants(onboarding);
-  for (const value of ['Ready to connect', 'MCP address', 'Copy', 'Complete the normal JustVoxel sign-in and approval when ChatGPT starts authentication.']) assert.ok(nodes.some(node => node.textContent === value), value);
+  for (const value of ['MCP address', 'Copy', 'Complete JustVoxel sign-in and approval.']) assert.ok(nodes.some(node => node.textContent === value), value);
   assert.ok(nodes.some(node => node.tagName === 'input' && node.readOnly === true && node.value === 'https://voxel.example/mcp/jvc_example'), 'connection-specific MCP address in a readonly input');
   assert.equal(h.node('[data-gateway-rotate]').hidden, true);
   assert.equal(h.node('[data-gateway-revoke]').hidden, true);
@@ -613,22 +607,23 @@ test('provider assets are transparent and generic providers reuse the applicatio
   assert.doesNotMatch(grok, /<foreignObject|fill="#050505"/);
 });
 
-test('sections are unframed and provider cards retain fixed wrapping tracks', () => {
+test('sections are unframed and provider cards use compact responsive tracks', () => {
   assert.doesNotMatch(form, /<fieldset|<legend/);
   assert.match(form, /role="group" aria-labelledby="gateway-provider-label"/);
   assert.match(form, /role="group" aria-labelledby="gateway-scope-label"/);
   const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
-  assert.ok(css.includes('gateway-provider-grid { display: flex; flex-wrap: wrap;'));
-  assert.match(css, /gateway-provider-card \{[^}]*flex: 0 0 224px;[^}]*height: 88px;[^}]*cursor: pointer/);
-  assert.doesNotMatch(css, /repeat\(|grid-template-columns: repeat/);
+  assert.ok(css.includes('gateway-provider-grid { display: grid;'));
+  assert.match(css, /gateway-provider-card \{[^}]*height: 64px;[^}]*cursor: pointer/);
+  assert.match(css, /grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 170px\), 1fr\)\)/);
+  assert.doesNotMatch(css, /224px|88px/);
   for (const card of form.matchAll(/<label class="gateway-provider-card">([\s\S]*?)<\/label>/g)) assert.match(card[1], /<input type="radio" name="purpose"/);
   assert.match(css, /@container gateway \(max-width: 520px\)/);
   assert.match(css, /\[data-gateway-details\][\s\S]*?max-width: 64rem/);
 });
 
 test('normal actions match authentication type and reset usage limits is absent', () => {
-  const actions = form.slice(form.indexOf('<section data-gateway-actions'), form.indexOf('<p data-gateway-live-note'));
-  assert.deepEqual([...actions.matchAll(/<button[^>]*>([^<]+)<\/button>/g)].map(match => match[1]), ['Rotate token', 'Revoke token', 'Delete']);
+  const actions = form.slice(form.indexOf('<div class="action-row gateway-credential-actions"'), form.indexOf('<p data-gateway-live-note'));
+  assert.deepEqual([...actions.matchAll(/<button[^>]*>([^<]+)<\/button>/g)].map(match => match[1]), ['Delete', 'Rotate token', 'Revoke token']);
   assert.doesNotMatch(actions, /allowance|usage limits|Reset restart/);
   const advanced = form.match(/<details data-gateway-advanced[\s\S]*?<\/details>/)[0];
   assert.doesNotMatch(form + js, /data-gateway-allowance|Reset usage limits|reset-allowance/);
@@ -655,20 +650,17 @@ function guideHarness(origin = 'http://192.168.1.20:8099') {
     document: {createElement: tag => new Node(tag)}, text: (tag, value) => new Node(tag, value)});
   const providers = js.slice(js.indexOf('  const providers ='), js.indexOf('  const activityLabel'));
   const guide = js.slice(js.indexOf('  // Presentation only:'), js.indexOf('  const renderSettings ='));
-  vm.runInContext(providers + guide + '\nglobalThis.render = renderProviderGuide; globalThis.setup = setupHelpGuide; globalThis.local = localAddress;', context);
+  vm.runInContext(providers + guide + '\nglobalThis.render = renderProviderGuide; globalThis.setup = setupHelpGuide; globalThis.local = localAddress; globalThis.secure = secureAddress;', context);
   return {host, copied, find, context, render(purpose, options) { context.render(host, purpose, origin + (purpose === 'Automation / REST API' ? '/api/v1' : '/mcp/jvc_current'), options); return guideText(host); }};
 }
 
 test('provider preview changes immediately and only Apply persists the selected purpose', () => {
   const existing = {id: 'jvc_current', name: 'Home', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true};
   const h = settingsHarness(existing);
-  const guide = h.node('.gateway-primary').afterChildren[0];
+  const guide = h.node('[data-gateway-status]').afterChildren[0];
   for (const purpose of ['Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenAI']) {
     h.preview(purpose);
-    assert.equal(guide.children[0].children[1].children[0].textContent, purpose);
-    const icon = guide.children[0].children[0];
-    const expectedIcon = {'Claude': 'claude', 'Grok': 'grok', 'Gemini': 'googlegemini', 'GitHub Copilot': 'githubcopilot', 'OpenAI': 'openai'}[purpose];
-    assert.equal(icon.src, `/static/ai-providers/${expectedIcon}.svg`);
+    assert.ok(!descendants(guide).some(node => node.className === 'gateway-connection-identity' || node.tagName === 'img'));
     assert.equal(descendants(guide).filter(node => node.tagName === 'button' && node.textContent === 'Codex').length, purpose === 'OpenAI' ? 1 : 0);
     assert.equal(h.requests.length, 0);
     assert.equal(existing.purpose, 'OpenAI');
@@ -686,7 +678,7 @@ test('provider preview changes immediately and only Apply persists the selected 
 test('OpenAI switches between current ChatGPT and local Codex instructions', async () => {
   const h = guideHarness();
   let content = h.render('OpenAI');
-  for (const phrase of ['ChatGPT', 'Codex', 'Plugins', 'Add custom MCP server', 'I understand and want to continue', 'install the plugin', 'reachable HTTPS', 'Secure MCP Tunnel', 'cannot connect directly']) assert.ok(content.includes(phrase), phrase);
+  for (const phrase of ['ChatGPT', 'Codex', 'Plugins', 'Add custom MCP server', 'I understand and want to continue', 'install the plugin', 'reachable HTTPS', 'Secure MCP Tunnel', 'cannot reach this LAN address directly']) assert.ok(content.includes(phrase), phrase);
   descendants(h.host).find(node => node.tagName === 'button' && node.textContent === 'Codex').listeners.click();
   content = guideText(h.host);
   for (const phrase of ['codex mcp add justvoxel --url http://192.168.1.20:8099/mcp/jvc_current', 'codex mcp list', 'computer running Codex can reach JustVoxel']) assert.ok(content.includes(phrase), phrase);
@@ -698,9 +690,9 @@ test('OpenAI switches between current ChatGPT and local Codex instructions', asy
 test('provider guides contain the verified setup, network and availability details', () => {
   const h = guideHarness();
   const required = new Map([
-    ['Claude', ['Customize', 'Connectors', 'Sign in now', 'Sign in when needed', 'Register automatically', 'Dynamic Client Registration', 'reachable by Claude']],
-    ['Grok', ['grok.com/connectors', 'New Connector', 'Custom', 'public Internet', 'local-only']],
-    ['Gemini', ['Settings', 'Connected Apps', 'Add a custom app', 'Dynamic Client Registration', '18+', 'United States', 'Personal Google Account', 'Keep Activity', 'English', 'Gemini web', 'reachable MCP endpoint']],
+    ['Claude', ['Customize', 'Connectors', 'Sign in now', 'Sign in when needed', 'Register automatically', 'Dynamic Client Registration', 'reachable from Anthropic infrastructure']],
+    ['Grok', ['grok.com/connectors', 'New Connector', 'Custom', 'private LAN address', 'publicly reachable secure endpoint or tunnel']],
+    ['Gemini', ['Settings', 'Connected Apps', 'Add a custom app', 'Dynamic Client Registration', '18+', 'United States', 'Personal Google Account', 'Keep Activity', 'English', 'Gemini web']],
     ['GitHub Copilot', ['copilot mcp add --transport http justvoxel http://192.168.1.20:8099/mcp/jvc_current', '/mcp auth justvoxel', '/mcp add', 'LAN address', 'Copilot cloud agent and Copilot code review currently do not support remote OAuth MCP servers']],
     ['Other AI / MCP app', ['Streamable HTTP', 'authentication method', 'JustVoxel token', 'Cloud clients', 'Local clients']],
     ['Automation / REST API', ['REST API address', 'http://192.168.1.20:8099/api/v1', 'JustVoxel API token', 'one-time', 'Store it securely', 'access level and Minecraft scope']],
@@ -751,10 +743,10 @@ test('Help selects one guide without any connection mutation or saved state', ()
   assert.doesNotMatch(setup, /mutate|send\(|snapshot|selectedID|fetch\(/);
 });
 
-test('local guidance detects HTTP, loopback and private IPv4 without requiring cloud access for local clients', () => {
+test('private host detection is independent of HTTP and HTTPS security', () => {
   const {context} = guideHarness();
-  for (const url of ['http://voxel.example/mcp', 'https://10.1.2.3/mcp', 'https://172.16.0.1/mcp', 'https://172.31.255.2/mcp', 'https://192.168.0.1/mcp', 'https://localhost/mcp', 'https://127.0.0.2/mcp', 'https://[::1]/mcp']) assert.equal(context.local(url), true, url);
-  for (const url of ['https://voxel.example/mcp', 'https://172.15.0.1/mcp', 'https://172.32.0.1/mcp']) assert.equal(context.local(url), false, url);
+  for (const url of ['https://10.1.2.3/mcp', 'https://172.16.0.1/mcp', 'https://172.31.255.2/mcp', 'https://192.168.0.1/mcp', 'https://localhost/mcp', 'https://127.0.0.2/mcp', 'https://[::1]/mcp', 'http://app.localhost/mcp', 'https://[fc00::1]/mcp', 'https://[fdff::1]/mcp', 'https://[fe80::1]/mcp', 'https://[febf::1]/mcp']) assert.equal(context.local(url), true, url);
+  for (const url of ['http://voxel.example/mcp', 'https://voxel.example/mcp', 'https://172.15.0.1/mcp', 'https://172.32.0.1/mcp', 'https://[fec0::1]/mcp', 'https://[2001:db8::1]/mcp']) assert.equal(context.local(url), false, url);
 });
 
 test('existing settings use equal Name/Access tracks with compact Enabled and expiration', () => {
@@ -764,11 +756,13 @@ test('existing settings use equal Name/Access tracks with compact Enabled and ex
   assert.equal(top.children[0].children[1], h.node('.gateway-switch'));
   assert.equal(top.afterChildren[0], h.field('expires_at').closest('label'));
   assert.equal(top.afterChildren[0].className, 'gateway-expiration');
-  assert.equal(h.settings.children.at(-1), h.node('[data-gateway-advanced]'));
+  assert.ok(form.indexOf('data-gateway-status hidden') < form.indexOf('data-gateway-advanced hidden'));
+  assert.ok(form.indexOf('data-gateway-actions hidden') < form.indexOf('data-gateway-advanced hidden'));
+  assert.doesNotMatch(js, /form\.append\(form\.querySelector\('\[data-gateway-advanced\]'\)\)/);
   assert.doesNotMatch(form.match(/<details data-gateway-advanced[^>]*>/)[0], /\bopen\b/);
   const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
-  assert.match(css, /gateway-edit-settings \.gateway-name-access-row \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) auto/);
-  assert.match(css, /gateway-expiration \{ width: fit-content; max-width: min\(100%, 24rem\)/);
+  assert.match(css, /\[data-gateway-settings\] \.gateway-name-access-row \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) auto/);
+  assert.match(css, /gateway-expiration \{ width: fit-content; max-width: min\(100%, 17rem\)/);
   assert.match(css, /@container gateway \(max-width: 420px\)/);
 });
 
@@ -805,7 +799,6 @@ test('scope lane keeps toggles, existing software icons and names while preservi
   assert.equal(lane.children[0].children[0].role, 'switch');
   h.scope('all');
   assert.equal(h.node('[data-gateway-scope]').hidden, false);
-  assert.equal(lane['aria-disabled'], 'true');
   assert.ok(lane.querySelectorAll('input').every(input => input.disabled));
   assert.equal(lane.children[0].children[0].checked, true);
   h.scope('selected');
@@ -817,9 +810,10 @@ test('scope lane keeps toggles, existing software icons and names while preservi
   const all = settingsHarness(connection); all.scope('all'); all.submit();
   assert.equal(all.requests[0].connection.all_instances, true);
   const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
-  assert.match(css, /gateway-edit-settings \[data-gateway-instance-options\] \{ display: flex; flex-wrap: wrap/);
-  assert.match(form, />All servers<\/label>/);
-  assert.match(form, />Choose servers<\/label>/);
+  assert.match(css, /\[data-gateway-settings\] \.gateway-server-lane \{ display: flex; flex-wrap: wrap/);
+  assert.match(form, />All servers<\/span><\/label>/);
+  assert.doesNotMatch(form, /Choose servers/);
+  assert.equal((form.match(/data-gateway-all-servers/g) || []).length, 1);
 });
 
 test('settings metrics use supported status, human auth and scope values and local dates', () => {
@@ -908,4 +902,248 @@ test('date presentation falls back only for invalid dates and leaves expiration 
   assert.equal(context.format(undefined), 'Unavailable');
   assert.match(js, /date\.getTime\(\) - date\.getTimezoneOffset\(\) \* 60000/);
   assert.match(js, /updated\.expires_at = new Date\(field\('expires_at'\)\.value\)\.toISOString\(\)/);
+});
+
+
+test('Add has no provider onboarding, addresses, commands or network callouts for any provider', () => {
+  for (const purpose of ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'Other AI / MCP app', 'Automation / REST API']) {
+    const h = settingsHarness({name: '', purpose, level: 1, enabled: true, all_instances: true});
+    h.preview(purpose);
+    assert.equal(h.settings.className, 'gateway-add-settings');
+    assert.equal(h.node('[data-gateway-status]').afterChildren, undefined);
+    assert.doesNotMatch(form + js, /data-gateway-settings-title|— settings/);
+    assert.ok(!h.created.some(node => ['ol', 'aside', 'code'].includes(node.tagName) || node.className === 'gateway-guide'));
+    const content = h.created.map(node => node.value || node.textContent).join('\n');
+    assert.doesNotMatch(content, /MCP address|How to connect|Secure MCP Tunnel|Official setup guide|https?:\/\//);
+    assert.equal(h.node('[data-gateway-save]').textContent, 'Create');
+    assert.equal(h.requests.length, 0);
+  }
+});
+
+test('Add shares the desktop configuration row and live Enabled draft with Settings', () => {
+  const draft = {name: 'Home', purpose: 'OpenAI', level: 1, enabled: true, all_instances: true};
+  const h = settingsHarness(draft);
+  const top = h.node('.gateway-name-access-row');
+  assert.equal(top.children[0].className, 'gateway-enabled-control');
+  assert.equal(top.children[0].children[1], h.node('.gateway-switch'));
+  assert.equal((form.match(/name="enabled"/g) || []).length, 1);
+  const label = h.node('.gateway-switch span');
+  for (const checked of [false, true, false]) {
+    h.field('enabled').checked = checked;
+    h.field('enabled').listeners.change();
+    assert.equal(label.textContent, checked ? 'Enabled' : 'Disabled');
+    assert.equal(label.className, checked ? 'gateway-enabled-success' : 'gateway-enabled-danger');
+    assert.equal(h.requests.length, 0);
+    assert.equal(draft.enabled, true);
+  }
+  h.submit();
+  assert.equal(h.requests[0].action, 'create');
+  assert.equal(h.requests[0].connection.enabled, false);
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.match(css, /\[data-gateway-settings\] \.gateway-name-access-row \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) auto/);
+});
+
+test('Add and Settings share one wrapping scope lane and retain disabled draft selections', () => {
+  const inventory = ['Paper1', 'Purpur', 'Spigot', 'Vanilla'].map((name, index) => ({id: String(index), display_name: name, software_icon: `/static/software/${name}.svg`}));
+  for (const id of [undefined, 'existing']) {
+    const h = settingsHarness({id, name: 'Home', purpose: 'OpenAI', level: 1, enabled: true, all_instances: false, instance_ids: ['0', '2']}, inventory);
+    const lane = h.node('[data-gateway-instance-options]');
+    assert.equal(lane.children.length, 4);
+    for (const [index, item] of lane.children.entries()) {
+      assert.equal(item.className, 'gateway-server-item');
+      assert.deepEqual(item.children.map(child => child.tagName), ['input', 'img', 'span']);
+      assert.equal(item.children[0].role, 'switch');
+      assert.equal(item.children[1].className, 'minecraft-server-software-icon');
+      assert.equal(item.children[1].src, inventory[index].software_icon);
+      assert.equal(item.children[2].textContent, inventory[index].display_name);
+    }
+    for (const scope of ['all', 'selected', 'all', 'selected']) {
+      h.scope(scope);
+      assert.equal(h.node('[data-gateway-scope]').hidden, false);
+      assert.ok(lane.querySelectorAll('input').every(input => input.disabled === (scope === 'all')));
+      assert.deepEqual(lane.querySelectorAll('input').map(input => input.checked), [true, false, true, false]);
+      assert.equal(h.requests.length, 0);
+    }
+    h.submit();
+    assert.deepEqual(Array.from(h.requests[0].connection.instance_ids), ['0', '2']);
+  }
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.match(css, /\[data-gateway-settings\] \.gateway-server-lane \{ display: flex; flex-wrap: wrap/);
+  assert.match(css, /gateway-server-item \{[^}]*flex: 0 0 auto/);
+  assert.match(css, /gateway-server-item \{[^}]*border-inline-start: 1px solid/);
+});
+
+test('Settings puts configuration before metrics, guide, actions and final Advanced', () => {
+  const h = settingsHarness({id: 'existing', name: 'Home', purpose: 'OpenAI', enabled: true, all_instances: true});
+  const order = ['gateway-name-access-row', 'data-gateway-purpose-label', 'gateway-scope-label', 'data-gateway-status hidden', 'data-gateway-actions hidden', 'gateway-save', 'data-gateway-advanced hidden'];
+  for (let i = 1; i < order.length; i++) assert.ok(form.indexOf(order[i - 1]) < form.indexOf(order[i]), order[i]);
+  assert.equal(h.node('.gateway-name-access-row').afterChildren[0], h.field('expires_at').closest('label'));
+  assert.equal(h.node('[data-gateway-status]').afterChildren[0].className, 'gateway-guide gateway-settings-guide');
+  assert.equal(h.node('.gateway-primary').afterChildren, undefined);
+  assert.doesNotMatch(form + js, /data-gateway-settings-title|— settings/);
+});
+
+test('address classification covers the requested protocol and host combinations', () => {
+  const {context} = guideHarness();
+  for (const [address, privateHost, secure] of [
+    ['http://192.168.0.28:8099', true, false],
+    ['https://192.168.0.28', true, true],
+    ['http://example.com', false, false],
+    ['https://example.com', false, true],
+  ]) {
+    assert.equal(context.local(address), privateHost, address);
+    assert.equal(context.secure(address), secure, address);
+  }
+});
+
+test('private provider guidance reserves warning styling for Grok', () => {
+  for (const origin of ['http://192.168.0.28:8099', 'https://192.168.0.28']) {
+    const h = guideHarness(origin);
+    for (const [purpose, mode, title, body] of [
+      ['OpenAI', 'ChatGPT', 'Local MCP address', 'ChatGPT cloud cannot reach this LAN address directly. Use a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.'],
+      ['OpenAI', 'Codex', 'Network access', 'This LAN address can work when the computer running Codex can reach JustVoxel.'],
+      ['Claude', undefined, 'Remote connector network access', 'Claude remote connectors need an MCP address reachable from Anthropic infrastructure.'],
+      ['Grok', undefined, 'Public endpoint required', 'Grok cannot reach this private LAN address directly. Use an appropriate publicly reachable secure endpoint or tunnel.'],
+      ['GitHub Copilot', undefined, 'Network access', 'Copilot CLI can use this LAN address when the machine running Copilot can reach JustVoxel.'],
+      ['Other AI / MCP app', undefined, 'Network access', 'Local clients may use a LAN endpoint if they can reach JustVoxel. Cloud clients depend on their own network requirements.'],
+    ]) {
+      h.render(purpose, {mode});
+      const callout = descendants(h.host).find(node => node.tagName === 'aside' && node.children[0].textContent === title);
+      assert.equal(callout.children[1].textContent, body);
+      assert.equal(callout.className, purpose === 'Grok' ? 'notice warning' : 'notice');
+      assert.equal(descendants(h.host).filter(node => node.className === 'notice warning').length, purpose === 'Grok' ? 1 : 0);
+      if (purpose === 'GitHub Copilot') {
+        const compatibility = descendants(h.host).find(node => node.children[0]?.textContent === 'Compatibility');
+        assert.equal(compatibility.className, 'notice');
+        assert.match(guideText(compatibility), /cloud agent.*code review.*do not support remote OAuth/);
+      }
+    }
+    const gemini = h.render('Gemini');
+    assert.doesNotMatch(gemini, /Network access|reachable MCP endpoint/);
+    assert.ok(gemini.includes('Current Gemini requirements'));
+    assert.ok(!descendants(h.host).some(node => node.className === 'notice warning'));
+    h.render('Automation / REST API');
+    assert.ok(!descendants(h.host).some(node => node.tagName === 'aside'));
+  }
+  const publicHTTP = guideHarness('http://example.com');
+  const content = publicHTTP.render('OpenAI');
+  assert.doesNotMatch(content, /Local MCP address|this LAN address/);
+  assert.ok(!descendants(publicHTTP.host).some(node => node.className === 'notice warning'));
+  publicHTTP.render('Grok');
+  assert.ok(!descendants(publicHTTP.host).some(node => node.className === 'notice warning'));
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.match(css, /\.notice:not\(\.warning\) \{[^}]*border: 1px solid var\(--jv-border\); background: var\(--jv-surface-sunken\)/);
+});
+
+test('Settings starts with one address row and a shared how-to toolbar without repeated identity', () => {
+  const h = guideHarness();
+  for (const purpose of ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'Other AI / MCP app', 'Automation / REST API']) {
+    h.render(purpose, {settings: true});
+    const nodes = descendants(h.host);
+    assert.ok(!nodes.some(node => node.className === 'gateway-connection-identity' || node.tagName === 'img'));
+    assert.doesNotMatch(guideText(h.host), /Ready to connect/);
+    const address = h.host.children[0];
+    assert.equal(address.className, 'gateway-address');
+    assert.deepEqual(address.children.map(node => node.tagName), ['span', 'input', 'button']);
+    assert.equal(address.children[0].textContent, purpose === 'Automation / REST API' ? 'REST API address' : 'MCP address');
+    assert.equal(address.children[1].readOnly, true);
+    assert.equal(address.children[2].textContent, 'Copy');
+    const toolbar = h.host.children.find(node => node.className === 'gateway-guide-toolbar');
+    assert.equal(toolbar.children[0].textContent, 'How to connect');
+    const branded = !['Other AI / MCP app', 'Automation / REST API'].includes(purpose);
+    assert.equal(toolbar.children.some(node => node.textContent === 'Official setup guide ↗'), branded);
+    if (purpose === 'OpenAI') {
+      assert.deepEqual(toolbar.children[1].children.map(node => node.textContent), ['ChatGPT', 'Codex']);
+      assert.equal(toolbar.children[2].textContent, 'Official setup guide ↗');
+      toolbar.children[1].children[1].listeners.click();
+      assert.ok(guideText(h.host).includes('codex mcp add justvoxel --url http://192.168.1.20:8099/mcp/jvc_current'));
+      assert.ok(guideText(h.host).includes('Verify: codex mcp list'));
+    }
+  }
+});
+
+test('Settings steps are concise while Help retains the detailed provider manuals', () => {
+  const h = guideHarness();
+  for (const [purpose, limit, fullMinimum] of [
+    ['OpenAI', 4, 7], ['Claude', 4, 7], ['Grok', 3, 5], ['Gemini', 4, 6],
+    ['Other AI / MCP app', 3, 4], ['Automation / REST API', 4, 5],
+  ]) {
+    h.render(purpose, {settings: true});
+    const steps = descendants(h.host).filter(node => node.tagName === 'li');
+    assert.equal(steps.length, limit, purpose);
+    assert.ok(!descendants(h.host).some(node => node.tagName === 'aside' || /\bnotice\b/.test(node.className || '')));
+    h.render(purpose, {help: true});
+    assert.ok(descendants(h.host).filter(node => node.tagName === 'li').length >= fullMinimum, purpose);
+    assert.equal(h.host.children[0].className, 'gateway-connection-identity');
+  }
+  h.render('GitHub Copilot', {settings: true});
+  assert.equal(descendants(h.host).filter(node => node.tagName === 'li').length, 0);
+  for (const command of ['copilot mcp add --transport http justvoxel http://192.168.1.20:8099/mcp/jvc_current', 'Authentication: /mcp auth justvoxel', 'Interactive: /mcp add']) assert.ok(guideText(h.host).includes(command));
+  h.render('GitHub Copilot', {help: true});
+  assert.ok(guideText(h.host).includes('IDE MCP support varies by IDE and configuration.'));
+});
+
+test('Settings uses inline network, Gemini requirements and Copilot compatibility information', () => {
+  for (const origin of ['http://192.168.1.20', 'https://192.168.1.20', 'http://example.com', 'https://example.com']) {
+    const h = guideHarness(origin);
+    for (const purpose of ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'Other AI / MCP app', 'Automation / REST API']) {
+      h.render(purpose, {settings: true});
+      const nodes = descendants(h.host);
+      assert.ok(!nodes.some(node => node.tagName === 'aside' || /\bnotice\b/.test(node.className || '')));
+      const warnings = nodes.filter(node => node.className === 'gateway-inline-note gateway-inline-warning');
+      assert.equal(warnings.length, purpose === 'Grok' && origin.includes('192.168') ? 1 : 0);
+      if (purpose === 'Gemini') {
+        assert.ok(nodes.some(node => node.textContent === 'Requirements: 18+ · United States · Personal Google Account · Keep Activity · English' && node.className === 'gateway-inline-note'));
+      }
+      if (purpose === 'GitHub Copilot') assert.ok(nodes.some(node => node.textContent === 'Cloud agent/code review do not currently support remote OAuth MCP servers.' && node.className === 'gateway-inline-note'));
+      if (purpose === 'Automation / REST API') assert.ok(!nodes.some(node => node.className === 'gateway-inline-note'));
+    }
+  }
+});
+
+test('compact desktop lanes wrap by available width with Advanced as the final collapsed element', () => {
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.doesNotMatch(form + js, /data-gateway-settings-title|— settings/);
+  assert.doesNotMatch(form, /Choose servers/);
+  assert.match(form, /class="gateway-server-lane" data-gateway-scope data-gateway-instance-options>\s*<label class="gateway-server-item gateway-all-servers"><input[^>]+role="switch"[^>]+data-gateway-all-servers/);
+  assert.equal((form.match(/data-gateway-all-servers/g) || []).length, 1);
+  assert.match(form, /name="server_scope" value="all"/);
+  assert.match(css, /gateway-server-lane \{ display: flex; flex-wrap: wrap; align-items: center/);
+  assert.match(css, /gateway-status-metrics \{ display: flex; flex-wrap: wrap;[^}]*border-block: 1px solid/);
+  assert.match(css, /gateway-guide-toolbar \{ display: flex; flex-wrap: wrap; align-items: center/);
+  assert.match(css, /gateway-guide-toolbar > a \{ margin-left: auto/);
+  assert.match(css, /gateway-settings-guide \.gateway-address \{ padding: 0; background: transparent/);
+  assert.match(css, /gateway-settings-guide \.gateway-help-steps \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /@container gateway \(max-width: 600px\)[\s\S]*gateway-help-steps \{ grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(css, /gateway-actions-lane \{ display: flex; flex-wrap: wrap; align-items: center/);
+  assert.match(css, /gateway-save \{ margin: 0 0 0 auto/);
+  const actions = form.slice(form.indexOf('gateway-actions-lane'), form.indexOf('<details data-gateway-advanced'));
+  assert.ok(actions.indexOf('data-gateway-delete') < actions.indexOf('data-gateway-live-note'));
+  assert.ok(actions.indexOf('data-gateway-live-note') < actions.indexOf('data-gateway-save'));
+  assert.match(form, /<details data-gateway-advanced hidden>[\s\S]*<\/details>\s*<\/form>/);
+  assert.doesNotMatch(form.match(/<details data-gateway-advanced[^>]*>/)[0], /\bopen\b/);
+});
+
+test('All servers adapter submits all scope and preserves exactly the chosen individual IDs', () => {
+  const inventory = ['paper', 'purpur', 'spigot', 'vanilla'].map(id => ({id, display_name: id, software_icon: `/static/${id}.svg`}));
+  for (const id of [undefined, 'existing']) {
+    const h = settingsHarness({id, name: 'Home', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: false, instance_ids: ['paper']}, inventory);
+    const inputs = h.node('[data-gateway-instance-options]').querySelectorAll('input');
+    h.scope('all');
+    assert.equal(h.node('[data-gateway-all-servers]').disabled, undefined);
+    assert.ok(inputs.every(input => input.disabled));
+    assert.deepEqual(inputs.map(input => input.checked), [true, false, false, false]);
+    h.submit();
+    assert.equal(h.requests[0].connection.all_instances, true);
+    assert.deepEqual(Array.from(h.requests[0].connection.instance_ids), []);
+    h.scope('selected');
+    assert.ok(inputs.every(input => !input.disabled));
+    h.submit();
+    assert.deepEqual(Array.from(h.requests[1].connection.instance_ids), ['paper']);
+    inputs[1].checked = true;
+    h.submit();
+    assert.deepEqual(Array.from(h.requests[2].connection.instance_ids), ['paper', 'purpur']);
+    h.scope('all'); h.scope('selected');
+    assert.deepEqual(inputs.map(input => input.checked), [true, true, false, false]);
+  }
 });
