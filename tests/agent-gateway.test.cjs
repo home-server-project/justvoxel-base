@@ -191,6 +191,7 @@ test('provider cards replace the purpose dropdown with one OpenAI choice for Cha
   assert.match(form, /<strong>OpenClaw<\/strong><small>Control UI &amp; CLI<\/small>/);
   assert.match(form, /<strong>GitHub Copilot<\/strong><small>CLI &amp; VS Code<\/small>/);
   assert.match(form, /<strong>OpenAI<\/strong><small>ChatGPT &amp; Codex<\/small>/);
+  assert.match(form, /<strong>Claude<\/strong><small>Claude &amp; Claude Code<\/small>/);
   assert.doesNotMatch(form, /<select name="purpose"|name="auth_mode"|Connection method|OAuth — Advanced|What do you want to call it/);
   for (const phrase of ['>Name</span>', 'What will use this connection?', 'Access level', 'Which Minecraft servers?', 'All servers']) assert.ok(form.includes(phrase), phrase);
   assert.match(form, /class="gateway-provider-grid"/);
@@ -300,7 +301,7 @@ function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
   const requests = [];
   const confirmations = [];
   const context = vm.createContext({
-    details, structuredClone, busy: false, instances: inventory, snapshot: {enabled: gatewayEnabled},
+    setTimeout: () => 1, clearTimeout() {}, details, structuredClone, busy: false, instances: inventory, snapshot: {enabled: gatewayEnabled},
     URL, location: {origin: 'https://voxel.example', protocol: 'https:', hostname: 'voxel.example'}, navigator: {clipboard: {async writeText() {}}},
     content: node('[data-gateway-content]'), find: node,
     document: {createElement: create, querySelector: () => ({content: {cloneNode() { return new Node('form'); }}})},
@@ -471,7 +472,7 @@ test('local OAuth onboarding shows the connection-specific address without crede
   const onboarding = h.node('[data-gateway-status]').afterChildren[0];
   const descendants = node => [node, ...node.children.flatMap(descendants)];
   const nodes = descendants(onboarding);
-  for (const value of ['MCP address', 'Copy', 'When ChatGPT opens JustVoxel, sign in and approve the requested access.']) assert.ok(nodes.some(node => node.textContent === value), value);
+  for (const value of ['MCP address', 'Copy', 'Complete JustVoxel sign-in/approval when prompted.']) assert.ok(nodes.some(node => node.textContent === value), value);
   assert.ok(nodes.some(node => node.tagName === 'input' && node.readOnly === true && node.value === 'https://voxel.example/mcp/jvc_example'), 'connection-specific MCP address in a readonly input');
   assert.equal(h.node('[data-gateway-rotate]').hidden, true);
   assert.equal(h.node('[data-gateway-revoke]').hidden, true);
@@ -657,7 +658,7 @@ function guideHarness(origin = 'http://192.168.1.20:8099') {
     if (!nodes.has(selector)) nodes.set(selector, new Node('div'));
     return nodes.get(selector);
   };
-  const context = vm.createContext({URL, location: {origin}, find,
+  const context = vm.createContext({setTimeout: () => 1, clearTimeout() {}, URL, location: {origin}, find,
     navigator: {clipboard: {async writeText(value) { copied.push(value); }}},
     document: {createElement: tag => new Node(tag)}, text: (tag, value) => new Node(tag, value)});
   const providers = js.slice(js.indexOf('  const providers ='), js.indexOf('  const activityLabel'));
@@ -687,57 +688,63 @@ test('provider preview changes immediately and only Apply persists the selected 
   assert.doesNotMatch(js, /text\('h4', 'Authentication'\), text\('p', 'Sign in with JustVoxel'\)/);
 });
 
-test('OpenAI switches between current ChatGPT and local Codex instructions', async () => {
+test('OpenAI private ChatGPT prerequisite switches to a copyable local Codex command', async () => {
   const h = guideHarness();
-  let content = h.render('OpenAI');
-  for (const phrase of ['ChatGPT', 'Codex', 'Plugins', 'Add custom MCP server', 'MCPs', 'Streamable HTTP', 'Bearer token env var', 'Headers', 'Save', 'reachable HTTPS', 'Secure MCP Tunnel', 'cannot reach this LAN address directly']) assert.ok(content.includes(phrase), phrase);
+  let content = h.render('OpenAI', {settings: true});
+  for (const phrase of ['ChatGPT needs a reachable connection', 'Secure MCP Tunnel', 'public HTTPS', 'Do not paste this 192.168.1.20 address into ChatGPT', 'LOCAL reference only']) assert.ok(content.includes(phrase), phrase);
+  assert.ok(!descendants(h.host).some(node => node.className === 'gateway-address'));
+  assert.ok(descendants(h.host).some(node => node.href === 'https://developers.openai.com/api/docs/guides/secure-mcp-tunnels'));
   descendants(h.host).find(node => node.tagName === 'button' && node.textContent === 'Codex').listeners.click();
   content = guideText(h.host);
   for (const phrase of ['codex mcp add justvoxel --url http://192.168.1.20:8099/mcp/jvc_current', 'codex mcp list', 'computer running Codex can reach JustVoxel']) assert.ok(content.includes(phrase), phrase);
-  assert.doesNotMatch(content, /public Internet|ChatGPT cloud cannot/);
+  assert.doesNotMatch(content, /Connection prerequisite|Secure MCP Tunnel|public HTTPS|Do not paste/);
   await descendants(h.host).find(node => node.textContent === 'Copy command').listeners.click();
   assert.equal(h.copied[0], 'codex mcp add justvoxel --url http://192.168.1.20:8099/mcp/jvc_current');
 });
 
-test('provider guides contain the verified setup, network and availability details', () => {
-  const h = guideHarness();
+test('public HTTPS candidates show provider steps without claiming proven reachability', () => {
   const required = new Map([
-    ['Claude', ['Customize', 'Connectors', 'Sign in now', 'Sign in when needed', 'Register automatically', 'Dynamic Client Registration', 'reachable from Anthropic infrastructure']],
-    ['Grok', ['grok.com/connectors', 'New Connector', 'Custom', 'private LAN address', 'publicly reachable secure endpoint or tunnel']],
-    ['Gemini', ['Settings', 'Connected Apps', 'Add a custom app', 'Dynamic Client Registration', '18+', 'United States', 'Personal Google Account', 'Keep Activity', 'English', 'Gemini web']],
-    ['GitHub Copilot', ['copilot mcp add --transport http justvoxel http://192.168.1.20:8099/mcp/jvc_current', '/mcp auth justvoxel', '/mcp add', 'LAN address', 'Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.']],
-    ['Other AI / MCP app', ['Streamable HTTP', 'authentication method', 'JustVoxel token', 'Cloud clients', 'Local clients']],
-    ['Automation / REST API', ['REST API address', 'http://192.168.1.20:8099/api/v1', 'JustVoxel API token', 'one-time', 'Store it securely', 'access level and Minecraft scope']],
+    ['OpenAI', ['ChatGPT → Plugins', '+ → Add custom MCP server', 'Under Connection', 'choose Tunnel', 'risk warning', 'Create as a plugin', 'sign-in/approval', 'Plugins → MCPs → Add', 'Streamable HTTP', 'STDIO is for launching a local MCP process', 'reachable HTTPS MCP address in URL', 'Leave Bearer token env var and Headers empty']],
+    ['Claude', ['Pro/Max', 'Customize → Connectors', '+ Add → Add custom connector', 'Sign in now', 'Sign in when needed', 'Register automatically', 'Dynamic Client Registration']],
+    ['Grok', ['grok.com/connectors', 'New Connector → Custom', 'reachable JustVoxel MCP URL']],
+    ['Gemini', ['Settings → Connected Apps', 'Personal Intelligence → Connected Apps', 'Add a custom app', 'Select Next', 'Dynamic Client Registration', '18+', 'United States', 'Personal Google Account', 'Keep Activity on', 'English', 'automatic registration failed']],
   ]);
-  for (const [provider, phrases] of required) {
-    const content = h.render(provider);
-    for (const phrase of phrases) assert.ok(content.includes(phrase), `${provider}: ${phrase}`);
-    if (provider === 'Automation / REST API') assert.doesNotMatch(content, /OAuth|sign-in|MCP address/);
-    if (provider === 'Gemini') {
-      const callout = descendants(h.host).find(node => node.children[0]?.textContent === 'Current Gemini requirements');
-      assert.equal(callout.className, 'notice');
+  for (const settings of [true, false]) {
+    const h = guideHarness('https://example.com');
+    for (const [provider, phrases] of required) {
+      const content = h.render(provider, {settings});
+      for (const phrase of phrases) assert.ok(content.includes(phrase), `${provider}: ${phrase}`);
+      assert.ok(content.includes('must be reachable by'));
+      assert.ok(content.includes('URL alone does not prove reachability'));
+      assert.doesNotMatch(content, /verified reachable|Connection prerequisite/);
+      const address = descendants(h.host).find(node => node.tagName === 'input');
+      assert.equal(address.value, 'https://example.com/mcp/jvc_current');
+      assert.ok(descendants(h.host).some(node => node.tagName === 'button' && node.textContent === 'Copy'));
     }
   }
 });
 
-test('official provider links are approved, isolated new-tab links', () => {
-  const h = guideHarness();
-  const approved = new Map([
-    ['OpenAI', 'https://developers.openai.com/api/docs/guides/custom-mcp-server'],
-    ['Claude', 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp'],
-    ['Grok', 'https://docs.x.ai/grok/connectors'],
-    ['Gemini', 'https://support.google.com/gemini/answer/17209137'],
-    ['GitHub Copilot', 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers'],
-    ['OpenClaw', 'https://docs.openclaw.ai/tools/mcp'],
-  ]);
-  for (const [provider, url] of [...approved, ['OpenAI', 'https://developers.openai.com/learn/docs-mcp']]) {
-    h.render(provider, {mode: url.endsWith('docs-mcp') ? 'Codex' : 'ChatGPT'});
+test('official provider links use the requested guides and isolated new tabs', () => {
+  const h = guideHarness('https://example.com');
+  for (const [provider, mode, url] of [
+    ['OpenAI', 'ChatGPT', 'https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt'],
+    ['OpenAI', 'Codex', 'https://developers.openai.com/learn/docs-mcp'],
+    ['Claude', 'Claude', 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp'],
+    ['Claude', 'Claude Code', 'https://code.claude.com/docs/en/mcp'],
+    ['Grok', undefined, 'https://docs.x.ai/grok/connectors'],
+    ['Gemini', undefined, 'https://support.google.com/gemini/answer/17209137'],
+    ['GitHub Copilot', 'CLI', 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers'],
+    ['GitHub Copilot', 'VS Code', 'https://code.visualstudio.com/docs/agent-customization/mcp-servers'],
+    ['OpenClaw', 'Control UI', 'https://docs.openclaw.ai/tools/mcp'],
+    ['OpenClaw', 'CLI', 'https://docs.openclaw.ai/cli/mcp/transports'],
+  ]) {
+    h.render(provider, {mode});
     const links = descendants(h.host).filter(node => node.tagName === 'a');
-    assert.equal(links.length, 1);
-    assert.equal(links[0].href, url);
-    assert.equal(links[0].target, '_blank');
-    assert.equal(links[0].rel, 'noopener noreferrer');
-    assert.equal(links[0].textContent, 'Official setup guide ↗');
+    assert.ok(links.some(node => node.href === url), url);
+    for (const link of links) {
+      assert.equal(link.target, '_blank');
+      assert.equal(link.rel, 'noopener noreferrer');
+    }
   }
 });
 
@@ -845,14 +852,16 @@ test('settings metrics use supported status, human auth and scope values and loc
 function copyHarness(clipboard, legacy) {
   const parent = new Node('div');
   const field = new Node('input'); field.value = 'http://voxel.local/mcp/jvc_current'; parent.append(field);
-  const status = new Node('p');
+  const status = new Node('p'); status.className = 'gateway-visually-hidden';
+  const button = new Node('button', 'Copy');
+  let reset;
   const attempts = [];
-  const context = vm.createContext({navigator: {clipboard}, document: {
+  const context = vm.createContext({setTimeout(callback) { reset = callback; return 1; }, clearTimeout() {}, navigator: {clipboard}, document: {
     createElement: tag => new Node(tag),
     execCommand(command) { attempts.push(command); if (legacy instanceof Error) throw legacy; return legacy; },
   }});
   vm.runInContext(js.slice(js.indexOf('  const copyText ='), js.indexOf('  const settingsDate =')) + '\nglobalThis.copy = copyText;', context);
-  return {parent, field, status, attempts, copy: () => context.copy(field.value, field, status)};
+  return {parent, field, status, button, attempts, reset: () => reset(), copy: () => context.copy(field.value, field, status, button)};
 }
 
 test('copy uses clipboard first and guarded legacy copying on LAN HTTP or permission rejection', async () => {
@@ -861,19 +870,29 @@ test('copy uses clipboard first and guarded legacy copying on LAN HTTP or permis
   await primary.copy();
   assert.deepEqual(copied, [primary.field.value]);
   assert.equal(primary.status.textContent, 'Copied');
+  assert.equal(primary.button.textContent, 'Copied');
+  primary.reset();
+  assert.equal(primary.button.textContent, 'Copy');
   assert.equal(primary.attempts.length, 0);
   for (const clipboard of [undefined, {async writeText() { throw new Error('Denied'); }}]) {
     const fallback = copyHarness(clipboard, true); await fallback.copy();
     assert.deepEqual(fallback.attempts, ['copy']);
     assert.equal(fallback.status.textContent, 'Copied');
+    assert.equal(fallback.button.textContent, 'Copied');
+    assert.equal(fallback.status.className, 'gateway-visually-hidden');
     assert.equal(fallback.parent.children.length, 1);
   }
 });
 
-test('failed copying visibly selects the entire address and offers Ctrl+C', async () => {
+test('failed copying selects the entire address with button and invisible keyboard guidance', async () => {
   for (const legacy of [false, new Error('Unavailable')]) {
     const h = copyHarness(undefined, legacy); await h.copy();
-    assert.equal(h.status.textContent, 'Selected — press Ctrl+C');
+    assert.equal(h.status.textContent, 'Address selected — press Ctrl+C');
+    assert.equal(h.status.className, 'gateway-visually-hidden');
+    assert.equal(h.button.textContent, 'Selected');
+    assert.equal(h.button.title, 'Address selected — press Ctrl+C');
+    h.reset();
+    assert.equal(h.button.textContent, 'Copy');
     assert.equal(h.field.focused, true);
     assert.equal(h.field.selected, true);
     assert.equal(h.field.selectionStart, 0);
@@ -881,8 +900,8 @@ test('failed copying visibly selects the entire address and offers Ctrl+C', asyn
     assert.equal(h.parent.children[0], h.field);
     assert.equal(h.parent.children.length, 1);
   }
-  assert.match(js, /copy\.addEventListener\('click', \(\) => copyText\(value, field, status\)\)/);
-  assert.match(js, /await copyText\(field\.value, field, status\)/);
+  assert.match(js, /copy\.addEventListener\('click', \(\) => copyText\(value, field, status, copy\)\)/);
+  assert.match(js, /await copyText\(field\.value, field, status, button\)/);
   assert.match(header, /<input[^>]+readonly[^>]+data-gateway-mcp/);
   assert.match(header, /<input[^>]+readonly[^>]+data-gateway-rest/);
 });
@@ -898,7 +917,9 @@ test('provider guide Copy command also selects the unchanged command when clipbo
   assert.equal(command.readOnly, true);
   assert.equal(command.selected, true);
   assert.equal(command.selectionEnd, command.value.length);
-  assert.ok(guideText(h.host).includes('Selected — press Ctrl+C'));
+  assert.equal(copy.textContent, 'Selected');
+  assert.equal(copy.title, 'Address selected — press Ctrl+C');
+  assert.ok(descendants(h.host).some(node => node.className === 'gateway-visually-hidden' && node.textContent === copy.title));
 });
 
 test('date presentation falls back only for invalid dates and leaves expiration conversion intact', () => {
@@ -911,7 +932,7 @@ test('date presentation falls back only for invalid dates and leaves expiration 
 });
 
 
-test('Add has no provider onboarding, addresses, commands or network callouts for any provider', () => {
+test('Add has no provider onboarding, addresses, commands or network callouts beyond its compact summary', () => {
   for (const purpose of ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']) {
     const h = settingsHarness({name: '', purpose, level: 1, enabled: true, all_instances: true});
     h.preview(purpose);
@@ -924,6 +945,47 @@ test('Add has no provider onboarding, addresses, commands or network callouts fo
     assert.equal(h.node('[data-gateway-save]').textContent, 'Create');
     assert.equal(h.requests.length, 0);
   }
+});
+
+test('Add has one neutral summary immediately below provider cards, with no setup controls', () => {
+  assert.equal((form.match(/data-gateway-compatibility-summary/g) || []).length, 1);
+  assert.match(form, /value="Automation \/ REST API"[^\n]+\n\s*<\/div>\n\s*<p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden><\/p>/);
+  const summary = form.match(/<p[^>]*data-gateway-compatibility-summary[^>]*><\/p>/)[0];
+  assert.doesNotMatch(summary, /warning|notice|icon|<svg|<img/);
+  assert.doesNotMatch(form, /data-gateway-copy|MCP address|https?:\/\/|codex mcp|claude mcp|openclaw mcp|copilot mcp/);
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  const rule = css.match(/\.gateway-compatibility-summary \{([^}]+)\}/)[1];
+  assert.match(rule, /margin: \.4rem 0 0; font-size: \.8rem;/);
+  assert.doesNotMatch(rule, /background|border|yellow|warning|height|padding/);
+});
+
+test('Add immediately previews all eight exact summaries without persisting purpose or auth', () => {
+  const summaries = new Map([
+    ['OpenAI', 'ChatGPT: Secure MCP Tunnel or reachable public HTTPS · Codex: local/LAN supported'],
+    ['Claude', 'Claude: remotely reachable MCP required · Claude Code: local/LAN supported'],
+    ['Grok', 'Public Internet MCP endpoint required'],
+    ['Gemini', 'Public HTTPS Streamable HTTP endpoint required'],
+    ['GitHub Copilot', 'CLI & VS Code: local/LAN supported'],
+    ['OpenClaw', 'Control UI & CLI: local/LAN supported'],
+    ['Other AI / MCP app', 'Depends on whether the MCP client runs locally or in the cloud'],
+    ['Automation / REST API', 'Client must be able to reach the REST API endpoint'],
+  ]);
+  const draft = {name: 'Home', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true};
+  const original = structuredClone(draft);
+  const h = settingsHarness(draft);
+  const summary = h.node('[data-gateway-compatibility-summary]');
+  assert.equal(summary.hidden, false);
+  assert.equal(summary.textContent, summaries.get('OpenAI'));
+  for (const [purpose, expected] of summaries) {
+    h.preview(purpose);
+    assert.equal(summary.textContent, expected);
+    assert.doesNotMatch(summary.textContent, /https?:\/\/|192\.168\.|Ready|Unsupported|\n/);
+    assert.equal(h.requests.length, 0);
+    assert.deepEqual(draft, original);
+  }
+  const edit = settingsHarness({...draft, id: 'jvc_current'});
+  assert.equal(edit.node('[data-gateway-compatibility-summary]').hidden, true);
+  assert.doesNotMatch(js, /localStorage|sessionStorage/);
 });
 
 test('Add shares the desktop configuration row and enabled draft with Settings', () => {
@@ -997,108 +1059,84 @@ test('address classification covers the requested protocol and host combinations
   }
 });
 
-test('private provider guidance reserves warning styling for Grok', () => {
-  for (const origin of ['http://192.168.0.28:8099', 'https://192.168.0.28']) {
+test('cloud modes gate private and non-HTTPS endpoints before any copy or paste workflow', () => {
+  for (const origin of ['http://192.168.1.20:8099', 'https://192.168.1.20', 'http://localhost', 'https://[fd00::1]', 'http://example.com']) {
     const h = guideHarness(origin);
-    for (const [purpose, mode, title, body] of [
-      ['OpenAI', 'ChatGPT', 'Local MCP address', 'ChatGPT cloud cannot reach this LAN address directly. Use a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.'],
-      ['OpenAI', 'Codex', 'Network access', 'This LAN address can work when the computer running Codex can reach JustVoxel.'],
-      ['Claude', undefined, 'Remote connector network access', 'Claude remote connectors need an MCP address reachable from Anthropic infrastructure.'],
-      ['Grok', undefined, 'Public endpoint required', 'Grok cannot reach this private LAN address directly. Use an appropriate publicly reachable secure endpoint or tunnel.'],
-      ['GitHub Copilot', undefined, 'Network access', 'Copilot CLI can use this LAN address when the machine running Copilot can reach JustVoxel.'],
-      ['Other AI / MCP app', undefined, 'Network access', 'Local clients may use a LAN endpoint if they can reach JustVoxel. Cloud clients depend on their own network requirements.'],
-    ]) {
-      h.render(purpose, {mode});
-      const callout = descendants(h.host).find(node => node.tagName === 'aside' && node.children[0].textContent === title);
-      assert.equal(callout.children[1].textContent, body);
-      assert.equal(callout.className, purpose === 'Grok' ? 'notice warning' : 'notice');
-      assert.equal(descendants(h.host).filter(node => node.className === 'notice warning').length, purpose === 'Grok' ? 1 : 0);
-      if (purpose === 'GitHub Copilot') {
-        const compatibility = descendants(h.host).find(node => node.children[0]?.textContent === 'Compatibility');
-        assert.equal(compatibility.className, 'notice');
-        assert.match(guideText(compatibility), /Repository-level Copilot cloud agent and code review do not currently support remote OAuth/);
+    for (const options of [{settings: true}, {help: true}]) {
+      for (const [purpose, title, body] of [
+        ['OpenAI', 'ChatGPT needs a reachable connection', 'Secure MCP Tunnel'],
+        ['Claude', 'Claude needs a remotely reachable MCP endpoint', 'Anthropic infrastructure'],
+        ['Grok', 'Public endpoint required', 'public'],
+        ['Gemini', 'Public HTTPS endpoint required', 'publicly reachable HTTPS Streamable HTTP'],
+      ]) {
+        const content = h.render(purpose, options);
+        assert.ok(content.includes('Connection prerequisite'), purpose);
+        assert.ok(content.includes(title), purpose);
+        assert.ok(content.includes(body), purpose);
+        assert.ok(!descendants(h.host).some(node => node.className === 'gateway-address'), purpose);
+        assert.ok(!descendants(h.host).some(node => node.tagName === 'input'), purpose);
+        assert.ok(!descendants(h.host).some(node => node.tagName === 'button' && /Copy/.test(node.textContent)), purpose);
+        assert.ok(!descendants(h.host).some(node => node.tagName === 'ol'), purpose);
+        if (purpose === 'Grok') assert.ok(descendants(h.host).some(node => node.href === 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling'));
+        if (purpose === 'Claude') assert.doesNotMatch(content, /built-in.*tunnel/);
       }
     }
-    const gemini = h.render('Gemini');
-    assert.doesNotMatch(gemini, /Network access|reachable MCP endpoint/);
-    assert.ok(gemini.includes('Current Gemini requirements'));
-    assert.ok(!descendants(h.host).some(node => node.className === 'notice warning'));
-    h.render('Automation / REST API');
-    assert.ok(!descendants(h.host).some(node => node.tagName === 'aside'));
   }
-  const publicHTTP = guideHarness('http://example.com');
-  const content = publicHTTP.render('OpenAI');
-  assert.doesNotMatch(content, /Local MCP address|this LAN address/);
-  assert.ok(!descendants(publicHTTP.host).some(node => node.className === 'notice warning'));
-  publicHTTP.render('Grok');
-  assert.ok(!descendants(publicHTTP.host).some(node => node.className === 'notice warning'));
-  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
-  assert.match(css, /\.notice:not\(\.warning\) \{[^}]*border: 1px solid var\(--jv-border\); background: var\(--jv-surface-sunken\)/);
+  const h = guideHarness();
+  assert.match(h.render('Claude'), /current JustVoxel address is private and cannot be reached directly/);
+  assert.match(h.render('Grok'), /xAI requires a custom MCP server to be reachable over the public internet/);
+  assert.match(h.render('Gemini'), /current JustVoxel endpoint does not meet that requirement/);
 });
 
-test('Settings starts with one address row and a shared how-to toolbar without repeated identity', () => {
+test('Settings uses an address row only when the selected client mode can use it', () => {
   const h = guideHarness();
-  for (const purpose of ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']) {
-    h.render(purpose, {settings: true});
+  for (const [purpose, mode] of [['OpenAI', 'Codex'], ['Claude', 'Claude Code'], ['GitHub Copilot', 'CLI'], ['GitHub Copilot', 'VS Code'], ['OpenClaw', 'Control UI'], ['OpenClaw', 'CLI'], ['Other AI / MCP app'], ['Automation / REST API']]) {
+    h.render(purpose, {settings: true, mode});
     const nodes = descendants(h.host);
     assert.ok(!nodes.some(node => node.className === 'gateway-connection-identity' || node.tagName === 'img'));
-    assert.doesNotMatch(guideText(h.host), /Ready to connect/);
     const address = h.host.children[0];
     assert.equal(address.className, 'gateway-address');
     assert.deepEqual(address.children.map(node => node.tagName), ['span', 'input', 'button']);
     assert.equal(address.children[0].textContent, purpose === 'Automation / REST API' ? 'REST API address' : 'MCP address');
     assert.equal(address.children[1].readOnly, true);
+    assert.equal(address.children[1].value, 'http://192.168.1.20:8099' + (purpose === 'Automation / REST API' ? '/api/v1' : '/mcp/jvc_current'));
     assert.equal(address.children[2].textContent, 'Copy');
-    const toolbar = h.host.children.find(node => node.className === 'gateway-guide-toolbar');
-    assert.equal(toolbar.children[0].textContent, 'How to connect');
-    const branded = !['Other AI / MCP app', 'Automation / REST API'].includes(purpose);
-    assert.equal(toolbar.children.some(node => node.textContent === 'Official setup guide ↗'), branded);
-    if (purpose === 'OpenAI') {
-      assert.deepEqual(toolbar.children[1].children.map(node => node.textContent), ['ChatGPT', 'Codex']);
-      assert.equal(toolbar.children[2].textContent, 'Official setup guide ↗');
-      toolbar.children[1].children[1].listeners.click();
-      assert.ok(guideText(h.host).includes('codex mcp add justvoxel --url http://192.168.1.20:8099/mcp/jvc_current'));
-      assert.ok(guideText(h.host).includes('Verify: codex mcp list'));
-    }
+    assert.equal(address.children[2]['data-gateway-copy-label'], 'Selected');
+    assert.equal(h.host.children[1].className, 'gateway-visually-hidden');
+    assert.equal(h.host.children[1].role, 'status');
+    assert.doesNotMatch(guideText(h.host), /Connection prerequisite|public.endpoint required|cannot be reached directly/);
   }
 });
 
-test('Settings steps are concise while Help retains the detailed provider manuals', () => {
-  const h = guideHarness();
-  for (const [purpose, limit, fullMinimum] of [
-    ['OpenAI', 7, 7], ['OpenClaw', 7, 7], ['Claude', 8, 9], ['Grok', 4, 5], ['Gemini', 6, 6],
-    ['Other AI / MCP app', 4, 4], ['Automation / REST API', 4, 5],
-  ]) {
-    h.render(purpose, {settings: true});
-    const steps = descendants(h.host).filter(node => node.tagName === 'li');
-    assert.equal(steps.length, limit, purpose);
-    assert.ok(!descendants(h.host).some(node => node.tagName === 'aside' || /\bnotice\b/.test(node.className || '')));
-    h.render(purpose, {help: true});
-    assert.ok(descendants(h.host).filter(node => node.tagName === 'li').length >= fullMinimum, purpose);
-    assert.equal(h.host.children[0].className, 'gateway-connection-identity');
-  }
-  h.render('GitHub Copilot', {settings: true});
-  assert.equal(descendants(h.host).filter(node => node.tagName === 'li').length, 0);
-  for (const command of ['copilot mcp add --transport http justvoxel http://192.168.1.20:8099/mcp/jvc_current', 'Authentication: /mcp auth justvoxel', 'Interactive: /mcp add']) assert.ok(guideText(h.host).includes(command));
-  h.render('GitHub Copilot', {help: true});
-  assert.ok(guideText(h.host).includes('Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.'));
-});
-
-test('Settings uses inline network, Gemini requirements and Copilot compatibility information', () => {
+test('Settings and Help use the same mode reachability rules', () => {
   for (const origin of ['http://192.168.1.20', 'https://192.168.1.20', 'http://example.com', 'https://example.com']) {
     const h = guideHarness(origin);
-    for (const purpose of ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']) {
-      h.render(purpose, {settings: true});
-      const nodes = descendants(h.host);
-      assert.ok(!nodes.some(node => node.tagName === 'aside' || /\bnotice\b/.test(node.className || '')));
-      const warnings = nodes.filter(node => node.className === 'gateway-inline-note gateway-inline-warning');
-      assert.equal(warnings.length, purpose === 'Grok' && origin.includes('192.168') ? 1 : 0);
-      if (purpose === 'Gemini') {
-        assert.ok(nodes.some(node => node.textContent === 'Requirements: 18+ · United States · Personal Google Account · Keep Activity · English' && node.className === 'gateway-inline-note'));
+    for (const [purpose, modes] of [['OpenAI', ['ChatGPT', 'Codex']], ['Claude', ['Claude', 'Claude Code']], ['GitHub Copilot', ['CLI', 'VS Code']], ['OpenClaw', ['Control UI', 'CLI']], ['Grok', [undefined]], ['Gemini', [undefined]]]) {
+      for (const mode of modes) {
+        const settings = h.render(purpose, {settings: true, mode});
+        const help = h.render(purpose, {help: true, mode});
+        assert.equal(settings.includes('Connection prerequisite'), help.includes('Connection prerequisite'), purpose + ': ' + mode);
+        assert.equal(h.host.children[0].className, 'gateway-connection-identity');
       }
-      if (purpose === 'GitHub Copilot') assert.ok(nodes.some(node => node.textContent === 'Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.' && node.className === 'gateway-inline-note'));
-      if (purpose === 'Automation / REST API') assert.ok(!nodes.some(node => node.className === 'gateway-inline-note'));
     }
+  }
+  const h = guideHarness();
+  const claude = h.render('Claude', {help: true});
+  assert.ok(claude.includes('Owner or Primary Owner'));
+  assert.ok(claude.includes('Organization settings → Connectors'));
+  const chatgpt = h.render('OpenAI', {help: true});
+  for (const phrase of ['Platform tunnel configuration', 'running tunnel-client', 'outbound connection to OpenAI', 'server itself can remain private']) assert.ok(chatgpt.includes(phrase), phrase);
+});
+
+test('generic MCP and REST reachability remain client-specific without AI cloud restrictions', () => {
+  const h = guideHarness();
+  for (const options of [{settings: true}, {help: true}]) {
+    const generic = h.render('Other AI / MCP app', options);
+    for (const phrase of ['depends on where your MCP client runs', 'local client can use this LAN address', 'cloud-hosted client usually needs', 'Streamable HTTP / HTTP', 'if that client can reach it', 'OAuth flow when supported', 'Compatibility depends on the client']) assert.ok(generic.includes(phrase), phrase);
+    assert.ok(descendants(h.host).some(node => node.value === 'http://192.168.1.20:8099/mcp/jvc_current'));
+    const rest = h.render('Automation / REST API', options);
+    for (const phrase of ['REST client/automation must be able to reach it', 'one-time JustVoxel API token', 'Store the token securely']) assert.ok(rest.includes(phrase), phrase);
+    assert.doesNotMatch(rest, /OAuth|MCP address|Connection prerequisite|cloud|public HTTPS/);
   }
 });
 
@@ -1213,110 +1251,91 @@ test('expiration is the single editable centered metric and keeps local draft an
   }
 });
 
-test('Settings provider paths are explicit and network guidance uses plain language', () => {
-  const h = guideHarness();
-  const required = [
-    ['OpenAI', 'ChatGPT', ['Settings → Plugins → MCPs', 'Select Add', 'Streamable HTTP', 'URL', 'Bearer token env var', 'Headers', 'OAuth', 'Save', 'sign in and approve', 'local network', 'ChatGPT runs in the cloud', 'cannot reach it directly', 'HTTPS address', 'ChatGPT Secure MCP Tunnel']],
-    ['OpenAI', 'Codex', ['codex mcp add justvoxel --url http://192.168.1.20:8099/mcp/jvc_current', 'codex mcp list', 'If authentication is required, Codex opens the JustVoxel sign-in flow.', 'computer running Codex can reach JustVoxel']],
-    ['Claude', undefined, ['Customize → Connectors', 'Add → Custom → Web', 'Sign in now', 'Sign in when needed', 'Register automatically', 'Anthropic infrastructure']],
-    ['Grok', undefined, ['grok.com/connectors', 'New Connector → Custom', 'private LAN address will not work directly']],
-    ['Gemini', undefined, ['gemini.google.com', 'Settings → Connected Apps', 'Add a custom app', 'Select Next']],
-    ['GitHub Copilot', undefined, ['copilot mcp add --transport http justvoxel http://192.168.1.20:8099/mcp/jvc_current', '/mcp auth justvoxel', '/mcp add', 'opens browser authentication when required', 'computer running Copilot CLI can reach JustVoxel']],
-    ['Other AI / MCP app', undefined, ['MCP-server settings in your client', 'Streamable HTTP server', 'authentication method supported by that client', 'Cloud clients may require a remotely reachable address']],
-    ['Automation / REST API', undefined, ['Copy the REST API address', 'one-time JustVoxel API token after creating', 'Store the token securely', 'connection credential']],
-  ];
-  for (const [purpose, mode, phrases] of required) {
-    const content = h.render(purpose, {settings: true, mode});
-    assert.doesNotMatch(content, /ⓘ/);
-    for (const phrase of phrases) assert.ok(content.includes(phrase), `${purpose}: ${phrase}`);
-    if (purpose === 'Automation / REST API') assert.doesNotMatch(content, /OAuth|authentication flow|local network|cloud/);
-    if (purpose === 'Gemini') assert.doesNotMatch(content, /local network|reachable|cloud/);
-  }
-  h.render('OpenAI', {help: true});
-  assert.ok(guideText(h.host).includes('Plugins → + → Add custom MCP server'));
-});
-
-
-test('OpenClaw Settings switches Control UI and CLI live without saving connection changes', async () => {
-  const connection = {id: 'jvc_current', name: 'Home', purpose: 'OpenClaw', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true};
-  const before = structuredClone(connection);
-  const h = settingsHarness(connection);
-  const host = h.node('[data-gateway-status]').afterChildren[0];
-  const toolbar = () => descendants(host).find(node => node.className === 'gateway-guide-toolbar');
-  const choose = mode => descendants(toolbar()).find(node => node.tagName === 'button' && node.textContent === mode).listeners.click();
-  assert.deepEqual(toolbar().children[1].children.map(node => node.textContent), ['Control UI', 'CLI']);
-  assert.equal(toolbar().children[1].children[0]['aria-pressed'], 'true');
-  assert.equal(toolbar().children.at(-1).href, 'https://docs.openclaw.ai/tools/mcp');
-  for (const mode of ['Control UI', 'CLI', 'Control UI', 'CLI']) {
-    choose(mode);
-    const content = guideText(host);
-    assert.equal(descendants(toolbar()).filter(node => node['aria-pressed'] === 'true').length, 1);
-    if (mode === 'Control UI') {
-      for (const phrase of ['Settings → MCP', 'Configured servers', 'Add server', 'JustVoxel', 'Streamable HTTP', 'OAuth', 'Sign in', 'openclaw mcp doctor justvoxel --probe']) assert.ok(content.includes(phrase), phrase);
-      assert.doesNotMatch(content, /openclaw mcp set/);
-    } else {
-      const command = descendants(host).find(node => node.value?.startsWith('openclaw mcp set justvoxel'));
-      assert.equal(command.value, `openclaw mcp set justvoxel '{"url":"https://voxel.example/mcp/jvc_current","transport":"streamable-http","auth":"oauth"}'`);
-      for (const phrase of ['openclaw mcp login justvoxel', 'openclaw mcp doctor justvoxel --probe', 'OpenClaw opens the JustVoxel OAuth authorization flow during login.']) assert.ok(content.includes(phrase), phrase);
-      await descendants(host).find(node => node.textContent === 'Copy command').listeners.click();
-      assert.ok(guideText(host).includes('Copied'));
-      assert.doesNotMatch(content, /Configured servers/);
+test('client modes default correctly and never mutate or persist connection changes', () => {
+  for (const [purpose, modes] of [['OpenAI', ['ChatGPT', 'Codex']], ['Claude', ['Claude', 'Claude Code']], ['GitHub Copilot', ['CLI', 'VS Code']], ['OpenClaw', ['Control UI', 'CLI']]]) {
+    const connection = {id: 'jvc_current', name: 'Home', purpose, auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true};
+    const before = structuredClone(connection);
+    const h = settingsHarness(connection);
+    const host = h.node('[data-gateway-status]').afterChildren[0];
+    const tabs = () => descendants(host).find(node => node.className === 'gateway-guide-modes');
+    assert.deepEqual(tabs().children.map(node => node.textContent), modes);
+    assert.equal(tabs().children[0]['aria-pressed'], 'true');
+    for (const mode of [...modes].reverse().concat(modes)) {
+      tabs().children.find(node => node.textContent === mode).listeners.click();
+      assert.equal(tabs().children.filter(node => node['aria-pressed'] === 'true').length, 1);
+      assert.equal(tabs().children.find(node => node.textContent === mode)['aria-pressed'], 'true');
+      assert.equal(h.requests.length, 0);
+      assert.deepEqual(connection, before);
     }
-    assert.equal(h.requests.length, 0);
-    assert.deepEqual(connection, before);
+    h.submit();
+    assert.equal(h.requests[0].connection.purpose, purpose);
+    assert.equal(h.requests[0].connection.id, 'jvc_current');
+    assert.equal(h.requests[0].connection.auth_mode, 'oauth_local');
+    assert.equal(Object.hasOwn(h.requests[0].connection, 'mode'), false);
   }
-  h.preview('Claude'); h.preview('OpenClaw');
-  assert.equal(toolbar().children[1].children[0]['aria-pressed'], 'true');
   assert.doesNotMatch(js, /localStorage|sessionStorage/);
 });
 
-test('OpenClaw Help retains Control UI, Composer, CLI, saved status and LAN guidance', () => {
-  for (const origin of ['http://192.168.1.20', 'https://192.168.1.20', 'http://10.0.0.2', 'http://localhost']) {
-    const h = guideHarness(origin);
-    for (const options of [{settings: true}, {settings: true, mode: 'CLI'}, {help: true}]) {
-      const content = h.render('OpenClaw', options);
-      assert.ok(content.includes('This local address can work when the OpenClaw Gateway can reach JustVoxel.'));
-      assert.doesNotMatch(content, /public|Internet|cannot reach|token connection/);
-      if (options.help) {
-        for (const phrase of ['Settings → MCP', 'Configured servers', '+ → Plugins → Add MCP server…', 'openclaw mcp set justvoxel', 'openclaw mcp login justvoxel', 'openclaw mcp doctor justvoxel --probe', 'openclaw mcp status --verbose']) assert.ok(content.includes(phrase), phrase);
-      } else assert.ok(!descendants(h.host).some(node => node.tagName === 'aside'));
-    }
-  }
-});
-
-test('Copilot Settings defaults to CLI and switches live to current VS Code setup', () => {
-  const connection = {id: 'jvc_current', name: 'Home', purpose: 'GitHub Copilot', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true};
-  const before = structuredClone(connection);
-  const h = settingsHarness(connection);
-  const host = h.node('[data-gateway-status]').afterChildren[0];
-  const toolbar = () => descendants(host).find(node => node.className === 'gateway-guide-toolbar');
-  assert.deepEqual(toolbar().children[1].children.map(node => node.textContent), ['CLI', 'VS Code']);
-  assert.equal(toolbar().children[1].children[0]['aria-pressed'], 'true');
-  for (const mode of ['VS Code', 'CLI', 'VS Code']) {
-    descendants(toolbar()).find(node => node.tagName === 'button' && node.textContent === mode).listeners.click();
-    const content = guideText(host);
-    assert.ok(content.includes('Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.'));
-    assert.doesNotMatch(content, /IDE MCP support varies|CLI.*unsupported|VS Code.*unsupported/);
-    if (mode === 'VS Code') {
-      for (const phrase of ['Command Palette', 'MCP: Add Server', 'HTTP', 'justvoxel', 'Global → Copilot Global', 'browser OAuth/sign-in', 'Chat → Open Customizations → MCP Servers → Add Server']) assert.ok(content.includes(phrase), phrase);
-      assert.equal(toolbar().children.at(-1).href, 'https://code.visualstudio.com/docs/agent-customization/mcp-servers');
-    } else {
-      for (const phrase of ['copilot mcp add --transport http justvoxel https://voxel.example/mcp/jvc_current', '/mcp add', 'Ctrl+S', '/mcp auth justvoxel']) assert.ok(content.includes(phrase), phrase);
-    }
-    assert.equal(h.requests.length, 0);
-    assert.deepEqual(connection, before);
-  }
-});
-
-test('Claude Settings and Help preserve the current Add Custom Web authentication flow', () => {
+test('OpenClaw local modes offer current Control UI and CLI setup and OAuth commands', async () => {
   const h = guideHarness();
   for (const options of [{settings: true}, {help: true}]) {
-    const content = h.render('Claude', options);
-    for (const phrase of ['Customize → Connectors', 'Add', 'Custom', 'Web', 'Continue', 'Authentication', 'Sign in now', 'Sign in when needed', 'OAuth client', 'Register automatically', 'Select Add.', 'JustVoxel sign-in and approval']) assert.ok(content.includes(phrase), phrase);
-    assert.doesNotMatch(content, /Add custom connector|\+ Add/);
+    const ui = h.render('OpenClaw', {...options, mode: 'Control UI'});
+    for (const phrase of ['Control UI → Settings → MCP', 'Configured servers', 'Add server', 'Name: JustVoxel', 'Transport: Streamable HTTP', 'OAuth', 'Sign in', 'openclaw mcp doctor justvoxel --probe']) assert.ok(ui.includes(phrase), phrase);
+    const cli = h.render('OpenClaw', {...options, mode: 'CLI'});
+    for (const phrase of ['openclaw mcp add justvoxel', '--url', '--transport streamable-http', 'openclaw mcp set justvoxel', '"auth":"oauth"', 'openclaw mcp login justvoxel', 'openclaw mcp doctor justvoxel --probe', 'openclaw mcp status --verbose']) assert.ok(cli.includes(phrase), phrase);
+    assert.doesNotMatch(cli, /Connection prerequisite/);
+    if (options.settings) assert.doesNotMatch(cli, /public|Internet/);
+    if (options.settings) {
+      const command = descendants(h.host).find(node => node.value?.startsWith('openclaw mcp add'));
+      assert.equal(command.value, 'openclaw mcp add justvoxel --url http://192.168.1.20:8099/mcp/jvc_current --transport streamable-http');
+      await command.parentNode.children[1].listeners.click();
+      assert.equal(h.copied[0], command.value);
+    }
   }
 });
 
+test('OpenClaw Gateway may reach private endpoints without a public internet prerequisite', () => {
+  for (const origin of ['http://192.168.1.20', 'https://192.168.1.20', 'http://10.0.0.2', 'http://localhost']) {
+    const h = guideHarness(origin);
+    for (const mode of ['Control UI', 'CLI']) {
+      for (const options of [{settings: true}, {help: true}]) {
+        const content = h.render('OpenClaw', {...options, mode});
+        assert.ok(content.includes('This local address can work when the OpenClaw Gateway can reach JustVoxel.'));
+        assert.doesNotMatch(content, /cannot reach|Connection prerequisite/);
+        if (options.settings) assert.doesNotMatch(content, /public|Internet/);
+        if (options.help && mode === 'Control UI') assert.ok(content.includes('+ → Plugins → Add MCP server…'));
+      }
+    }
+  }
+});
+
+test('Copilot CLI and VS Code use private HTTP URLs and distinguish command transport', () => {
+  const h = guideHarness();
+  const cli = h.render('GitHub Copilot', {settings: true});
+  for (const phrase of ['copilot mcp add --transport http justvoxel http://192.168.1.20:8099/mcp/jvc_current', '/mcp add', 'Ctrl+S', '/mcp auth justvoxel', 'OAuth re-authentication', 'copilot mcp list', 'STDIO is for launching a local MCP process']) assert.ok(cli.includes(phrase), phrase);
+  const code = h.render('GitHub Copilot', {settings: true, mode: 'VS Code'});
+  const steps = descendants(h.host).filter(node => node.tagName === 'li').map(node => node.textContent);
+  assert.deepEqual(steps, ['Open Command Palette.', 'Run MCP: Add Server.', 'Choose HTTP.', 'Paste the JustVoxel MCP endpoint.', 'Enter server ID: justvoxel.', 'Choose Global.', 'Choose Copilot Global.', 'Complete OAuth/browser authentication if requested.']);
+  assert.ok(code.includes('HTTP is correct because JustVoxel provides a URL'));
+  assert.ok(code.includes('Command/stdio is for launching a local MCP process'));
+  for (const content of [cli, code]) {
+    assert.doesNotMatch(content, /Connection prerequisite|public.endpoint|cannot reach/);
+    assert.ok(content.includes('Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.'));
+  }
+});
+
+test('Claude Code stays local-capable with HTTP OAuth and never inherits cloud prerequisites', () => {
+  const h = guideHarness();
+  for (const options of [{settings: true}, {help: true}]) {
+    const content = h.render('Claude', {...options, mode: 'Claude Code'});
+    for (const phrase of ['claude mcp add --transport http justvoxel', 'claude mcp login justvoxel', 'claude mcp get justvoxel', 'claude mcp list', 'machine where the CLI is running', 'HTTP servers support OAuth', 'No static bearer token', '/mcp']) assert.ok(content.includes(phrase), phrase);
+    assert.doesNotMatch(content, /Anthropic infrastructure|Connection prerequisite|remotely reachable|public.endpoint/);
+    if (options.settings) {
+      assert.ok(descendants(h.host).some(node => node.value === 'http://192.168.1.20:8099/mcp/jvc_current'));
+      assert.ok(descendants(h.host).some(node => node.value === 'claude mcp add --transport http justvoxel http://192.168.1.20:8099/mcp/jvc_current'));
+    }
+  }
+});
 
 test('OpenClaw preserves an existing external OAuth connection on Apply', () => {
   const oauth = {issuer: 'https://issuer.example', audience: 'https://voxel.example/mcp', jwks_uri: 'https://issuer.example/keys', scope: 'justvoxel:connect', subject: 'user', client_id: 'openclaw'};
@@ -1370,6 +1389,12 @@ test('default Help is a reference with provider manuals and developer integratio
   assert.doesNotMatch(normal, /Getting connected|Choose your app|data-gateway-help-providers|data-gateway-help-guide|How to connect/);
   for (const section of ['Access levels', 'Minecraft scope', 'Authentication', 'Network access']) assert.ok(normal.includes(`<h3>${section}</h3>`));
   for (const phrase of ['Selected servers', 'OAuth connections', 'Token connections', 'shown once', 'Local clients', 'Cloud clients']) assert.ok(normal.includes(phrase));
+  const local = normal.match(/<dt>Local clients<\/dt><dd>(.*?)<\/dd>/)[1];
+  for (const name of ['Codex', 'Claude Code', 'GitHub Copilot CLI', 'VS Code', 'OpenClaw', 'other local MCP clients']) assert.ok(local.includes(name), name);
+  assert.match(local, /machine running the client can reach JustVoxel/);
+  const cloud = normal.match(/<dt>Cloud clients<\/dt><dd>(.*?)<\/dd>/)[1];
+  for (const name of ['ChatGPT', 'Claude remote connectors', 'Grok', 'Gemini']) assert.ok(cloud.includes(name), name);
+  assert.match(cloud, /run outside your LAN/);
   const reference = help.slice(referenceStart, help.indexOf('<details class="panel"><summary>Developer integration'));
   assert.match(reference, /<summary>Provider reference<\/summary>/);
   assert.match(reference, /data-gateway-help-providers/);
@@ -1381,8 +1406,83 @@ test('default Help is a reference with provider manuals and developer integratio
     button.listeners.click();
     assert.ok(h.find('[data-gateway-help-guide]').children.length > 0);
   }
-  for (const [provider, phrases] of [['OpenAI', ['ChatGPT', 'Codex']], ['GitHub Copilot', ['CLI', 'VS Code']], ['OpenClaw', ['Control UI', 'CLI']]]) {
+  for (const [provider, phrases] of [['OpenAI', ['ChatGPT', 'Codex']], ['Claude', ['Claude', 'Claude Code']], ['GitHub Copilot', ['CLI', 'VS Code']], ['OpenClaw', ['Control UI', 'CLI']]]) {
     const content = h.render(provider, {help: true});
     for (const phrase of phrases) assert.ok(content.includes(phrase), provider + ': ' + phrase);
   }
+});
+
+test('ChatGPT Help documents both connection architectures for private and public endpoints', () => {
+  for (const origin of ['http://192.168.1.20:8099', 'https://voxel.example']) {
+    const h = guideHarness(origin);
+    const content = h.render('OpenAI', {help: true, mode: 'ChatGPT'});
+    for (const phrase of [
+      'Option 1 — Secure MCP Tunnel', 'Option 2 — Public HTTPS endpoint',
+      'ChatGPT → OpenAI Secure MCP Tunnel → tunnel-client on a machine that can reach JustVoxel → private JustVoxel MCP endpoint',
+      'outbound connection to OpenAI', 'can remain private on the LAN',
+      'Inbound exposure of port 8099 is not required merely for the tunnel',
+      'OpenAI Platform/workspace availability and permissions',
+      'secure public HTTPS endpoint reachable by ChatGPT', 'custom MCP/plugin with that HTTPS endpoint',
+      'JustVoxel OAuth remains the authentication flow',
+    ]) assert.ok(content.includes(phrase), phrase);
+    const urls = descendants(h.host).filter(node => node.tagName === 'a').map(node => node.href);
+    assert.ok(urls.includes('https://developers.openai.com/api/docs/guides/secure-mcp-tunnels'));
+    assert.ok(urls.includes('https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt'));
+    const codex = h.render('OpenAI', {help: true, mode: 'Codex'});
+    assert.ok(codex.includes('codex mcp add justvoxel --url <MCP_URL>'));
+    assert.ok(codex.includes('codex mcp list'));
+    assert.ok(codex.includes('JustVoxel LAN MCP URL directly when the machine running Codex can reach JustVoxel'));
+    assert.doesNotMatch(codex, /Secure MCP Tunnel|secure-mcp-tunnels/);
+  }
+});
+
+test('Help distinguishes cloud prerequisites from local Claude, Copilot and OpenClaw connections', () => {
+  for (const origin of ['http://192.168.1.20:8099', 'https://voxel.example']) {
+    const h = guideHarness(origin);
+    const claude = h.render('Claude', {help: true});
+    for (const phrase of ['requests originate from Anthropic infrastructure', 'private JustVoxel LAN URL is not directly reachable', 'endpoint reachable from Anthropic infrastructure']) assert.ok(claude.includes(phrase), phrase);
+    assert.doesNotMatch(claude, /tunnel/i);
+    const code = h.render('Claude', {help: true, mode: 'Claude Code'});
+    assert.ok(code.includes('machine where the CLI is running'));
+    assert.ok(code.includes('Claude Code is a local client'));
+    assert.ok(code.includes('JustVoxel LAN HTTP MCP endpoint when its machine can reach JustVoxel'));
+    assert.doesNotMatch(code, /Anthropic infrastructure|Connection prerequisite/);
+    const grok = h.render('Grok', {help: true});
+    for (const phrase of ['public Internet reachability', 'Private LAN URLs do not work directly', 'xAI documents tunneling for local MCP servers']) assert.ok(grok.includes(phrase), phrase);
+    assert.ok(descendants(h.host).some(node => node.href === 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling'));
+    if (origin.startsWith('http:')) assert.doesNotMatch(grok, /192\.168\.1\.20/);
+    const gemini = h.render('Gemini', {help: true});
+    for (const phrase of ['publicly reachable HTTPS Streamable HTTP MCP endpoint', 'Private LAN HTTP does not qualify', 'does not provide an automatic Google tunnel', 'Dynamic Client Registration']) assert.ok(gemini.includes(phrase), phrase);
+    assert.ok(descendants(h.host).some(node => node.href === 'https://developers.google.com/connected-apps/gpc/prerequisites'));
+    for (const mode of ['CLI', 'VS Code']) {
+      const copilot = h.render('GitHub Copilot', {help: true, mode});
+      assert.ok(copilot.includes('Their machine must be able to reach JustVoxel, so a private LAN URL may work directly'));
+      assert.doesNotMatch(copilot, /Connection prerequisite/);
+    }
+    for (const mode of ['Control UI', 'CLI']) {
+      const claw = h.render('OpenClaw', {help: true, mode});
+      for (const phrase of ['OpenClaw Gateway owns the MCP connection', 'Gateway can reach JustVoxel on the LAN', 'use the private endpoint directly', 'Public Internet exposure is not required']) assert.ok(claw.includes(phrase), phrase);
+      assert.doesNotMatch(claw, /Connection prerequisite/);
+    }
+  }
+});
+
+
+test('copy feedback has no visible status row and reserves intrinsic label width with standard sizing', async () => {
+  const h = guideHarness(); h.render('OpenAI', {settings: true, mode: 'Codex'});
+  const count = h.host.children.length;
+  const row = h.host.children[0];
+  const button = row.children[2];
+  await button.listeners.click();
+  assert.equal(button.textContent, 'Copied');
+  assert.equal(button.className, 'secondary');
+  assert.equal(h.host.children.length, count);
+  assert.equal(row.children.length, 3);
+  for (const node of descendants(h.host).filter(node => node.role === 'status')) assert.equal(node.className, 'gateway-visually-hidden');
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.match(css, /\[data-gateway-copy-label\] \{ display: inline-grid; white-space: nowrap;/);
+  assert.match(css, /content: attr\(data-gateway-copy-label\); visibility: hidden; height: 0/);
+  assert.match(header, /class="gateway-visually-hidden" data-gateway-address-status role="status"/);
+  const copyRule = css.match(/\[data-gateway-copy-label\] \{([^}]+)\}/)[1];
+  assert.doesNotMatch(copyRule, /padding|font|height/);
 });

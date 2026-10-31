@@ -46,6 +46,7 @@
 [data-agent-gateway-dialog] :is(input, select) { min-width: 0; max-width: 100%; }
 [data-agent-gateway-dialog] small { color: var(--jv-muted); }
 /* Compact provider choices retain native radio keyboard navigation. */
+[data-agent-gateway-dialog] .gateway-compatibility-summary { margin: .4rem 0 0; font-size: .8rem; }
 [data-agent-gateway-dialog] .gateway-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: .4rem; }
 [data-agent-gateway-dialog] .gateway-provider-card { position: relative; display: flex; align-items: center; gap: .5rem; box-sizing: border-box; width: 100%; min-width: 0; height: 64px; padding: .45rem .6rem; font-size: .85rem; margin: 0; border: 1px solid var(--jv-border-strong); border-radius: var(--jv-radius); background: var(--jv-surface-sunken); cursor: pointer; }
 [data-agent-gateway-dialog] .gateway-provider-card > span { display: grid; gap: .2rem; min-width: 0; overflow-wrap: anywhere; }
@@ -152,3 +153,7 @@
 @container gateway (max-width: 420px) {
   [data-agent-gateway-dialog] .gateway-status-metrics { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Reserve label space without changing shared button sizing or adding a status row. */
+[data-agent-gateway-dialog] [data-gateway-copy-label] { display: inline-grid; white-space: nowrap; }
+[data-agent-gateway-dialog] [data-gateway-copy-label]::after { content: attr(data-gateway-copy-label); visibility: hidden; height: 0; overflow: hidden; }

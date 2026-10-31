@@ -242,8 +242,8 @@
               <p>JustVoxel does not require an AI provider model API key merely to expose MCP.</p>
             </section>
             <section class="panel"><h3>Network access</h3>
-              <dl><dt>Local clients</dt><dd>Codex, Copilot CLI, OpenClaw or another client running on a machine that can reach JustVoxel may use a LAN address.</dd>
-              <dt>Cloud clients</dt><dd>Cloud-hosted providers may require an HTTPS address reachable from their infrastructure.</dd></dl>
+              <dl><dt>Local clients</dt><dd>Codex, Claude Code, GitHub Copilot CLI, VS Code, OpenClaw and other local MCP clients may use a JustVoxel LAN endpoint when the machine running the client can reach JustVoxel.</dd>
+              <dt>Cloud clients</dt><dd>ChatGPT, Claude remote connectors, Grok and Gemini run outside your LAN and may need a different connection path. ChatGPT supports Secure MCP Tunnel or reachable public HTTPS. Claude needs an endpoint reachable from Anthropic infrastructure; Grok requires public Internet access; Gemini requires public HTTPS Streamable HTTP. See Provider reference for each option. An HTTPS hostname alone does not prove provider reachability.</dd></dl>
             </section>
             <details class="panel" data-gateway-provider-reference><summary>Provider reference</summary>
               <p class="muted">Availability depends on your account, plan or subscription, and network access.</p>
@@ -251,9 +251,9 @@
               <section class="gateway-guide" data-gateway-help-guide aria-live="polite"></section>
             </details>
             <details class="panel"><summary>Developer integration</summary>
-              <p>Shared MCP endpoint (token and existing external sign-in connections)</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="MCP address" data-gateway-mcp><button type="button" class="secondary" data-gateway-copy-address="mcp">Copy</button></div>
-              <p>REST API endpoint</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="REST API address" data-gateway-rest><button type="button" class="secondary" data-gateway-copy-address="rest">Copy</button></div>
-              <p data-gateway-address-status role="status"></p>
+              <p>Shared MCP endpoint (token and existing external sign-in connections)</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="MCP address" data-gateway-mcp><button type="button" class="secondary" data-gateway-copy-label="Selected" data-gateway-copy-address="mcp">Copy</button></div>
+              <p>REST API endpoint</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="REST API address" data-gateway-rest><button type="button" class="secondary" data-gateway-copy-label="Selected" data-gateway-copy-address="rest">Copy</button></div>
+              <p class="gateway-visually-hidden" data-gateway-address-status role="status"></p>
               <p>OpenAPI: <a data-gateway-openapi target="_blank" rel="noopener"></a> (requires your connection credential).</p>
               <p>OAuth protected-resource metadata: <code data-gateway-metadata></code>. Required scope: <code>justvoxel:connect</code>.</p>
               <p>MCP uses Streamable HTTP with a bearer credential. Your app must support this protocol and the configured token or OAuth method.</p>
@@ -277,7 +277,7 @@
         <section role="group" aria-labelledby="gateway-provider-label"><h4 id="gateway-provider-label" data-gateway-purpose-label>What will use this connection?</h4>
           <div class="gateway-provider-grid" data-gateway-providers>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="OpenAI" checked><img class="gateway-provider-icon" src="/static/ai-providers/openai.svg" alt=""><span><strong>OpenAI</strong><small>ChatGPT &amp; Codex</small></span></label>
-            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Claude"><img class="gateway-provider-icon" src="/static/ai-providers/claude.svg" alt=""><span><strong>Claude</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Claude"><img class="gateway-provider-icon" src="/static/ai-providers/claude.svg" alt=""><span><strong>Claude</strong><small>Claude &amp; Claude Code</small></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Grok"><img class="gateway-provider-icon" src="/static/ai-providers/grok.svg" alt=""><span><strong>Grok</strong></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Gemini"><img class="gateway-provider-icon" src="/static/ai-providers/googlegemini.svg" alt=""><span><strong>Gemini</strong></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="GitHub Copilot"><img class="gateway-provider-icon" src="/static/ai-providers/githubcopilot.svg" alt=""><span><strong>GitHub Copilot</strong><small>CLI &amp; VS Code</small></span></label>
@@ -285,6 +285,7 @@
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Other AI / MCP app"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Other AI / MCP app</strong></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Automation / REST API"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Automation / REST API</strong></span></label>
           </div>
+          <p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden></p>
         </section>
         <section role="group" aria-labelledby="gateway-scope-label"><h4 id="gateway-scope-label">Which Minecraft servers?</h4>
           <input type="hidden" name="server_scope" value="all">

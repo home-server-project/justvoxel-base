@@ -154,6 +154,14 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 		t.Fatal("connection settings template missing")
 	}
 	form := match[1]
+	if strings.Count(form, `data-gateway-compatibility-summary`) != 1 || !regexp.MustCompile(`(?s)value="Automation / REST API".*?</label>\s*</div>\s*<p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden></p>`).MatchString(form) {
+		t.Error("Add must have one compact neutral compatibility summary immediately below the provider cards")
+	}
+	for _, forbidden := range []string{"data-gateway-copy", "MCP address", "codex mcp", "claude mcp", "https://", "http://"} {
+		if strings.Contains(form, forbidden) {
+			t.Errorf("configuration template contains connection instructions: %s", forbidden)
+		}
+	}
 	providers := regexp.MustCompile(`type="radio" name="purpose" value="([^"]+)"`).FindAllStringSubmatch(form, -1)
 	wantProviders := []string{"OpenAI", "Claude", "Grok", "Gemini", "GitHub Copilot", "OpenClaw", "Other AI / MCP app", "Automation / REST API"}
 	if len(providers) != len(wantProviders) {
@@ -166,6 +174,9 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 	}
 	if strings.Count(form, `value="OpenClaw"`) != 1 || !strings.Contains(form, `/static/ai-providers/openclaw.svg`) || !strings.Contains(form, `<strong>OpenClaw</strong><small>Control UI &amp; CLI</small>`) {
 		t.Error("OpenClaw must have one branded provider card with its local official icon and subtitle")
+	}
+	if !strings.Contains(form, `<strong>Claude</strong><small>Claude &amp; Claude Code</small>`) {
+		t.Error("Claude must identify Claude and Claude Code without a separate provider record")
 	}
 	if !strings.Contains(form, `<strong>GitHub Copilot</strong><small>CLI &amp; VS Code</small>`) {
 		t.Error("Copilot must identify both supported client modes")
@@ -218,6 +229,11 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 		t.Fatal("collapsed provider reference missing")
 	}
 	normal := help[:reference]
+	for _, phrase := range []string{"Codex, Claude Code, GitHub Copilot CLI, VS Code, OpenClaw and other local MCP clients", "machine running the client can reach JustVoxel", "ChatGPT, Claude remote connectors, Grok and Gemini run outside your LAN", "ChatGPT supports Secure MCP Tunnel or reachable public HTTPS", "Claude needs an endpoint reachable from Anthropic infrastructure", "Grok requires public Internet access", "Gemini requires public HTTPS Streamable HTTP"} {
+		if !strings.Contains(normal, phrase) {
+			t.Errorf("Network access guidance missing: %s", phrase)
+		}
+	}
 	for _, title := range []string{"Access levels", "Minecraft scope", "Authentication", "Network access"} {
 		if !strings.Contains(normal, "<h3>"+title+"</h3>") {
 			t.Errorf("visible reference section missing: %s", title)

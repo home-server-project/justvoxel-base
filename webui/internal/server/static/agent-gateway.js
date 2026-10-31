@@ -39,6 +39,16 @@
     ['Automation / REST API', {label: 'Automation / REST API'}],
   ]);
   const providerAuthMode = purpose => providers.get(purpose)?.icon ? 'oauth_local' : 'token';
+  const providerCompatibility = new Map([
+    ['OpenAI', 'ChatGPT: Secure MCP Tunnel or reachable public HTTPS · Codex: local/LAN supported'],
+    ['Claude', 'Claude: remotely reachable MCP required · Claude Code: local/LAN supported'],
+    ['Grok', 'Public Internet MCP endpoint required'],
+    ['Gemini', 'Public HTTPS Streamable HTTP endpoint required'],
+    ['GitHub Copilot', 'CLI & VS Code: local/LAN supported'],
+    ['OpenClaw', 'Control UI & CLI: local/LAN supported'],
+    ['Other AI / MCP app', 'Depends on whether the MCP client runs locally or in the cloud'],
+    ['Automation / REST API', 'Client must be able to reach the REST API endpoint'],
+  ]);
   const legacyPurposes = new Map([['AI Agent', 'AI assistant'], ['API Client', 'Automation or app'], ['Other', 'Other']]);
   const purposeLabel = purpose => providers.get(purpose)?.label || legacyPurposes.get(purpose) || purpose || 'Other AI / MCP app';
   const providerIcon = purpose => {
@@ -186,11 +196,24 @@
     }
   };
   // Presentation only: neither provider previews nor Help submit connection changes.
-  const copyText = async (value, field, status) => {
+  const copyText = async (value, field, status, button) => {
+    const originalLabel = button.gatewayCopyLabel || button.textContent;
+    button.gatewayCopyLabel = originalLabel;
+    const feedback = copied => {
+      clearTimeout(button.gatewayCopyTimer);
+      button.textContent = copied ? 'Copied' : 'Selected';
+      button.title = copied ? 'Copied' : 'Address selected — press Ctrl+C';
+      status.textContent = button.title;
+      button.gatewayCopyTimer = setTimeout(() => {
+        button.textContent = originalLabel;
+        button.title = '';
+        status.textContent = '';
+      }, 1800);
+    };
     if (navigator.clipboard?.writeText) {
       try {
         await navigator.clipboard.writeText(value);
-        status.textContent = 'Copied';
+        feedback(true);
         return;
       } catch (_) { /* LAN HTTP and browser permissions can prevent clipboard access. */ }
     }
@@ -207,11 +230,11 @@
       copied = Boolean(document.execCommand && document.execCommand('copy'));
     } catch (_) { /* Leave the original field selected for keyboard copying below. */ }
     finally { temporary.remove(); }
-    if (copied) { status.textContent = 'Copied'; return; }
+    if (copied) { feedback(true); return; }
     field.focus();
     field.select();
     field.setSelectionRange(0, value.length);
-    status.textContent = 'Selected — press Ctrl+C';
+    feedback(false);
   };
   const settingsDate = value => {
     if (!value) return 'Unavailable';
@@ -230,15 +253,31 @@
         octets[0] === 192 && octets[1] === 168 || octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31));
   };
   const secureAddress = address => new URL(address).protocol === 'https:';
+  // Modes affect instructions only; connection purpose and authentication stay unchanged.
+  const clientModes = {
+    OpenAI: {'ChatGPT': 'cloud', 'Codex': 'local'},
+    Claude: {'Claude': 'cloud', 'Claude Code': 'local'},
+    'GitHub Copilot': {'CLI': 'local', 'VS Code': 'local'},
+    OpenClaw: {'Control UI': 'local', 'CLI': 'local'},
+    Grok: {'Grok': 'cloud'}, Gemini: {'Gemini': 'cloud'},
+    'Other AI / MCP app': {'Other AI / MCP app': 'client'},
+    'Automation / REST API': {'Automation / REST API': 'rest'},
+  };
   const renderProviderGuide = (host, purpose, address, options = {}) => {
-    const modes = {OpenAI: ['ChatGPT', 'Codex'], 'GitHub Copilot': ['CLI', 'VS Code'], OpenClaw: ['Control UI', 'CLI']}[purpose];
-    const mode = modes?.includes(options.mode) ? options.mode : modes?.[0];
+    const modes = Object.keys(clientModes[purpose] || {});
+    const mode = modes.includes(options.mode) ? options.mode : modes[0];
+    const reachability = clientModes[purpose]?.[mode];
     const automation = purpose === 'Automation / REST API';
+    const privateEndpoint = localAddress(address);
+    const httpsEndpoint = secureAddress(address);
+    const definitelyPrivate = privateEndpoint === true;
+    const cloudCandidate = privateEndpoint === false && httpsEndpoint === true;
+    const prerequisite = reachability === 'cloud' && !cloudCandidate;
     host.replaceChildren();
     if (!options.settings) {
       const identity = text('div', ''); identity.className = 'gateway-connection-identity';
       const titles = text('div', '');
-      const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Custom connector', Grok: 'Custom MCP connector', Gemini: 'Custom connected app', 'GitHub Copilot': 'CLI & VS Code', OpenClaw: 'Control UI & CLI'}[purpose];
+      const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Claude & Claude Code', Grok: 'Custom MCP connector', Gemini: 'Custom connected app', 'GitHub Copilot': 'CLI & VS Code', OpenClaw: 'Control UI & CLI'}[purpose];
       titles.append(text('h3', purpose));
       if (subtitle) titles.append(text('p', subtitle));
       identity.append(providerIcon(purpose), titles); host.append(identity);
@@ -246,23 +285,25 @@
     const copyBlock = (value, label, caption) => {
       const row = text('div', ''); row.className = 'gateway-address';
       const copy = text('button', label); copy.type = 'button'; copy.className = 'secondary';
-      const status = text('p', ''); status.setAttribute('role', 'status');
+      copy.setAttribute('data-gateway-copy-label', label === 'Copy' ? 'Selected' : label);
+      const status = text('p', ''); status.className = 'gateway-visually-hidden'; status.setAttribute('role', 'status');
       const field = document.createElement('input');
       field.type = 'text'; field.readOnly = true; field.value = value;
       field.className = 'gateway-copy-field'; field.setAttribute('aria-label', caption || (label === 'Copy command' ? 'Command' : 'Address'));
       field.addEventListener('click', () => field.select());
-      copy.addEventListener('click', () => copyText(value, field, status));
+      copy.addEventListener('click', () => copyText(value, field, status, copy));
       if (caption) row.append(text('span', caption));
       row.append(field, copy); host.append(row, status);
     };
     const addressLabel = automation ? 'REST API address' : 'MCP address';
-    if (!options.settings) host.append(text('h4', addressLabel));
-    if (options.help && !automation && providers.get(purpose)?.icon) host.append(text('p', 'Copy the connection-specific MCP address from Settings.'));
-    else copyBlock(address, 'Copy', options.settings ? addressLabel : undefined);
+    if (!prerequisite) {
+      if (options.help && !automation && providers.get(purpose)?.icon) host.append(text('p', 'Copy the connection-specific MCP address from Settings if this client can reach it.'));
+      else copyBlock(address, 'Copy', addressLabel);
+    }
     const toolbar = options.settings ? text('div', '') : host;
     if (options.settings) { toolbar.className = 'gateway-guide-toolbar'; host.append(toolbar); }
     toolbar.append(text('h4', 'How to connect'));
-    if (modes && (options.settings || purpose !== 'OpenClaw')) {
+    if (modes.length > 1) {
       const tabs = text('div', ''); tabs.className = 'gateway-guide-modes'; tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', purpose + ' app');
       for (const choice of modes) {
         const button = text('button', choice); button.type = 'button'; button.className = 'secondary'; button.setAttribute('aria-pressed', String(choice === mode));
@@ -274,138 +315,149 @@
       const list = text('ol', ''); list.className = 'gateway-help-steps';
       for (const value of values) list.append(text('li', value)); host.append(list);
     };
-    const note = (title, body, warning = false) => {
-      const box = text('aside', ''); box.className = warning ? 'notice warning' : 'notice';
-      box.append(text('strong', title), text('p', body)); host.append(box); return box;
+    const inline = value => {
+      const line = text('p', value); line.className = 'gateway-inline-note'; host.append(line);
     };
-    const claudeSteps = ['Open Claude → Customize → Connectors.', 'Select Add → Custom → Web.', 'Enter a name and paste this JustVoxel MCP address.', 'Select Continue.', 'Under Authentication choose Sign in now or Sign in when needed.', 'Under OAuth client choose Register automatically.', 'Select Add.', 'Complete JustVoxel sign-in and approval.'];
-    const copilotCodeSteps = ['Open the Command Palette.', 'Run MCP: Add Server.', 'Choose HTTP.', 'Paste the JustVoxel MCP URL.', 'Enter server ID justvoxel.', 'Choose Global → Copilot Global.', 'Complete the browser OAuth/sign-in prompt when requested.'];
-    const copilotCodeAlternative = 'Alternative: Chat → Open Customizations → MCP Servers → Add Server.';
-    const copilotCloudLimit = 'Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.';
-    const openclawSteps = ['Open OpenClaw → Settings → MCP.', 'Under Configured servers select Add server.', 'Name it JustVoxel and choose Streamable HTTP.', 'Paste this JustVoxel MCP address and select Add server.', 'Configure the server to use OAuth, then select Sign in.', 'Complete JustVoxel sign-in and approval.', 'Verify with: openclaw mcp doctor justvoxel --probe'];
-    const openclawNetwork = 'This local address can work when the OpenClaw Gateway can reach JustVoxel.';
-    const openclawCLI = commandAddress => {
-      // Quote the JSON as one shell argument, including any apostrophe in the URL.
-      const config = JSON.stringify({url: commandAddress, transport: 'streamable-http', auth: 'oauth'}).replace(/'/g, "'\\''");
-      copyBlock(`openclaw mcp set justvoxel '${config}'`, 'Copy command');
-      host.append(text('code', 'openclaw mcp login justvoxel'), text('code', 'openclaw mcp doctor justvoxel --probe'));
-      host.append(text('p', 'OpenClaw opens the JustVoxel OAuth authorization flow during login.'));
+    const link = (label, url, parent = host) => {
+      const anchor = text('a', label); anchor.href = url; anchor.target = '_blank'; anchor.rel = 'noopener noreferrer'; parent.append(anchor);
     };
-    if (options.settings) {
-      const inline = (value, warning = false) => {
-        const line = text('p', value); line.className = warning ? 'gateway-inline-note gateway-inline-warning' : 'gateway-inline-note'; host.append(line);
-      };
-      const official = {
-        OpenAI: mode === 'Codex' ? 'https://developers.openai.com/learn/docs-mcp' : 'https://developers.openai.com/api/docs/guides/custom-mcp-server',
-        Claude: 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp',
-        Grok: 'https://docs.x.ai/grok/connectors', Gemini: 'https://support.google.com/gemini/answer/17209137',
-        'GitHub Copilot': mode === 'VS Code' ? 'https://code.visualstudio.com/docs/agent-customization/mcp-servers' : 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
-        OpenClaw: 'https://docs.openclaw.ai/tools/mcp',
-      }[purpose];
-      if (official) {
-        const link = text('a', 'Official setup guide ↗'); link.href = official; link.target = '_blank'; link.rel = 'noopener noreferrer'; toolbar.append(link);
-      }
+    const tunnelGuide = 'https://developers.openai.com/api/docs/guides/secure-mcp-tunnels';
+    const official = {
+      OpenAI: mode === 'Codex' ? 'https://developers.openai.com/learn/docs-mcp' : 'https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt',
+      Claude: mode === 'Claude Code' ? 'https://code.claude.com/docs/en/mcp' : 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp',
+      Grok: 'https://docs.x.ai/grok/connectors', Gemini: 'https://support.google.com/gemini/answer/17209137',
+      'GitHub Copilot': mode === 'VS Code' ? 'https://code.visualstudio.com/docs/agent-customization/mcp-servers' : 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
+      OpenClaw: mode === 'CLI' ? 'https://docs.openclaw.ai/cli/mcp/transports' : 'https://docs.openclaw.ai/tools/mcp',
+    }[purpose];
+    if (official && !prerequisite) link('Official setup guide ↗', official, toolbar);
+    if (purpose === 'Claude' && mode === 'Claude' && options.help) {
+      inline('For Team/Enterprise, an Owner or Primary Owner first adds the connector from Organization settings → Connectors.');
+    }
+    if (purpose === 'Gemini') {
+      inline('Requirements: 18+ · United States · Personal Google Account · Keep Activity on · English. Initial setup in Gemini web.');
+      inline('JustVoxel supports Dynamic Client Registration. Do not manually enter OAuth client credentials unless Google explicitly reports that automatic registration failed.');
+    }
+    if (options.help) {
       if (purpose === 'OpenAI' && mode === 'ChatGPT') {
-        steps(['Open ChatGPT → Settings → Plugins → MCPs.', 'Select Add and connect a custom MCP.', 'Choose Streamable HTTP.', 'Enter a name such as JustVoxel and paste this MCP address into URL.', 'Leave Bearer token env var and Headers empty — JustVoxel uses OAuth.', 'Select Save.', 'When ChatGPT opens JustVoxel, sign in and approve the requested access.']);
-        if (localAddress(address)) inline('This address works only inside your local network. ChatGPT runs in the cloud and cannot reach it directly. To connect ChatGPT, use an HTTPS address ChatGPT can reach or ChatGPT Secure MCP Tunnel.');
-        else if (!secureAddress(address)) inline('To connect ChatGPT, use an HTTPS address ChatGPT can reach or ChatGPT Secure MCP Tunnel.');
-      } else if (purpose === 'OpenAI') {
-        copyBlock(`codex mcp add justvoxel --url ${address}`, 'Copy command');
-        host.append(text('p', 'Verify: codex mcp list'), text('p', 'If authentication is required, Codex opens the JustVoxel sign-in flow.'));
-        if (localAddress(address)) inline('This local address can work when the computer running Codex can reach JustVoxel.');
-      } else if (purpose === 'Claude') {
-        steps(claudeSteps);
-        if (localAddress(address)) inline('This address is inside your local network. Claude remote connectors must be able to reach the JustVoxel MCP address from Anthropic infrastructure.');
+        host.append(text('h4', 'Option 1 — Secure MCP Tunnel'));
+        inline('ChatGPT → OpenAI Secure MCP Tunnel → tunnel-client on a machine that can reach JustVoxel → private JustVoxel MCP endpoint.');
+        inline('The tunnel-client makes an outbound connection to OpenAI; the JustVoxel MCP server itself can remain private on the LAN. Inbound exposure of port 8099 is not required merely for the tunnel.');
+        inline('Tunnel setup depends on OpenAI Platform/workspace availability and permissions. It requires Platform tunnel configuration and a running tunnel-client.');
+        link('Official Secure MCP Tunnel guide', tunnelGuide);
+        host.append(text('h4', 'Option 2 — Public HTTPS endpoint'));
+        inline('Expose the JustVoxel MCP endpoint through a secure public HTTPS endpoint reachable by ChatGPT, then configure the ChatGPT custom MCP/plugin with that HTTPS endpoint. JustVoxel OAuth remains the authentication flow.');
+        link('Official ChatGPT MCP guide', official);
+      } else if (purpose === 'Claude' && mode === 'Claude') {
+        inline('Claude remote connector requests originate from Anthropic infrastructure. A private JustVoxel LAN URL is not directly reachable; use an MCP endpoint reachable from Anthropic infrastructure.');
+      } else if (purpose === 'OpenAI' && mode === 'Codex') {
+        inline('Codex may use the JustVoxel LAN MCP URL directly when the machine running Codex can reach JustVoxel.');
+      } else if (purpose === 'Claude' && mode === 'Claude Code') {
+        inline('Claude Code is a local client. It can use the JustVoxel LAN HTTP MCP endpoint when its machine can reach JustVoxel.');
       } else if (purpose === 'Grok') {
-        steps(['Open grok.com/connectors.', 'Select New Connector → Custom.', 'Paste this JustVoxel MCP URL.', 'Complete authentication.']);
-        if (localAddress(address)) inline('Grok requires a publicly reachable MCP address. This private LAN address will not work directly.', true);
-        else inline('Grok requires a publicly reachable secure MCP address.');
+        inline('Grok custom MCP requires public Internet reachability. Private LAN URLs do not work directly. xAI documents tunneling for local MCP servers in its official tunneling guide.');
       } else if (purpose === 'Gemini') {
-        steps(['Open gemini.google.com.', 'Settings → Connected Apps.', 'Under Custom apps select Add a custom app.', 'Paste this JustVoxel MCP URL.', 'Select Next.', 'Complete the authentication flow.']);
-        inline('Requirements: 18+ · United States · Personal Google Account · Keep Activity · English');
+        inline('Gemini custom Connected Apps require a publicly reachable HTTPS Streamable HTTP MCP endpoint. Private LAN HTTP does not qualify. JustVoxel does not provide an automatic Google tunnel.');
+        if (!prerequisite) link('Official endpoint prerequisites', 'https://developers.google.com/connected-apps/gpc/prerequisites');
       } else if (purpose === 'GitHub Copilot') {
-        if (mode === 'VS Code') {
-          steps(copilotCodeSteps);
-          host.append(text('p', copilotCodeAlternative));
-        } else {
-          copyBlock(`copilot mcp add --transport http justvoxel ${address}`, 'Copy command');
-          host.append(text('p', 'Authentication: /mcp auth justvoxel'), text('p', 'Interactive: /mcp add — use Ctrl+S to save.'), text('p', '/mcp auth opens browser authentication when required.'));
-        }
-        if (localAddress(address)) inline(`This local address can work when the computer running ${mode === 'VS Code' ? 'VS Code' : 'Copilot CLI'} can reach JustVoxel.`);
-        inline(copilotCloudLimit);
+        inline('Copilot CLI and VS Code run locally. Their machine must be able to reach JustVoxel, so a private LAN URL may work directly.');
       } else if (purpose === 'OpenClaw') {
-        if (mode === 'CLI') openclawCLI(address);
-        else steps(openclawSteps);
-        if (localAddress(address)) inline(openclawNetwork);
-      } else if (automation) {
-        steps(['Copy the REST API address.', 'Copy the one-time JustVoxel API token after creating the connection.', 'Store the token securely.', 'Use it as the connection credential in the automation/client.']);
-      } else {
-        steps(['Open the MCP-server settings in your client.', 'Add a Streamable HTTP server.', 'Paste this MCP address.', 'Complete the authentication method supported by that client.']);
-        if (localAddress(address)) inline('Local clients can use this address when they can reach JustVoxel. Cloud clients may require a remotely reachable address.');
+        inline('The OpenClaw Gateway owns the MCP connection for Control UI and CLI. If that Gateway can reach JustVoxel on the LAN, it can use the private endpoint directly. Public Internet exposure is not required just for that OpenClaw connection.');
+      }
+    }
+    if (prerequisite) {
+      host.append(text('h4', 'Connection prerequisite'));
+      if (purpose === 'OpenAI') {
+        host.append(text('strong', 'ChatGPT needs a reachable connection'));
+        host.append(text('p', definitelyPrivate
+          ? `The current JustVoxel MCP endpoint is inside your local network. Do not paste this ${new URL(address).hostname} address into ChatGPT.`
+          : 'The current JustVoxel MCP endpoint is not HTTPS. Use a public HTTPS MCP endpoint that ChatGPT can reach, or Secure MCP Tunnel.'));
+        if (!options.help) {
+          host.append(text('p', 'For a private JustVoxel server, use ChatGPT Secure MCP Tunnel. Alternatively expose JustVoxel through a public HTTPS MCP endpoint.'));
+          inline('Secure MCP Tunnel runs OpenAI’s tunnel-client on a machine that can already reach JustVoxel and creates an outbound path to OpenAI. The JustVoxel MCP server itself can remain private.');
+          link('Secure MCP Tunnel guide', tunnelGuide);
+          link('Official ChatGPT MCP guide', official);
+        }
+        if (definitelyPrivate) inline(`Local JustVoxel endpoint (LOCAL reference only): ${address}`);
+      } else if (purpose === 'Claude') {
+        host.append(text('strong', 'Claude needs a remotely reachable MCP endpoint'));
+        host.append(text('p', definitelyPrivate
+          ? 'Claude remote connectors connect from Anthropic infrastructure. The current JustVoxel address is private and cannot be reached directly.'
+          : 'Claude remote connectors connect from Anthropic infrastructure. Open JustVoxel through an HTTPS MCP endpoint reachable from that infrastructure.'));
+        host.append(text('p', 'Make the MCP endpoint reachable from Anthropic infrastructure before continuing. This also applies to the normal remote-connector flow in Claude Desktop.'));
+        link('Official setup guide ↗', official);
+      } else if (purpose === 'Grok') {
+        host.append(text('strong', 'Public endpoint required'));
+        host.append(text('p', definitelyPrivate
+          ? 'Grok cannot use the current private JustVoxel address directly. xAI requires a custom MCP server to be reachable over the public internet.'
+          : 'Use a secure public HTTPS MCP endpoint that Grok can reach over the public internet.'));
+        host.append(text('p', 'Use a secure public endpoint or a tunnel, then return here with JustVoxel opened through that endpoint.'));
+        link('Official Grok tunneling guide', 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling');
+        link('Official setup guide ↗', official);
+      } else if (purpose === 'Gemini') {
+        host.append(text('strong', 'Public HTTPS endpoint required'));
+        host.append(text('p', 'Gemini custom Connected Apps require a publicly reachable HTTPS Streamable HTTP MCP endpoint. The current JustVoxel endpoint does not meet that requirement.'));
+        link('Official setup guide ↗', official);
+        link('Official endpoint prerequisites', 'https://developers.google.com/connected-apps/gpc/prerequisites');
       }
       return;
     }
     const commandAddress = options.help ? '<MCP_URL>' : address;
-    let guide;
+    if (reachability === 'cloud') inline(`The HTTPS MCP endpoint must be reachable by ${purpose === 'OpenAI' ? 'ChatGPT' : purpose === 'Claude' ? 'Anthropic infrastructure' : purpose}. Its URL alone does not prove reachability.`);
     if (purpose === 'OpenAI' && mode === 'ChatGPT') {
-      steps(['Open ChatGPT → Settings → Plugins → MCPs.', 'Select Add and connect a custom MCP.', 'Choose Streamable HTTP.', 'Enter a name such as JustVoxel and paste the JustVoxel MCP address into URL.', 'Leave Bearer token env var and Headers empty — JustVoxel uses OAuth.', 'Select Save.', 'When ChatGPT opens JustVoxel, sign in and approve the requested access.']);
-      host.append(text('p', 'OpenAI also documents this flow as Plugins → + → Add custom MCP server.'));
-      if (localAddress(address)) note('Local MCP address', 'ChatGPT cloud cannot reach this LAN address directly. Use a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.');
-      else if (!secureAddress(address)) note('HTTPS endpoint', 'ChatGPT cloud needs a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.');
-      guide = 'https://developers.openai.com/api/docs/guides/custom-mcp-server';
+      steps(['Open ChatGPT → Plugins.', 'Select + → Add custom MCP server.', 'Under Connection, enter the public HTTPS MCP endpoint. If using Secure MCP Tunnel, choose Tunnel instead and select the tunnel.', 'Configure authentication.', 'Review the risk warning.', 'Select Create as a plugin.', 'Complete JustVoxel sign-in/approval when prompted.']);
+      inline('If your ChatGPT desktop Settings shows Plugins → MCPs → Add, choose Streamable HTTP for a URL-based JustVoxel connection. STDIO is for launching a local MCP process and is not the JustVoxel HTTP endpoint. Enter the reachable HTTPS MCP address in URL. Leave Bearer token env var and Headers empty for JustVoxel OAuth.');
+      link('Secure MCP Tunnel guide', tunnelGuide);
+      if (options.help) link('Official ChatGPT plugin guide', 'https://developers.openai.com/plugins/deploy/connect-chatgpt');
     } else if (purpose === 'OpenAI') {
       copyBlock(`codex mcp add justvoxel --url ${commandAddress}`, 'Copy command');
-      host.append(text('p', 'Verify the connection:'), text('code', 'codex mcp list'));
-      host.append(text('p', 'Codex opens the JustVoxel OAuth flow when authentication is required. Codex CLI and IDE share MCP configuration.'));
-      note('Network access', 'This LAN address can work when the computer running Codex can reach JustVoxel.');
-      guide = 'https://developers.openai.com/learn/docs-mcp';
+      host.append(text('code', 'codex mcp list'));
+      inline('If authentication is required, Codex opens the JustVoxel sign-in flow.');
+      if (definitelyPrivate) inline('This local address can work when the computer running Codex can reach JustVoxel.');
+    } else if (purpose === 'Claude' && mode === 'Claude Code') {
+      copyBlock(`claude mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
+      for (const command of ['claude mcp login justvoxel', 'claude mcp get justvoxel', 'claude mcp list']) host.append(text('code', command));
+      inline('Claude Code connects from the machine where the CLI is running. This local JustVoxel address can work when that machine can reach the server.');
+      inline('Remote HTTP is the recommended transport. HTTP servers support OAuth; claude mcp login runs the configured server’s OAuth flow. No static bearer token is required for JustVoxel oauth_local. Interactive alternative inside Claude Code: /mcp');
     } else if (purpose === 'Claude') {
-      steps([claudeSteps[0], 'Select Add.', 'Choose Custom → Web.', ...claudeSteps.slice(2)]);
-      note('OAuth client: Register automatically', 'JustVoxel currently supports Dynamic Client Registration.');
-      if (localAddress(address)) note('Remote connector network access', 'Claude remote connectors need an MCP address reachable from Anthropic infrastructure.');
-      guide = 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp';
+      steps(['For Pro/Max: open Claude → Customize → Connectors.', 'Select + Add → Add custom connector.', 'Enter a name and the JustVoxel MCP URL.', 'Select Continue.', 'Choose Sign in now or Sign in when needed.', 'Under OAuth client choose Register automatically.', 'Add the connector.', 'Complete JustVoxel sign-in and approval.']);
+      inline('JustVoxel supports Dynamic Client Registration.');
     } else if (purpose === 'Grok') {
-      steps(['Open grok.com/connectors.', 'Select New Connector.', 'Select Custom.', 'Enter the JustVoxel MCP URL.', 'Complete JustVoxel authentication.']);
-      if (localAddress(address)) note('Public endpoint required', 'Grok cannot reach this private LAN address directly. Use an appropriate publicly reachable secure endpoint or tunnel.', true);
-      else note('Remote connector network access', 'Grok requires a publicly reachable secure MCP endpoint.');
-      guide = 'https://docs.x.ai/grok/connectors';
+      steps(['Open grok.com/connectors.', 'Select New Connector → Custom.', 'Enter the reachable JustVoxel MCP URL.', 'Complete authentication.']);
+      link('Official Grok tunneling guide', 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling');
     } else if (purpose === 'Gemini') {
-      steps(['Open gemini.google.com.', 'Open Settings → Connected Apps (or Personal Intelligence → Connected Apps).', 'Under Custom apps, select Add a custom app.', 'Enter the JustVoxel MCP URL.', 'Select Next.', 'Complete JustVoxel authentication.']);
-      const availability = note('Current Gemini requirements', 'Google may change availability.');
-      const list = text('ul', ''); list.className = 'gateway-requirements';
-      for (const requirement of ['Age 18+', 'United States', 'Personal Google Account', 'Keep Activity enabled', 'English', 'Initial setup in Gemini web']) list.append(text('li', '✓ ' + requirement));
-      availability.append(list);
-      host.append(text('p', 'JustVoxel supports Dynamic Client Registration, so manual OAuth client credentials under Advanced features should not normally be required.'));
-      guide = 'https://support.google.com/gemini/answer/17209137';
+      steps(['Open gemini.google.com.', 'Settings → Connected Apps. If needed: Personal Intelligence → Connected Apps.', 'Under Custom apps select Add a custom app.', 'Enter the JustVoxel MCP URL.', 'Select Next.', 'Complete JustVoxel authentication.']);
     } else if (purpose === 'GitHub Copilot') {
       if (mode === 'VS Code') {
-        steps(copilotCodeSteps);
-        host.append(text('p', copilotCodeAlternative));
+        steps(['Open Command Palette.', 'Run MCP: Add Server.', 'Choose HTTP.', 'Paste the JustVoxel MCP endpoint.', 'Enter server ID: justvoxel.', 'Choose Global.', 'Choose Copilot Global.', 'Complete OAuth/browser authentication if requested.']);
+        inline('HTTP is correct because JustVoxel provides a URL. Command/stdio is for launching a local MCP process.');
+        if (options.help) inline('Alternative: Chat → Open Customizations → MCP Servers → Add Server.');
       } else {
         copyBlock(`copilot mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
-        host.append(text('p', 'If authentication or re-authentication is required, open browser sign-in with:'), text('code', '/mcp auth justvoxel'));
-        host.append(text('p', 'Interactive setup is also available: /mcp add — use Ctrl+S to save.'));
+        host.append(text('code', '/mcp auth justvoxel'), text('code', 'copilot mcp list'));
+        inline('Interactive alternative: /mcp add — choose HTTP and press Ctrl+S to save. JustVoxel is a remote HTTP server; STDIO is for launching a local MCP process. /mcp auth justvoxel starts OAuth re-authentication for a remote MCP server.');
       }
-      note('Network access', mode === 'VS Code' ? 'VS Code can use this LAN address when the machine running VS Code can reach JustVoxel.' : 'Copilot CLI can use this LAN address when the machine running Copilot can reach JustVoxel.');
-      note('Compatibility', copilotCloudLimit);
-      guide = mode === 'VS Code' ? 'https://code.visualstudio.com/docs/agent-customization/mcp-servers' : 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers';
+      if (definitelyPrivate) inline(`This local address can work when the computer running ${mode === 'VS Code' ? 'VS Code' : 'Copilot CLI'} can reach JustVoxel.`);
+      inline('Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.');
     } else if (purpose === 'OpenClaw') {
-      steps(openclawSteps);
-      host.append(text('p', 'Composer: + → Plugins → Add MCP server…'));
-      host.append(text('h4', 'CLI'));
-      openclawCLI(commandAddress);
-      host.append(text('p', 'Saved configuration/status: openclaw mcp status --verbose'));
-      if (localAddress(address)) host.append(text('p', openclawNetwork));
-      guide = 'https://docs.openclaw.ai/tools/mcp';
+      if (mode === 'CLI') {
+        copyBlock(`openclaw mcp add justvoxel --url ${commandAddress} --transport streamable-http`, 'Copy command');
+        const config = JSON.stringify({url: commandAddress, transport: 'streamable-http', auth: 'oauth'}).replace(/'/g, "'\\''");
+        inline('Configure OAuth if needed:');
+        copyBlock(`openclaw mcp set justvoxel '${config}'`, 'Copy command');
+        host.append(text('code', 'openclaw mcp login justvoxel'));
+        inline('OpenClaw opens the JustVoxel OAuth authorization flow during login.');
+      } else {
+        steps(['Open OpenClaw Control UI → Settings → MCP.', 'Under Configured servers select Add server.', 'Name: JustVoxel.', 'Transport: Streamable HTTP.', 'Paste the JustVoxel MCP URL.', 'Select Add server.', 'Configure auth as OAuth and select Sign in when available.', 'Verify: openclaw mcp doctor justvoxel --probe']);
+        if (options.help) inline('Composer: + → Plugins → Add MCP server…');
+      }
+      host.append(text('code', 'openclaw mcp doctor justvoxel --probe'), text('code', 'openclaw mcp status --verbose'));
+      if (definitelyPrivate) inline('This local address can work when the OpenClaw Gateway can reach JustVoxel.');
     } else if (automation) {
-      host.append(text('h4', 'Authentication'), text('p', 'JustVoxel API token'));
-      steps(['Create the connection.', 'Copy the one-time scoped JustVoxel API token.', 'Store it securely; the token is shown only once.', 'Send it as the connection credential from the automation or client.', 'Requests remain limited by the configured JustVoxel access level and Minecraft scope.']);
+      steps(['Copy the REST API address. The REST client/automation must be able to reach it.', 'Copy the one-time JustVoxel API token after creating the connection.', 'Store the token securely.', 'Use it as the connection credential in the automation/client.']);
     } else {
-      steps(['Add a remote Streamable HTTP MCP server in a compatible client.', 'Use this MCP address.', 'Complete the authentication method supported by that client; use the JustVoxel token for token connections.', 'Confirm the connection permissions in JustVoxel.']);
-      note('Network access', 'Local clients may use a LAN endpoint if they can reach JustVoxel. Cloud clients depend on their own network requirements.');
-    }
-    if (guide) {
-      const link = text('a', 'Official setup guide ↗'); link.href = guide; link.target = '_blank'; link.rel = 'noopener noreferrer'; host.append(link);
+      inline('This connection type depends on where your MCP client runs. A local client can use this LAN address when it can reach JustVoxel. A cloud-hosted client usually needs an endpoint reachable from its own infrastructure.');
+      steps(['Find the MCP server settings in your client.', 'Choose Streamable HTTP / HTTP for a URL-based server.', 'Paste the JustVoxel MCP address if that client can reach it.', 'Use the client’s OAuth flow when supported.']);
+      inline('Compatibility depends on the client. For token connections, use the scoped JustVoxel API token.');
     }
   };
   // Both form modes keep individual draft selections while All servers is on.
@@ -464,6 +516,15 @@
       form.querySelector('[data-gateway-providers]').append(label);
     }
     field('purpose').value = c.purpose || 'OpenAI';
+    const compatibility = form.querySelector('[data-gateway-compatibility-summary]');
+    compatibility.hidden = Boolean(c.id);
+    if (!c.id) {
+      const previewCompatibility = () => {
+        compatibility.textContent = providerCompatibility.get(field('purpose').value) || providerCompatibility.get('Other AI / MCP app');
+      };
+      form.querySelectorAll('input[name="purpose"]').forEach(input => input.addEventListener('change', previewCompatibility));
+      previewCompatibility();
+    }
     if (c.id) {
       form.querySelector('[data-gateway-purpose-label]').textContent = 'Provider';
       form.querySelector('[data-gateway-level-label]').textContent = 'Access level';
@@ -553,7 +614,7 @@
     button.addEventListener('click', async () => {
       const status = find('[data-gateway-address-status]');
       const field = find(`[data-gateway-${button.dataset.gatewayCopyAddress}]`);
-      await copyText(field.value, field, status);
+      await copyText(field.value, field, status, button);
     });
   }
   for (const [selector, path] of [['[data-gateway-mcp]', '/mcp'], ['[data-gateway-rest]', '/api/v1'], ['[data-gateway-openapi]', '/api/v1/openapi.json'], ['[data-gateway-metadata]', '/.well-known/oauth-protected-resource/mcp']]) {
