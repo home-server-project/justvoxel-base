@@ -209,6 +209,9 @@ func serve(socket string) error {
 		return fmt.Errorf("open operation journal: %w", err)
 	}
 	defer operations.close()
+	if err := reconcileMinecraftUpdateFailureAtStartup(operations); err != nil {
+		log.Printf("Minecraft update startup reconciliation: %v; startup continues", err)
+	}
 
 	webAccount, err := user.Lookup("justvoxel-web")
 	if err != nil {

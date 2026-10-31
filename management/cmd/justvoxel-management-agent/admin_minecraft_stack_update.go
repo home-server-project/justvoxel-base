@@ -174,12 +174,11 @@ func executeMinecraftStackUpdate(ctx context.Context, s *server, operationID str
 		}
 		// A stopped update remains a failure even when its current runtime is safe.
 		verifyCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		verifyCtx = context.WithValue(verifyCtx, instanceVersionKey{}, request.InstanceID)
-		verifyErr := verifyMinecraftStack(verifyCtx)
+		verifyErr := verifyMinecraftFailedUpdateSafeToRelease(verifyCtx, request.InstanceID)
 		cancel()
 		var transitionErr error
 		if verifyErr == nil {
-			_, transitionErr = s.operations.transition(operationID, operationResolved, "resolved", "Server update stopped. Current Minecraft runtime verified and kept automatically. No update was retried.")
+			_, transitionErr = s.operations.transition(operationID, operationResolved, "resolved", "Server update stopped. Already-running committed runtime independently verified and kept automatically. No update was retried.")
 		}
 		err = errors.Join(err, verifyErr, transitionErr)
 	} else {

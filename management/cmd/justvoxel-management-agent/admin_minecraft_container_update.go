@@ -233,10 +233,10 @@ func executeMinecraftContainerUpdate(ctx context.Context, s *server, id string, 
 		if transitionErr == nil {
 			// Persist the failure before proving safety, independently of the update deadline.
 			verifyCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-			verifyErr := recoverAndVerifyMinecraftContainerCurrent(verifyCtx, request.InstanceID)
+			verifyErr := verifyMinecraftFailedUpdateSafeToRelease(verifyCtx, request.InstanceID)
 			cancel()
 			if verifyErr == nil {
-				_, transitionErr = s.operations.transition(id, operationResolved, "resolved", "Container update stopped. Current runtime verified and kept automatically. No update was retried.")
+				_, transitionErr = s.operations.transition(id, operationResolved, "resolved", "Container update stopped. Already-running committed runtime independently verified and kept automatically. No update was retried.")
 			}
 			err = errors.Join(err, verifyErr, transitionErr)
 		}

@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestContainerStrictInstanceContractAndStaleReview(t *testing.T) {
@@ -101,106 +98,7 @@ func boolText(value bool) string {
 }
 
 func TestContainerWorkerFailureRetainsMaintenance(t *testing.T) {
-	for _, scenario := range []string{"safe", "recovered", "verification_failed", "recovery_failed"} {
-		t.Run(scenario, func(t *testing.T) {
-			oldRun, oldVerify, oldRuntime := runMinecraftContainerUpdate, verifyMinecraftContainerCurrent, instanceRuntimes
-			t.Cleanup(func() {
-				runMinecraftContainerUpdate, verifyMinecraftContainerCurrent, instanceRuntimes = oldRun, oldVerify, oldRuntime
-			})
-			f := newInstanceActivationFixture(t)
-			f.backend.networkRoot = filepath.Join(t.TempDir(), "network")
-			instanceRuntimes = f.backend
-			id := f.configs[0].ID
-			if scenario == "recovered" {
-				f.failReload = 2
-				if err := f.apply(id); !errors.Is(err, errInstanceRecovery) {
-					t.Fatalf("prepare recoverable runtime: %v", err)
-				}
-			}
-			if scenario == "recovery_failed" {
-				dir, _, _ := f.backend.paths(id)
-				if err := f.backend.writeJSON(filepath.Join(dir, "pending.json"), map[string]any{}, false); err != nil {
-					t.Fatal(err)
-				}
-			}
-			s := surfaceTestServer(t, roleAdministrator)
-			s.operations = openTestOperationStore(t)
-			journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftContainerUpdate, id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			updateErr, verifyErr := errors.New("update failed"), errors.New("verification failed")
-			calls, verifies := 0, 0
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			runMinecraftContainerUpdate = func(ctx context.Context, r minecraftContainerUpdateRequest) error {
-				calls++
-				if _, ok := ctx.Value(operationTraceKey{}).(operationTraceContext); !ok || r.InstanceID != id {
-					t.Fatal("trace or immutable instance detached")
-				}
-				cancel()
-				return updateErr
-			}
-			verifyMinecraftContainerCurrent = func(ctx context.Context, selected string) error {
-				verifies++
-				deadline, bounded := ctx.Deadline()
-				if selected != id || ctx.Err() != nil || !bounded || time.Until(deadline) > 90*time.Second {
-					t.Fatal("verification lost immutable instance or fresh bounded context")
-				}
-				var durable operationJournal
-				data, err := os.ReadFile(filepath.Join(s.operations.operationsDir, journal.OperationID+".json"))
-				if err != nil || json.Unmarshal(data, &durable) != nil || durable.State != operationNeedsAttention || durable.Stage != "update_failed" {
-					t.Fatalf("verification preceded durable failure: %+v %v", durable, err)
-				}
-				if pending, err := f.backend.pending(id); err != nil || pending {
-					t.Fatal("verification preceded runtime recovery", pending, err)
-				}
-				if scenario == "verification_failed" {
-					return verifyErr
-				}
-				return nil
-			}
-			err = executeMinecraftContainerUpdate(ctx, s, journal.OperationID, minecraftContainerUpdateRequest{InstanceID: id, PlanFingerprint: testMinecraftResetFingerprint}, session{})
-			if !errors.Is(err, updateErr) || calls != 1 {
-				t.Fatalf("update failure lost or retried: %v calls=%d", err, calls)
-			}
-			if scenario == "verification_failed" && !errors.Is(err, verifyErr) {
-				t.Fatal("verification error lost", err)
-			}
-			if scenario == "recovery_failed" {
-				if verifies != 0 || !errors.Is(err, errContainerRuntimeRecovery) {
-					t.Fatal("failed recovery bypassed or lost", verifies, err)
-				}
-			} else if verifies != 1 {
-				t.Fatal("runtime verification not performed exactly once", verifies)
-			}
-			finished, err := s.operations.get(journal.OperationID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			current, err := s.operations.currentMinecraftMaintenance()
-			if err != nil {
-				t.Fatal(err)
-			}
-			safe := scenario == "safe" || scenario == "recovered"
-			if safe {
-				if finished.State != operationResolved || current != nil || s.operations.currentMinecraftResetID != "" || !strings.Contains(finished.Status, "stopped") || !strings.Contains(finished.Status, "kept automatically") {
-					t.Fatalf("verified runtime retained maintenance or lost failure status: %+v current=%+v", finished, current)
-				}
-			} else if finished.State != operationNeedsAttention || finished.Stage != "update_failed" || finished.Status != "Update stopped. Check the details below. You can keep the current version or try again." || current == nil || current.OperationID != journal.OperationID {
-				t.Fatalf("unsafe failure changed or released maintenance: %+v current=%+v", finished, current)
-			}
-			for _, held := range []bool{s.operations.setupLockHeld, s.operations.restoreLockHeld, s.operations.dataMigrationLockHeld, s.operations.migrationLockHeld} {
-				if held == safe {
-					t.Fatal("incorrect shared exclusion lock ownership")
-				}
-			}
-			_, created, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypePluginInstall, "jv-d4e5f6")
-			if safe && (err != nil || !created) || !safe && err == nil {
-				t.Fatalf("competing maintenance: created=%v err=%v", created, err)
-			}
-		})
-	}
+	testFailedMinecraftUpdateWorker(t, operationTypeMinecraftContainerUpdate)
 }
 
 func TestContainerPullActualOutputThroughProtectedTrace(t *testing.T) {

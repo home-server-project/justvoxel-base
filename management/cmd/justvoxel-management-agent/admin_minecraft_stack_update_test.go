@@ -6,11 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestMinecraftStackStatusStatesAndPrivateArtifactMetadata(t *testing.T) {
@@ -94,78 +91,7 @@ func TestMinecraftStackApplyAuthorizationStrictRequestAndReview(t *testing.T) {
 }
 
 func TestMinecraftStackWorkerFailureIsPersistentAndNeverRetries(t *testing.T) {
-	for _, safe := range []bool{true, false} {
-		t.Run(boolText(safe), func(t *testing.T) {
-			whitelistSurfaceFixture(t)
-			oldRun, oldVerify := runMinecraftStackUpdate, verifyMinecraftStack
-			t.Cleanup(func() { runMinecraftStackUpdate, verifyMinecraftStack = oldRun, oldVerify })
-			s := surfaceTestServer(t, roleAdministrator)
-			s.operations = openTestOperationStore(t)
-			journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate, "jv-a1b2c3")
-			if err != nil {
-				t.Fatal(err)
-			}
-			calls, verifies := 0, 0
-			updateErr, verifyErr := errors.New("fixture failure"), errors.New("unsafe stack")
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			runMinecraftStackUpdate = func(ctx context.Context, _ string, _ bool, _, _ string) error {
-				calls++
-				if ctx.Value(instanceVersionKey{}) != journal.InstanceID {
-					t.Fatal("update lost immutable instance")
-				}
-				cancel()
-				return updateErr
-			}
-			verifyMinecraftStack = func(ctx context.Context) error {
-				verifies++
-				deadline, bounded := ctx.Deadline()
-				if ctx.Value(instanceVersionKey{}) != journal.InstanceID || ctx.Err() != nil || !bounded || time.Until(deadline) > 90*time.Second {
-					t.Fatal("verification lost immutable instance or fresh bounded context")
-				}
-				var durable operationJournal
-				data, err := os.ReadFile(filepath.Join(s.operations.operationsDir, journal.OperationID+".json"))
-				if err != nil || json.Unmarshal(data, &durable) != nil || durable.State != operationNeedsAttention || durable.Stage != "update_failed" {
-					t.Fatalf("verification preceded durable failure: %+v %v", durable, err)
-				}
-				if !safe {
-					return verifyErr
-				}
-				return nil
-			}
-			err = executeMinecraftStackUpdate(ctx, s, journal.OperationID, minecraftStackUpdateRequest{InstanceID: journal.InstanceID, PlanFingerprint: testMinecraftResetFingerprint}, session{})
-			if !errors.Is(err, updateErr) || calls != 1 || verifies != 1 {
-				t.Fatalf("update failure lost or retried: %v calls=%d verifies=%d", err, calls, verifies)
-			}
-			if !safe && !errors.Is(err, verifyErr) {
-				t.Fatal("verification error lost", err)
-			}
-			finished, err := s.operations.get(journal.OperationID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			current, err := s.operations.currentMinecraftMaintenance()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if safe {
-				if finished.State != operationResolved || current != nil || s.operations.currentMinecraftResetID != "" || !strings.Contains(finished.Status, "stopped") || !strings.Contains(finished.Status, "kept automatically") {
-					t.Fatalf("verified runtime retained maintenance or lost failure status: %+v current=%+v", finished, current)
-				}
-			} else if finished.State != operationNeedsAttention || finished.Stage != "update_failed" || finished.Status != "Server update stopped. Review Minecraft state before continuing." || current == nil || current.OperationID != journal.OperationID {
-				t.Fatalf("unsafe failure changed or released maintenance: %+v current=%+v", finished, current)
-			}
-			for _, held := range []bool{s.operations.setupLockHeld, s.operations.restoreLockHeld, s.operations.dataMigrationLockHeld, s.operations.migrationLockHeld} {
-				if held == safe {
-					t.Fatal("incorrect shared exclusion lock ownership")
-				}
-			}
-			_, created, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypePluginInstall, "jv-d4e5f6")
-			if safe && (err != nil || !created) || !safe && err == nil {
-				t.Fatalf("competing maintenance: created=%v err=%v", created, err)
-			}
-		})
-	}
+	testFailedMinecraftUpdateWorker(t, operationTypeMinecraftUpdate)
 }
 
 func TestMinecraftStackWorkerSuccessAndAcknowledgeRequireRuntimeVerification(t *testing.T) {
@@ -298,10 +224,9 @@ func TestCombinedStackSelectionValidationAndWorkerBinding(t *testing.T) {
 }
 
 func TestCombinedStackWorkerPersistsIncompleteRecovery(t *testing.T) {
-	whitelistSurfaceFixture(t)
-	oldRun, oldVerify := runMinecraftStackUpdate, verifyMinecraftStack
-	defer func() { runMinecraftStackUpdate, verifyMinecraftStack = oldRun, oldVerify }()
-	verifyMinecraftStack = func(context.Context) error { return errInstanceRecovery }
+	x := newFailedUpdateSafetyFixture(t, "pending")
+	oldRun := runMinecraftStackUpdate
+	defer func() { runMinecraftStackUpdate = oldRun }()
 	s := surfaceTestServer(t, roleAdministrator)
 	s.operations = openTestOperationStore(t)
 	journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate, "jv-a1b2c3")
@@ -317,6 +242,8 @@ func TestCombinedStackWorkerPersistsIncompleteRecovery(t *testing.T) {
 		return &minecraftStackMaintenanceError{message: "Previous server recovery is incomplete."}
 	}
 	err = executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "purpur", ImageTag: "latest", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true}, session{})
+	assertFailedUpdateProofCount(t, x, "pending")
+	assertStartupUpdateLocks(t, s.operations, true)
 	current, readErr := s.operations.currentMinecraftMaintenance()
 	if err == nil || readErr != nil || current == nil || current.State != operationNeedsAttention || !strings.Contains(current.Status, "recovery is incomplete") || calls != 1 {
 		t.Fatalf("incomplete recovery: %#v %v %v calls=%d", current, err, readErr, calls)
