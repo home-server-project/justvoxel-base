@@ -123,6 +123,12 @@ func TestGatewayNavigationKeepsSwitchOutsideSurfaces(t *testing.T) {
 	if !strings.Contains(lane[1], `data-gateway-connections aria-selected="true"`) || !strings.Contains(lane[1], `gateway-global-switch`) || !strings.Contains(lane[1], `data-gateway-enabled`) {
 		t.Error("Connections must be the default tab with Gateway in the same lane")
 	}
+	if strings.Contains(workspace, `data-gateway-summary`) || strings.Contains(workspace, `gateway-summary`) {
+		t.Error("Connections must begin directly with cards or the compact empty state")
+	}
+	if strings.Count(workspace, `data-gateway-help-guide`) != 1 || !strings.Contains(workspace, `data-gateway-help-providers`) {
+		t.Error("Help must have a provider selector and one dynamic guide")
+	}
 	body := workspace[strings.Index(workspace, `</nav>`)+len(`</nav>`):]
 	if strings.Contains(body, `data-gateway-enabled`) || strings.Count(workspace, `data-gateway-enabled`) != 1 {
 		t.Error("Gateway must remain outside Connections, Add/Settings, and Help surfaces")

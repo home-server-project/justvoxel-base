@@ -214,31 +214,15 @@
         <p data-gateway-feedback role="status"></p>
         <div class="system-workspace-content" data-gateway-content data-gateway-csrf="{{.CSRF}}">
           <section data-gateway-overview>
-            <div class="panel gateway-summary">
-              <p class="muted" data-gateway-summary>Loading connections…</p>
-            </div>
             <div class="minecraft-server-inventory"><div class="minecraft-server-entries" data-gateway-cards></div></div>
           </section>
           <section class="panel" data-gateway-details hidden></section>
           <section data-gateway-help hidden>
-            <section class="panel"><h3>Getting started</h3>
-              <ol class="gateway-help-steps">
-                <li>Create a connection</li><li>Copy/use the MCP address</li><li>Sign in with JustVoxel</li><li>Review and allow</li><li>Start using the connection</li>
-              </ol>
-              <p>For branded providers, copy the connection-specific MCP address from Settings into your AI app.</p>
-              <p>Automation / REST API: create a connection, copy the JustVoxel connection token once, then use it with the REST address. Other AI / MCP app uses a token with the shared MCP address.</p>
-            </section>
-            <section class="panel"><h3>Providers / connection types</h3>
-              <dl class="gateway-help-providers">
-                <dt>OpenAI — ChatGPT &amp; Codex</dt><dd>Use a supported OpenAI MCP connection.</dd>
-                <dt>Claude</dt><dd>Use a Claude custom connector.</dd>
-                <dt>Grok</dt><dd>Use a supported Grok custom MCP connector.</dd>
-                <dt>Gemini</dt><dd>Use custom MCP when available for your account/application.</dd>
-                <dt>GitHub Copilot</dt><dd>Configure a custom MCP server.</dd>
-                <dt>Other AI / MCP app</dt><dd>Use a compatible MCP client and a JustVoxel connection token.</dd>
-                <dt>Automation / REST API</dt><dd>Use the REST address and JustVoxel connection token.</dd>
-              </dl>
-              <p>Availability depends on the provider, application, account, plan or subscription, and network access.</p>
+            <section class="panel"><h3>Getting connected</h3>
+              <p>Choose your app</p>
+              <div class="gateway-help-selector" data-gateway-help-providers role="group" aria-label="Choose your app"></div>
+              <p class="muted">Create a connection in Add, then use its address from Settings. Availability depends on your account, plan or subscription, and network access.</p>
+              <section class="gateway-guide" data-gateway-help-guide aria-live="polite"></section>
             </section>
             <section class="panel"><h3>Access levels</h3>
               <div class="gateway-table-scroll"><table class="gateway-access-table">
@@ -257,16 +241,14 @@
               <dl><dt>All servers</dt><dd>Access all Minecraft servers.</dd><dt>Choose servers</dt><dd>Access only the Minecraft servers you select.</dd></dl>
               <p>Connection access is limited to the selected scope.</p>
             </section>
-            <section class="panel"><h3>Connection / login</h3>
-              <p class="gateway-login-flow">AI app → MCP address → JustVoxel sign-in → Review permissions → Allow</p>
+            <section class="panel"><h3>Security / authorization</h3>
+              <p>AI clients authenticate to JustVoxel. JustVoxel sign-in and approval control authorization.</p>
+              <p>Changes to access level and Minecraft scope apply to subsequent requests. Disabling the connection or Gateway stops access.</p>
               <p>JustVoxel does not require an AI provider model API key merely to expose MCP.</p>
             </section>
-            <section class="panel"><h3>Remote access</h3>
-              <p class="notice warning">Remote/cloud AI clients need a reachable HTTPS MCP address. Never expose port 8099 directly to the public Internet.</p>
-            </section>
             <details class="panel"><summary>Developer integration</summary>
-              <p>Shared MCP endpoint (token and existing external sign-in connections)</p><div class="gateway-address"><code data-gateway-mcp></code><button type="button" class="secondary" data-gateway-copy-address="mcp">Copy</button></div>
-              <p>REST API endpoint</p><div class="gateway-address"><code data-gateway-rest></code><button type="button" class="secondary" data-gateway-copy-address="rest">Copy</button></div>
+              <p>Shared MCP endpoint (token and existing external sign-in connections)</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="MCP address" data-gateway-mcp><button type="button" class="secondary" data-gateway-copy-address="mcp">Copy</button></div>
+              <p>REST API endpoint</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="REST API address" data-gateway-rest><button type="button" class="secondary" data-gateway-copy-address="rest">Copy</button></div>
               <p data-gateway-address-status role="status"></p>
               <p>OpenAPI: <a data-gateway-openapi target="_blank" rel="noopener"></a> (requires your connection credential).</p>
               <p>OAuth protected-resource metadata: <code data-gateway-metadata></code>. Required scope: <code>justvoxel:connect</code>.</p>
@@ -306,12 +288,10 @@
         </section>
         <label class="gateway-switch"><span>Enabled</span><input class="date-time-switch" type="checkbox" role="switch" name="enabled"></label>
       </section>
-      <section data-gateway-status hidden><h4>Status</h4><dl data-gateway-status-details></dl></section>
+      <section data-gateway-status hidden><div data-gateway-status-details></div></section>
       <details data-gateway-advanced hidden><summary>Advanced details</summary>
         <label>Expiration (optional, your local time)<input type="datetime-local" name="expires_at"></label>
         <dl data-gateway-safe-details></dl>
-        <p>Reset the restart and backup usage limits for this connection.</p>
-        <button type="button" class="secondary" data-gateway-allowance>Reset usage limits</button>
       </details>
       <section data-gateway-oauth hidden><h4>Developer integration</h4>
         <p>Use the details supplied by your app or sign-in service. Never paste access tokens or private keys here.</p>
