@@ -137,6 +137,7 @@ func New(client API, cfg Config) (*App, error) {
 
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
+	a.registerAgentGatewayRoutes(mux)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", a.static))
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /login", a.providerLoginPage)

@@ -212,3 +212,35 @@ The documentation is intentionally split by purpose:
 - [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso) — fresh installation, hardware/disk guidance, installation access, and installer-media creation
 
 The design goal is straightforward: a normal user should be able to install and operate JustVoxel without deep Linux administration knowledge, while the full underlying system remains available to administrators who want it.
+
+## AI agent and automation gateway
+
+External MCP/REST traffic terminates in the existing unprivileged WebUI process:
+
+```text
+External MCP/REST -> unprivileged WebUI Gateway -> existing Unix-socket Management API -> privileged Management Agent -> system
+```
+
+Keeping MCP Streamable HTTP and explicit `/api/v1` REST routes in that process
+preserves the single network-facing management listener. No extra daemon, proxy,
+container, database engine or privileged listener is introduced. The official Go
+MCP SDK owns protocol negotiation/transport; stateless requests avoid persistent
+external sessions. Its RFC 9728 resource-metadata handler supports discovery.
+
+The Agent remains authoritative for the migrated SQLite connection registry,
+SHA-256 token digests, enabled/expiration state, externally issued OAuth identity
+bindings, live Levels 1–4, immutable instance scopes, separate Operator-style
+usage and audit. Each execution authenticates again. One explicit Agent catalog
+feeds REST routing, MCP visibility, OpenAPI minimum-level annotations and
+execution policy, then dispatches existing typed appliance operations. Private
+paths are represented externally by connection-bound opaque selectors; existing
+ownership and operation-plan checks still apply after resolution.
+
+Human browser identity and external identity have separate trust boundaries.
+Neither transport is an arbitrary Unix API proxy. No level exposes user/password
+administration, gateway security, self-escalation, raw shell or Full Factory Reset.
+Level 4 systemd operations use strictly validated verbs/units and direct argv.
+Full Factory Reset commits independent gateway revocation before destructive
+cleanup so later failure or retry cannot restore credentials. Its public review
+fields extend the plan without changing persistent reset fingerprints, preserving
+deployed recovery compatibility. See [AI-API-CONNECTIONS.md](AI-API-CONNECTIONS.md).

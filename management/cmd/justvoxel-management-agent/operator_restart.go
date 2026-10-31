@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -31,14 +32,19 @@ type operatorRestartAvailability struct {
 }
 
 type operatorRestartGuard struct {
-	store  *webUIStore
-	tx     *sql.Tx
-	userID int64
+	store        *webUIStore
+	tx           *sql.Tx
+	userID       int64
+	connectionID string
 }
 
 func (s *webUIStore) beginOperatorRestart(userID int64) (*operatorRestartGuard, operatorRestartAvailability, error) {
+	return s.beginOperatorRestartPrincipal(userID, "")
+}
+
+func (s *webUIStore) beginOperatorRestartPrincipal(userID int64, connectionID string) (*operatorRestartGuard, operatorRestartAvailability, error) {
 	availability := operatorRestartAvailability{Limit: operatorRestartLimit}
-	if s == nil || s.db == nil || userID <= 0 {
+	if s == nil || s.db == nil || (userID <= 0 && connectionID == "") {
 		return nil, availability, errOperatorUnavailable
 	}
 
@@ -54,10 +60,25 @@ func (s *webUIStore) beginOperatorRestart(userID int64) (*operatorRestartGuard, 
 	var role webUserRole
 	var enabled int
 	var lastPersonal sql.NullString
-	if err := tx.QueryRow(`SELECT u.role, u.enabled, o.restart_used, o.last_restart_at
+	var readErr error
+	if connectionID != "" {
+		var raw string
+		readErr = tx.QueryRow(`SELECT c.record_json, o.restart_used, o.last_restart_at FROM gateway_connections c JOIN gateway_usage o ON o.connection_id=c.id WHERE c.id=?`, connectionID).Scan(&raw, &availability.Used, &lastPersonal)
+		var c gatewayConnection
+		if readErr == nil {
+			readErr = json.Unmarshal([]byte(raw), &c)
+		}
+		if readErr == nil && c.Enabled && c.Level == 2 {
+			role = webUserRoleOperator
+			enabled = 1
+		}
+	} else {
+		readErr = tx.QueryRow(`SELECT u.role, u.enabled, o.restart_used, o.last_restart_at
 		FROM web_users AS u
 		JOIN operator_usage AS o ON o.user_id = u.id
-		WHERE u.id = ?`, userID).Scan(&role, &enabled, &availability.Used, &lastPersonal); err != nil {
+		WHERE u.id = ?`, userID).Scan(&role, &enabled, &availability.Used, &lastPersonal)
+	}
+	if err := readErr; err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return rollback(errOperatorUnavailable)
 		}
@@ -101,7 +122,7 @@ func (s *webUIStore) beginOperatorRestart(userID int64) (*operatorRestartGuard, 
 	}
 
 	availability.Allowed = true
-	return &operatorRestartGuard{store: s, tx: tx, userID: userID}, availability, nil
+	return &operatorRestartGuard{store: s, tx: tx, userID: userID, connectionID: connectionID}, availability, nil
 }
 
 func (g *operatorRestartGuard) cancel() {
@@ -119,16 +140,28 @@ func (g *operatorRestartGuard) acceptTarget(actor session, target string) (int, 
 	}
 	now := g.store.now().UTC()
 	nowText := formatWebUIStoreTime(now)
-	if _, err := g.tx.Exec(`UPDATE operator_usage
+	var used int
+	if g.connectionID != "" {
+		if _, err := g.tx.Exec(`UPDATE gateway_usage SET restart_used=restart_used+1,last_restart_at=?,updated_at=? WHERE connection_id=?`, nowText, nowText, g.connectionID); err != nil {
+			g.cancel()
+			return 0, err
+		}
+		if err := g.tx.QueryRow(`SELECT restart_used FROM gateway_usage WHERE connection_id=?`, g.connectionID).Scan(&used); err != nil {
+			g.cancel()
+			return 0, err
+		}
+	} else {
+		if _, err := g.tx.Exec(`UPDATE operator_usage
 		SET restart_used = restart_used + 1, last_restart_at = ?, updated_at = ?
 		WHERE user_id = ?`, nowText, nowText, g.userID); err != nil {
-		g.cancel()
-		return 0, fmt.Errorf("consume operator restart allowance: %w", err)
-	}
-	var used int
-	if err := g.tx.QueryRow(`SELECT restart_used FROM operator_usage WHERE user_id = ?`, g.userID).Scan(&used); err != nil {
-		g.cancel()
-		return 0, fmt.Errorf("read consumed operator restart allowance: %w", err)
+			g.cancel()
+			return 0, fmt.Errorf("consume operator restart allowance: %w", err)
+		}
+		if err := g.tx.QueryRow(`SELECT restart_used FROM operator_usage WHERE user_id = ?`, g.userID).Scan(&used); err != nil {
+			g.cancel()
+			return 0, fmt.Errorf("read consumed operator restart allowance: %w", err)
+		}
+
 	}
 	if _, err := g.tx.Exec(`UPDATE operator_global_state
 		SET last_restart_at = ?, updated_at = ? WHERE id = 1`, nowText, nowText); err != nil {
@@ -139,7 +172,7 @@ func (g *operatorRestartGuard) acceptTarget(actor session, target string) (int, 
 		g.cancel()
 		return 0, err
 	}
-	if used == operatorRestartLimit {
+	if used == operatorRestartLimit && g.connectionID == "" {
 		title := "Operator restart limit reached"
 		message := fmt.Sprintf("%s has used %d of %d Minecraft restart actions. Administrator reset is required before another Operator restart.", actor.Username, used, operatorRestartLimit)
 		if _, err := g.tx.Exec(`INSERT INTO notifications(created_at, kind, user_id, title, message)
@@ -258,7 +291,7 @@ func (s *webUIStore) operatorRestartUsage(userID int64) (int, *time.Time, error)
 
 // Called only after the selected immutable identity has been validated.
 func (s *server) instanceOperatorRestartGuard(w http.ResponseWriter, sess session, id string) (*operatorRestartGuard, bool) {
-	guard, availability, err := s.store.beginOperatorRestart(sess.WebUserID)
+	guard, availability, err := s.store.beginOperatorRestartPrincipal(sess.WebUserID, sess.ConnectionID)
 	if err != nil {
 		_ = s.store.recordAuditEvent(sess, "minecraft_restart", id, false, "operator restart eligibility check failed")
 		writeError(w, http.StatusServiceUnavailable, "operator restart allowance is unavailable")

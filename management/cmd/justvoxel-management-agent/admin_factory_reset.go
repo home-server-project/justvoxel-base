@@ -66,32 +66,34 @@ var restoreSystemAdministratorFactoryCredential = func(ctx context.Context) erro
 }
 
 type adminFactoryResetPlanResponse struct {
-	Instances             []factoryResetInstance         `json:"-"`
-	SharedPlan            *adminFactoryResetPlanResponse `json:"-"`
-	OK                    bool                           `json:"ok"`
-	SchemaVersion         string                         `json:"schema_version,omitempty"`
-	Mode                  string                         `json:"mode,omitempty"`
-	PlanFingerprint       string                         `json:"plan_fingerprint,omitempty"`
-	Code                  string                         `json:"code,omitempty"`
-	Error                 string                         `json:"error,omitempty"`
-	MinecraftConfigured   bool                           `json:"minecraft_configured"`
-	DataPath              string                         `json:"data_path,omitempty"`
-	DataScope             string                         `json:"data_scope,omitempty"`
-	DataAction            string                         `json:"data_action,omitempty"`
-	BackupPath            string                         `json:"backup_path,omitempty"`
-	BackupScope           string                         `json:"backup_scope,omitempty"`
-	BackupAction          string                         `json:"backup_action,omitempty"`
-	ConfigBackupsAction   string                         `json:"config_backups_action,omitempty"`
-	StorageLayoutAction   string                         `json:"storage_layout_action,omitempty"`
-	ExternalStorageAction string                         `json:"external_storage_action,omitempty"`
-	NetworkStorageAction  string                         `json:"network_storage_action,omitempty"`
-	AuthenticationAction  string                         `json:"authentication_action,omitempty"`
-	WebUIUsersAction      string                         `json:"webui_users_action,omitempty"`
-	PasswordAction        string                         `json:"password_action,omitempty"`
-	SessionsAction        string                         `json:"sessions_action,omitempty"`
-	PlayersOnline         int                            `json:"players_online,omitempty"`
-	Players               []string                       `json:"players"`
-	Warnings              []string                       `json:"warnings"`
+	Instances                 []factoryResetInstance         `json:"-"`
+	SharedPlan                *adminFactoryResetPlanResponse `json:"-"`
+	OK                        bool                           `json:"ok"`
+	SchemaVersion             string                         `json:"schema_version,omitempty"`
+	Mode                      string                         `json:"mode,omitempty"`
+	PlanFingerprint           string                         `json:"plan_fingerprint,omitempty"`
+	Code                      string                         `json:"code,omitempty"`
+	Error                     string                         `json:"error,omitempty"`
+	MinecraftConfigured       bool                           `json:"minecraft_configured"`
+	DataPath                  string                         `json:"data_path,omitempty"`
+	DataScope                 string                         `json:"data_scope,omitempty"`
+	DataAction                string                         `json:"data_action,omitempty"`
+	BackupPath                string                         `json:"backup_path,omitempty"`
+	BackupScope               string                         `json:"backup_scope,omitempty"`
+	BackupAction              string                         `json:"backup_action,omitempty"`
+	ConfigBackupsAction       string                         `json:"config_backups_action,omitempty"`
+	StorageLayoutAction       string                         `json:"storage_layout_action,omitempty"`
+	ExternalStorageAction     string                         `json:"external_storage_action,omitempty"`
+	NetworkStorageAction      string                         `json:"network_storage_action,omitempty"`
+	AuthenticationAction      string                         `json:"authentication_action,omitempty"`
+	WebUIUsersAction          string                         `json:"webui_users_action,omitempty"`
+	PasswordAction            string                         `json:"password_action,omitempty"`
+	SessionsAction            string                         `json:"sessions_action,omitempty"`
+	ExternalConnectionsAction string                         `json:"external_connections_action,omitempty"`
+	GatewayAction             string                         `json:"gateway_action,omitempty"`
+	PlayersOnline             int                            `json:"players_online,omitempty"`
+	Players                   []string                       `json:"players"`
+	Warnings                  []string                       `json:"warnings"`
 }
 
 type adminFactoryResetApplyRequest struct {
@@ -369,6 +371,9 @@ func authoritativeAdminFactoryResetPlan(parent context.Context) (adminFactoryRes
 			Players: []string{}, Warnings: []string{},
 		}, http.StatusInternalServerError
 	}
+	plan.ExternalConnectionsAction = "revoke_and_delete"
+	plan.GatewayAction = "disable"
+	plan.Warnings = append(plan.Warnings, "All AI/API connections will be revoked and deleted before cleanup; the external gateway will be disabled, even if reset later needs attention.")
 	plan.PlanFingerprint = fingerprint
 	return plan, 0
 }
@@ -525,6 +530,14 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 	if status != 0 || !plan.OK || plan.PlanFingerprint != expectedFingerprint {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "plan_changed", "Full factory reset stopped because the reviewed plan changed.")
 		return errors.New("factory reset plan changed before execution")
+	}
+
+	s.gatewayMu.Lock()
+	revokeErr := s.store.gatewayFactoryRevoke()
+	s.gatewayMu.Unlock()
+	if err := revokeErr; err != nil {
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "gateway_revocation_failed", "External connections could not be revoked. No destructive cleanup was started. Retry Factory Reset.")
+		return err
 	}
 
 	if _, err := s.operations.transition(operationID, operationRunning, "resetting_runtime", "Removing appliance-owned Minecraft and local backup state."); err != nil {

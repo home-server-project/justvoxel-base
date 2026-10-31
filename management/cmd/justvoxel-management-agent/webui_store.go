@@ -153,6 +153,18 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			`INSERT INTO filebrowser_settings(id, availability) VALUES(1, 'on-demand')`,
 		},
 	},
+	{
+		version: 5,
+		name:    "external_agent_gateway",
+		statements: []string{
+			`CREATE TABLE gateway_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)))`,
+			`INSERT INTO gateway_settings(id,enabled) VALUES(1,0)`,
+			`CREATE TABLE gateway_connections (id TEXT PRIMARY KEY, record_json TEXT NOT NULL, token_digest BLOB, fingerprint TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)`,
+			`CREATE TABLE gateway_references (connection_id TEXT NOT NULL REFERENCES gateway_connections(id) ON DELETE CASCADE, reference TEXT PRIMARY KEY, value TEXT NOT NULL, UNIQUE(connection_id,value))`,
+			`CREATE UNIQUE INDEX gateway_token_digest ON gateway_connections(token_digest) WHERE token_digest IS NOT NULL`,
+			`CREATE TABLE gateway_usage (connection_id TEXT PRIMARY KEY REFERENCES gateway_connections(id) ON DELETE CASCADE, restart_used INTEGER NOT NULL DEFAULT 0, backup_used INTEGER NOT NULL DEFAULT 0, last_restart_at TEXT, last_backup_at TEXT, updated_at TEXT NOT NULL)`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {
@@ -317,6 +329,8 @@ func (s *webUIStore) resetFactoryState() error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, statement := range []string{
+		`UPDATE gateway_settings SET enabled = 0 WHERE id = 1`,
+		`DELETE FROM gateway_connections`,
 		`DELETE FROM notifications`,
 		`DELETE FROM audit_events`,
 		`DELETE FROM operator_usage`,

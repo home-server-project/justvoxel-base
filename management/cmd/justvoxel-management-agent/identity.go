@@ -20,6 +20,7 @@ const (
 	authSourceSeparate  authSource = "separate"
 	authSourceWebUI     authSource = "webui"
 	authSourceLocalRoot authSource = "local-root"
+	authSourceExternal  authSource = "external"
 )
 
 type identityAuthResult struct {

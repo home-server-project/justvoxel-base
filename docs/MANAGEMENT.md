@@ -6,12 +6,13 @@ The management interfaces are layers over the same AlmaLinux 10 bootc host and M
 
 ## Management surfaces
 
-JustVoxel can be administered in four ways:
+JustVoxel can be administered through these surfaces:
 
 1. **WebUI** — browser-based management for users who prefer a graphical interface.
 2. **Interactive `mjust` menu** — terminal UI with descriptions, selectors, and guarded workflows.
 3. **Direct `mjust` commands** — the same operations can be called directly without opening the menu.
-4. **Native Linux administration** — advanced users can use standard tools such as `systemctl`, `journalctl`, `podman`, `bootc`, `nmcli`, `firewall-cmd`, `findmnt`, and `lsblk` directly over SSH or the local console.
+4. **AI Agents & API Connections** — curated MCP and REST operations on the existing unprivileged WebUI listener, with Agent-owned credentials and live authorization.
+5. **Native Linux administration** — advanced users can use standard tools such as `systemctl`, `journalctl`, `podman`, `bootc`, `nmcli`, `firewall-cmd`, `findmnt`, and `lsblk` directly over SSH or the local console.
 
 A typical supported appliance relationship is:
 
@@ -293,3 +294,23 @@ The privileged Unix-socket API exposes `GET /v1/admin/terminal` and `POST /v1/ad
 The unprivileged WebUI calls these operations through `/api/system/workspace/terminal` and its `/start` and `/stop` routes; mutations require normal CSRF validation. Every `/terminal/` request, including WebSocket upgrades, validates the real JustVoxel session and rejects password-change-required sessions and secondary administrators. That session is the authentication boundary. The WebUI cannot traverse the private runtime directory or connect directly to ttyd. It forwards Terminal HTTP and WebSocket traffic through its existing authenticated Management Agent Unix-socket transport to `/v1/admin/terminal/proxy/`. The root Management Agent is the only ttyd proxy; both WebUI and Agent enforce the primary `voxel` administrator boundary. Only the Agent injects `X-JustVoxel-Terminal: 1`, after removing Management bearer credentials and browser-supplied headers. The header is defense-in-depth: [ttyd 1.7.7 proxy authentication checks header presence](https://github.com/tsl0922/ttyd/blob/1.7.7/src/http.c), not a password. Browser-supplied identity/forwarding headers and cookies are stripped, and the original public Host is preserved for ttyd origin validation. There is no second login.
 
 Only authenticated `/terminal/` responses receive same-origin framing and the inline script/style allowance required by ttyd's bundled page. Ordinary routes retain `X-Frame-Options: DENY` and `frame-ancestors 'none'`. Terminal is always on demand: closing the Terminal workspace ends the on-demand session, removes its frame and requests a stop; last-client disconnect is the fallback if the browser disappears. Startup polling is bounded to the explicit startup wait. Source coverage does not establish live image, runtime, or visual acceptance.
+
+## External MCP and REST gateway
+
+```text
+External MCP/REST -> unprivileged WebUI Gateway -> existing Unix-socket Management API -> privileged Management Agent -> system
+```
+
+The gateway is a transport and curated capability adapter, not another privileged
+management engine. It reuses the Agent's operation validation, safety checks,
+locking, recovery and audit implementation. The privileged socket remains local
+and UID restricted. Browser roles remain separate from external Levels 1–4.
+Only the primary human administrator manages connection trust; no external level
+can manage connections, users/passwords or Full Factory Reset. Level 4 adds typed
+host/systemd operations through the Agent without a shell API.
+
+Connections and independent Level 2 restart/backup usage extend the existing
+SQLite identity/state database through a migration. Full Factory Reset durably
+revokes all external connections and disables the gateway before cleanup; failed
+cleanup never restores credentials. See [AI-API-CONNECTIONS.md](AI-API-CONNECTIONS.md)
+for endpoints, capability boundaries, OAuth prerequisites and client examples.

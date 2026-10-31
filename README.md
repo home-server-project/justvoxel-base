@@ -99,6 +99,8 @@ Because the default local WebUI does not use TLS, administrator credentials and 
 
 For the local-access, authentication, and security model, see [`docs/WEBUI.md`](docs/WEBUI.md).
 
+**AI Agents & API Connections** provides a primary-administrator **AI & API Connections** workspace to manage independent AI agent and automation connections through the standard MCP and REST interfaces on the existing WebUI listener. Each connection has a live access level and instance scope; tokens and external OAuth bindings stay authoritative in the Management Agent. The local default remains unencrypted; use trusted HTTPS or private VPN access for protected remote connections. See [`docs/AI-API-CONNECTIONS.md`](docs/AI-API-CONNECTIONS.md).
+
 ## Storage, backups, and recovery
 
 JustVoxel separates Minecraft data from backup storage so users can choose a layout that fits their machine or hypervisor.
@@ -143,6 +145,7 @@ Start with the document that matches what you are trying to do:
 - [`docs/RESTORE.md`](docs/RESTORE.md) — selected-instance full-data recovery
 - [`docs/MIGRATION.md`](docs/MIGRATION.md) — import, export, and server migration
 - [`docs/START_OVER.md`](docs/START_OVER.md) — retire all managed servers while preserving data and backups
+- [`docs/AI-API-CONNECTIONS.md`](docs/AI-API-CONNECTIONS.md) — MCP/REST connections, tokens, OAuth, access levels and revocation
 - [`docs/WEBUI.md`](docs/WEBUI.md) — WebUI authentication, access, and security model
 - [`docs/MANAGEMENT.md`](docs/MANAGEMENT.md) — management layers and native Linux administration
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — why JustVoxel is built as an immutable appliance

@@ -81,3 +81,64 @@ The `mjust` interaction model is inspired by Universal Blue's `ujust` / `ugum` i
 - https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just
 
 JustVoxel currently uses its own wrapper, justfile, menus, and administration scripts and does not copy `ujust` or `ugum` source code. If future JustVoxel work directly reuses or adapts Universal Blue source, the applicable Apache-2.0 license and attribution will be retained with those files.
+
+## AI & API gateway Go dependencies
+
+- Official MCP Go SDK `github.com/modelcontextprotocol/go-sdk` **v1.8.0**,
+  used only by the unprivileged WebUI for Streamable HTTP and RFC 9728 resource
+  metadata: https://github.com/modelcontextprotocol/go-sdk/tree/v1.8.0
+  Its release license records the transition to Apache-2.0 with earlier
+  un-relicensed contributions retaining MIT terms. Retain the upstream license:
+  https://github.com/modelcontextprotocol/go-sdk/blob/v1.8.0/LICENSE
+- `github.com/golang-jwt/jwt/v5` **v5.3.1** (MIT), used by the Management Agent
+  for audited JWT signature/claim verification. This small library avoids
+  implementing cryptographic JWT verification in JustVoxel; JWKS sources and
+  connection bindings remain explicitly administrator-configured. It is also
+  used transitively by the MCP SDK:
+  https://github.com/golang-jwt/jwt/tree/v5.3.1
+
+JWT copyright and permission notice:
+
+```text
+Copyright (c) 2012 Dave Grijalva
+Copyright (c) 2021 golang-jwt maintainers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+```
+
+MCP SDK transitive modules are pinned in `webui/go.mod`/`webui/go.sum`, including
+Google jsonschema-go, Segmentio encoding/asm, yosida95 uritemplate, and Go
+OAuth2/time/sync/sys modules. Their upstream licenses remain applicable; no
+additional operating-system packages are introduced.
+
+MCP SDK retained MIT notice:
+
+```text
+MIT License
+
+Copyright (c) 2024-2025 Model Context Protocol a Series of LF Projects, LLC.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+```

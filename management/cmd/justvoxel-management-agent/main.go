@@ -45,10 +45,12 @@ type releaseMetadata struct {
 }
 
 type session struct {
-	Username   string
-	Role       principalRole
-	AuthSource authSource
-	WebUserID  int64
+	Username        string
+	Role            principalRole
+	AuthSource      authSource
+	WebUserID       int64
+	ConnectionID    string
+	ConnectionLevel int
 
 	Created    time.Time
 	LastSeen   time.Time
@@ -60,6 +62,7 @@ type server struct {
 	store      *webUIStore
 	operations *operationStore
 
+	gatewayMu      sync.RWMutex
 	systemUpdateMu sync.Mutex
 	fileBrowserMu  sync.Mutex
 	terminalMu     sync.Mutex
@@ -244,6 +247,7 @@ func serve(socket string) error {
 	mux.HandleFunc("GET /v1/session", s.sessionStatus)
 	mux.HandleFunc("GET /v1/info", s.info)
 	mux.HandleFunc("GET /v1/status", s.status)
+	registerGatewayRoutes(mux, s)
 	registerAdminUserRoutes(mux, s)
 	registerAdminActivityRoutes(mux, s)
 	registerAdminDiscoveryRoutes(mux, s)
@@ -376,6 +380,9 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) authorize(r *http.Request, allowMustChange bool) (string, session, bool) {
+	if sess, ok := r.Context().Value(gatewayPrincipalKey{}).(session); ok {
+		return "", sess, true
+	}
 	if sess, ok := localRootAdministrator(r); ok {
 		return "", sess, true
 	}

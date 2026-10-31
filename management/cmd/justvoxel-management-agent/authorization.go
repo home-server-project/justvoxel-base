@@ -68,7 +68,7 @@ func (s *server) requirePrimaryAdministrator(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return session{}, false
 	}
-	if sess.Username != systemAdminUsername {
+	if sess.ConnectionID != "" || sess.Username != systemAdminUsername {
 		writeError(w, http.StatusForbidden, "primary administrator access required")
 		return session{}, false
 	}

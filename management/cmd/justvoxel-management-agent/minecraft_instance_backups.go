@@ -564,7 +564,7 @@ func (s *server) instanceBackupNow(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var available operatorBackupAvailability
-		guard, available, err = s.store.beginOperatorBackup(actor.WebUserID)
+		guard, available, err = s.store.beginOperatorBackupPrincipal(actor.WebUserID, actor.ConnectionID)
 		if err != nil {
 			writeError(w, 503, "Operator backup allowance is unavailable.")
 			return

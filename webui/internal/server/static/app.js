@@ -5987,6 +5987,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       else if (plan.backup_action === "preserve") keep.push("Backup archives on USB, external, or network storage.");
       remove.push("Local JustVoxel configuration backups.");
       remove.push("Additional WebUI users, notifications, history, and local authentication state.");
+      remove.push("All AI/API connections and credentials, including OAuth bindings and allowances. The external gateway is disabled before cleanup, even if Factory Reset later needs attention.");
       remove.push("Current WebUI sessions; the voxel system password returns to voxel / voxel and must be replaced immediately after sign-in.");
       keep.push("USB, external, NFS, and SMB data.");
       remove.push("JustVoxel-managed mounts and /etc/fstab entries are reset; storage data is not erased by removing these entries.");

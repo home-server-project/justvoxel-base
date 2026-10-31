@@ -86,6 +86,7 @@
             <button class="control-tile" type="button" data-network-open title="Ethernet, Wi-Fi and current network status"><strong>System Network</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-files-open title="Manage Minecraft server files and backups"><strong>File Browser</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-agent-gateway-open><strong>AI &amp; API Connections</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-terminal-open title="Open a command-line session on JustVoxel"><strong>Terminal</strong></button>
           </div>
         </section>
@@ -193,6 +194,88 @@
       </div>
     </div>
   </dialog>
+
+  <dialog class="workspace-window system-workspace-dialog" data-workspace-window="agent-gateway" data-agent-gateway-dialog aria-labelledby="agent-gateway-title">
+    <div class="system-workspace-shell">
+      <div class="system-workspace-header" data-workspace-drag-handle>
+        <div><p class="eyebrow">JustVoxel</p><h2 id="agent-gateway-title">AI &amp; API Connections</h2></div>
+        <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-gateway-refresh>Refresh</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-gateway-close aria-label="Close AI &amp; API Connections"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="system-workspace-body">
+        <p data-gateway-feedback role="status"></p>
+        <div class="system-workspace-content" data-gateway-content data-gateway-csrf="{{.CSRF}}">
+          <section class="panel">
+            <h3>External connections</h3><p data-gateway-summary>Loading connections…</p>
+            <label class="system-update-option system-ups-shutdown-switch"><span>Enable MCP and REST gateway</span><input type="checkbox" role="switch" data-gateway-enabled></label>
+            <p>Disabling the gateway blocks new requests and keeps your connection settings.</p>
+            <p>MCP endpoint: <code data-gateway-mcp></code></p>
+            <p>REST endpoint: <code data-gateway-rest></code></p>
+            <p>OpenAPI: <a data-gateway-openapi target="_blank" rel="noopener"></a> (requires a connection bearer credential)</p>
+            <button type="button" data-gateway-add>Add Connection</button>
+          </section>
+          <div data-gateway-cards></div>
+          <section class="panel" data-gateway-details hidden></section>
+          <details><summary>Connection help</summary>
+            <p>Your AI agent interaction and connection with JustVoxel through MCP or REST API depends on your AI provider, application, package/subscription, and supported connection methods. JustVoxel provides standard MCP and REST API interfaces, but connection availability is determined by the AI agent or service provider.</p>
+            <p>Use a trusted network or protected HTTPS/VPN access. The local default uses unencrypted HTTP. Never expose port 8099 directly to the public Internet. JustVoxel never needs an AI provider’s model API key to expose MCP or REST.</p>
+            <p>OAuth requires an external authorization server issuing signed access tokens for your configured JustVoxel resource, scope and identity binding. Unknown identities are never enrolled automatically.</p>
+            <p>Level 1: read only. Level 2: Operator actions, restart/backup allowances and cooldowns; no Stop. Level 3: normal appliance management; no users or gateway security. Level 4: Developer Mode, including systemd and host updates/power. Full Factory Reset and connection/security administration are never exposed externally.</p>
+          </details>
+        </div>
+      </div>
+    </div>
+  </dialog>
+  <template data-gateway-settings-template>
+    <form data-gateway-settings>
+      <h3 data-gateway-settings-title>Connection settings</h3>
+      <label>Name<input name="name" required maxlength="100" autocomplete="off"></label>
+      <label>Type / purpose<input name="purpose" maxlength="100" placeholder="AI Agent or API Client"></label>
+      <label>Authentication method<select name="auth_mode"><option value="token">Scoped API Token</option><option value="oauth">OAuth</option></select></label>
+      <label>Access level<select name="level"><option value="1">Level 1 — Read Only</option><option value="2">Level 2 — Basic Management</option><option value="3">Level 3 — Full Management</option><option value="4">Level 4 — Full System Control (Developer Mode)</option></select></label>
+      <label>Enabled<input type="checkbox" role="switch" name="enabled"></label>
+      <label>Expiration (optional, your local time)<input type="datetime-local" name="expires_at"></label>
+      <label>All Minecraft instances<input type="checkbox" role="switch" name="all_instances"></label>
+      <fieldset data-gateway-scope><legend>Selected immutable Minecraft instance IDs</legend><div data-gateway-instance-options></div></fieldset>
+      <fieldset data-gateway-oauth hidden><legend>External OAuth authorization server</legend>
+        <label>Issuer (HTTPS)<input name="issuer" type="url"></label>
+        <label>JustVoxel resource / audience (HTTPS)<input name="audience" type="url"></label>
+        <label>JWKS endpoint (HTTPS)<input name="jwks_uri" type="url"></label>
+        <label>Required scope<input name="scope" value="justvoxel:connect" readonly></label>
+        <label>Stable subject binding<input name="subject" maxlength="512" autocomplete="off"></label>
+        <label>Stable client ID binding<input name="client_id" maxlength="512" autocomplete="off"></label>
+        <p>Configure at least one binding. When both are provided, both must match.</p>
+      </fieldset>
+      <dl data-gateway-safe-details></dl>
+      <p>Level changes apply to the next request with the same credential. Accepted operations may finish.</p>
+      <div class="action-row"><button type="submit">Apply</button><button type="button" class="secondary" data-gateway-toggle>Disable</button><button type="button" class="secondary" data-gateway-rotate>Rotate token</button><button type="button" class="secondary" data-gateway-revoke>Revoke token</button><button type="button" class="secondary" data-gateway-allowance>Reset restart / backup allowances</button><button type="button" class="danger" data-gateway-delete>Delete</button></div>
+    </form>
+  </template>
+  <dialog class="minecraft-delete-dialog" data-gateway-level4-dialog aria-labelledby="gateway-level4-title">
+    <form class="minecraft-delete-card" data-gateway-level4-form>
+      <h2 id="gateway-level4-title">Enable Level 4</h2>
+      <p class="notice warning">Level 4 grants highly privileged control over the JustVoxel system and may affect system services, storage, network/firewall configuration and availability.</p>
+      <div class="destructive-confirmation" data-destructive-confirmation data-destructive-idle="Slide to confirm Level 4">
+        <p class="minecraft-delete-selected">Selected connection:<strong data-gateway-level4-name></strong></p>
+        <div class="destructive-confirm-slider" data-destructive-slider-shell>
+          <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm Level 4</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">›</span>
+          <input type="range" min="0" max="100" value="0" data-destructive-slider aria-label="Slide to confirm Level 4">
+        </div>
+        <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">I acknowledge Level 4 system control</span><input type="checkbox" role="switch" class="destructive-confirm-toggle" data-destructive-toggle aria-label="Acknowledge Level 4 system control"></label>
+      </div>
+      <div class="action-row"><button type="button" class="secondary" data-gateway-level4-cancel>Cancel</button><button type="submit" class="danger" data-destructive-submit disabled>Enable Level 4</button></div>
+    </form>
+  </dialog>
+  <dialog class="system-action-dialog" data-gateway-token-dialog aria-labelledby="gateway-token-title">
+    <div class="system-action-dialog-content">
+      <h2 id="gateway-token-title">Save your API token</h2><p>This token is shown only once. Copy it now and store it securely. JustVoxel cannot show it again.</p>
+      <pre data-gateway-token></pre><p data-gateway-copy-status role="status"></p>
+      <div class="action-row"><button type="button" data-gateway-token-copy>Copy token</button><button type="button" class="secondary" data-gateway-token-done>Done</button></div>
+    </div>
+  </dialog>
+  <script src="/static/agent-gateway.js" defer></script>
 
   <dialog class="workspace-window system-workspace-dialog" data-workspace-window="terminal" data-terminal-workspace-dialog aria-labelledby="terminal-workspace-title">
     <div class="system-workspace-shell">

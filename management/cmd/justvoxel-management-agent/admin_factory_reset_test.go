@@ -368,6 +368,7 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 	if s.store == nil {
 		t.Fatal("surface test server has no WebUI store")
 	}
+	_, gatewayToken := createTestGatewayConnection(t, s.store, 4)
 	if _, err := s.store.createWebUser("Alex", webUserRoleOperator, "operator-password"); err != nil {
 		t.Fatal(err)
 	}
@@ -405,6 +406,13 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 	}
 	if len(users) != 0 {
 		t.Fatalf("factory reset left WebUI users: %#v", users)
+	}
+	snapshot, gatewayErr := s.store.gatewaySnapshot()
+	if gatewayErr != nil || snapshot.Enabled || len(snapshot.Connections) != 0 {
+		t.Fatalf("Factory Reset retained external gateway state: %+v %v", snapshot, gatewayErr)
+	}
+	if _, gatewayErr = s.store.gatewayAuthenticate(gatewayToken); gatewayErr == nil {
+		t.Fatal("Factory Reset retained external credential")
 	}
 	if len(s.sessions) != 0 || len(s.failures) != 0 || !s.lockTill.IsZero() {
 		t.Fatalf("factory reset did not invalidate login state: sessions=%d failures=%d lock=%v", len(s.sessions), len(s.failures), s.lockTill)

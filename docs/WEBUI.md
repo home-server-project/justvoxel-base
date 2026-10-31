@@ -290,3 +290,35 @@ Terminal Refresh reconnects Terminal by closing the current shell and stopping i
 Terminal Settings stores font-size and background preferences in the current browser. Apply reconnects the Terminal.
 
 Terminal HTTP and WebSocket traffic passes through the existing authenticated Management Agent Unix socket. Both WebUI and Agent enforce the primary `voxel` administrator requirement; the JustVoxel session remains the real authentication boundary. The Management Agent is the only ttyd proxy and alone injects `X-JustVoxel-Terminal: 1`. ttyd exposes no TCP listener: it uses `/run/justvoxel-terminal/ttyd.sock` inside a private `0700` runtime directory, which the WebUI cannot access directly.
+
+## AI & API Connections workspace
+
+The primary `voxel` administrator can open **AI & API Connections** from its own
+Control Center tile. It uses the existing movable/resizable workspace model and
+visual components. Viewer, Operator and other Administrator users cannot manage
+connections. External bearer credentials cannot authenticate this human workspace.
+
+The workspace shows configured/enabled counts, a global gateway switch, independent
+connection cards and per-connection settings: name/purpose, Scoped API Token or
+OAuth, Level 1–4, enabled state, optional expiration, immutable instance scope,
+safe fingerprint, timestamps, Last Activity, MCP/REST/OpenAPI endpoints and actions.
+Enabled and Last Activity describe evidence accurately; there is no generic
+Connected claim for stateless clients.
+
+Apply saves live permission/scope changes without token replacement. Every entry
+to Level 4 from a lower level opens the existing destructive-confirmation style:
+a connection-specific warning, confirmation slider, explicit acknowledgement
+switch, **Enable Level 4**, and Cancel. The final button stays unavailable until
+both acknowledgements are satisfied. Downgrades use normal Apply.
+
+Token creation/rotation opens a focused one-time modal with Copy. A full token is
+never redisplayed in settings or stored in browser storage; closing clears the
+presentation. Disabling the gateway preserves settings, while Full Factory Reset
+revokes/deletes every connection and returns the gateway to disabled before
+cleanup. The reset review includes this consequence even if cleanup later fails.
+
+The local HTTP default remains unencrypted. Keep port 8099 off the public Internet
+and arrange trusted HTTPS/VPN access for remote clients. Provider/application and
+package/subscription support determine actual connectivity; JustVoxel does not
+need a provider model API key to expose MCP/REST. See
+[AI-API-CONNECTIONS.md](AI-API-CONNECTIONS.md) for the full guide.

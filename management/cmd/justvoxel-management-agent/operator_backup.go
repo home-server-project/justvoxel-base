@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -25,14 +26,19 @@ type operatorBackupAvailability struct {
 }
 
 type operatorBackupGuard struct {
-	store  *webUIStore
-	tx     *sql.Tx
-	userID int64
+	store        *webUIStore
+	tx           *sql.Tx
+	userID       int64
+	connectionID string
 }
 
 func (s *webUIStore) beginOperatorBackup(userID int64) (*operatorBackupGuard, operatorBackupAvailability, error) {
+	return s.beginOperatorBackupPrincipal(userID, "")
+}
+
+func (s *webUIStore) beginOperatorBackupPrincipal(userID int64, connectionID string) (*operatorBackupGuard, operatorBackupAvailability, error) {
 	availability := operatorBackupAvailability{Limit: operatorBackupLimit}
-	if s == nil || s.db == nil || userID <= 0 {
+	if s == nil || s.db == nil || (userID <= 0 && connectionID == "") {
 		return nil, availability, errOperatorUnavailable
 	}
 
@@ -48,10 +54,25 @@ func (s *webUIStore) beginOperatorBackup(userID int64) (*operatorBackupGuard, op
 	var role webUserRole
 	var enabled int
 	var lastPersonal sql.NullString
-	if err := tx.QueryRow(`SELECT u.role, u.enabled, o.backup_used, o.last_backup_at
+	var readErr error
+	if connectionID != "" {
+		var raw string
+		readErr = tx.QueryRow(`SELECT c.record_json, o.backup_used, o.last_backup_at FROM gateway_connections c JOIN gateway_usage o ON o.connection_id=c.id WHERE c.id=?`, connectionID).Scan(&raw, &availability.Used, &lastPersonal)
+		var c gatewayConnection
+		if readErr == nil {
+			readErr = json.Unmarshal([]byte(raw), &c)
+		}
+		if readErr == nil && c.Enabled && c.Level == 2 {
+			role = webUserRoleOperator
+			enabled = 1
+		}
+	} else {
+		readErr = tx.QueryRow(`SELECT u.role, u.enabled, o.backup_used, o.last_backup_at
 		FROM web_users AS u
 		JOIN operator_usage AS o ON o.user_id = u.id
-		WHERE u.id = ?`, userID).Scan(&role, &enabled, &availability.Used, &lastPersonal); err != nil {
+		WHERE u.id = ?`, userID).Scan(&role, &enabled, &availability.Used, &lastPersonal)
+	}
+	if err := readErr; err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return rollback(errOperatorUnavailable)
 		}
@@ -94,7 +115,7 @@ func (s *webUIStore) beginOperatorBackup(userID int64) (*operatorBackupGuard, op
 	}
 
 	availability.Allowed = true
-	return &operatorBackupGuard{store: s, tx: tx, userID: userID}, availability, nil
+	return &operatorBackupGuard{store: s, tx: tx, userID: userID, connectionID: connectionID}, availability, nil
 }
 
 func (g *operatorBackupGuard) cancel() {
@@ -116,16 +137,28 @@ func (g *operatorBackupGuard) acceptTarget(actor session, target string) (int, e
 
 	now := g.store.now().UTC()
 	nowText := formatWebUIStoreTime(now)
-	if _, err := g.tx.Exec(`UPDATE operator_usage
+	var used int
+	if g.connectionID != "" {
+		if _, err := g.tx.Exec(`UPDATE gateway_usage SET backup_used=backup_used+1,last_backup_at=?,updated_at=? WHERE connection_id=?`, nowText, nowText, g.connectionID); err != nil {
+			g.cancel()
+			return 0, err
+		}
+		if err := g.tx.QueryRow(`SELECT backup_used FROM gateway_usage WHERE connection_id=?`, g.connectionID).Scan(&used); err != nil {
+			g.cancel()
+			return 0, err
+		}
+	} else {
+		if _, err := g.tx.Exec(`UPDATE operator_usage
 		SET backup_used = backup_used + 1, last_backup_at = ?, updated_at = ?
 		WHERE user_id = ?`, nowText, nowText, g.userID); err != nil {
-		g.cancel()
-		return 0, fmt.Errorf("consume operator backup allowance: %w", err)
-	}
-	var used int
-	if err := g.tx.QueryRow(`SELECT backup_used FROM operator_usage WHERE user_id = ?`, g.userID).Scan(&used); err != nil {
-		g.cancel()
-		return 0, fmt.Errorf("read consumed operator backup allowance: %w", err)
+			g.cancel()
+			return 0, fmt.Errorf("consume operator backup allowance: %w", err)
+		}
+		if err := g.tx.QueryRow(`SELECT backup_used FROM operator_usage WHERE user_id = ?`, g.userID).Scan(&used); err != nil {
+			g.cancel()
+			return 0, fmt.Errorf("read consumed operator backup allowance: %w", err)
+		}
+
 	}
 	if _, err := g.tx.Exec(`UPDATE operator_global_state
 		SET last_backup_at = ?, updated_at = ? WHERE id = 1`, nowText, nowText); err != nil {
@@ -136,7 +169,7 @@ func (g *operatorBackupGuard) acceptTarget(actor session, target string) (int, e
 		g.cancel()
 		return 0, err
 	}
-	if used == operatorBackupLimit {
+	if used == operatorBackupLimit && g.connectionID == "" {
 		title := "Operator backup limit reached"
 		message := fmt.Sprintf("%s has used %d of %d manual backup actions. Administrator reset is required before another Operator backup.", actor.Username, used, operatorBackupLimit)
 		if _, err := g.tx.Exec(`INSERT INTO notifications(created_at, kind, user_id, title, message)
