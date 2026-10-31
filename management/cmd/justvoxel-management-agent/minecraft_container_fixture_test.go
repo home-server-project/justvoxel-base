@@ -127,6 +127,7 @@ if [[ $1 == instance-container-history ]]; then
  case "$2" in
  status) jq --arg selected "$(jq -r .runtime.image_digest "$FIXTURE_ROOT/instances/$3/config.json")" '.previous_images |= map(select(.digest != $selected))' "$history";;
  record)
+  [[ ! -f $FIXTURE_ROOT/history-fail ]] || exit 24
   jq --arg old "$4" --arg selected "$5" '.previous_images=([if $old!="" and $old!=$selected then {digest:$old,image:"docker.io/itzg/minecraft-server:stable",retained_at:"2026-10-27T00:00:00Z",size:1024} else empty end]+[.previous_images[]|select(.digest!=$old and .digest!=$selected)]) | .previous_images=.previous_images[:.keep_previous_images]' "$history" > "$history.tmp"
   mv "$history.tmp" "$history";;
  retention) jq --argjson n "$4" '.keep_previous_images=$n | .previous_images=.previous_images[:$n]' "$history" > "$history.tmp"; mv "$history.tmp" "$history";;
@@ -161,15 +162,20 @@ func (f *containerFixture) write(name, text string) {
 		f.t.Fatal(err)
 	}
 }
-func (f *containerFixture) run(args ...string) ([]byte, error) {
+func (f *containerFixture) command(args ...string) *exec.Cmd {
 	cmd := exec.Command("bash", append([]string{f.helper, "--instance", "jv-a1b2c3"}, args...)...)
+	cmd.Env = append(os.Environ(), "FIXTURE_ROOT="+f.root, "FIXTURE_REMOTE="+f.remote, "FIXTURE_OLD="+f.old)
+	return cmd
+}
+func (f *containerFixture) run(args ...string) ([]byte, error) {
+	cmd := f.command(args...)
 	trace, err := os.OpenFile(filepath.Join(f.root, "trace"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	defer trace.Close()
 	cmd.ExtraFiles = []*os.File{trace}
-	cmd.Env = append(os.Environ(), "JV_OPERATION_TRACE_FD=3", "FIXTURE_ROOT="+f.root, "FIXTURE_REMOTE="+f.remote, "FIXTURE_OLD="+f.old)
+	cmd.Env = append(cmd.Env, "JV_OPERATION_TRACE_FD=3")
 	return cmd.CombinedOutput()
 }
 func (f *containerFixture) status() minecraftContainerStatus {
@@ -657,5 +663,39 @@ jv_wait_minecraft_stopped
 	f.helper = filepath.Join(f.root, "stop-check")
 	if data, err := f.run(); err != nil {
 		t.Fatalf("shutdown observation: %v %s", err, data)
+	}
+}
+
+func TestContainerHelperUpdateRestoreUpdate(t *testing.T) {
+	for _, keep := range []string{"1", "2"} {
+		t.Run(keep, func(t *testing.T) {
+			f := newContainerFixture(t)
+			if data, err := f.run("retention", keep); err != nil {
+				t.Fatalf("%v %s", err, data)
+			}
+			check := func(selected, running, previous string) {
+				t.Helper()
+				status := f.status()
+				if f.text("active") != "active" || f.text("running") != running || !strings.Contains(f.text("instances/jv-a1b2c3/config.json"), selected) {
+					t.Fatal("serving identity changed")
+				}
+				if status.KeepPreviousImages != int(keep[0]-'0') || len(status.PreviousImages) != 1 || status.PreviousImages[0].Digest != previous {
+					t.Fatalf("history: %+v", status)
+				}
+			}
+			if data, err := f.apply(f.status(), true, false, false); err != nil {
+				t.Fatalf("update: %v %s", err, data)
+			}
+			check(f.remote, "new-id", f.old)
+			plan := f.status()
+			if data, err := f.run("restore", plan.RestoreFingerprint, "true", "false", "false", f.old); err != nil {
+				t.Fatalf("restore: %v %s", err, data)
+			}
+			check(f.old, "old-id", f.remote)
+			if data, err := f.apply(f.status(), true, false, false); err != nil {
+				t.Fatalf("update again: %v %s", err, data)
+			}
+			check(f.remote, "new-id", f.old)
+		})
 	}
 }

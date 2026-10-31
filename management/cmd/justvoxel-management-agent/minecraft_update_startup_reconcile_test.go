@@ -87,9 +87,9 @@ func TestMinecraftUpdateStartupPersistedFailure(t *testing.T) {
 				before := startupJournalBytes(t, store, journal.OperationID)
 				oldContainerRun, oldStackRun := runMinecraftContainerUpdate, runMinecraftStackUpdate
 				t.Cleanup(func() { runMinecraftContainerUpdate, runMinecraftStackUpdate = oldContainerRun, oldStackRun })
-				runMinecraftContainerUpdate = func(context.Context, minecraftContainerUpdateRequest) error {
+				runMinecraftContainerUpdate = func(context.Context, minecraftContainerUpdateRequest) (bool, error) {
 					t.Fatal("startup retried container update")
-					return nil
+					return false, nil
 				}
 				runMinecraftStackUpdate = func(context.Context, string, bool, string, string) error {
 					t.Fatal("startup retried stack update")

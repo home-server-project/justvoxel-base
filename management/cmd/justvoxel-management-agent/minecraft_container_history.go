@@ -157,8 +157,8 @@ func (b *instanceRuntimeBackend) saveContainerHistory(ctx context.Context, id st
 			continue
 		}
 		ref := retainedImageReference(id, image.Digest)
-		// Never remove an underlying image ID. Untag removes ONLY this instance's
-		// private reference, preserving every selected/running/sibling/unrelated image.
+		// Supply the name explicitly: untag with only an image argument removes
+		// ALL its names, including registry and sibling references.
 		if _, err = b.command(ctx, "podman", "image", "exists", ref); err != nil {
 			var exit interface{ ExitCode() int }
 			if errors.As(err, &exit) && exit.ExitCode() == 1 {
@@ -169,7 +169,7 @@ func (b *instanceRuntimeBackend) saveContainerHistory(ctx context.Context, id st
 		if _, err = b.inspectRetainedImage(ctx, ref, image.Size); err != nil {
 			return err
 		}
-		if _, err = b.command(ctx, "podman", "untag", ref); err != nil {
+		if _, err = b.command(ctx, "podman", "untag", ref, ref); err != nil {
 			pending = append(pending, image)
 		}
 	}

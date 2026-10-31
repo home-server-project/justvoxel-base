@@ -1686,7 +1686,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 [data-server-selector-compact] .server-selector>summary{padding:.15rem .3rem;font-size:.75rem}
 [data-server-selector-compact] .server-selector-icon{width:16px;height:16px}
 
-/* Version / Container: identity, controls, and separate status. */
+/* Version / Container: summary and controls. */
 .version-container-panel .version-container-row {
   display: flex;
   align-items: center;
@@ -1701,9 +1701,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .version-container-panel .version-container-row .minecraft-native-toggle {
   margin: 0;
 }
-.version-container-panel .version-container-actions {
-  justify-content: space-between;
-}
+.version-container-panel .version-container-summary{padding:.65rem .8rem;border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface-sunken)}
 
 /* Version / Container owns its available height, including the scrollable output. */
 .version-workspace-body:has(.version-container-workspace){display:flex;flex-direction:column}
@@ -1711,6 +1709,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .version-container-workspace{display:flex;flex:1;flex-direction:column;min-height:0;gap:var(--jv-space-sm)}
 .version-container-workspace>.log-box{flex:1;min-height:140px;height:auto;max-height:none;overflow:auto;margin:0}
 .version-container-workspace>.panel,.version-container-workspace>[data-version-operation]{flex:none}
+.version-container-workspace .version-operation-status.notice.warning{--version-operation-accent:var(--jv-warning)}
 .version-container-action-lane{display:flex;align-items:center;gap:var(--jv-space-sm);flex-wrap:wrap}
 .version-container-retention{display:flex;align-items:center;gap:var(--jv-space-sm);margin:0;white-space:nowrap}
 .version-container-retention input{width:3.25rem;flex:none}
@@ -1727,11 +1726,12 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 @media(max-width:700px){.version-container-panel .version-container-controls{grid-template-columns:minmax(0,1fr)}.version-container-controls>:is(label+label,.version-container-action-lane){border-left:0;border-top:1px solid var(--jv-border)}}
 @container(max-width:700px){.version-container-panel .version-container-controls{grid-template-columns:minmax(0,1fr)}.version-container-controls>:is(label+label,.version-container-action-lane){border-left:0;border-top:1px solid var(--jv-border)}}
 .version-container-history .backup-file-grid{max-height:180px;overflow:auto}
-.version-container-history .backup-file-card>div{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
+.version-container-history .backup-file-copy{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}
+.version-container-history .backup-file-copy :is(strong,span){white-space:normal;overflow-wrap:anywhere}
 .version-container-history .backup-library-summary{display:flex;justify-content:space-between;align-items:center;gap:var(--jv-space-sm);margin-top:var(--jv-space-sm)}
 
 .version-container-history .backup-file-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:.4rem}
-.version-container-workspace .version-container-history .backup-file-card{grid-template-columns:32px minmax(0,1fr)!important;padding:.45rem .55rem;gap:.5rem}
+.version-container-workspace .version-container-history .backup-file-card{grid-template-columns:32px 36px minmax(0,1fr)!important;padding:.45rem .55rem;gap:.5rem}
 
 /* Approved Minecraft Overview controls and destructive review. */
 .minecraft-overview-playerline>.minecraft-summary-label{color:var(--jv-muted);font-size:.72rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}

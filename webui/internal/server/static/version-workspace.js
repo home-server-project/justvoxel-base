@@ -55,6 +55,20 @@ if (versionLauncher && versionDialog) {
     const failed = ["failed", "needs_attention"].includes(operation.state);
     const resolved = operation.state === "resolved";
     const kind = operationKinds.get(operation.operation_id);
+    if (kind === "container") {
+      const warning = succeeded && operation.status?.includes("previous-image history needs attention");
+      const text = succeeded ? warning ? "Container updated successfully — previous-image history needs attention." : "Container update succeeded."
+        : resolved ? "Container update stopped — current runtime kept."
+        : failed ? "Container update needs attention — check the details below." : operation.status || "Container update in progress.";
+      const progress = card("");
+      progress.className += " version-operation-status " + (warning ? "notice warning" : succeeded || resolved ? "is-succeeded" : failed ? "is-failed" : "is-running");
+      progress.dataset.versionOperation = "";
+      progress.setAttribute("role", "status");
+      const notice = document.createElement("p");
+      notice.textContent = text;
+      progress.appendChild(notice);
+      return progress;
+    }
     const heading = succeeded ? kind === "switch" ? "Switch succeeded" : kind === "container" ? "Container update succeeded" : "Server update succeeded"
       : failed ? kind === "container" ? "Update stopped. Check the details below." : "Server update needs attention" : resolved ? "Current version kept" : "Server update in progress";
     const progress = card(heading);
@@ -258,7 +272,7 @@ if (versionLauncher && versionDialog) {
     const panel = card("Minecraft container");
     panel.className += " version-container-panel";
     const identity = document.createElement("div");
-    identity.className = "version-container-row";
+    identity.className = "version-container-row version-container-summary";
     identity.dataset.containerRow = "identity";
     const selector = versionDialog.querySelector("[data-selected-server] select");
     const serverLine = line("Server:", selector?.selectedOptions?.[0]?.textContent || "Unavailable");
@@ -275,12 +289,10 @@ if (versionLauncher && versionDialog) {
       input.checked = false; input.disabled = true;
       label.append(title, input); controls.appendChild(label); return input;
     };
-    const actions = document.createElement("div"); actions.className = "version-container-row version-container-actions";
-    actions.dataset.containerRow = "actions";
     const statusLine = line("Status:", "Checking…");
     const update = document.createElement("button"); update.type = "button"; update.textContent = "Update"; update.disabled = true;
     const actionLane = document.createElement("div"); actionLane.className = "version-container-action-lane";
-    actionLane.appendChild(update); actions.appendChild(statusLine);
+    actionLane.appendChild(update); identity.appendChild(statusLine);
     const retentionLabel = document.createElement("label"); retentionLabel.className = "version-container-retention";
     const retentionTitle = document.createElement("span"); retentionTitle.textContent = "Keep previous images";
     const retention = document.createElement("input"); retention.type = "number"; retention.min = "1"; retention.max = "2"; retention.step = "1"; retention.value = "1"; retention.disabled = true;
@@ -303,7 +315,7 @@ if (versionLauncher && versionDialog) {
     const progress = document.createElement("div");
     const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = "";
     terminal.textContent = "Checking the selected container image…";
-    panel.append(identity, controls, actions, helper, library);
+    panel.append(identity, controls, helper, library);
     root.append(panel, progress, terminal);
     if (!current()) return;
     content.replaceChildren(root);
@@ -424,14 +436,20 @@ if (versionLauncher && versionDialog) {
       let totalSize = 0;
       for (const image of retained) {
         const entry = document.createElement("label"); entry.className = "backup-file-card backup-file-selectable";
-        const select = document.createElement("input"); select.type = "radio"; select.className = "backup-file-checkbox"; select.name = "previous-container-image"; select.value = image.digest;
+        const select = document.createElement("input"); select.type = "radio"; select.className = "backup-file-checkbox"; select.name = "previous-container-image"; select.value = image.digest; select.setAttribute("aria-label", "Select previous image " + image.digest);
         select.addEventListener("change", () => { if (!current() || busy) return; selectedDigest = select.checked ? image.digest : ""; sync(); });
-        const details = document.createElement("div");
+        const icon = document.createElement("div"); icon.className = "backup-file-icon"; icon.setAttribute("aria-hidden", "true");
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("viewBox", "0 0 24 24");
+        const outline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        outline.setAttribute("d", "M12 3 3 7.5v9L12 21l9-4.5v-9L12 3ZM3 7.5l9 4.5 9-4.5M12 12v9M7.5 5.25l9 4.5");
+        svg.appendChild(outline); icon.appendChild(svg);
+        const details = document.createElement("div"); details.className = "backup-file-copy";
         const name = document.createElement("strong"); name.textContent = image.image;
         const metadata = document.createElement("span"); metadata.className = "muted compact";
         const size = sizeLabel(image.size); totalSize += image.size || 0;
         metadata.textContent = `${image.digest.slice(0, 19)}… · ${new Date(image.retained_at).toLocaleString()}${size ? " · " + size : ""}`;
-        details.append(name, metadata); entry.append(select, details); images.appendChild(entry);
+        metadata.title = image.digest;
+        details.append(name, metadata); entry.append(select, icon, details); images.appendChild(entry);
       }
       summary.textContent = `${retained.length} images${totalSize ? " · " + sizeLabel(totalSize) : ""}`;
       if (!retained.length) { const empty = document.createElement("p"); empty.className = "muted compact"; empty.textContent = "No previous container images."; images.appendChild(empty); }

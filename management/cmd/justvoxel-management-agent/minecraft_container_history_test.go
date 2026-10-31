@@ -90,7 +90,7 @@ func TestContainerHistoryPerInstanceDurabilityAndReferenceOnlyCleanup(t *testing
 	if err != nil || !reflect.DeepEqual(selected.PreviousImages, []retainedContainerImage{newer}) {
 		t.Fatalf("selected history: %+v %v", selected, err)
 	}
-	if len(calls) != 3 || calls[2] != "podman untag "+retainedImageReference("jv-a1b2c3", old.Digest) {
+	if len(calls) != 3 || calls[2] != "podman untag "+retainedImageReference("jv-a1b2c3", old.Digest)+" "+retainedImageReference("jv-a1b2c3", old.Digest) {
 		t.Fatalf("cleanup: %v", calls)
 	}
 	for _, call := range calls {
@@ -215,7 +215,7 @@ func TestContainerHistoryLocalTagIdentity(t *testing.T) {
 						tagged = true
 						return nil, nil
 					}
-					if args[0] == "untag" && len(args) == 2 && args[1] == ref {
+					if args[0] == "untag" && len(args) == 3 && args[1] == ref && args[2] == ref {
 						tagged = false
 						return nil, nil
 					}
@@ -285,7 +285,7 @@ func TestContainerHistoryLocalTagIdentity(t *testing.T) {
 				if err = b.containerHistoryCommand(context.Background(), []string{"retention", id, "0"}); err != nil {
 					t.Fatal(err)
 				}
-				if tagged || calls[len(calls)-1] != "podman untag "+ref {
+				if tagged || calls[len(calls)-1] != "podman untag "+ref+" "+ref {
 					t.Fatal("cleanup did not untag exact private reference", calls)
 				}
 			})
@@ -297,3 +297,142 @@ type historyImageMissing struct{}
 
 func (historyImageMissing) Error() string { return "image missing" }
 func (historyImageMissing) ExitCode() int { return 1 }
+
+// Model Podman's name ownership, including its documented all-names behavior
+// when untag is passed only IMAGE. A permissive untag stub hid this regression.
+func TestContainerHistoryUpdateRestoreUpdatePreservesNames(t *testing.T) {
+	for _, keep := range []int{1, 2} {
+		t.Run(fmt.Sprint(keep), func(t *testing.T) {
+			f := newInstanceActivationFixture(t)
+			f.activateBoth()
+			b := f.backend
+			id := f.configs[0].ID
+			a, next, earlier := historyImage(1), historyImage(2), historyImage(3)
+			repo := "docker.io/itzg/minecraft-server@"
+			names := map[string]string{}
+			identities := map[string]retainedContainerImage{}
+			for _, image := range []retainedContainerImage{a, next, earlier} {
+				names[repo+image.Digest] = image.Digest
+				identities[image.Digest] = image
+			}
+			sibling := retainedImageReference("jv-sibling", a.Digest)
+			names[sibling] = a.Digest
+			names["localhost/unrelated:stable"] = a.Digest
+			serving := a.Digest
+			b.command = func(_ context.Context, cmd string, args ...string) ([]byte, error) {
+				if cmd != "podman" {
+					t.Fatal(cmd)
+				}
+				switch args[0] {
+				case "image":
+					digest, exists := names[args[2]]
+					if !exists {
+						return nil, historyImageMissing{}
+					}
+					if args[1] == "exists" {
+						return nil, nil
+					}
+					if args[1] != "inspect" {
+						t.Fatal(args)
+					}
+					image := identities[digest]
+					return []byte(strings.TrimPrefix(digest, "sha256:") + "|" + digest + "|" + fmt.Sprint(image.Size)), nil
+				case "tag":
+					digest, exists := names[args[1]]
+					if !exists {
+						return nil, historyImageMissing{}
+					}
+					names[args[2]] = digest
+					return nil, nil
+				case "untag":
+					digest, exists := names[args[1]]
+					if !exists {
+						return nil, historyImageMissing{}
+					}
+					if len(args) == 2 {
+						for name, identity := range names {
+							if identity == digest {
+								delete(names, name)
+							}
+						}
+					} else {
+						for _, name := range args[2:] {
+							if names[name] != digest {
+								t.Fatal("wrong image owner", args)
+							}
+							delete(names, name)
+						}
+					}
+					return nil, nil
+				}
+				t.Fatal("unexpected command", args)
+				return nil, nil
+			}
+			publish := func(digest string) {
+				t.Helper()
+				if names[repo+digest] != digest {
+					t.Fatal("selected registry name lost", digest)
+				}
+				record, err := b.readRecord(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record.Runtime.ImageDigest = digest
+				dir, _, _ := b.paths(id)
+				if err = b.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+					t.Fatal(err)
+				}
+				serving = digest // selected server has started and verified this identity
+			}
+			recordHistory := func(old, selected string, want []retainedContainerImage) {
+				t.Helper()
+				if err := b.containerHistoryCommand(context.Background(), []string{"record", id, old, selected}); err != nil {
+					t.Fatalf("record after verified runtime %s: %v", serving, err)
+				}
+				h, err := b.containerHistory(id)
+				if err != nil || h.KeepPreviousImages != keep || len(h.PreviousImages) != len(want) || len(h.PendingRemoval) != 0 {
+					t.Fatalf("rotation: %+v %v", h, err)
+				}
+				for i, image := range want {
+					if h.PreviousImages[i].Digest != image.Digest || names[retainedImageReference(id, image.Digest)] != image.Digest {
+						t.Fatal("retained identity/order lost", h)
+					}
+				}
+			}
+			publish(a.Digest)
+			if err := b.containerHistoryCommand(context.Background(), []string{"retention", id, fmt.Sprint(keep)}); err != nil {
+				t.Fatal(err)
+			}
+			recordHistory(earlier.Digest, a.Digest, []retainedContainerImage{earlier})
+			expected := func(first retainedContainerImage) []retainedContainerImage {
+				images := []retainedContainerImage{first}
+				if keep == 2 {
+					images = append(images, earlier)
+				}
+				return images
+			}
+			publish(next.Digest)
+			recordHistory(a.Digest, next.Digest, expected(a))
+			publish(a.Digest) // restore retained A, retaining B as the undo image
+			recordHistory(next.Digest, a.Digest, expected(next))
+			publish(next.Digest)
+			recordHistory(a.Digest, next.Digest, expected(a))
+			// Without explicit-name cleanup, restoring A removes its registry
+			// name and the final record above fails inspecting the serving A.
+			if names[repo+serving] != serving || names[sibling] != a.Digest || names["localhost/unrelated:stable"] != a.Digest {
+				t.Fatal("serving/sibling/unrelated name removed", names)
+			}
+			// A later retention reduction removes only owned private names.
+			if err := b.containerHistoryCommand(context.Background(), []string{"retention", id, "0"}); err != nil {
+				t.Fatal(err)
+			}
+			h, err := b.containerHistory(id)
+			if err != nil || h.KeepPreviousImages != 0 || len(h.PreviousImages) != 0 || len(h.PendingRemoval) != 0 {
+				t.Fatal(h, err)
+			}
+			if names[repo+a.Digest] != a.Digest || names[repo+serving] != serving || names[sibling] != a.Digest {
+				t.Fatal("retention removed shared names")
+			}
+		})
+	}
+}

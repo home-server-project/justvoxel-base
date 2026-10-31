@@ -98,7 +98,8 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	for _, want := range []string{
 		`identity.dataset.containerRow = "identity"`,
 		`controls.dataset.containerRow = "controls"`,
-		`actions.dataset.containerRow = "actions"`,
+		`identity.className = "version-container-row version-container-summary"`,
+		`identity.appendChild(statusLine)`,
 		`card("Minecraft container")`,
 		`toggle("Restart server now")`,
 		`toggle("Create backup before restart")`,

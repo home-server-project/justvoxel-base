@@ -152,7 +152,7 @@ test('persistent polling updates the frame, keeps journal messages once, and ren
     URLSearchParams, updateOperation: '', completedOperation: null, state: {}, content, operationKinds: new Map(),
     justVoxelSelectionGeneration: { version: 0 },
     document: { createElement: tag => new Element(tag) },
-    card: title => { const panel = new Element('section'); const heading = new Element('h2'); heading.textContent = title; panel.append(heading); return panel; },
+    card: title => { const panel = new Element('section'); if (title) { const heading = new Element('h2'); heading.textContent = title; panel.append(heading); } return panel; },
     request: async (url) => { assert.equal(url, '/api/version/workspace/update-operation?id=operation-1'); return result; },
     render: async (message, operation) => { messages.push({message, operation}); },
     setTimeout: (callback, delay) => { assert.equal(delay, 2000); nextPoll = callback; },
@@ -176,7 +176,7 @@ test('persistent polling updates the frame, keeps journal messages once, and ren
   assert.match(content.children[0].className, /is-succeeded/);
   assert.equal(content.children[0].children[0].textContent, 'Switch succeeded');
   context.operationKinds.set('operation-1', 'container');
-  assert.equal(context.operationFrame(result.operation).children[0].textContent, 'Container update succeeded');
+  assert.equal(context.operationFrame(result.operation).children[0].textContent, 'Container update succeeded.');
   context.operationKinds.clear();
   assert.equal(context.operationFrame(result.operation).children[0].textContent, 'Server update succeeded');
   for (const state of ['failed', 'needs_attention']) {
@@ -275,7 +275,7 @@ function operationPresentation(operationKinds = new Map()) {
     operationKinds, document: { createElement: tag => new Element(tag) },
     card: title => {
       const panel = new Element('section');
-      panel.append(Object.assign(new Element('h2'), { textContent: title }));
+      if (title) panel.append(Object.assign(new Element('h2'), { textContent: title }));
       return panel;
     },
   });
@@ -299,7 +299,7 @@ test('resolved operations use normal-user keep-current success wording', () => {
   for (const kind of [undefined, 'switch', 'container']) {
     const context = operationPresentation(kind ? new Map([['resolved-operation', kind]]) : new Map());
     const frame = context.operationFrame({operation_id:'resolved-operation',state:'resolved',status:''});
-    assert.equal(frame.children[0].textContent, 'Current version kept');
+    assert.equal(frame.children[0].textContent, kind === 'container' ? 'Container update stopped — current runtime kept.' : 'Current version kept');
     assert.doesNotMatch(frame.children[0].textContent, /verified/i);
   }
 });
@@ -479,7 +479,7 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
     justVoxelSelectionGeneration: {version: 0}, currentTab: 'container', sequence: 1,
     csrf: 'csrf', content, state: {}, operationKinds: new Map(),
     versionDialog: {querySelector: () => ({selectedOptions:[{textContent:'22222'}]})},
-    document: {createElement: tag => new ContainerElement(tag)},
+    document: {createElement: tag => new ContainerElement(tag), createElementNS: (_, tag) => new ContainerElement(tag)},
     card: title => {const panel=new ContainerElement('section');panel.append(Object.assign(new ContainerElement('h2'),{textContent:title}));return panel;},
     line: (label,value) => {const row=new ContainerElement('div');row.append(Object.assign(new ContainerElement('span'),{textContent:label}),Object.assign(new ContainerElement('strong'),{textContent:value||'Unavailable'}));return row;},
     operationFrame: operation => Object.assign(new ContainerElement('section'),{textContent:operation.status||operation.state}),
@@ -510,9 +510,11 @@ for(const [status,label,disabled] of [['up_to_date','Up to date',true],['update_
   test('Container '+status+' uses approved rows and bounded actions',async()=>{
     const page=containerWorkspace({status});await page.mount();
     const rows=page.content.all().filter(node=>'containerRow' in node.dataset);
-    assert.deepEqual(rows.map(row=>row.dataset.containerRow),['identity','controls','actions']);
+    assert.deepEqual(rows.map(row=>row.dataset.containerRow),['identity','controls']);
     assert.match(rows[0].textContent,/Server: 22222.*Image: docker.io\/itzg\/minecraft-server:stable/);
-    assert.match(rows[2].textContent,new RegExp('Status: '+label));
+    assert.match(rows[0].textContent,new RegExp('Status: '+label));
+    assert.equal(rows[0].className,'version-container-row version-container-summary');
+    assert.equal(rows[0].children.length,3);
     assert.equal(page.update().disabled,disabled);
     assert.ok(page.toggles().every(input=>input.disabled===disabled&&!input.checked));
     assert.equal(page.timers.length,0,'idle availability must not poll');
@@ -584,10 +586,14 @@ test('Container combines controls and previous images in one outer card with sep
  assert.equal(page.update().parent,lane);
  assert.equal(page.update().textContent,'Update');
  assert.equal(controls.children.at(-1),lane);
- const actions=panel.children.find(node=>node.dataset.containerRow==='actions');
- assert.equal(actions.children.length,1);
- assert.match(actions.textContent,/^Status: /);
- assert.ok(!actions.all().includes(page.update()));
+ const identity=panel.children.find(node=>node.dataset.containerRow==='identity');
+ assert.equal(identity.children.length,3);
+ assert.match(identity.children[2].textContent,/^Status: /);
+ assert.ok(!identity.all().includes(page.update()));
+ assert.ok(!panel.children.some(node=>node.dataset.containerRow==='actions'));
+ assert.match(cssRule('.version-container-panel .version-container-summary'),/background:var\(--jv-surface-sunken\)/);
+ assert.match(cssRule('.version-container-panel .version-container-summary'),/border:1px solid var\(--jv-border\)/);
+ assert.match(css,/\.version-container-panel \.version-container-row\s*\{[^}]*flex-wrap: wrap/);
  assert.equal(retentionInput(page).parent,controls.children[0]);
  assert.equal(page.terminal().parent,root);assert.equal(root.children.at(-1),page.terminal());
  assert.ok(!panel.all().includes(page.terminal()));
@@ -736,7 +742,7 @@ test('Version Container rules precede the Minecraft Network-only CSS region',()=
   '.version-container-retention',
   '.version-container-retention input',
   '.version-container-history .backup-file-grid',
-  '.version-container-history .backup-file-card>div',
+  '.version-container-history .backup-file-copy',
   '.version-container-history .backup-library-summary',
   '.version-container-workspace .version-container-history .backup-file-card',
  ]) {
@@ -820,4 +826,65 @@ test('Container submitted switches clear on success, resolution, fresh state and
   await page.mount();
   assert.deepEqual(page.toggles().map(node=>node.checked),[false,false]);
  }
+});
+
+test('Container operation results use one semantic line and warning styling', () => {
+ assert.match(cssRule('.version-container-workspace .version-operation-status.notice.warning'),/--version-operation-accent:var\(--jv-warning\)/);
+ const operationKinds = new Map([['container-1','container']]);
+ const context = vm.createContext({
+  operationKinds,
+  document: {createElement:tag=>new ContainerElement(tag)},
+  card: title => {
+   const panel=new ContainerElement('section');panel.className='panel details';
+   if(title) panel.append(Object.assign(new ContainerElement('h2'),{textContent:title}));
+   return panel;
+  },
+ });
+ vm.runInContext(source.slice(source.indexOf('  const operationFrame ='),source.indexOf('  const watchUpdate ='))+'\nglobalThis.frame=operationFrame;',context);
+ for(const [state,status,text,warning] of [
+  ['succeeded','Container update succeeded.','Container update succeeded.',false],
+  ['succeeded','Container updated successfully — previous-image history needs attention.','Container updated successfully — previous-image history needs attention.',true],
+  ['resolved','Already-running committed runtime independently verified.','Container update stopped — current runtime kept.',false],
+  ['needs_attention','Update stopped.','Container update needs attention — check the details below.',false],
+  ['failed','Update stopped.','Container update needs attention — check the details below.',false],
+ ]) {
+  const frame=context.frame({operation_id:'container-1',state,status});
+  assert.equal(frame.children.length,1);
+  assert.equal(frame.children[0].tag,'p');assert.equal(frame.textContent,text);
+  assert.equal(frame.className.includes('notice warning'),warning);
+  assert.equal(frame.role,'status');
+  if(state==='succeeded') assert.doesNotMatch(frame.textContent,/Current version kept|update stopped|rolled back/i);
+ }
+});
+test('Container retained cards reuse backup selection and icon patterns and restore the chosen image',async()=>{
+ const first=retainedImage('sha256:'+'a'.repeat(64));
+ const second=retainedImage('sha256:'+'b'.repeat(64));
+ const page=containerWorkspace({previousImages:[first,second]});await page.mount();
+ const cards=page.content.all().filter(node=>node.className==='backup-file-card backup-file-selectable');
+ assert.equal(cards.length,2);
+ const radios=cards.map(card=>card.children[0]);
+ assert.equal(radios[0].type,'radio');assert.equal(radios[1].type,'radio');
+ assert.equal(radios[0].name,radios[1].name);
+ assert.equal(radios[0].name,'previous-container-image');
+ for(const [i,card] of cards.entries()) {
+  const image=[first,second][i];
+  assert.equal(card.children.length,3);
+  assert.equal(card.children[1].className,'backup-file-icon');
+  assert.equal(card.children[1]['aria-hidden'],'true');
+  assert.equal(card.children[1].children[0].tag,'svg');
+  assert.equal(card.children[2].className,'backup-file-copy');
+  assert.equal(card.children[2].children[0].textContent,image.image);
+  assert.equal(card.children[2].children[1].title,image.digest);
+  assert.ok(card.textContent.includes(new Date(image.retained_at).toLocaleString()));
+  assert.match(card.textContent,/1 MB/);
+ }
+ const restore=page.content.all().find(node=>node.textContent==='Restore selected');
+ radios[0].checked=true;radios[0].listeners.change();
+ assert.equal(restore.disabled,false);
+ // Native radios in the same named group deselect the first control.
+ radios[0].checked=false;radios[1].checked=true;radios[1].listeners.change();
+ assert.equal(radios.filter(radio=>radio.checked).length,1);
+ await restore.listeners.click();
+ assert.equal(page.calls.find(call=>call.url==='/api/version/container/update').body.get('restore_digest'),second.digest);
+ assert.match(cssRule('.version-container-workspace .version-container-history .backup-file-card'),/grid-template-columns:32px 36px minmax\(0,1fr\)/);
 });

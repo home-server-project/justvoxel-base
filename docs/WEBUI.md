@@ -99,6 +99,15 @@ or Purpur server can select the other as a reviewed switch; for any other instal
 software, both choices are unavailable. Software conversion beyond the existing
 Paper/Purpur boundary remains roadmap work.
 
+The Minecraft Update workspace's Container tab shows the selected server, image,
+and status together. Previous container images use single selection; **Restore
+selected** restores the chosen retained image. Once a restarted server passes
+RCON readiness, image identity, and stack verification, its container update is
+successful. A later previous-image history problem appears as a warning on that
+successful result; it does not roll back the verified runtime or report that the
+current version was kept. The operation output includes the final history stage
+and command result.
+
 The Minecraft Version tab shows the installed and available versions, configured
 policy, server software, container channel, and applicable managed component
 status. **Review changes** resolves the proposed version/channel without saving

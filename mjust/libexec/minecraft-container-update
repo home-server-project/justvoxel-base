@@ -220,4 +220,9 @@ else
 fi
 publication_attempted=false
 # Only verified publication can add history. A failed pull never reaches here.
-/usr/libexec/justvoxel/management-agent instance-container-history record "${id}" "${history_digest}" "${remote}"
+jv_trace_stage 'Recording previous-image history'
+if ! jv_trace_run /usr/libexec/justvoxel/management-agent instance-container-history record "${id}" "${history_digest}" "${remote}"; then
+    # Publication/runtime verification is complete. Bookkeeping cannot undo it.
+    jv_trace_output 'Warning: previous-image history needs attention; verified image selection kept.'
+    printf '\n%s\n' 'JUSTVOXEL_CONTAINER_HISTORY_WARNING'
+fi

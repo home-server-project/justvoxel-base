@@ -210,7 +210,7 @@ func testFailedMinecraftUpdateWorker(t *testing.T, kind string) {
 			calls := 0
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			runMinecraftContainerUpdate = func(ctx context.Context, r minecraftContainerUpdateRequest) error {
+			runMinecraftContainerUpdate = func(ctx context.Context, r minecraftContainerUpdateRequest) (bool, error) {
 				if kind != operationTypeMinecraftContainerUpdate || r.InstanceID != x.id {
 					t.Fatal("wrong update target")
 				}
@@ -219,7 +219,7 @@ func testFailedMinecraftUpdateWorker(t *testing.T, kind string) {
 				}
 				calls++
 				cancel()
-				return updateErr
+				return false, updateErr
 			}
 			runMinecraftStackUpdate = func(ctx context.Context, _ string, _ bool, _, _ string) error {
 				if kind != operationTypeMinecraftUpdate || ctx.Value(instanceVersionKey{}) != x.id {

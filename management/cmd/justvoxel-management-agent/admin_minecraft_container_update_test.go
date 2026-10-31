@@ -251,3 +251,61 @@ func TestContainerRestoreRequiresRetainedDigestAndReviewedLocalFingerprint(t *te
 		t.Fatal(starts)
 	}
 }
+
+func TestContainerVerifiedUpdateHistoryWarningRemainsSuccessful(t *testing.T) {
+	for _, warning := range []bool{false, true} {
+		t.Run(boolText(warning), func(t *testing.T) {
+			f := newContainerFixture(t)
+			plan := f.status()
+			if warning {
+				f.write("history-fail", "")
+			}
+			s := surfaceTestServer(t, roleAdministrator)
+			s.operations = openTestOperationStore(t)
+			journal, _, err := s.operations.beginMinecraftMaintenance(plan.PlanFingerprint, operationTypeMinecraftContainerUpdate, "jv-a1b2c3")
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := runMinecraftContainerUpdate
+			t.Cleanup(func() { runMinecraftContainerUpdate = old })
+			runMinecraftContainerUpdate = func(ctx context.Context, r minecraftContainerUpdateRequest) (bool, error) {
+				return runMinecraftContainerCommand(ctx, f.command("update", r.PlanFingerprint, "true", "false", "false"))
+			}
+			err = executeMinecraftContainerUpdate(context.Background(), s, journal.OperationID, minecraftContainerUpdateRequest{InstanceID: "jv-a1b2c3", PlanFingerprint: plan.PlanFingerprint, RestartNow: true}, session{})
+			if err != nil {
+				t.Fatal("verified runtime reported as failure", err)
+			}
+			finished, err := s.operations.get(journal.OperationID)
+			if err != nil || finished.State != operationSucceeded || strings.Contains(finished.Status, "kept") || strings.Contains(finished.Status, "stopped") {
+				t.Fatal(finished, err)
+			}
+			if strings.Contains(finished.Status, "previous-image history needs attention") != warning {
+				t.Fatal(finished.Status)
+			}
+			if f.text("running") != "new-id" || !strings.Contains(f.text("instances/jv-a1b2c3/config.json"), f.remote) {
+				t.Fatal("verified runtime rolled back")
+			}
+			current, err := s.operations.currentMinecraftMaintenance()
+			if err != nil || current != nil {
+				t.Fatal("successful operation retained maintenance", current, err)
+			}
+			trace, err := s.operations.readTrace(journal.OperationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			code := "0"
+			if warning {
+				code = "24"
+			}
+			output := string(trace)
+			for _, text := range []string{"Selected server restarted and verified.", "STAGE Recording previous-image history", "instance-container-history record jv-a1b2c3 " + f.old + " " + f.remote, "[exit " + code + "]"} {
+				if !strings.Contains(output, text) {
+					t.Fatalf("missing trace %s: %s", text, output)
+				}
+			}
+			if strings.Contains(output, "Restoring previous selected image") {
+				t.Fatal("history failure triggered recovery")
+			}
+		})
+	}
+}

@@ -90,22 +90,30 @@ var runMinecraftContainerStatus = func(ctx context.Context, id string) (minecraf
 	}
 	return out, err
 }
-var runMinecraftContainerUpdate = func(ctx context.Context, request minecraftContainerUpdateRequest) error {
+var runMinecraftContainerUpdate = func(ctx context.Context, request minecraftContainerUpdateRequest) (bool, error) {
 	mode := "update"
 	args := []string{"--instance", request.InstanceID, mode, request.PlanFingerprint, strconv.FormatBool(request.RestartNow), strconv.FormatBool(request.BackupBeforeRestart), strconv.FormatBool(request.ConfirmPlayers)}
 	if request.RestoreDigest != "" {
 		args[2] = "restore"
 		args = append(args, request.RestoreDigest)
 	}
-	cmd := exec.CommandContext(ctx, minecraftContainerHelper, args...)
+	return runMinecraftContainerCommand(ctx, exec.CommandContext(ctx, minecraftContainerHelper, args...))
+}
+
+// The helper exits successfully once publication/runtime verification completes.
+// Its fixed stdout marker distinguishes a later history warning from failure.
+func runMinecraftContainerCommand(ctx context.Context, cmd *exec.Cmd) (bool, error) {
+	var output bytes.Buffer
+	cmd.Stdout = &output
 	finish, err := attachOperationTrace(ctx, cmd)
 	if err != nil {
-		return err
+		return false, err
 	}
 	err = cmd.Run()
 	finish(err)
-	return err
+	return err == nil && strings.HasSuffix("\n"+output.String(), "\nJUSTVOXEL_CONTAINER_HISTORY_WARNING\n"), err
 }
+
 var verifyMinecraftContainerCurrent = func(ctx context.Context, id string) error {
 	return exec.CommandContext(ctx, minecraftContainerHelper, "--instance", id, "verify").Run()
 }
@@ -226,7 +234,8 @@ func executeMinecraftContainerUpdate(ctx context.Context, s *server, id string, 
 		return err
 	}
 	ctx = withOperationTrace(ctx, s.operations, id)
-	err = runMinecraftContainerUpdate(ctx, request)
+	historyWarning, runErr := runMinecraftContainerUpdate(ctx, request)
+	err = runErr
 	if err != nil {
 		_, transitionErr := s.operations.transition(id, operationNeedsAttention, "update_failed", "Update stopped. Check the details below. You can keep the current version or try again.")
 		err = errors.Join(err, transitionErr)
@@ -244,7 +253,11 @@ func executeMinecraftContainerUpdate(ctx context.Context, s *server, id string, 
 		if _, err = s.operations.transition(id, operationVerifying, "verifying", "Selected image verification completed."); err != nil {
 			return err
 		}
-		_, err = s.operations.transition(id, operationSucceeded, "complete", "Container update completed.")
+		status := "Container update succeeded."
+		if historyWarning {
+			status = "Container updated successfully — previous-image history needs attention."
+		}
+		_, err = s.operations.transition(id, operationSucceeded, "complete", status)
 	}
 	if s.store != nil {
 		_ = s.store.recordAuditEvent(actor, operationTypeMinecraftContainerUpdate, request.InstanceID, err == nil, "Selected container image maintenance")
