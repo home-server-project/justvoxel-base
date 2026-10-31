@@ -86,8 +86,8 @@
             <button class="control-tile" type="button" data-network-open title="Ethernet, Wi-Fi and current network status"><strong>System Network</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-files-open title="Manage Minecraft server files and backups"><strong>File Browser</strong></button>
-            <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-agent-gateway-open><strong>AI &amp; API Connections</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-terminal-open title="Open a command-line session on JustVoxel"><strong>Terminal</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-agent-gateway-open><strong>AI &amp; API Connections</strong></button>
           </div>
         </section>
       </nav>
@@ -204,53 +204,111 @@
           <button class="system-monitor-header-button workspace-header-close" type="button" data-gateway-close aria-label="Close AI &amp; API Connections"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
         </div>
       </div>
+      <nav class="minecraft-workspace-tabs" aria-label="AI &amp; API Connections actions">
+        <button type="button" data-gateway-add>Add Connection</button>
+        <button type="button" data-gateway-help-open>Connection help</button>
+      </nav>
       <div class="system-workspace-body">
         <p data-gateway-feedback role="status"></p>
         <div class="system-workspace-content" data-gateway-content data-gateway-csrf="{{.CSRF}}">
-          <section class="panel">
-            <h3>External connections</h3><p data-gateway-summary>Loading connections…</p>
-            <label class="system-update-option system-ups-shutdown-switch"><span>Enable MCP and REST gateway</span><input type="checkbox" role="switch" data-gateway-enabled></label>
-            <p>Disabling the gateway blocks new requests and keeps your connection settings.</p>
-            <p>MCP endpoint: <code data-gateway-mcp></code></p>
-            <p>REST endpoint: <code data-gateway-rest></code></p>
-            <p>OpenAPI: <a data-gateway-openapi target="_blank" rel="noopener"></a> (requires a connection bearer credential)</p>
-            <button type="button" data-gateway-add>Add Connection</button>
+          <section data-gateway-overview>
+            <div class="panel gateway-summary">
+              <label class="gateway-switch"><strong data-gateway-state>Gateway Disabled</strong><input class="date-time-switch" type="checkbox" role="switch" aria-label="Enable gateway" data-gateway-enabled></label>
+              <p class="muted" data-gateway-summary>Loading connections…</p>
+            </div>
+            <div class="minecraft-server-inventory"><div class="minecraft-server-entries" data-gateway-cards></div></div>
           </section>
-          <div data-gateway-cards></div>
           <section class="panel" data-gateway-details hidden></section>
-          <details><summary>Connection help</summary>
-            <p>Your AI agent interaction and connection with JustVoxel through MCP or REST API depends on your AI provider, application, package/subscription, and supported connection methods. JustVoxel provides standard MCP and REST API interfaces, but connection availability is determined by the AI agent or service provider.</p>
-            <p>Use a trusted network or protected HTTPS/VPN access. The local default uses unencrypted HTTP. Never expose port 8099 directly to the public Internet. JustVoxel never needs an AI provider’s model API key to expose MCP or REST.</p>
-            <p>OAuth requires an external authorization server issuing signed access tokens for your configured JustVoxel resource, scope and identity binding. Unknown identities are never enrolled automatically.</p>
-            <p>Level 1: read only. Level 2: Operator actions, restart/backup allowances and cooldowns; no Stop. Level 3: normal appliance management; no users or gateway security. Level 4: Developer Mode, including systemd and host updates/power. Full Factory Reset and connection/security administration are never exposed externally.</p>
-          </details>
+          <section data-gateway-help hidden>
+            <button type="button" class="secondary" data-gateway-back>Back to connections</button>
+            <h3>Connection help</h3>
+            <section class="panel"><h4>Choose your app</h4>
+              <p>Connect an AI assistant, automation, or another supported app to JustVoxel. You choose what it is allowed to see or control.</p>
+              <h5>OpenAI — ChatGPT &amp; Codex</h5><p>Use the MCP address with a supported OpenAI MCP connection.</p>
+              <h5>Claude</h5><p>Use the MCP address with a Claude custom connector.</p>
+              <h5>Grok</h5><p>Use the MCP address with a supported Grok custom MCP connector.</p>
+              <h5>Gemini</h5><p>Use the MCP address when custom MCP connections are available for the user’s account/application.</p>
+              <h5>GitHub Copilot</h5><p>Use the MCP address when configuring a custom MCP server.</p>
+              <h5>Other AI / MCP app</h5><p>Use the MCP address with any compatible Streamable HTTP MCP client.</p>
+              <h5>Automation / REST API</h5><p>Use the REST address and JustVoxel connection token.</p>
+              <p>AI provider cards use the MCP connection address. Automation / REST API uses the REST API address.</p>
+              <p>Support and setup availability depend on the provider, application, account, plan or subscription, and network access.</p>
+              <p>Create a connection, copy its JustVoxel connection token once into your app, then select Done.</p>
+            </section>
+            <section class="panel"><h4>Access levels</h4>
+              <h5>Level 1 — Read Only</h5><p>Can see server information. Cannot change anything.</p>
+              <h5>Level 2 — Basic Management</h5><p>Can perform common safe actions such as restarting a Minecraft server and creating a backup. Stop is not included. Restart and backup allowances and cooldowns apply.</p>
+              <h5>Level 3 — Full Management</h5><p>Can manage Minecraft servers and normal JustVoxel administration features.</p>
+              <h5>Level 4 — Full System Control</h5><p>Advanced mode. Can control important parts of the host system. Only enable this for a connection you fully trust.</p>
+              <p>No level can manage connection permissions, user accounts or Full Factory Reset.</p>
+            </section>
+            <section class="panel"><h4>Connection addresses</h4>
+              <p>MCP</p><div class="gateway-address"><code data-gateway-mcp></code><button type="button" class="secondary" data-gateway-copy-address="mcp">Copy</button></div>
+              <p>REST API</p><div class="gateway-address"><code data-gateway-rest></code><button type="button" class="secondary" data-gateway-copy-address="rest">Copy</button></div>
+              <p data-gateway-address-status role="status"></p>
+            </section>
+            <section class="panel"><h4>Remote access and security</h4>
+              <p>Local JustVoxel uses HTTP on your trusted local network by default. Use HTTPS or a private VPN such as Tailscale for protected remote access. Never expose port 8099 directly to the public Internet.</p>
+              <p>JustVoxel does not require an AI provider model API key merely to expose MCP or REST.</p>
+            </section>
+            <details class="panel"><summary>Developer integration</summary>
+              <p>OpenAPI: <a data-gateway-openapi target="_blank" rel="noopener"></a> (requires your connection credential).</p>
+              <p>OAuth protected-resource metadata: <code data-gateway-metadata></code>. Required scope: <code>justvoxel:connect</code>.</p>
+              <p>MCP uses Streamable HTTP with a bearer credential. Your app must support this protocol and the configured token or OAuth method.</p>
+              <p>OAuth requires HTTPS issuer, JWKS and resource addresses, plus a subject or client binding. JustVoxel checks tokens from your configured sign-in service; it does not issue OAuth tokens.</p>
+              <p>When using a trusted HTTPS reverse proxy, preserve the external Host and forward X-Forwarded-Proto: https for correct discovery.</p>
+              <p>Optional expiration stops access at the chosen time. Leave it empty for no connection expiration; OAuth access tokens still need their own valid expiration.</p>
+            </details>
+          </section>
         </div>
       </div>
     </div>
   </dialog>
   <template data-gateway-settings-template>
     <form data-gateway-settings>
+      <button type="button" class="secondary" data-gateway-back>Back to connections</button>
       <h3 data-gateway-settings-title>Connection settings</h3>
-      <label>Name<input name="name" required maxlength="100" autocomplete="off"></label>
-      <label>Type / purpose<input name="purpose" maxlength="100" placeholder="AI Agent or API Client"></label>
-      <label>Authentication method<select name="auth_mode"><option value="token">Scoped API Token</option><option value="oauth">OAuth</option></select></label>
-      <label>Access level<select name="level"><option value="1">Level 1 — Read Only</option><option value="2">Level 2 — Basic Management</option><option value="3">Level 3 — Full Management</option><option value="4">Level 4 — Full System Control (Developer Mode)</option></select></label>
-      <label>Enabled<input type="checkbox" role="switch" name="enabled"></label>
-      <label>Expiration (optional, your local time)<input type="datetime-local" name="expires_at"></label>
-      <label>All Minecraft instances<input type="checkbox" role="switch" name="all_instances"></label>
-      <fieldset data-gateway-scope><legend>Selected immutable Minecraft instance IDs</legend><div data-gateway-instance-options></div></fieldset>
-      <fieldset data-gateway-oauth hidden><legend>External OAuth authorization server</legend>
-        <label>Issuer (HTTPS)<input name="issuer" type="url"></label>
-        <label>JustVoxel resource / audience (HTTPS)<input name="audience" type="url"></label>
-        <label>JWKS endpoint (HTTPS)<input name="jwks_uri" type="url"></label>
-        <label>Required scope<input name="scope" value="justvoxel:connect" readonly></label>
-        <label>Stable subject binding<input name="subject" maxlength="512" autocomplete="off"></label>
-        <label>Stable client ID binding<input name="client_id" maxlength="512" autocomplete="off"></label>
-        <p>Configure at least one binding. When both are provided, both must match.</p>
-      </fieldset>
-      <dl data-gateway-safe-details></dl>
-      <p>Level changes apply to the next request with the same credential. Accepted operations may finish.</p>
-      <div class="action-row"><button type="submit">Apply</button><button type="button" class="secondary" data-gateway-toggle>Disable</button><button type="button" class="secondary" data-gateway-rotate>Rotate token</button><button type="button" class="secondary" data-gateway-revoke>Revoke token</button><button type="button" class="secondary" data-gateway-allowance>Reset restart / backup allowances</button><button type="button" class="danger" data-gateway-delete>Delete</button></div>
+      <section class="gateway-primary">
+        <label><span data-gateway-name-label>Name</span><input name="name" placeholder="My AI Assistant" required maxlength="100" autocomplete="off"></label>
+        <fieldset><legend data-gateway-purpose-label>What will use this connection?</legend>
+          <div class="gateway-provider-grid" data-gateway-providers>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="OpenAI" checked><img class="gateway-provider-icon" src="/static/ai-providers/openai.svg" alt=""><span><strong>OpenAI</strong><small>ChatGPT &amp; Codex</small></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Claude"><img class="gateway-provider-icon" src="/static/ai-providers/claude.svg" alt=""><span><strong>Claude</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Grok"><img class="gateway-provider-icon" src="/static/ai-providers/grok.svg" alt=""><span><strong>Grok</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Gemini"><img class="gateway-provider-icon" src="/static/ai-providers/googlegemini.svg" alt=""><span><strong>Gemini</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="GitHub Copilot"><img class="gateway-provider-icon" src="/static/ai-providers/githubcopilot.svg" alt=""><span><strong>GitHub Copilot</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Other AI / MCP app"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Other AI / MCP app</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Automation / REST API"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Automation / REST API</strong></span></label>
+          </div>
+        </fieldset>
+        <label><span data-gateway-level-label>How much access should it have?</span><select name="level"><option value="1">Level 1 — Read Only</option><option value="2">Level 2 — Basic Management</option><option value="3">Level 3 — Full Management</option><option value="4">Level 4 — Full System Control</option></select></label>
+        <fieldset><legend>Which Minecraft servers?</legend>
+          <label class="gateway-choice"><input type="radio" name="server_scope" value="all" checked>All servers</label>
+          <label class="gateway-choice"><input type="radio" name="server_scope" value="selected">Choose servers</label>
+          <div data-gateway-scope hidden><div data-gateway-instance-options></div></div>
+        </fieldset>
+        <label class="gateway-switch"><span>Enabled</span><input class="date-time-switch" type="checkbox" role="switch" name="enabled"></label>
+      </section>
+      <section data-gateway-status hidden><h4>Status</h4><dl data-gateway-status-details></dl></section>
+      <details data-gateway-advanced hidden><summary>Advanced details</summary>
+        <label>Expiration (optional, your local time)<input type="datetime-local" name="expires_at"></label>
+        <dl data-gateway-safe-details></dl>
+      </details>
+      <section data-gateway-oauth hidden><h4>Developer integration</h4>
+        <p>Use the details supplied by your app or sign-in service. Never paste access tokens or private keys here.</p>
+        <label>Issuer (HTTPS)<input name="issuer" type="url"><small>The address of the service that issues access tokens.</small></label>
+        <label>Audience / resource (HTTPS)<input name="audience" type="url"><small>The protected JustVoxel address the token is intended for.</small></label>
+        <label>JWKS URL (HTTPS)<input name="jwks_uri" type="url"><small>The service’s public signing keys address.</small></label>
+        <label>Required scope<input name="scope" value="justvoxel:connect" readonly><small>The permission the app must request.</small></label>
+        <label>Subject binding<input name="subject" maxlength="512" autocomplete="off"><small>The exact user identity allowed to connect.</small></label>
+        <label>Client binding<input name="client_id" maxlength="512" autocomplete="off"><small>The exact app identity allowed to connect.</small></label>
+        <p>Provide at least one binding. If you provide both, both must match.</p>
+      </section>
+      <section data-gateway-actions hidden><h4>Actions</h4><div class="action-row">
+        <button type="button" class="secondary" data-gateway-rotate>Rotate token</button><button type="button" class="secondary" data-gateway-revoke>Revoke token</button><button type="button" class="secondary" data-gateway-allowance>Reset restart / backup allowances</button><button type="button" class="danger" data-gateway-delete>Delete connection</button>
+      </div></section>
+      <p data-gateway-live-note hidden>Changes apply to the next request. Operations already accepted may finish.</p>
+      <div class="action-row gateway-save"><button type="button" class="secondary" data-gateway-back>Cancel</button><button type="submit" data-gateway-save>Create</button></div>
     </form>
   </template>
   <dialog class="minecraft-delete-dialog" data-gateway-level4-dialog aria-labelledby="gateway-level4-title">
@@ -275,6 +333,7 @@
       <div class="action-row"><button type="button" data-gateway-token-copy>Copy token</button><button type="button" class="secondary" data-gateway-token-done>Done</button></div>
     </div>
   </dialog>
+  <link rel="stylesheet" href="/static/agent-gateway.css">
   <script src="/static/agent-gateway.js" defer></script>
 
   <dialog class="workspace-window system-workspace-dialog" data-workspace-window="terminal" data-terminal-workspace-dialog aria-labelledby="terminal-workspace-title">

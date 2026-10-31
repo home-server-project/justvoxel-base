@@ -1240,7 +1240,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	}
 	for heading, labels := range map[string][]string{
 		"Minecraft": {"Minecraft Settings", "Minecraft Servers", "Minecraft Update", "Minecraft Network", "Backups", "Migration", "Plugins", "How to connect"},
-		"System":    {"System Settings", "System Monitor", "System Update", "System Network", "Storage", "File Browser", "AI &amp; API Connections", "Terminal"},
+		"System":    {"System Settings", "System Monitor", "System Update", "System Network", "Storage", "File Browser", "Terminal", "AI &amp; API Connections"},
 	} {
 		section := strings.Split(strings.Split(markup, `<span class="control-section-label">`+heading+`</span>`)[1], `</section>`)[0]
 		matches := regexp.MustCompile(`<strong>([^<]+)</strong>`).FindAllStringSubmatch(section, -1)

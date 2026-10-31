@@ -298,12 +298,36 @@ Control Center tile. It uses the existing movable/resizable workspace model and
 visual components. Viewer, Operator and other Administrator users cannot manage
 connections. External bearer credentials cannot authenticate this human workspace.
 
-The workspace shows configured/enabled counts, a global gateway switch, independent
-connection cards and per-connection settings: name/purpose, Scoped API Token or
-OAuth, Level 1–4, enabled state, optional expiration, immutable instance scope,
-safe fingerprint, timestamps, Last Activity, MCP/REST/OpenAPI endpoints and actions.
-Enabled and Last Activity describe evidence accurately; there is no generic
-Connected claim for stateless clients.
+The default view is a card-first overview using the Minecraft Servers card layout.
+A compact gateway switch shows Enabled/Disabled and connection counts. Each card
+shows name, provider logo and identity, readable access level, Minecraft server
+scope, Last activity and Settings. Technical identifiers and addresses stay off
+the overview. Terminal remains bottom-left in the System Control Center grid;
+AI & API Connections occupies bottom-right.
+
+The compact top lane contains **Add Connection**, then **Connection help**.
+Add Connection replaces the overview with **Name**, recognizable provider cards,
+access level, Minecraft server scope and Enabled. **OpenAI** is one card for
+**ChatGPT & Codex**; the other choices are Claude, Grok, Gemini, GitHub Copilot,
+Other AI / MCP app and Automation / REST API. Defaults are OpenAI, Level 1,
+all servers and Enabled. Normal creation automatically uses a scoped JustVoxel
+connection token, with no authentication-method selector or OAuth creation path.
+Select Create, copy the token once, then Done.
+
+Settings opens the selected connection with primary controls, status, token and
+allowance actions. **Advanced details** contains identifiers, fingerprint,
+timestamps and optional expiration. Existing OAuth connections retain editable
+technical fields under **Developer integration** inside Advanced details; token
+connections show no OAuth fields. Unknown existing provider labels display safely
+with the generic local icon. Back or Cancel returns to the overview.
+
+Connection help starts with **Choose your app** and provider guidance: AI choices
+use the MCP address; automation uses the REST address and connection token. MCP
+and REST addresses retain Copy controls. Provider, application, account,
+subscription and network access determine availability. The collapsed
+**Developer integration** section at the bottom contains OAuth technical details,
+metadata and OpenAPI. Enabled and Last activity describe evidence accurately;
+there is no generic Connected claim for stateless clients.
 
 Apply saves live permission/scope changes without token replacement. Every entry
 to Level 4 from a lower level opens the existing destructive-confirmation style:

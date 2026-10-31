@@ -27,7 +27,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 			t.Errorf("%s close is not the shared accessible SVG control", match[1])
 		}
 	}
-	for _, name := range []string{"network", "system", "minecraft", "storage", "backups", "migration", "version", "system-update", "files", "terminal"} {
+	for _, name := range []string{"network", "system", "minecraft", "storage", "backups", "migration", "version", "system-update", "files", "terminal", "gateway"} {
 		if refreshes[name] == "" || closes[name] == "" {
 			t.Errorf("%s workspace lost its header controls", name)
 		}

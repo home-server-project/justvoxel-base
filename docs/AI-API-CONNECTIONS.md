@@ -9,6 +9,43 @@ automation service, or a script are labels and grant no special permissions.
 
 JustVoxel never needs an AI provider's model API key merely to expose MCP or REST.
 
+## Workspace
+
+The overview starts with a compact gateway Enabled/Disabled switch and configured
+and enabled connection counts. Disabling it keeps your connections. Below it,
+responsive cards follow the Minecraft Servers layout. Cards show the name,
+provider identity, readable access level, Minecraft server scope,
+enabled state and Last activity. Select **Settings** on a card to edit it.
+
+The top action lane contains **Add Connection**, then **Connection help**.
+**Add Connection** opens a provider-first setup surface. Enter a **Name** and
+choose **OpenAI** (ChatGPT & Codex), **Claude**, **Grok**, **Gemini**, **GitHub
+Copilot**, **Other AI / MCP app**, or **Automation / REST API**. OpenAI is one card
+for both ChatGPT and Codex. The default is OpenAI, Level 1 — Read Only, all
+Minecraft servers, and Enabled. Choose the permissions and servers, then select
+**Create**. Normal setup automatically uses a scoped JustVoxel connection token;
+there is no authentication-method choice and OAuth is not part of normal
+creation. Copy the token from the one-time dialog, then select **Done**.
+Provider selection is a label stored in the existing purpose field and does not
+change permissions or automatically configure the provider.
+
+**Settings** groups the primary controls, status and actions. It shows credential
+status and expiration when configured, and offers token rotation/revocation,
+allowance reset and deletion. **Advanced details** contains the connection ID,
+safe credential fingerprint, created/updated times and optional expiration.
+Existing OAuth connections retain editable technical configuration under
+**Advanced details → Developer integration**; token connections do not show
+OAuth fields. Tokens are shown only once on creation or rotation, never in Settings.
+Back or Cancel returns to the overview.
+
+**Connection help** starts with **Choose your app** and high-level provider
+guidance. AI cards use the MCP address; Automation / REST API uses the REST
+address and connection token. Both addresses retain Copy actions. Provider,
+application, account, subscription and network access determine actual support;
+selecting a card does not promise availability. Levels 1–4 and remote-access
+guidance follow. Technical OAuth explanation and metadata are in the collapsed
+**Developer integration** section at the bottom, outside normal setup.
+
 ## Architecture and security boundary
 
 ```text
@@ -73,12 +110,17 @@ There is no JustVoxel client registration or authorization/token endpoint.
 
 ## Create and use a scoped API token
 
-1. Select **Add Connection**, choose a name and optional type/purpose.
-2. Select **Scoped API Token**, the least access level needed, enabled state,
-   optional expiration and all or selected Minecraft instances.
-3. Select **Apply**. For Level 4, complete the special confirmation first.
-4. Copy the token from the one-time modal and store it securely in the client.
-5. Enable the gateway when ready. Send `Authorization: Bearer …` on each request.
+1. Select **Add Connection**, enter a **Name** and choose the provider card.
+2. Choose the least access level needed and all or selected Minecraft servers.
+3. Select **Create**. For Level 4, complete the existing special confirmation first.
+4. Copy the JustVoxel connection token once, store it securely in the client, then
+   select **Done**. Normal setup automatically uses a token.
+5. Use the MCP address for AI apps or the REST address for automation. Enable the
+   gateway when ready. Send `Authorization: Bearer …` on each request.
+
+Optional expiration remains editable in the existing connection's **Advanced
+details**. OAuth is not offered during normal creation. Existing OAuth records
+remain manageable through **Developer integration** without migration.
 
 Tokens use the `jvapi_` prefix and 256 random bits. Only a SHA-256 digest and a
 safe fingerprint/last characters are persisted. Authentication compares digests
@@ -143,7 +185,7 @@ with the switch, then select **Enable Level 4**. The final button stays disabled
 until both are satisfied. Cancel leaves the saved permission unchanged.
 Only the authenticated primary human administrator can approve this transition.
 
-## OAuth resource-server configuration
+## Developer integration: OAuth resource-server configuration
 
 JustVoxel is an OAuth **resource server**, not an authorization server. It does
 not turn the `voxel` password into access tokens. Bring an external standards-based

@@ -1,0 +1,41 @@
+/* AI & API Connections only; reuse the Minecraft Servers cards and action lane. */
+[data-agent-gateway-dialog] [hidden] { display: none !important; }
+[data-agent-gateway-dialog] [data-gateway-feedback]:empty { display: none; }
+[data-agent-gateway-dialog] .gateway-summary { display: grid; gap: .35rem; }
+[data-agent-gateway-dialog] .gateway-summary p { margin: 0; }
+[data-agent-gateway-dialog] .gateway-switch { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0; }
+[data-agent-gateway-dialog] .gateway-switch input { flex: none; margin: 0; }
+[data-agent-gateway-dialog] .gateway-card-actions { justify-content: flex-end; margin-top: auto; }
+[data-agent-gateway-dialog] .minecraft-server-card { margin: 0; padding: 1rem; }
+[data-agent-gateway-dialog] .gateway-primary,
+[data-agent-gateway-dialog] [data-gateway-settings],
+[data-agent-gateway-dialog] [data-gateway-oauth] { display: grid; gap: .85rem; min-width: 0; }
+[data-agent-gateway-dialog] .gateway-primary > label,
+[data-agent-gateway-dialog] [data-gateway-oauth] label { display: grid; gap: .35rem; margin: 0; }
+[data-agent-gateway-dialog] .gateway-primary > .gateway-switch { display: flex; }
+[data-agent-gateway-dialog] .gateway-choice { display: flex; align-items: center; gap: .5rem; margin: .35rem 0; }
+[data-agent-gateway-dialog] .gateway-choice input { flex: none; width: auto; margin: 0; }
+[data-agent-gateway-dialog] .gateway-save { justify-content: flex-end; }
+[data-agent-gateway-dialog] .gateway-address { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+[data-agent-gateway-dialog] :is(code, dd, h3, p) { overflow-wrap: anywhere; }
+[data-agent-gateway-dialog] :is(fieldset, input, select) { min-width: 0; max-width: 100%; }
+[data-agent-gateway-dialog] small { color: var(--jv-muted); }
+/* Provider choices follow the local server-software card pattern. */
+[data-agent-gateway-dialog] .gateway-provider-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
+[data-agent-gateway-dialog] .gateway-provider-card { position: relative; display: flex; align-items: center; gap: .65rem; min-width: 0; min-height: 80px; padding: .7rem; margin: 0; border: 1px solid var(--jv-border-strong); border-radius: var(--jv-radius); background: var(--jv-surface-sunken); cursor: pointer; }
+[data-agent-gateway-dialog] .gateway-provider-card > span { display: grid; gap: .2rem; min-width: 0; overflow-wrap: anywhere; }
+[data-agent-gateway-dialog] .gateway-provider-card small { font-weight: 400; }
+[data-agent-gateway-dialog] .gateway-provider-card:has(input:checked) { border-color: var(--jv-success); background: color-mix(in srgb, var(--jv-success) 18%, var(--jv-surface-sunken)); }
+[data-agent-gateway-dialog] .gateway-provider-card:has(input:focus-visible) { outline: 2px solid var(--jv-accent); outline-offset: 2px; }
+[data-agent-gateway-dialog] .gateway-provider-card > input[type=radio] { position: absolute; width: 1px; min-width: 0; height: 1px; min-height: 0; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+[data-agent-gateway-dialog] .gateway-provider-icon { flex: none; width: 36px; height: 36px; object-fit: contain; padding: 4px; border-radius: 6px; background: #fff; }
+[data-agent-gateway-dialog] .gateway-connection-identity { display: flex; align-items: center; gap: .7rem; min-width: 0; }
+[data-agent-gateway-dialog] .gateway-connection-identity > div { min-width: 0; }
+[data-agent-gateway-dialog] .gateway-connection-identity :is(h2, p) { margin: 0; }
+[data-agent-gateway-dialog] .gateway-connection-identity p { color: var(--jv-muted); margin-top: .25rem; }
+@media (max-width: 850px) {
+  [data-agent-gateway-dialog] .gateway-provider-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  [data-agent-gateway-dialog] .gateway-provider-grid { grid-template-columns: minmax(0, 1fr); }
+}
