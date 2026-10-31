@@ -33,7 +33,13 @@ func newContainerFixture(t *testing.T) *containerFixture {
 	record := `{"schema_version":1,"runtime":{"id":"jv-a1b2c3","software":"paper","image_tag":"stable","image_digest":"` + f.old + `","version":"26.2","version_policy":"recommended","uid":1000,"gid":1000,"bedrock_enabled":true},"storage":{"root":"/fixture","data_path":"/fixture/minecraft-instances/jv-a1b2c3/data"}}`
 	f.write("instances/jv-a1b2c3/config.json", record)
 	f.write("instances/jv-sibling/config.json", "sibling must remain identical")
-	common := `sleep(){ :; }
+	common := `sleep(){
+ if [[ -f $FIXTURE_ROOT/stopping ]]; then
+  printf inactive > "$FIXTURE_ROOT/active"
+  printf '' > "$FIXTURE_ROOT/running"
+  rm "$FIXTURE_ROOT/stopping"
+ fi
+}
 require_root(){ :; }
 validate_server_capabilities(){ :; }
 JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
@@ -44,10 +50,21 @@ systemctl(){
  case "$1" in
  show) cat "$FIXTURE_ROOT/active";;
  is-active) [[ $(cat "$FIXTURE_ROOT/active") == active ]];;
- --no-block|stop) printf inactive > "$FIXTURE_ROOT/active";;
+ --no-block)
+  [[ $# == 3 && $2 == stop && $3 == minecraft-jv-a1b2c3.service ]] || return 93
+  [[ ! -f $FIXTURE_ROOT/stop-fail ]] || return 18
+  printf deactivating > "$FIXTURE_ROOT/active"
+  touch "$FIXTURE_ROOT/stopping";;
+ stop)
+  [[ $# == 2 && $2 == minecraft-jv-a1b2c3.service ]] || return 93
+  printf inactive > "$FIXTURE_ROOT/active"
+  printf '' > "$FIXTURE_ROOT/running";;
  start)
+  [[ $# == 2 && $2 == minecraft-jv-a1b2c3.service ]] || return 93
+  [[ $(cat "$FIXTURE_ROOT/active") != active ]] || return 0
+  if [[ -f $FIXTURE_ROOT/start-fail ]]; then rm "$FIXTURE_ROOT/start-fail"; return 19; fi
   printf active > "$FIXTURE_ROOT/active"
-  if [[ $(jq -r .runtime.image_digest "$FIXTURE_ROOT/instances/jv-a1b2c3/config.json") == "$FIXTURE_REMOTE" ]];then printf new-id > "$FIXTURE_ROOT/running";else printf old-id > "$FIXTURE_ROOT/running";fi;;
+  if [[ $(jq -r .runtime.image_digest "$FIXTURE_ROOT/instances/jv-a1b2c3/config.json") == "$FIXTURE_REMOTE" ]];then if [[ -f $FIXTURE_ROOT/wrong-new-id ]]; then printf wrong-id > "$FIXTURE_ROOT/running"; else printf new-id > "$FIXTURE_ROOT/running"; fi;else printf old-id > "$FIXTURE_ROOT/running";fi;;
  *) return 93;;esac
 }
 podman(){
@@ -56,17 +73,23 @@ podman(){
  pull) [[ ! -f $FIXTURE_ROOT/pull-fail ]] || return 17; printf 'Copying blob fixture\nCopying config fixture\nWriting manifest fixture\n'; touch "$FIXTURE_ROOT/downloaded"; if [[ -f $FIXTURE_ROOT/move-remote ]]; then cat "$FIXTURE_ROOT/move-remote" > "$FIXTURE_ROOT/remote"; fi;;
  ps) [[ $(cat "$FIXTURE_ROOT/active") != active ]] || printf minecraft-jv-a1b2c3;;
  image)
-  if [[ $3 == *"$FIXTURE_REMOTE" ]];then
+  [[ $# == 5 && $2 == inspect && $4 == --format ]] || return 94
+  if [[ $3 == *"$FIXTURE_REMOTE" || $3 == new-id ]];then
    [[ -f $FIXTURE_ROOT/downloaded ]] || return 1
    if [[ $5 == *Digest* ]];then printf '%s' "$FIXTURE_REMOTE";else printf new-id;fi
   else
+   [[ $3 == old-id || $3 == *"$FIXTURE_OLD" || $3 == docker.io/itzg/minecraft-server:stable ]] || return 94
    [[ ! -f $FIXTURE_ROOT/missing ]] || return 1
    if [[ $5 == *Digest* ]];then printf '%s' "$FIXTURE_OLD";else printf old-id;fi
   fi;;
  inspect)
-  if [[ $4 == *State.Running* ]];then [[ $(cat "$FIXTURE_ROOT/active") == active ]] && printf true || printf false
-  else cat "$FIXTURE_ROOT/running";fi;;
- exec) cat "$FIXTURE_ROOT/players";;
+  if [[ $2 == --format ]]; then format=$3; container=$4; else container=$2; [[ $3 == --format ]] || return 94; format=$4; fi
+  [[ $container == minecraft-jv-a1b2c3 ]] || return 94
+  case "$format" in
+   '{{.State.Running}}') [[ -n $(cat "$FIXTURE_ROOT/running") ]] && printf true || printf false;;
+   '{{.Image}}') [[ -n $(cat "$FIXTURE_ROOT/running") ]] || return 1; cat "$FIXTURE_ROOT/running";;
+   *) return 94;;esac;;
+ exec) [[ $2 == minecraft-jv-a1b2c3 && $3 == rcon-cli && -n $(cat "$FIXTURE_ROOT/running") ]] || return 1; cat "$FIXTURE_ROOT/players";;
  kill) return 0;;
  *) return 94;;esac
 }
@@ -84,7 +107,7 @@ podman(){
 		f.write(name, text)
 	}
 	f.write("validate-instance-runtime-commit", "#!/bin/bash\n[[ $1 == jv-a1b2c3 ]]\n")
-	f.write("verify-minecraft-stack", "#!/bin/bash\nif [[ -f $FIXTURE_ROOT/fail-old && $(jq -r .runtime.image_digest $FIXTURE_ROOT/instances/jv-a1b2c3/config.json) == $FIXTURE_OLD ]]; then exit 1; fi\nprintf 'verify %s\\n' \"$*\" >> \"$FIXTURE_ROOT/calls\"\n")
+	f.write("verify-minecraft-stack", "#!/bin/bash\nif [[ -f $FIXTURE_ROOT/verify-new-fail && $(cat $FIXTURE_ROOT/running) == new-id ]]; then exit 22; fi\nif [[ -f $FIXTURE_ROOT/fail-old && $(jq -r .runtime.image_digest $FIXTURE_ROOT/instances/jv-a1b2c3/config.json) == $FIXTURE_OLD ]]; then exit 1; fi\nprintf 'verify %s\\n' \"$*\" >> \"$FIXTURE_ROOT/calls\"\n")
 	f.write("management-agent", `#!/bin/bash
 printf 'agent %s\n' "$*" >> "$FIXTURE_ROOT/calls"
 if [[ $1 == instance-container-history ]]; then
@@ -103,9 +126,21 @@ fi
 [[ $2 == jv-a1b2c3 ]] || exit 95
 case "$1" in
  instance-container-publish)
+  printf 'publish-state %s %s\n' "$(cat "$FIXTURE_ROOT/active")" "$(cat "$FIXTURE_ROOT/running")" >> "$FIXTURE_ROOT/calls"
+  if [[ -e $FIXTURE_ROOT/instances/$2/pending.json ]]; then
+   printf 'recover pending\n' >> "$FIXTURE_ROOT/calls"
+   jq --arg digest "$FIXTURE_OLD" '.runtime.image_digest=$digest' "$FIXTURE_ROOT/instances/$2/config.json" > "$FIXTURE_ROOT/next"
+   mv "$FIXTURE_ROOT/next" "$FIXTURE_ROOT/instances/$2/config.json"
+   rm "$FIXTURE_ROOT/instances/$2/pending.json"
+  fi
+  if [[ $3 == "$FIXTURE_REMOTE" && -f $FIXTURE_ROOT/publish-fail ]]; then return_code=20; exit "$return_code"; fi
   jq --arg digest "$3" '.runtime.image_digest=$digest' "$FIXTURE_ROOT/instances/$2/config.json" > "$FIXTURE_ROOT/next"
-  mv "$FIXTURE_ROOT/next" "$FIXTURE_ROOT/instances/$2/config.json";;
- instance-version-backup) [[ $(cat "$FIXTURE_ROOT/active") == inactive ]];;
+  mv "$FIXTURE_ROOT/next" "$FIXTURE_ROOT/instances/$2/config.json"
+  if [[ $3 == "$FIXTURE_REMOTE" && -f $FIXTURE_ROOT/publish-partial ]]; then
+   touch "$FIXTURE_ROOT/instances/$2/pending.json"
+   exit 21
+  fi;;
+ instance-version-backup) [[ ! -f $FIXTURE_ROOT/backup-fail ]] || exit 23; [[ $(cat "$FIXTURE_ROOT/active") == inactive ]];;
  *) exit 96;;esac
 `)
 	return f
@@ -118,7 +153,13 @@ func (f *containerFixture) write(name, text string) {
 }
 func (f *containerFixture) run(args ...string) ([]byte, error) {
 	cmd := exec.Command("bash", append([]string{f.helper, "--instance", "jv-a1b2c3"}, args...)...)
-	cmd.Env = append(os.Environ(), "FIXTURE_ROOT="+f.root, "FIXTURE_REMOTE="+f.remote, "FIXTURE_OLD="+f.old)
+	trace, err := os.OpenFile(filepath.Join(f.root, "trace"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer trace.Close()
+	cmd.ExtraFiles = []*os.File{trace}
+	cmd.Env = append(os.Environ(), "JV_OPERATION_TRACE_FD=3", "FIXTURE_ROOT="+f.root, "FIXTURE_REMOTE="+f.remote, "FIXTURE_OLD="+f.old)
 	return cmd.CombinedOutput()
 }
 func (f *containerFixture) status() minecraftContainerStatus {
@@ -174,6 +215,7 @@ func TestContainerHelperPullOnlyPreservesRuntimeAndSibling(t *testing.T) {
 			f := newContainerFixture(t)
 			if !active {
 				f.write("active", "inactive")
+				f.write("running", "")
 			}
 			before := f.text("instances/jv-a1b2c3/config.json")
 			sibling := f.text("instances/jv-sibling/config.json")
@@ -256,6 +298,7 @@ func TestContainerHelperFailsClosedBeforeDisruption(t *testing.T) {
 			f := newContainerFixture(t)
 			if reason == "stopped" {
 				f.write("active", "inactive")
+				f.write("running", "")
 			}
 			plan := f.status()
 			switch reason {
@@ -312,6 +355,7 @@ func TestContainerTagMovementDuringPullDoesNotPublishOrDisrupt(t *testing.T) {
 func TestContainerStoppedMissingImageCanBeAcknowledgedWithoutStarting(t *testing.T) {
 	f := newContainerFixture(t)
 	f.write("active", "inactive")
+	f.write("running", "")
 	f.write("missing", "")
 	f.write("calls", "")
 	if data, err := f.run("verify"); err != nil {
@@ -348,6 +392,7 @@ func TestContainerSuccessfulUpdateRetainsServingImageAndRestoresExactImage(t *te
 			f := newContainerFixture(t)
 			if !running {
 				f.write("active", "inactive")
+				f.write("running", "")
 			}
 			if data, err := f.apply(f.status(), running, false, false); err != nil {
 				t.Fatalf("update: %v %s", err, data)
@@ -421,5 +466,122 @@ func TestContainerRestorePlayerConfirmationPrecedesShutdown(t *testing.T) {
 	}
 	if data, err := f.run("restore", plan.RestoreFingerprint, "true", "false", "true", f.old); err != nil {
 		t.Fatalf("%v %s", err, data)
+	}
+}
+
+func TestContainerHelperRestartTransactionOrder(t *testing.T) {
+	for _, backup := range []bool{false, true} {
+		t.Run(boolText(backup), func(t *testing.T) {
+			f := newContainerFixture(t)
+			plan := f.status()
+			f.write("calls", "")
+			if data, err := f.apply(plan, true, backup, false); err != nil {
+				t.Fatalf("%v %s", err, data)
+			}
+			calls := f.text("calls")
+			order := []string{"podman pull", "podman image inspect docker.io/itzg/minecraft-server@" + f.remote + " --format {{.Digest}}", "agent instance-container-publish jv-a1b2c3 " + f.remote, "publish-state active old-id", "systemctl --no-block stop minecraft-jv-a1b2c3.service"}
+			if backup {
+				order = append(order, "agent instance-version-backup jv-a1b2c3")
+			}
+			order = append(order, "systemctl start minecraft-jv-a1b2c3.service", "podman exec minecraft-jv-a1b2c3 rcon-cli list", "podman inspect minecraft-jv-a1b2c3 --format {{.Image}}", "verify --instance jv-a1b2c3 26.2", "agent instance-container-history record")
+			for _, want := range order {
+				pos := strings.Index(calls, want)
+				if pos < 0 {
+					t.Fatalf("missing ordered call %q in %s", want, calls)
+				}
+				calls = calls[pos+len(want):]
+			}
+			trace := f.text("trace")
+			for _, want := range []string{"STAGE Publishing selected image", "instance-container-publish", "STAGE Gracefully stopping selected server", "$ systemctl --no-block stop minecraft-jv-a1b2c3.service\n[exit 0]", "STAGE Starting and verifying selected server", "$ systemctl start minecraft-jv-a1b2c3.service\n[exit 0]"} {
+				if !strings.Contains(trace, want) {
+					t.Fatalf("missing trace %q: %s", want, trace)
+				}
+			}
+		})
+	}
+}
+
+func TestContainerHelperFailureRecoveryMatchesStoppedState(t *testing.T) {
+	for _, failure := range []string{"publish-fail", "publish-partial", "stop-fail", "start-fail", "verify-new-fail", "wrong-new-id", "backup-fail"} {
+		t.Run(failure, func(t *testing.T) {
+			f := newContainerFixture(t)
+			plan := f.status()
+			history := f.text("history.json")
+			f.write("calls", "")
+			f.write(failure, "")
+			if data, err := f.apply(plan, true, failure == "backup-fail", false); err == nil {
+				t.Fatalf("failure accepted: %s", data)
+			}
+			calls, trace := f.text("calls"), f.text("trace")
+			if f.text("active") != "active" || f.text("running") != "old-id" {
+				t.Fatalf("old server not recovered: %s\n%s", calls, trace)
+			}
+			var record struct {
+				Runtime struct {
+					ImageDigest string `json:"image_digest"`
+				} `json:"runtime"`
+			}
+			if err := json.Unmarshal([]byte(f.text("instances/jv-a1b2c3/config.json")), &record); err != nil {
+				t.Fatal(err)
+			}
+			if record.Runtime.ImageDigest != f.old {
+				t.Fatal("old selection not restored")
+			}
+			if f.text("history.json") != history || strings.Contains(calls, "instance-container-history record") {
+				t.Fatal("failed update wrote history")
+			}
+			if strings.Contains(trace, "recovery is incomplete") || strings.Contains(trace, "requires attention") {
+				t.Fatalf("false recovery failure: %s", trace)
+			}
+			stopped := failure == "start-fail" || failure == "verify-new-fail" || failure == "wrong-new-id" || failure == "backup-fail"
+			if !stopped {
+				for _, forbidden := range []string{"systemctl start", "systemctl stop"} {
+					if strings.Contains(calls, forbidden) {
+						t.Fatalf("unnecessary lifecycle mutation %s: %s", forbidden, calls)
+					}
+				}
+				if failure != "stop-fail" && strings.Contains(calls, "systemctl --no-block") {
+					t.Fatal("publication failure stopped server")
+				}
+			} else {
+				for _, want := range []string{"agent instance-container-publish jv-a1b2c3 " + f.old, "systemctl start minecraft-jv-a1b2c3.service", "podman inspect minecraft-jv-a1b2c3 --format {{.Image}}", "verify --instance jv-a1b2c3 26.2"} {
+					if !strings.Contains(calls, want) {
+						t.Fatalf("recovery missing %s: %s", want, calls)
+					}
+				}
+			}
+			if failure == "publish-partial" && !strings.Contains(calls, "recover pending") {
+				t.Fatal("pending publication not recovered")
+			}
+			code := map[string]string{"publish-fail": "20", "publish-partial": "21", "stop-fail": "18", "start-fail": "19", "verify-new-fail": "22", "backup-fail": "23"}[failure]
+			if code != "" && !strings.Contains(trace, "[exit "+code+"]") {
+				t.Fatalf("command failure missing from trace: %s", trace)
+			}
+		})
+	}
+}
+
+func TestContainerHelperStopObservesContainerUntilShutdownCompletes(t *testing.T) {
+	f := newContainerFixture(t)
+	f.write("stop-check", `#!/bin/bash
+set -Eeuo pipefail
+source "$FIXTURE_ROOT/common.sh"
+source "$FIXTURE_ROOT/interrupt-safety.sh"
+source "$FIXTURE_ROOT/migration-instance.sh"
+JV_INSTANCE_UNIT=minecraft-jv-a1b2c3.service
+JV_INSTANCE_CONTAINER=minecraft-jv-a1b2c3
+jv_begin_minecraft_stop
+[[ $(cat "$FIXTURE_ROOT/active") == deactivating ]]
+[[ $(podman inspect --format '{{.State.Running}}' "$JV_INSTANCE_CONTAINER") == true ]]
+[[ $(podman inspect "$JV_INSTANCE_CONTAINER" --format '{{.State.Running}}') == true ]]
+jv_minecraft_still_running
+jv_wait_minecraft_stopped
+[[ $(cat "$FIXTURE_ROOT/active") == inactive ]]
+[[ $(podman inspect --format '{{.State.Running}}' "$JV_INSTANCE_CONTAINER") == false ]]
+! jv_minecraft_still_running
+`)
+	f.helper = filepath.Join(f.root, "stop-check")
+	if data, err := f.run(); err != nil {
+		t.Fatalf("shutdown observation: %v %s", err, data)
 	}
 }

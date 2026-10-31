@@ -66,7 +66,13 @@ jv_minecraft_still_running() {
     systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || [[ $(podman inspect --format '{{.State.Running}}' "${JV_INSTANCE_CONTAINER}" 2>/dev/null) == true ]]
 }
 jv_minecraft_announce_shutdown() { podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli "say Server shutting down in $1 seconds" >/dev/null; }
-jv_begin_minecraft_stop() { systemctl --no-block stop "${JV_INSTANCE_UNIT}"; }
+jv_begin_minecraft_stop() {
+    if declare -F jv_trace_run >/dev/null; then
+        jv_trace_run systemctl --no-block stop "${JV_INSTANCE_UNIT}"
+    else
+        systemctl --no-block stop "${JV_INSTANCE_UNIT}"
+    fi
+}
 jv_bypass_container_shutdown_delay() {
     local attempt
     for attempt in 1 2 3 4 5; do

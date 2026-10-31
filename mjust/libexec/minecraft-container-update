@@ -105,23 +105,39 @@ if [[ ${mode} == restore ]]; then
     recovery_id="$(podman image inspect "${JV_INSTANCE_IMAGE_REF}" --format '{{.Id}}')"
     [[ -n ${recovery_id} ]] || exit 1
 fi
-mutation_started=false
+publication_attempted=false
 published=false
+server_stopped=false
 cleanup() {
-    local result=$? recovery=yes
+    local result=$? recovery=yes selected
     trap - EXIT
-    if (( result != 0 )) && [[ ${mutation_started} == true ]]; then
+    if (( result != 0 )) && [[ ${publication_attempted} == true ]]; then
         jv_trace_stage 'Restoring previous selected image'
-        if [[ ${restart} == true ]]; then systemctl stop "${JV_INSTANCE_UNIT}" || recovery=no; fi
-        if [[ ${recovery} == yes && ${published} == true ]]; then
-            /usr/libexec/justvoxel/management-agent instance-container-publish "${id}" "${old_digest}" || recovery=no
+        if [[ ${server_stopped} == true ]]; then
+            jv_trace_run systemctl stop "${JV_INSTANCE_UNIT}" || recovery=no
         fi
-        if [[ ${recovery} == yes && ${restart} == true ]]; then
-            systemctl start "${JV_INSTANCE_UNIT}" && wait_for_rcon 900 && \
-                [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}') == "${recovery_id}" ]] && \
-                JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${id}" "${old_version}" || recovery=no
+        # A failed publication can leave durable pending evidence. The existing
+        # publication command recovers it before restoring the old selection.
+        selected="$(jq -r '.runtime.image_digest // ""' "/etc/justvoxel/instances/${id}/config.json")" || recovery=no
+        if [[ ${recovery} == yes ]] && { [[ ${published} == true || ${selected} != "${old_digest}" ]] ||
+            [[ -e /etc/justvoxel/instances/${id}/pending.json || -L /etc/justvoxel/instances/${id}/pending.json ]]; }; then
+            jv_trace_run /usr/libexec/justvoxel/management-agent instance-container-publish "${id}" "${old_digest}" || recovery=no
         fi
-        [[ ${recovery} == yes ]] || jv_trace_output 'Previous runtime recovery is incomplete; operation requires attention.'
+        if [[ ${recovery} == yes && ${server_stopped} == true ]]; then
+            jv_trace_run systemctl start "${JV_INSTANCE_UNIT}" && wait_for_rcon 900 || recovery=no
+        fi
+        if [[ ${recovery} == yes && ${container_running} == true ]]; then
+            [[ $(systemctl show --property=ActiveState --value "${JV_INSTANCE_UNIT}") == active &&
+               $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}') == "${recovery_id}" ]] &&
+                JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 jv_trace_run /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${id}" "${old_version}" || recovery=no
+        fi
+        if [[ ${recovery} != yes ]]; then
+            if [[ ${server_stopped} == true ]]; then
+                jv_trace_output 'Previous runtime recovery is incomplete; operation requires attention.'
+            else
+                jv_trace_output 'Previous selection or running runtime could not be verified; operation requires attention.'
+            fi
+        fi
     fi
     exit "${result}"
 }
@@ -158,31 +174,29 @@ if [[ ${restart} == true ]]; then
     [[ $(jq -r .online <<< "${players}") == 0 || ${confirm_players} == true ]] || { jv_trace_output 'Online players require confirmation. Server left untouched.'; exit 1; }
     JV_INTERRUPT_CONFIRMATION_MODE=required
     [[ ${confirm_players} != true ]] || JV_INTERRUPT_CONFIRMATION_MODE=confirmed
-    # The stop helper repeats player checks immediately before shutdown.
-    jv_begin_minecraft_stop() {
-        mutation_started=true
-        systemctl --no-block stop "${JV_INSTANCE_UNIT}"
-    }
+fi
+# Recheck the moving tag immediately before publishing while the old runtime serves.
+[[ ${mode} == restore || $(jv_remote_platform_digest "${image}") == "${remote}" ]] || { jv_trace_output 'The configured tag changed. Refresh and review again.'; exit 1; }
+jv_trace_stage 'Publishing selected image'
+publication_attempted=true
+jv_trace_run /usr/libexec/justvoxel/management-agent instance-container-publish "${id}" "${remote}"
+published=true
+if [[ ${restart} == true ]]; then
+    # The shared exact-instance stop repeats player checks before shutdown.
     jv_trace_stage 'Gracefully stopping selected server'
     jv_stop_minecraft_adaptive 'Update Minecraft container'
-    [[ ${mutation_started} == true ]] || { jv_trace_output 'The server stopped before maintenance. Refresh and review again.'; exit 1; }
+    server_stopped=true
     if [[ ${backup} == true ]]; then
         jv_trace_stage 'Creating cold backup'
-        /usr/libexec/justvoxel/management-agent instance-version-backup "${id}"
+        jv_trace_run /usr/libexec/justvoxel/management-agent instance-version-backup "${id}"
     fi
 fi
-# Recheck the moving tag immediately before publication, also after a backup.
-[[ ${mode} == restore || $(jv_remote_platform_digest "${image}") == "${remote}" ]] || { jv_trace_output 'The configured tag changed. Refresh and review again.'; exit 1; }
-mutation_started=true
-# Mark before publication: its durable transaction may need recovery on failure.
-published=true
-/usr/libexec/justvoxel/management-agent instance-container-publish "${id}" "${remote}"
 if [[ ${restart} == true ]]; then
     jv_trace_stage 'Starting and verifying selected server'
-    systemctl start "${JV_INSTANCE_UNIT}"
+    jv_trace_run systemctl start "${JV_INSTANCE_UNIT}"
     wait_for_rcon 900
     [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}') == "${new_id}" ]] || exit 1
-    JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${id}" "${old_version}"
+    JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 jv_trace_run /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${id}" "${old_version}"
     jv_trace_output 'Selected server restarted and verified.'
 else
     [[ $(systemctl show --property=ActiveState --value "${JV_INSTANCE_UNIT}") == "$(jq -r .active <<< "${initial_plan}")" ]] || exit 1
@@ -191,6 +205,6 @@ else
     fi
     jv_trace_output 'Restart deferred. The new image will be used on the next server start.'
 fi
-mutation_started=false
+publication_attempted=false
 # Only verified publication can add history. A failed pull never reaches here.
 /usr/libexec/justvoxel/management-agent instance-container-history record "${id}" "${history_digest}" "${remote}"

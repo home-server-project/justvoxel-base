@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 type instanceVersionKey struct{}
@@ -34,6 +35,23 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 	}
 	b := instanceRuntimes
 	id := args[1]
+	containerOnly := args[0] == "instance-container-publish"
+	if containerOnly {
+		if len(args) != 3 || (args[2] != "" && !operationFingerprintPattern.MatchString(args[2])) {
+			return errInstanceID
+		}
+		pending, err := b.pending(id)
+		if err != nil {
+			return err
+		}
+		if pending {
+			recoveryCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			if err := b.recover(recoveryCtx, id); err != nil {
+				return err
+			}
+		}
+	}
 	previous, err := b.readRecord(id)
 	if err != nil {
 		return err
@@ -41,11 +59,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 	if err = b.verifyLive(previous); err != nil {
 		return err
 	}
-	containerOnly := args[0] == "instance-container-publish"
 	if containerOnly {
-		if len(args) != 3 || (args[2] != "" && !operationFingerprintPattern.MatchString(args[2])) {
-			return errInstanceID
-		}
 		args = []string{"instance-version-publish", id, previous.Runtime.Software, previous.Runtime.ImageTag, previous.Runtime.Version, previous.Runtime.VersionPolicy, args[2]}
 	}
 	switch args[0] {
