@@ -45,6 +45,10 @@ validate_server_capabilities(){ :; }
 JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
 JV_MAINTENANCE_LOCK="$FIXTURE_ROOT/lock"
 JV_SETUP_IN_PROGRESS="$FIXTURE_ROOT/setup"
+flock(){
+ command flock "$@" || return $?
+ printf 'flock %s\n' "$*" >> "$FIXTURE_ROOT/calls"
+}
 systemctl(){
  printf 'systemctl %s\n' "$*" >> "$FIXTURE_ROOT/calls"
  case "$1" in
@@ -62,6 +66,12 @@ systemctl(){
  start)
   [[ $# == 2 && $2 == minecraft-jv-a1b2c3.service ]] || return 93
   [[ $(cat "$FIXTURE_ROOT/active") != active ]] || return 0
+  # Model ExecStartPre opening the same lock independently of updater fd 9.
+  if ! command flock -n "$JV_MAINTENANCE_LOCK" true; then
+   printf 'crossplay lock blocked\n' >> "$FIXTURE_ROOT/calls"
+   return 98
+  fi
+  printf 'crossplay lock acquired\n' >> "$FIXTURE_ROOT/calls"
   if [[ -f $FIXTURE_ROOT/start-fail ]]; then rm "$FIXTURE_ROOT/start-fail"; return 19; fi
   printf active > "$FIXTURE_ROOT/active"
   if [[ $(jq -r .runtime.image_digest "$FIXTURE_ROOT/instances/jv-a1b2c3/config.json") == "$FIXTURE_REMOTE" ]];then if [[ -f $FIXTURE_ROOT/wrong-new-id ]]; then printf wrong-id > "$FIXTURE_ROOT/running"; else printf new-id > "$FIXTURE_ROOT/running"; fi;else printf old-id > "$FIXTURE_ROOT/running";fi;;
@@ -496,6 +506,70 @@ func TestContainerHelperRestartTransactionOrder(t *testing.T) {
 				if !strings.Contains(trace, want) {
 					t.Fatalf("missing trace %q: %s", want, trace)
 				}
+			}
+		})
+	}
+}
+
+func TestContainerHelperMaintenanceLockHandoff(t *testing.T) {
+	for _, failStart := range []bool{false, true} {
+		t.Run(boolText(failStart), func(t *testing.T) {
+			f := newContainerFixture(t)
+			plan := f.status()
+			f.write("calls", "")
+			if failStart {
+				f.write("start-fail", "")
+			}
+			data, err := f.apply(plan, true, false, false)
+			if failStart {
+				if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 19 {
+					t.Fatalf("start status not preserved: %v %s", err, data)
+				}
+				if f.text("running") != "old-id" || !strings.Contains(f.text("instances/jv-a1b2c3/config.json"), f.old) {
+					t.Fatal("failed start did not recover old selection and server")
+				}
+			} else if err != nil {
+				t.Fatalf("start under lock handoff: %v %s", err, data)
+			}
+			calls := f.text("calls")
+			if strings.Contains(calls, "crossplay lock blocked") {
+				t.Fatalf("ExecStartPre encountered updater lock: %s", calls)
+			}
+			order := []string{
+				"flock -n 9\n",
+				"agent instance-container-publish jv-a1b2c3 " + f.remote,
+				"systemctl --no-block stop minecraft-jv-a1b2c3.service",
+				"flock -u 9\n",
+				"systemctl start minecraft-jv-a1b2c3.service",
+				"crossplay lock acquired\n",
+				"flock 9\n",
+			}
+			if failStart {
+				order = append(order,
+					"systemctl stop minecraft-jv-a1b2c3.service",
+					"agent instance-container-publish jv-a1b2c3 "+f.old,
+					"flock -u 9\n",
+					"systemctl start minecraft-jv-a1b2c3.service",
+					"crossplay lock acquired\n",
+					"flock 9\n",
+				)
+			}
+			order = append(order,
+				"podman exec minecraft-jv-a1b2c3 rcon-cli list",
+				"podman inspect minecraft-jv-a1b2c3 --format {{.Image}}",
+				"verify --instance jv-a1b2c3 26.2",
+			)
+			if !failStart {
+				order = append(order, "agent instance-container-history record")
+			} else if strings.Contains(calls, "instance-container-history record") {
+				t.Fatal("failed start recorded history")
+			}
+			for _, want := range order {
+				pos := strings.Index(calls, want)
+				if pos < 0 {
+					t.Fatalf("missing ordered call %q in %s", want, calls)
+				}
+				calls = calls[pos+len(want):]
 			}
 		})
 	}

@@ -108,6 +108,19 @@ fi
 publication_attempted=false
 published=false
 server_stopped=false
+start_selected_server() {
+    local rc
+    # ExecStartPre needs maintenance itself; operation-level claims stay held.
+    flock -u 9 || return $?
+    if jv_trace_run systemctl start "${JV_INSTANCE_UNIT}"; then rc=0; else rc=$?; fi
+    # Never run verification or recovery without reacquiring maintenance.
+    if ! flock 9; then
+        trap - EXIT
+        jv_trace_output 'Unable to reacquire maintenance lock; operation requires attention.'
+        exit 1
+    fi
+    return "${rc}"
+}
 cleanup() {
     local result=$? recovery=yes selected
     trap - EXIT
@@ -124,7 +137,7 @@ cleanup() {
             jv_trace_run /usr/libexec/justvoxel/management-agent instance-container-publish "${id}" "${old_digest}" || recovery=no
         fi
         if [[ ${recovery} == yes && ${server_stopped} == true ]]; then
-            jv_trace_run systemctl start "${JV_INSTANCE_UNIT}" && wait_for_rcon 900 || recovery=no
+            start_selected_server && wait_for_rcon 900 || recovery=no
         fi
         if [[ ${recovery} == yes && ${container_running} == true ]]; then
             [[ $(systemctl show --property=ActiveState --value "${JV_INSTANCE_UNIT}") == active &&
@@ -193,7 +206,7 @@ if [[ ${restart} == true ]]; then
 fi
 if [[ ${restart} == true ]]; then
     jv_trace_stage 'Starting and verifying selected server'
-    jv_trace_run systemctl start "${JV_INSTANCE_UNIT}"
+    start_selected_server
     wait_for_rcon 900
     [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}') == "${new_id}" ]] || exit 1
     JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 jv_trace_run /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${id}" "${old_version}"
