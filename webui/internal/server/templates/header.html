@@ -218,12 +218,8 @@
           </section>
           <section class="panel" data-gateway-details hidden></section>
           <section data-gateway-help hidden>
-            <section class="panel"><h3>Getting connected</h3>
-              <p>Choose your app</p>
-              <div class="gateway-help-selector" data-gateway-help-providers role="group" aria-label="Choose your app"></div>
-              <p class="muted">Create a connection in Add, then use its address from Settings. Availability depends on your account, plan or subscription, and network access.</p>
-              <section class="gateway-guide" data-gateway-help-guide aria-live="polite"></section>
-            </section>
+            <h3>Help</h3>
+            <p class="muted">Create connections in Add. Connection-specific setup instructions are available in Settings.</p>
             <section class="panel"><h3>Access levels</h3>
               <div class="gateway-table-scroll"><table class="gateway-access-table">
                 <caption class="gateway-visually-hidden">Connection access levels</caption>
@@ -238,14 +234,22 @@
               <p class="notice warning">No level can manage AI/API connection permissions, user accounts, or Factory Reset.</p>
             </section>
             <section class="panel"><h3>Minecraft scope</h3>
-              <dl><dt>All servers</dt><dd>Access all Minecraft servers.</dd><dt>Choose servers</dt><dd>Access only the Minecraft servers you select.</dd></dl>
-              <p>Connection access is limited to the selected scope.</p>
+              <dl><dt>All servers</dt><dd>The connection applies to every JustVoxel Minecraft server.</dd><dt>Selected servers</dt><dd>Enable only the individual server switches the client may access.</dd></dl>
             </section>
-            <section class="panel"><h3>Security / authorization</h3>
-              <p>AI clients authenticate to JustVoxel. JustVoxel sign-in and approval control authorization.</p>
-              <p>Changes to access level and Minecraft scope apply to subsequent requests. Disabling the connection or Gateway stops access.</p>
+            <section class="panel"><h3>Authentication</h3>
+              <dl><dt>OAuth connections</dt><dd>Branded AI clients use JustVoxel OAuth. The client opens JustVoxel sign-in and approval when authorization is required. You do not need to manually copy an OAuth access token.</dd>
+              <dt>Token connections</dt><dd>Other AI / MCP app and Automation / REST API may use scoped JustVoxel API tokens. The token is shown once. Store it securely.</dd></dl>
               <p>JustVoxel does not require an AI provider model API key merely to expose MCP.</p>
             </section>
+            <section class="panel"><h3>Network access</h3>
+              <dl><dt>Local clients</dt><dd>Codex, Copilot CLI, OpenClaw or another client running on a machine that can reach JustVoxel may use a LAN address.</dd>
+              <dt>Cloud clients</dt><dd>Cloud-hosted providers may require an HTTPS address reachable from their infrastructure.</dd></dl>
+            </section>
+            <details class="panel" data-gateway-provider-reference><summary>Provider reference</summary>
+              <p class="muted">Availability depends on your account, plan or subscription, and network access.</p>
+              <div class="gateway-help-selector" data-gateway-help-providers role="group" aria-label="Provider reference"></div>
+              <section class="gateway-guide" data-gateway-help-guide aria-live="polite"></section>
+            </details>
             <details class="panel"><summary>Developer integration</summary>
               <p>Shared MCP endpoint (token and existing external sign-in connections)</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="MCP address" data-gateway-mcp><button type="button" class="secondary" data-gateway-copy-address="mcp">Copy</button></div>
               <p>REST API endpoint</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="REST API address" data-gateway-rest><button type="button" class="secondary" data-gateway-copy-address="rest">Copy</button></div>
@@ -268,6 +272,7 @@
         <div class="gateway-name-access-row">
           <label><span data-gateway-name-label>Name</span><input name="name" placeholder="My AI Assistant" required maxlength="100" autocomplete="off"></label>
           <label><span data-gateway-level-label>Access level</span><select name="level"><option value="1">Level 1 — Read Only</option><option value="2">Level 2 — Basic Management</option><option value="3">Level 3 — Full Management</option><option value="4">Level 4 — Full System Control</option></select></label>
+          <div class="gateway-enabled-control"><label class="gateway-switch"><input class="date-time-switch" type="checkbox" role="switch" name="enabled" aria-label="Connection enabled"></label></div>
         </div>
         <section role="group" aria-labelledby="gateway-provider-label"><h4 id="gateway-provider-label" data-gateway-purpose-label>What will use this connection?</h4>
           <div class="gateway-provider-grid" data-gateway-providers>
@@ -287,7 +292,6 @@
             <label class="gateway-server-item gateway-all-servers"><input class="date-time-switch" type="checkbox" role="switch" data-gateway-all-servers checked><span>All servers</span></label>
           </div>
         </section>
-        <label class="gateway-switch"><input class="date-time-switch" type="checkbox" role="switch" name="enabled" aria-label="Connection enabled"></label>
       </section>
       <section data-gateway-status hidden><div data-gateway-status-details><input class="gateway-expiration" type="datetime-local" name="expires_at" aria-label="Expiration" title="Optional, your local time"></div></section>
       <div class="gateway-actions-lane">

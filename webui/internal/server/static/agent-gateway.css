@@ -9,10 +9,10 @@
 [data-agent-gateway-dialog] .gateway-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 [data-agent-gateway-dialog] .gateway-switch { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0; }
 [data-agent-gateway-dialog] .gateway-switch input { flex: none; margin: 0; }
-[data-agent-gateway-dialog] .gateway-card-actions { justify-content: flex-end; margin-top: auto; }
+[data-agent-gateway-dialog] .minecraft-server-software-row > p { align-items: center; }
+[data-agent-gateway-dialog] .minecraft-server-software-row .gateway-provider-icon { width: 1.1rem; height: 1.1rem; }
 [data-agent-gateway-dialog] .gateway-card-activity { display: grid; gap: .3rem; }
 [data-agent-gateway-dialog] .gateway-card-activity > span { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--jv-muted); }
-[data-agent-gateway-dialog] .gateway-card-actions > button { cursor: pointer; }
 [data-agent-gateway-dialog] [data-gateway-details],
 [data-agent-gateway-dialog] [data-gateway-help] { box-sizing: border-box; width: 100%; max-width: 64rem; }
 [data-agent-gateway-dialog] [data-gateway-settings] > section,

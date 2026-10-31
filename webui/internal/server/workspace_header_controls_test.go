@@ -200,3 +200,35 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 		t.Error("Advanced details must be collapsed and last")
 	}
 }
+
+func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	start := strings.Index(markup, `<section data-gateway-help hidden>`)
+	end := strings.Index(markup, `<template data-gateway-settings-template>`)
+	if start < 0 || end <= start {
+		t.Fatal("connection Help missing")
+	}
+	help := markup[start:end]
+	reference := strings.Index(help, `<details class="panel" data-gateway-provider-reference>`)
+	if reference < 0 {
+		t.Fatal("collapsed provider reference missing")
+	}
+	normal := help[:reference]
+	for _, title := range []string{"Access levels", "Minecraft scope", "Authentication", "Network access"} {
+		if !strings.Contains(normal, "<h3>"+title+"</h3>") {
+			t.Errorf("visible reference section missing: %s", title)
+		}
+	}
+	for _, obsolete := range []string{"Getting connected", "Choose your app", "data-gateway-help-providers", "data-gateway-help-guide"} {
+		if strings.Contains(normal, obsolete) {
+			t.Errorf("default Help contains onboarding: %s", obsolete)
+		}
+	}
+	if !strings.Contains(help[reference:], `data-gateway-help-guide`) || !strings.Contains(help, `<details class="panel"><summary>Developer integration</summary>`) || regexp.MustCompile(`<details[^>]*\bopen\b`).MatchString(help) {
+		t.Error("provider manuals and developer integration must remain available in collapsed details")
+	}
+}

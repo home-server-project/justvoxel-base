@@ -166,7 +166,14 @@
       const identity = text('div', ''); identity.className = 'minecraft-server-software-row';
       const provider = text('p', ''); provider.className = 'muted';
       provider.append(providerIcon(connection.purpose), text('span', purposeLabel(connection.purpose)));
-      identity.append(provider); card.append(identity);
+      const actions = text('details', ''); actions.className = 'storage-action-menu minecraft-server-more';
+      const button = text('summary', '⋯'); button.setAttribute('aria-label', `Settings for ${connection.name}`);
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        if (busy) return;
+        selectedID = connection.id; renderSettings(connection);
+      });
+      actions.append(button); identity.append(provider, actions); card.append(identity);
       const metrics = text('div', ''); metrics.className = 'minecraft-server-metrics';
       const auth = connection.auth_mode === 'oauth' || connection.auth_mode === 'oauth_local' ? 'OAuth' : 'Token';
       for (const [label, value] of [['Access', levelLabel(connection.level)], ['Scope', scopeLabel(connection)], ['Auth', auth]]) {
@@ -175,10 +182,7 @@
       card.append(metrics);
       const activity = text('div', ''); activity.className = 'gateway-card-activity';
       activity.append(text('span', 'Last activity'), text('p', activityLabel(connection.last_activity))); card.append(activity);
-      const actions = text('div', ''); actions.className = 'action-row gateway-card-actions';
-      const button = text('button', 'Settings'); button.type = 'button'; button.className = 'secondary';
-      button.addEventListener('click', () => { if (busy) return; selectedID = connection.id; renderSettings(connection); });
-      actions.append(button); card.append(actions); cards.append(card);
+      cards.append(card);
     }
   };
   // Presentation only: neither provider previews nor Help submit connection changes.
@@ -404,6 +408,32 @@
       const link = text('a', 'Official setup guide ↗'); link.href = guide; link.target = '_blank'; link.rel = 'noopener noreferrer'; host.append(link);
     }
   };
+  // Both form modes keep individual draft selections while All servers is on.
+  const renderMinecraftScope = (form, c) => {
+    const field = name => form.elements.namedItem(name);
+    const allServers = form.querySelector('[data-gateway-all-servers]');
+    allServers.checked = Boolean(c.all_instances);
+    const instanceOptions = form.querySelector('[data-gateway-instance-options]');
+    const known = new Map(instances.map(instance => [instance.id, instance.display_name || instance.name || 'Minecraft server']));
+    for (const id of c.instance_ids || []) if (!known.has(id)) known.set(id, 'Unavailable server');
+    for (const [id, name] of known) {
+      const label = text('label', ''); label.className = 'gateway-server-item';
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.name = 'instance_ids'; checkbox.value = id; checkbox.checked = (c.instance_ids || []).includes(id);
+      checkbox.className = 'date-time-switch'; checkbox.setAttribute('role', 'switch');
+      const icon = document.createElement('img'); icon.className = 'minecraft-server-software-icon'; icon.alt = '';
+      icon.src = instances.find(instance => instance.id === id)?.software_icon || '/static/justvoxel-logo.png';
+      label.append(checkbox, icon, text('span', name));
+      instanceOptions.append(label);
+    }
+    if (!known.size) instanceOptions.append(text('p', 'No Minecraft servers are available to choose.'));
+    const sync = () => {
+      const all = allServers.checked;
+      field('server_scope').value = all ? 'all' : 'selected';
+      form.querySelector('[data-gateway-scope]').hidden = false;
+      instanceOptions.querySelectorAll('input[name="instance_ids"]').forEach(input => { input.disabled = all; });
+    };
+    allServers.addEventListener('change', sync); sync();
+  };
   const setupHelpGuide = () => {
     const selector = find('[data-gateway-help-providers]');
     const guide = find('[data-gateway-help-guide]');
@@ -425,11 +455,6 @@
     const form = details.querySelector('form');
     const field = name => form.elements.namedItem(name);
     form.className = c.id ? 'gateway-edit-settings' : 'gateway-add-settings';
-    const top = form.querySelector('.gateway-name-access-row');
-    const enabled = form.querySelector('.gateway-switch');
-    const enabledRow = text('div', ''); enabledRow.className = 'gateway-enabled-control';
-    enabledRow.append(enabled);
-    top.append(enabledRow);
     for (const name of ['name', 'level']) field(name).value = c[name] ?? '';
     // Keep custom purposes from deployed connections without interpreting them as markup or asset paths.
     if (c.purpose && !providers.has(c.purpose)) {
@@ -447,9 +472,6 @@
     form.querySelector('[data-gateway-advanced]').hidden = !c.id;
     for (const selector of ['[data-gateway-delete]', '[data-gateway-live-note]']) form.querySelector(selector).hidden = !c.id;
     field('enabled').checked = Boolean(c.enabled);
-    field('server_scope').value = c.all_instances ? 'all' : 'selected';
-    const allServers = form.querySelector('[data-gateway-all-servers]');
-    allServers.checked = Boolean(c.all_instances);
     if (c.expires_at) {
       const date = new Date(c.expires_at);
       field('expires_at').value = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -463,28 +485,9 @@
       for (const name of ['issuer', 'audience', 'jwks_uri', 'scope', 'subject', 'client_id']) field(name).value = c.oauth?.[name] || '';
       for (const name of ['issuer', 'audience', 'jwks_uri']) field(name).required = true;
     } else oauthFields.remove();
-    const instanceOptions = form.querySelector('[data-gateway-instance-options]');
-    const known = new Map(instances.map(instance => [instance.id, instance.display_name || instance.name || 'Minecraft server']));
-    for (const id of c.instance_ids || []) if (!known.has(id)) known.set(id, 'Unavailable server');
-    for (const [id, name] of known) {
-      const label = text('label', ''); label.className = 'gateway-server-item';
-      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.name = 'instance_ids'; checkbox.value = id; checkbox.checked = (c.instance_ids || []).includes(id);
-      checkbox.className = 'date-time-switch'; checkbox.setAttribute('role', 'switch');
-      const icon = document.createElement('img'); icon.className = 'minecraft-server-software-icon'; icon.alt = '';
-      icon.src = instances.find(instance => instance.id === id)?.software_icon || '/static/justvoxel-logo.png';
-      label.append(checkbox, icon, text('span', name));
-      instanceOptions.append(label);
-    }
-    if (!known.size) instanceOptions.append(text('p', 'No Minecraft servers are available to choose.'));
-    const sync = () => {
-      const all = allServers.checked;
-      field('server_scope').value = all ? 'all' : 'selected';
-      form.querySelector('[data-gateway-scope]').hidden = false;
-      instanceOptions.querySelectorAll('input[name="instance_ids"]').forEach(input => { input.disabled = all; });
-      form.querySelector('[data-gateway-actions]').hidden = !c.id || c.auth_mode !== 'token';
-      for (const action of ['rotate', 'revoke']) form.querySelector(`[data-gateway-${action}]`).hidden = !c.id || c.auth_mode !== 'token';
-    };
-    allServers.addEventListener('change', sync); sync();
+    renderMinecraftScope(form, c);
+    form.querySelector('[data-gateway-actions]').hidden = !c.id || c.auth_mode !== 'token';
+    for (const action of ['rotate', 'revoke']) form.querySelector(`[data-gateway-${action}]`).hidden = !c.id || c.auth_mode !== 'token';
     if (c.id) {
       const onboarding = text('section', ''); onboarding.className = 'gateway-guide gateway-settings-guide';
       onboarding.setAttribute('aria-live', 'polite');
@@ -499,10 +502,12 @@
       previewProvider();
     }
     const status = form.querySelector('[data-gateway-status-details]');
-    form.querySelector('[data-gateway-status]').hidden = false;
+    form.querySelector('[data-gateway-status]').hidden = !c.id;
     status.className = 'minecraft-server-metrics gateway-status-metrics';
     const expiration = text('div', '');
-    expiration.append(text('span', 'EXPIRATION'), field('expires_at')); status.append(expiration);
+    if (c.id) {
+      expiration.append(text('span', 'EXPIRATION'), field('expires_at')); status.append(expiration);
+    }
     const safeDetails = form.querySelector('[data-gateway-safe-details]');
     if (c.id) {
       for (const [name, value] of [['Connection ID', c.id], ['Safe credential fingerprint', c.fingerprint || 'None'], ['Created', settingsDate(c.created_at)], ['Updated', settingsDate(c.updated_at)]]) {
@@ -527,7 +532,7 @@
       if (busy || !form.reportValidity()) return;
       const updated = {...c, name: field('name').value.trim(), purpose: field('purpose').value.trim(), auth_mode: c.id ? c.auth_mode : providerAuthMode(field('purpose').value.trim()), level: Number(field('level').value), enabled: field('enabled').checked, all_instances: (field('server_scope').value === 'all')};
       updated.instance_ids = updated.all_instances ? [] : [...form.querySelectorAll('input[name="instance_ids"]:checked')].map(input => input.value);
-      if (field('expires_at').value) updated.expires_at = new Date(field('expires_at').value).toISOString();
+      if (c.id && field('expires_at').value) updated.expires_at = new Date(field('expires_at').value).toISOString();
       else delete updated.expires_at;
       if (updated.auth_mode === 'oauth') updated.oauth = Object.fromEntries(['issuer', 'audience', 'jwks_uri', 'scope', 'subject', 'client_id'].map(name => [name, field(name).value.trim()]));
       else delete updated.oauth;

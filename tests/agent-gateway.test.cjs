@@ -58,7 +58,11 @@ test('multiple independent cards select their own immutable connection settings'
   for (const [index, card] of cards.children.entries()) {
     assert.equal(card.dataset.gatewayConnection, connections[index].id);
     assert.equal(card.children[0].children[0].textContent, connections[index].name);
-    card.children.at(-1).children[0].listeners.click();
+    const action = card.children[1].children[1].children[0];
+    assert.equal(action.textContent, '⋯');
+    let prevented = false;
+    action.listeners.click({preventDefault() { prevented = true; }});
+    assert.equal(prevented, true);
     assert.equal(context.selectedID, connections[index].id);
   }
   assert.deepEqual(selected, ['first', 'second', 'third']);
@@ -169,7 +173,7 @@ test('cards contain human summaries while technical fields and endpoints stay of
 });
 
 test('help uses compact sections and a comparison table with collapsed developer details', () => {
-  for (const section of ['Getting connected', 'Access levels', 'Minecraft scope', 'Security / authorization']) assert.ok(help.includes(`<h3>${section}</h3>`), section);
+  for (const section of ['Access levels', 'Minecraft scope', 'Authentication', 'Network access']) assert.ok(help.includes(`<h3>${section}</h3>`), section);
   assert.match(help, /data-gateway-help-providers/);
   assert.equal((help.match(/data-gateway-help-guide/g) || []).length, 1);
   const table = help.match(/<table[\s\S]*?<\/table>/)[0];
@@ -244,10 +248,10 @@ test('OAuth settings remain editable only for an existing OAuth connection', () 
 
 test('normal help keeps raw endpoints and integration details collapsed at the bottom', () => {
   const normal = help.slice(0, help.indexOf('<details class="panel"><summary>Developer integration'));
-  assert.doesNotMatch(normal, /OAuth|JWKS|issuer|audience|subject|client ID|data-gateway-mcp|data-gateway-rest/);
+  assert.doesNotMatch(normal, /JWKS|issuer|audience|subject|client ID|data-gateway-mcp|data-gateway-rest/);
   assert.match(help, /<details class="panel"><summary>Developer integration<\/summary>/);
   assert.doesNotMatch(help, /<details[^>]* open/);
-  assert.ok(help.indexOf('Security / authorization') < help.indexOf('Developer integration'));
+  assert.ok(help.indexOf('Authentication') < help.indexOf('Developer integration'));
 });
 
 test('System Control Center keeps Terminal bottom-left and connections bottom-right', () => {
@@ -553,7 +557,7 @@ test('connection cards reuse server hierarchy and compact human-readable data fo
     context.render();
     const card = cards.children[0];
     assert.equal(card.dataset.gatewayConnection, 'immutable-id');
-    const [heading, identity, metrics, activity, actions] = card.children;
+    const [heading, identity, metrics, activity] = card.children;
     assert.equal(heading.className, 'minecraft-server-heading');
     assert.deepEqual(heading.children.map(node => node.textContent), ['<Assistant>', 'Enabled']);
     assert.equal(identity.className, 'minecraft-server-software-row');
@@ -565,8 +569,13 @@ test('connection cards reuse server hierarchy and compact human-readable data fo
     ]);
     assert.equal(activity.className, 'gateway-card-activity');
     assert.deepEqual(activity.children.map(node => node.textContent), ['Last activity', 'No activity yet']);
-    assert.equal(actions.children[0].textContent, 'Settings');
-    assert.equal(actions.children[0].type, 'button');
+    assert.equal(card.children.length, 4);
+    const actions = identity.children[1];
+    assert.equal(actions.className, 'storage-action-menu minecraft-server-more');
+    assert.equal(actions.children.length, 1);
+    assert.equal(actions.children[0].tagName, 'summary');
+    assert.equal(actions.children[0].textContent, '⋯');
+    assert.equal(actions.children[0]['aria-label'], 'Settings for <Assistant>');
   }
   connection.all_instances = false;
   connection.instance_ids = ['jv-example'];
@@ -596,7 +605,7 @@ test('connection cards inherit the existing Minecraft Server responsive grid and
 
 test('provider assets are transparent and generic providers reuse the application logo', () => {
   const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
-  const icon = css.match(/\.gateway-provider-icon \{([^}]+)\}/)[1];
+  const icon = css.match(/^\[data-agent-gateway-dialog\] \.gateway-provider-icon \{([^}]+)\}/m)[1];
   assert.match(icon, /background: transparent/);
   assert.doesNotMatch(icon, /#fff|white|border-radius/);
   for (const purpose of ['Other AI / MCP app', 'Automation / REST API']) {
@@ -756,10 +765,8 @@ test('private host detection is independent of HTTP and HTTPS security', () => {
 
 test('existing settings use equal Name/Access tracks with an unlabeled switch and metric expiration', () => {
   const h = settingsHarness({id: 'one', name: 'Home', purpose: 'OpenAI', auth_mode: 'oauth_local', enabled: true, all_instances: true});
-  const top = h.node('.gateway-name-access-row');
-  assert.equal(top.children[0].className, 'gateway-enabled-control');
-  assert.equal(top.children[0].children[0], h.node('.gateway-switch'));
-  assert.equal(top.afterChildren, undefined);
+  assert.match(form, /gateway-enabled-control"><label class="gateway-switch">/);
+  assert.equal(h.node('.gateway-name-access-row').afterChildren, undefined);
   assert.equal(h.node('[data-gateway-status-details]').children[0].children[1], h.field('expires_at'));
   assert.ok(form.indexOf('data-gateway-status hidden') < form.indexOf('data-gateway-advanced hidden'));
   assert.ok(form.indexOf('data-gateway-actions hidden') < form.indexOf('data-gateway-advanced hidden'));
@@ -922,9 +929,7 @@ test('Add has no provider onboarding, addresses, commands or network callouts fo
 test('Add shares the desktop configuration row and enabled draft with Settings', () => {
   const draft = {name: 'Home', purpose: 'OpenAI', level: 1, enabled: true, all_instances: true};
   const h = settingsHarness(draft);
-  const top = h.node('.gateway-name-access-row');
-  assert.equal(top.children[0].className, 'gateway-enabled-control');
-  assert.equal(top.children[0].children[0], h.node('.gateway-switch'));
+  assert.match(form, /gateway-name-access-row[\s\S]*?gateway-enabled-control"><label class="gateway-switch">/);
   assert.equal((form.match(/name="enabled"/g) || []).length, 1);
   for (const checked of [false, true, false]) {
     h.field('enabled').checked = checked;
@@ -1192,7 +1197,7 @@ test('expiration is the single editable centered metric and keeps local draft an
   for (const columns of [5, 3, 2]) assert.ok(css.includes(`grid-template-columns: repeat(${columns}, minmax(0, 1fr))`));
   assert.match(css, /@container gateway \(max-width: 420px\) \{\s*[^{}]+gateway-status-metrics \{ grid-template-columns: minmax\(0, 1fr\)/);
   const expires_at = '2026-11-01T16:30:00.000Z';
-  for (const id of [undefined, 'one']) {
+  for (const id of ['one']) {
     const connection = {id, name: 'Home', purpose: 'OpenAI', auth_mode: 'oauth_local', enabled: true, all_instances: true, expires_at};
     const h = settingsHarness(connection);
     const date = new Date(expires_at);
@@ -1320,4 +1325,64 @@ test('OpenClaw preserves an existing external OAuth connection on Apply', () => 
   assert.equal(h.requests[0].action, 'apply');
   assert.equal(h.requests[0].connection.auth_mode, 'oauth');
   assert.deepEqual({...h.requests[0].connection.oauth}, oauth);
+});
+
+
+test('overview ellipsis shares the Minecraft summary style without a bottom action row', () => {
+  const renderer = js.slice(js.indexOf('  const renderCards ='), js.indexOf('  // Presentation only:'));
+  const server = readFileSync(`${base}webui/internal/server/templates/minecraft_servers.html`, 'utf8');
+  const style = readFileSync(`${base}webui/internal/server/static/storage-browser.css`, 'utf8');
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.match(server, /class="storage-action-menu minecraft-server-more"/);
+  assert.match(renderer, /actions.className = 'storage-action-menu minecraft-server-more'/);
+  assert.match(renderer, /text\('summary', '⋯'\)/);
+  assert.match(style, /\.storage-action-menu>summary\{/);
+  assert.match(renderer, /identity.append\(provider, actions\)/);
+  assert.doesNotMatch(renderer + css, /gateway-card-actions/);
+  assert.doesNotMatch(renderer, /text\('button', 'Settings'\)/);
+  assert.match(css, /minecraft-server-software-row > p \{ align-items: center;/);
+  assert.match(css, /minecraft-server-software-row \.gateway-provider-icon \{ width: 1.1rem; height: 1.1rem;/);
+});
+
+test('create and edit use one configuration template, provider list and scope helper', () => {
+  assert.equal((header.match(/<template data-gateway-settings-template>/g) || []).length, 1);
+  for (const name of ['name', 'level', 'enabled']) assert.equal((form.match(new RegExp(`name="${name}"`, 'g')) || []).length, 1);
+  assert.equal((form.match(/data-gateway-providers/g) || []).length, 1);
+  assert.equal((js.match(/renderMinecraftScope\(form, c\)/g) || []).length, 1);
+  for (const id of [undefined, 'existing']) {
+    const h = settingsHarness({id, name: 'Home', purpose: 'OpenAI', level: 1, enabled: true, all_instances: true});
+    assert.equal(h.settings.className, id ? 'gateway-edit-settings' : 'gateway-add-settings');
+    assert.equal(h.node('[data-gateway-status]').hidden, !id);
+    assert.equal(h.node('[data-gateway-advanced]').hidden, !id);
+    assert.equal(h.node('[data-gateway-delete]').hidden, !id);
+    assert.equal(Boolean(h.node('[data-gateway-status]').afterChildren), Boolean(id));
+    assert.equal(h.node('[data-gateway-status-details]').children.length, id ? 5 : 0);
+    assert.equal(h.node('[data-gateway-save]').textContent, id ? 'Apply' : 'Create');
+    h.submit();
+    assert.equal(h.requests[0].action, id ? 'apply' : 'create');
+  }
+});
+
+test('default Help is a reference with provider manuals and developer integration collapsed', () => {
+  const referenceStart = help.indexOf('<details class="panel" data-gateway-provider-reference>');
+  assert.ok(referenceStart > 0);
+  const normal = help.slice(0, referenceStart);
+  assert.doesNotMatch(normal, /Getting connected|Choose your app|data-gateway-help-providers|data-gateway-help-guide|How to connect/);
+  for (const section of ['Access levels', 'Minecraft scope', 'Authentication', 'Network access']) assert.ok(normal.includes(`<h3>${section}</h3>`));
+  for (const phrase of ['Selected servers', 'OAuth connections', 'Token connections', 'shown once', 'Local clients', 'Cloud clients']) assert.ok(normal.includes(phrase));
+  const reference = help.slice(referenceStart, help.indexOf('<details class="panel"><summary>Developer integration'));
+  assert.match(reference, /<summary>Provider reference<\/summary>/);
+  assert.match(reference, /data-gateway-help-providers/);
+  assert.match(reference, /data-gateway-help-guide/);
+  assert.doesNotMatch(help, /<details[^>]*\bopen\b/);
+  const h = guideHarness(); h.context.setup();
+  const buttons = h.find('[data-gateway-help-providers]').children;
+  for (const button of buttons) {
+    button.listeners.click();
+    assert.ok(h.find('[data-gateway-help-guide]').children.length > 0);
+  }
+  for (const [provider, phrases] of [['OpenAI', ['ChatGPT', 'Codex']], ['GitHub Copilot', ['CLI', 'VS Code']], ['OpenClaw', ['Control UI', 'CLI']]]) {
+    const content = h.render(provider, {help: true});
+    for (const phrase of phrases) assert.ok(content.includes(phrase), provider + ': ' + phrase);
+  }
 });
