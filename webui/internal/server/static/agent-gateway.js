@@ -43,7 +43,7 @@
     ['OpenAI', 'ChatGPT: Secure MCP Tunnel or reachable public HTTPS · Codex: local/LAN supported'],
     ['Claude', 'Claude: remotely reachable MCP required · Claude Code: local/LAN supported'],
     ['Grok', 'Public Internet MCP endpoint required'],
-    ['Gemini', 'Public HTTPS Streamable HTTP endpoint required'],
+    ['Gemini', 'Gemini: public HTTPS required · Gemini CLI: private HTTPS supported with OAuth private-network opt-in'],
     ['GitHub Copilot', 'CLI & VS Code: local/LAN supported'],
     ['OpenClaw', 'Control UI & CLI: local/LAN supported'],
     ['Other AI / MCP app', 'Depends on whether the MCP client runs locally or in the cloud'],
@@ -259,7 +259,7 @@
     Claude: {'Claude': 'cloud', 'Claude Code': 'local'},
     'GitHub Copilot': {'CLI': 'local', 'VS Code': 'local'},
     OpenClaw: {'Control UI': 'local', 'CLI': 'local'},
-    Grok: {'Grok': 'cloud'}, Gemini: {'Gemini': 'cloud'},
+    Grok: {'Grok': 'cloud'}, Gemini: {'Gemini': 'cloud', 'Gemini CLI': 'local'},
     'Other AI / MCP app': {'Other AI / MCP app': 'client'},
     'Automation / REST API': {'Automation / REST API': 'rest'},
   };
@@ -268,16 +268,21 @@
     const mode = modes.includes(options.mode) ? options.mode : modes[0];
     const reachability = clientModes[purpose]?.[mode];
     const automation = purpose === 'Automation / REST API';
-    const privateEndpoint = localAddress(address);
+    const hostname = new URL(address).hostname.toLowerCase();
+    const octets = hostname.split('.').map(Number);
+    const geminiPrivateHost = purpose === 'Gemini' && (/\.(local|internal)$/.test(hostname) ||
+      octets.length === 4 && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127);
+    const privateEndpoint = localAddress(address) || geminiPrivateHost;
     const httpsEndpoint = secureAddress(address);
     const definitelyPrivate = privateEndpoint === true;
     const cloudCandidate = privateEndpoint === false && httpsEndpoint === true;
-    const prerequisite = reachability === 'cloud' && !cloudCandidate;
+    const geminiCLI = purpose === 'Gemini' && mode === 'Gemini CLI';
+    const prerequisite = (reachability === 'cloud' && !cloudCandidate) || (geminiCLI && !httpsEndpoint);
     host.replaceChildren();
     if (!options.settings) {
       const identity = text('div', ''); identity.className = 'gateway-connection-identity';
       const titles = text('div', '');
-      const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Claude & Claude Code', Grok: 'Custom MCP connector', Gemini: 'Custom connected app', 'GitHub Copilot': 'CLI & VS Code', OpenClaw: 'Control UI & CLI'}[purpose];
+      const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Claude & Claude Code', Grok: 'Custom MCP connector', Gemini: 'Gemini & Gemini CLI', 'GitHub Copilot': 'CLI & VS Code', OpenClaw: 'Control UI & CLI'}[purpose];
       titles.append(text('h3', purpose));
       if (subtitle) titles.append(text('p', subtitle));
       identity.append(providerIcon(purpose), titles); host.append(identity);
@@ -321,21 +326,52 @@
     const link = (label, url, parent = host) => {
       const anchor = text('a', label); anchor.href = url; anchor.target = '_blank'; anchor.rel = 'noopener noreferrer'; parent.append(anchor);
     };
+    const details = entries => {
+      const line = text('p', '');
+      line.append(text('span', 'For details see '));
+      entries.forEach(([label, url], index) => {
+        if (index) line.append(text('span', ' and '));
+        link(label, url, line);
+      });
+      line.append(text('span', '.')); host.append(line);
+    };
     const tunnelGuide = 'https://developers.openai.com/api/docs/guides/secure-mcp-tunnels';
     const official = {
       OpenAI: mode === 'Codex' ? 'https://developers.openai.com/learn/docs-mcp' : 'https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt',
       Claude: mode === 'Claude Code' ? 'https://code.claude.com/docs/en/mcp' : 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp',
-      Grok: 'https://docs.x.ai/grok/connectors', Gemini: 'https://support.google.com/gemini/answer/17209137',
+      Grok: 'https://docs.x.ai/grok/connectors', Gemini: geminiCLI ? 'https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md' : 'https://support.google.com/gemini/answer/17209137',
       'GitHub Copilot': mode === 'VS Code' ? 'https://code.visualstudio.com/docs/agent-customization/mcp-servers' : 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
       OpenClaw: mode === 'CLI' ? 'https://docs.openclaw.ai/cli/mcp/transports' : 'https://docs.openclaw.ai/tools/mcp',
     }[purpose];
-    if (official && !prerequisite) link('Official setup guide ↗', official, toolbar);
+    const providerDetails = () => {
+      if (purpose === 'OpenAI' && mode === 'ChatGPT') details([['Secure MCP Tunnel guide', tunnelGuide], ['Official ChatGPT MCP guide', official]]);
+      else if (purpose === 'Claude' && mode === 'Claude') details([['Official setup guide', official]]);
+      else if (purpose === 'Grok') details([['Official Grok tunneling guide', 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling'], ['Official setup guide', official]]);
+      else if (purpose === 'Gemini') details(geminiCLI ? [['Official Gemini CLI MCP guide', official]] : [['Official setup guide', official], ['Official endpoint prerequisites', 'https://developers.google.com/connected-apps/gpc/prerequisites']]);
+    };
+    const compactProviderLinks = purpose === 'OpenAI' && mode === 'ChatGPT' || purpose === 'Claude' && mode === 'Claude' || purpose === 'Grok' || purpose === 'Gemini';
+    if (official && !prerequisite && !compactProviderLinks) link('Official setup guide ↗', official, toolbar);
     if (purpose === 'Claude' && mode === 'Claude' && options.help) {
       inline('For Team/Enterprise, an Owner or Primary Owner first adds the connector from Organization settings → Connectors.');
     }
-    if (purpose === 'Gemini') {
-      inline('Requirements: 18+ · United States · Personal Google Account · Keep Activity on · English. Initial setup in Gemini web.');
-      inline('JustVoxel supports Dynamic Client Registration. Do not manually enter OAuth client credentials unless Google explicitly reports that automatic registration failed.');
+    if (purpose === 'Gemini' && options.help) {
+      host.append(text('h4', 'Availability'));
+      inline('Gemini custom apps currently have Google account, region and feature-availability requirements. See Google’s current setup guide.');
+      host.append(text('h4', 'Authentication'));
+      inline('JustVoxel supports automatic OAuth client registration (Dynamic Client Registration). Manual OAuth credentials are normally not required.');
+      if (geminiCLI) {
+        host.append(text('h4', 'Gemini CLI'));
+        inline('Gemini CLI supports Streamable HTTP MCP servers, OAuth discovery and Dynamic Client Registration when supported.');
+        host.append(text('code', 'gemini mcp add --transport http justvoxel <MCP_URL>'), text('code', 'gemini mcp list'));
+        inline('Inside Gemini CLI, authenticate with:');
+        host.append(text('code', '/mcp auth justvoxel'));
+        inline('For private-network JustVoxel OAuth, Gemini CLI requires HTTPS for non-loopback private endpoints and private-network OAuth opt-in. allowPrivateNetwork defaults to false.');
+        inline('In Gemini CLI settings.json, configure the server OAuth access as follows. Replace the placeholder with the exact connection-specific server URL from Settings:');
+        const config = text('pre', ''); config.className = 'gateway-cli-config';
+        config.append(text('code', JSON.stringify({mcpServers: {justvoxel: {httpUrl: 'https://<justvoxel-lan-host>/mcp/<connection-id>', oauth: {allowPrivateNetwork: true}}}}, null, 2)));
+        host.append(config);
+        details([['Official Google setup guide', 'https://support.google.com/gemini/answer/17209137']]);
+      }
     }
     if (options.help) {
       if (purpose === 'OpenAI' && mode === 'ChatGPT') {
@@ -343,10 +379,8 @@
         inline('ChatGPT → OpenAI Secure MCP Tunnel → tunnel-client on a machine that can reach JustVoxel → private JustVoxel MCP endpoint.');
         inline('The tunnel-client makes an outbound connection to OpenAI; the JustVoxel MCP server itself can remain private on the LAN. Inbound exposure of port 8099 is not required merely for the tunnel.');
         inline('Tunnel setup depends on OpenAI Platform/workspace availability and permissions. It requires Platform tunnel configuration and a running tunnel-client.');
-        link('Official Secure MCP Tunnel guide', tunnelGuide);
         host.append(text('h4', 'Option 2 — Public HTTPS endpoint'));
         inline('Expose the JustVoxel MCP endpoint through a secure public HTTPS endpoint reachable by ChatGPT, then configure the ChatGPT custom MCP/plugin with that HTTPS endpoint. JustVoxel OAuth remains the authentication flow.');
-        link('Official ChatGPT MCP guide', official);
       } else if (purpose === 'Claude' && mode === 'Claude') {
         inline('Claude remote connector requests originate from Anthropic infrastructure. A private JustVoxel LAN URL is not directly reachable; use an MCP endpoint reachable from Anthropic infrastructure.');
       } else if (purpose === 'OpenAI' && mode === 'Codex') {
@@ -355,9 +389,8 @@
         inline('Claude Code is a local client. It can use the JustVoxel LAN HTTP MCP endpoint when its machine can reach JustVoxel.');
       } else if (purpose === 'Grok') {
         inline('Grok custom MCP requires public Internet reachability. Private LAN URLs do not work directly. xAI documents tunneling for local MCP servers in its official tunneling guide.');
-      } else if (purpose === 'Gemini') {
+      } else if (purpose === 'Gemini' && !geminiCLI) {
         inline('Gemini custom Connected Apps require a publicly reachable HTTPS Streamable HTTP MCP endpoint. Private LAN HTTP does not qualify. JustVoxel does not provide an automatic Google tunnel.');
-        if (!prerequisite) link('Official endpoint prerequisites', 'https://developers.google.com/connected-apps/gpc/prerequisites');
       } else if (purpose === 'GitHub Copilot') {
         inline('Copilot CLI and VS Code run locally. Their machine must be able to reach JustVoxel, so a private LAN URL may work directly.');
       } else if (purpose === 'OpenClaw') {
@@ -365,49 +398,52 @@
       }
     }
     if (prerequisite) {
-      host.append(text('h4', 'Connection prerequisite'));
-      if (purpose === 'OpenAI') {
+      host.append(text('h4', 'Before you connect'));
+      if (geminiCLI) {
+        host.append(text('strong', definitelyPrivate ? 'Private HTTPS required for OAuth' : 'HTTPS required for OAuth'));
+        host.append(text('p', 'Gemini CLI can use a private Streamable HTTP MCP server, but its OAuth security policy requires HTTPS for non-loopback private endpoints.'));
+        host.append(text('p', definitelyPrivate ? 'Open JustVoxel through a trusted LAN HTTPS endpoint before connecting Gemini CLI.' : 'Open JustVoxel through a trusted HTTPS endpoint before connecting Gemini CLI.'));
+        if (definitelyPrivate) host.append(text('p', 'Private-network OAuth discovery must also be explicitly enabled in Gemini CLI.'));
+      } else if (purpose === 'OpenAI') {
         host.append(text('strong', 'ChatGPT needs a reachable connection'));
         host.append(text('p', definitelyPrivate
           ? `The current JustVoxel MCP endpoint is inside your local network. Do not paste this ${new URL(address).hostname} address into ChatGPT.`
           : 'The current JustVoxel MCP endpoint is not HTTPS. Use a public HTTPS MCP endpoint that ChatGPT can reach, or Secure MCP Tunnel.'));
         if (!options.help) {
           host.append(text('p', 'For a private JustVoxel server, use ChatGPT Secure MCP Tunnel. Alternatively expose JustVoxel through a public HTTPS MCP endpoint.'));
-          inline('Secure MCP Tunnel runs OpenAI’s tunnel-client on a machine that can already reach JustVoxel and creates an outbound path to OpenAI. The JustVoxel MCP server itself can remain private.');
-          link('Secure MCP Tunnel guide', tunnelGuide);
-          link('Official ChatGPT MCP guide', official);
+          host.append(text('p', 'Secure MCP Tunnel runs OpenAI’s tunnel-client on a machine that can already reach JustVoxel and creates an outbound path to OpenAI. The JustVoxel MCP server itself can remain private.'));
         }
-        if (definitelyPrivate) inline(`Local JustVoxel endpoint (LOCAL reference only): ${address}`);
+        if (definitelyPrivate) {
+          const reference = text('div', ''); reference.className = 'gateway-endpoint-reference';
+          reference.append(text('p', 'Local JustVoxel endpoint — reference only'), text('code', address));
+          host.append(reference);
+        }
       } else if (purpose === 'Claude') {
-        host.append(text('strong', 'Claude needs a remotely reachable MCP endpoint'));
+        host.append(text('strong', 'Claude needs a reachable MCP endpoint'));
         host.append(text('p', definitelyPrivate
           ? 'Claude remote connectors connect from Anthropic infrastructure. The current JustVoxel address is private and cannot be reached directly.'
           : 'Claude remote connectors connect from Anthropic infrastructure. Open JustVoxel through an HTTPS MCP endpoint reachable from that infrastructure.'));
         host.append(text('p', 'Make the MCP endpoint reachable from Anthropic infrastructure before continuing. This also applies to the normal remote-connector flow in Claude Desktop.'));
-        link('Official setup guide ↗', official);
       } else if (purpose === 'Grok') {
         host.append(text('strong', 'Public endpoint required'));
         host.append(text('p', definitelyPrivate
           ? 'Grok cannot use the current private JustVoxel address directly. xAI requires a custom MCP server to be reachable over the public internet.'
           : 'Use a secure public HTTPS MCP endpoint that Grok can reach over the public internet.'));
         host.append(text('p', 'Use a secure public endpoint or a tunnel, then return here with JustVoxel opened through that endpoint.'));
-        link('Official Grok tunneling guide', 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling');
-        link('Official setup guide ↗', official);
       } else if (purpose === 'Gemini') {
         host.append(text('strong', 'Public HTTPS endpoint required'));
         host.append(text('p', 'Gemini custom Connected Apps require a publicly reachable HTTPS Streamable HTTP MCP endpoint. The current JustVoxel endpoint does not meet that requirement.'));
-        link('Official setup guide ↗', official);
-        link('Official endpoint prerequisites', 'https://developers.google.com/connected-apps/gpc/prerequisites');
       }
+      providerDetails();
       return;
     }
+    if (geminiCLI && options.help) { providerDetails(); return; }
     const commandAddress = options.help ? '<MCP_URL>' : address;
     if (reachability === 'cloud') inline(`The HTTPS MCP endpoint must be reachable by ${purpose === 'OpenAI' ? 'ChatGPT' : purpose === 'Claude' ? 'Anthropic infrastructure' : purpose}. Its URL alone does not prove reachability.`);
     if (purpose === 'OpenAI' && mode === 'ChatGPT') {
       steps(['Open ChatGPT → Plugins.', 'Select + → Add custom MCP server.', 'Under Connection, enter the public HTTPS MCP endpoint. If using Secure MCP Tunnel, choose Tunnel instead and select the tunnel.', 'Configure authentication.', 'Review the risk warning.', 'Select Create as a plugin.', 'Complete JustVoxel sign-in/approval when prompted.']);
       inline('If your ChatGPT desktop Settings shows Plugins → MCPs → Add, choose Streamable HTTP for a URL-based JustVoxel connection. STDIO is for launching a local MCP process and is not the JustVoxel HTTP endpoint. Enter the reachable HTTPS MCP address in URL. Leave Bearer token env var and Headers empty for JustVoxel OAuth.');
-      link('Secure MCP Tunnel guide', tunnelGuide);
-      if (options.help) link('Official ChatGPT plugin guide', 'https://developers.openai.com/plugins/deploy/connect-chatgpt');
+      if (options.help) details([['Official ChatGPT plugin guide', 'https://developers.openai.com/plugins/deploy/connect-chatgpt']]);
     } else if (purpose === 'OpenAI') {
       copyBlock(`codex mcp add justvoxel --url ${commandAddress}`, 'Copy command');
       host.append(text('code', 'codex mcp list'));
@@ -423,7 +459,16 @@
       inline('JustVoxel supports Dynamic Client Registration.');
     } else if (purpose === 'Grok') {
       steps(['Open grok.com/connectors.', 'Select New Connector → Custom.', 'Enter the reachable JustVoxel MCP URL.', 'Complete authentication.']);
-      link('Official Grok tunneling guide', 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling');
+    } else if (geminiCLI) {
+      copyBlock(`gemini mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
+      host.append(text('code', 'gemini mcp list'));
+      host.append(text('p', 'Inside Gemini CLI:'));
+      host.append(text('code', '/mcp auth justvoxel'));
+      host.append(text('p', 'Gemini CLI supports Streamable HTTP and OAuth discovery.'));
+      if (definitelyPrivate) {
+        host.append(text('p', 'For a private network OAuth endpoint, enable Gemini CLI private-network OAuth access for this server. In Gemini CLI settings.json, the server OAuth configuration must set allowPrivateNetwork: true. See Help → Provider reference → Gemini → Gemini CLI for the settings example.'));
+      }
+      inline('The computer running Gemini CLI must be able to reach this endpoint. Its URL alone does not prove reachability.');
     } else if (purpose === 'Gemini') {
       steps(['Open gemini.google.com.', 'Settings → Connected Apps. If needed: Personal Intelligence → Connected Apps.', 'Under Custom apps select Add a custom app.', 'Enter the JustVoxel MCP URL.', 'Select Next.', 'Complete JustVoxel authentication.']);
     } else if (purpose === 'GitHub Copilot') {
@@ -459,6 +504,7 @@
       steps(['Find the MCP server settings in your client.', 'Choose Streamable HTTP / HTTP for a URL-based server.', 'Paste the JustVoxel MCP address if that client can reach it.', 'Use the client’s OAuth flow when supported.']);
       inline('Compatibility depends on the client. For token connections, use the scoped JustVoxel API token.');
     }
+    providerDetails();
   };
   // Both form modes keep individual draft selections while All servers is on.
   const renderMinecraftScope = (form, c) => {

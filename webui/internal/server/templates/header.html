@@ -234,16 +234,42 @@
               <p class="notice warning">No level can manage AI/API connection permissions, user accounts, or Factory Reset.</p>
             </section>
             <section class="panel"><h3>Minecraft scope</h3>
-              <dl><dt>All servers</dt><dd>The connection applies to every JustVoxel Minecraft server.</dd><dt>Selected servers</dt><dd>Enable only the individual server switches the client may access.</dd></dl>
+              <div class="gateway-help-facts">
+                <div class="gateway-help-fact">
+                  <strong>All servers</strong>
+                  <p>The connection applies to every JustVoxel Minecraft server.</p>
+                </div>
+                <div class="gateway-help-fact">
+                  <strong>Selected servers</strong>
+                  <p>Enable only the individual servers this connection may access.</p>
+                </div>
+              </div>
             </section>
             <section class="panel"><h3>Authentication</h3>
-              <dl><dt>OAuth connections</dt><dd>Branded AI clients use JustVoxel OAuth. The client opens JustVoxel sign-in and approval when authorization is required. You do not need to manually copy an OAuth access token.</dd>
-              <dt>Token connections</dt><dd>Other AI / MCP app and Automation / REST API may use scoped JustVoxel API tokens. The token is shown once. Store it securely.</dd></dl>
+              <div class="gateway-help-facts">
+                <div class="gateway-help-fact">
+                  <strong>OAuth connections</strong>
+                  <p>Branded AI clients use JustVoxel OAuth. Sign-in and approval happen through JustVoxel.</p>
+                </div>
+                <div class="gateway-help-fact">
+                  <strong>Token connections</strong>
+                  <p>Other AI / MCP app and Automation / REST API use scoped JustVoxel API tokens. The token is shown once.</p>
+                </div>
+              </div>
               <p>JustVoxel does not require an AI provider model API key merely to expose MCP.</p>
             </section>
             <section class="panel"><h3>Network access</h3>
-              <dl><dt>Local clients</dt><dd>Codex, Claude Code, GitHub Copilot CLI, VS Code, OpenClaw and other local MCP clients may use a JustVoxel LAN endpoint when the machine running the client can reach JustVoxel.</dd>
-              <dt>Cloud clients</dt><dd>ChatGPT, Claude remote connectors, Grok and Gemini run outside your LAN and may need a different connection path. ChatGPT supports Secure MCP Tunnel or reachable public HTTPS. Claude needs an endpoint reachable from Anthropic infrastructure; Grok requires public Internet access; Gemini requires public HTTPS Streamable HTTP. See Provider reference for each option. An HTTPS hostname alone does not prove provider reachability.</dd></dl>
+              <div class="gateway-help-facts">
+                <div class="gateway-help-fact">
+                  <strong>Local clients</strong>
+                  <p>Codex, Claude Code, GitHub Copilot CLI, VS Code, OpenClaw and other local MCP clients can use a JustVoxel LAN endpoint when they can reach the server.</p>
+                </div>
+                <div class="gateway-help-fact">
+                  <strong>Cloud clients</strong>
+                  <p>ChatGPT, Claude remote connectors, Grok and Gemini connect from outside your LAN and may require a different connection path.</p>
+                </div>
+              </div>
+              <p>See Provider reference for the exact connection options for each provider.</p>
             </section>
             <details class="panel" data-gateway-provider-reference><summary>Provider reference</summary>
               <p class="muted">Availability depends on your account, plan or subscription, and network access.</p>
@@ -279,7 +305,7 @@
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="OpenAI" checked><img class="gateway-provider-icon" src="/static/ai-providers/openai.svg" alt=""><span><strong>OpenAI</strong><small>ChatGPT &amp; Codex</small></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Claude"><img class="gateway-provider-icon" src="/static/ai-providers/claude.svg" alt=""><span><strong>Claude</strong><small>Claude &amp; Claude Code</small></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Grok"><img class="gateway-provider-icon" src="/static/ai-providers/grok.svg" alt=""><span><strong>Grok</strong></span></label>
-            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Gemini"><img class="gateway-provider-icon" src="/static/ai-providers/googlegemini.svg" alt=""><span><strong>Gemini</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Gemini"><img class="gateway-provider-icon" src="/static/ai-providers/googlegemini.svg" alt=""><span><strong>Gemini</strong><small>Gemini &amp; Gemini CLI</small></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="GitHub Copilot"><img class="gateway-provider-icon" src="/static/ai-providers/githubcopilot.svg" alt=""><span><strong>GitHub Copilot</strong><small>CLI &amp; VS Code</small></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="OpenClaw"><img class="gateway-provider-icon" src="/static/ai-providers/openclaw.svg" alt=""><span><strong>OpenClaw</strong><small>Control UI &amp; CLI</small></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Other AI / MCP app"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Other AI / MCP app</strong></span></label>

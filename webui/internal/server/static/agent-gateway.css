@@ -23,6 +23,10 @@
 [data-agent-gateway-dialog] [data-gateway-advanced] > label { display: grid; gap: .35rem; max-width: 24rem; margin-top: .65rem; }
 [data-agent-gateway-dialog] [data-gateway-help] h3 { margin: 0 0 .6rem; font-size: 1rem; }
 [data-agent-gateway-dialog] [data-gateway-help] p { margin: .6rem 0; }
+[data-agent-gateway-dialog] .gateway-help-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 1.5rem; text-align: left; }
+[data-agent-gateway-dialog] .gateway-help-fact { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+[data-agent-gateway-dialog] .gateway-help-fact > strong { display: block; }
+[data-agent-gateway-dialog] [data-gateway-help] .gateway-help-fact > p { margin: .3rem 0 0; color: var(--jv-muted); }
 [data-agent-gateway-dialog] .gateway-help-steps { padding-left: 1.4rem; margin: .5rem 0; }
 [data-agent-gateway-dialog] .gateway-help-steps li { margin: .3rem 0; }
 [data-agent-gateway-dialog] .gateway-table-scroll { max-width: 100%; overflow-x: auto; }
@@ -140,6 +144,7 @@
   [data-agent-gateway-dialog] .gateway-status-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @container gateway (max-width: 600px) {
+  [data-agent-gateway-dialog] .gateway-help-facts { grid-template-columns: minmax(0, 1fr); }
   [data-agent-gateway-dialog] .gateway-status-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   [data-agent-gateway-dialog] [data-gateway-settings] .gateway-name-access-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   [data-agent-gateway-dialog] .gateway-settings-guide .gateway-help-steps { grid-template-columns: minmax(0, 1fr); }
@@ -157,3 +162,7 @@
 /* Reserve label space without changing shared button sizing or adding a status row. */
 [data-agent-gateway-dialog] [data-gateway-copy-label] { display: inline-grid; white-space: nowrap; }
 [data-agent-gateway-dialog] [data-gateway-copy-label]::after { content: attr(data-gateway-copy-label); visibility: hidden; height: 0; overflow: hidden; }
+
+[data-agent-gateway-dialog] .gateway-endpoint-reference { display: grid; gap: .3rem; min-width: 0; color: var(--jv-muted); }
+[data-agent-gateway-dialog] .gateway-endpoint-reference code { overflow-wrap: anywhere; }
+[data-agent-gateway-dialog] .gateway-cli-config { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }

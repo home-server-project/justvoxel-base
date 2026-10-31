@@ -178,6 +178,9 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 	if !strings.Contains(form, `<strong>Claude</strong><small>Claude &amp; Claude Code</small>`) {
 		t.Error("Claude must identify Claude and Claude Code without a separate provider record")
 	}
+	if !strings.Contains(form, `<strong>Gemini</strong><small>Gemini &amp; Gemini CLI</small>`) {
+		t.Error("Gemini must identify Gemini and Gemini CLI without a separate provider record")
+	}
 	if !strings.Contains(form, `<strong>GitHub Copilot</strong><small>CLI &amp; VS Code</small>`) {
 		t.Error("Copilot must identify both supported client modes")
 	}
@@ -229,7 +232,7 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 		t.Fatal("collapsed provider reference missing")
 	}
 	normal := help[:reference]
-	for _, phrase := range []string{"Codex, Claude Code, GitHub Copilot CLI, VS Code, OpenClaw and other local MCP clients", "machine running the client can reach JustVoxel", "ChatGPT, Claude remote connectors, Grok and Gemini run outside your LAN", "ChatGPT supports Secure MCP Tunnel or reachable public HTTPS", "Claude needs an endpoint reachable from Anthropic infrastructure", "Grok requires public Internet access", "Gemini requires public HTTPS Streamable HTTP"} {
+	for _, phrase := range []string{"Codex, Claude Code, GitHub Copilot CLI, VS Code, OpenClaw and other local MCP clients", "when they can reach the server", "ChatGPT, Claude remote connectors, Grok and Gemini connect from outside your LAN", "See Provider reference for the exact connection options for each provider."} {
 		if !strings.Contains(normal, phrase) {
 			t.Errorf("Network access guidance missing: %s", phrase)
 		}
@@ -237,6 +240,28 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 	for _, title := range []string{"Access levels", "Minecraft scope", "Authentication", "Network access"} {
 		if !strings.Contains(normal, "<h3>"+title+"</h3>") {
 			t.Errorf("visible reference section missing: %s", title)
+		}
+	}
+	for _, title := range []string{"Minecraft scope", "Authentication", "Network access"} {
+		sectionStart := strings.Index(normal, "<section class=\"panel\"><h3>"+title+"</h3>")
+		if sectionStart < 0 {
+			t.Fatalf("Help fact section missing: %s", title)
+		}
+		sectionEnd := strings.Index(normal[sectionStart:], "</section>")
+		if sectionEnd < 0 {
+			t.Fatalf("Help fact section not closed: %s", title)
+		}
+		section := normal[sectionStart : sectionStart+sectionEnd]
+		if strings.Count(section, `class="gateway-help-facts"`) != 1 || strings.Count(section, `class="gateway-help-fact"`) != 2 {
+			t.Errorf("Help section must share the two-fact layout: %s", title)
+		}
+		if regexp.MustCompile(`<(?:dl|dt|dd)\b`).MatchString(section) || len(regexp.MustCompile(`(?s)<div class="gateway-help-fact">\s*<strong>[^<]+</strong>\s*<p>[^<]+</p>\s*</div>`).FindAllString(section, -1)) != 2 {
+			t.Errorf("Help facts must put each label above its description: %s", title)
+		}
+	}
+	for _, duplicate := range []string{"Secure MCP Tunnel", "Anthropic infrastructure", "public Internet", "public HTTPS Streamable HTTP"} {
+		if strings.Contains(normal, duplicate) {
+			t.Errorf("generic Help duplicates provider mechanics: %s", duplicate)
 		}
 	}
 	for _, obsolete := range []string{"Getting connected", "Choose your app", "data-gateway-help-providers", "data-gateway-help-guide"} {
