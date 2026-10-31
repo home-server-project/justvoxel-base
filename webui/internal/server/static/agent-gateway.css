@@ -94,17 +94,15 @@
 [data-agent-gateway-dialog] [data-gateway-settings] .gateway-name-access-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; }
 [data-agent-gateway-dialog] .gateway-enabled-control { display: grid; gap: .35rem; }
 [data-agent-gateway-dialog] .gateway-enabled-control .gateway-switch { flex-direction: row-reverse; justify-content: flex-end; gap: .5rem; min-height: 2.5rem; white-space: nowrap; }
-[data-agent-gateway-dialog] .gateway-enabled-success { color: var(--jv-success); }
-[data-agent-gateway-dialog] .gateway-enabled-danger { color: var(--jv-danger); }
-[data-agent-gateway-dialog] .gateway-edit-settings .gateway-expiration { width: fit-content; max-width: min(100%, 17rem); }
 [data-agent-gateway-dialog] [data-gateway-settings] .gateway-server-lane { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 0; }
 [data-agent-gateway-dialog] .gateway-server-item { display: flex; align-items: center; gap: .4rem; padding: .3rem .7rem; margin: 0; border-inline-start: 1px solid var(--jv-border); cursor: pointer; flex: 0 0 auto; min-width: 0; max-width: 100%; }
 [data-agent-gateway-dialog] .gateway-server-item:first-child { border-inline-start: 0; padding-inline-start: 0; }
 [data-agent-gateway-dialog] .gateway-server-item > input { flex: none; margin: 0; }
 [data-agent-gateway-dialog] .gateway-server-item > span { overflow-wrap: anywhere; }
 [data-agent-gateway-dialog] .gateway-server-item:has(input:disabled) { opacity: .5; cursor: default; }
-[data-agent-gateway-dialog] .gateway-status-metrics { display: flex; flex-wrap: wrap; gap: .5rem 2rem; margin: 0; padding-block: .5rem; border-block: 1px solid var(--jv-border); }
-[data-agent-gateway-dialog] .gateway-status-metrics > div { text-align: left; }
+[data-agent-gateway-dialog] .gateway-status-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; box-sizing: border-box; gap: .5rem; margin: 0; padding-block: .5rem; border-block: 1px solid var(--jv-border); }
+[data-agent-gateway-dialog] .gateway-status-metrics > div { min-width: 0; text-align: center; }
+[data-agent-gateway-dialog] .gateway-status-metrics .gateway-expiration { box-sizing: border-box; width: 100%; margin: 0; font-size: .8rem; text-align: center; }
 [data-agent-gateway-dialog] .gateway-edit-settings [data-gateway-safe-details] { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .35rem .8rem; font-size: .85rem; }
 [data-agent-gateway-dialog] .gateway-edit-settings [data-gateway-safe-details] dt { color: var(--jv-muted); }
 [data-agent-gateway-dialog] .gateway-edit-settings [data-gateway-safe-details] dd { margin: 0; }
@@ -120,8 +118,9 @@
 /* Settings uses the compact workspace rhythm; Help retains its full manual. */
 [data-agent-gateway-dialog] [data-gateway-details] { padding: .75rem; }
 [data-agent-gateway-dialog] .gateway-name-access-row > label > :is(input, select),
-[data-agent-gateway-dialog] .gateway-expiration input { padding: .4rem .55rem; margin-top: 0; }
-[data-agent-gateway-dialog] .gateway-settings-guide { gap: .45rem; font-size: .88rem; }
+[data-agent-gateway-dialog] .gateway-expiration { padding: .4rem .55rem; margin-top: 0; }
+[data-agent-gateway-dialog] .gateway-settings-guide { gap: .45rem; }
+[data-agent-gateway-dialog] .gateway-settings-guide :is(p, ol, h4, a) { font-size: .88rem; }
 [data-agent-gateway-dialog] .gateway-settings-guide .gateway-address { padding: 0; background: transparent; border-radius: 0; }
 [data-agent-gateway-dialog] .gateway-settings-guide .gateway-address > span { flex: none; font-weight: 600; }
 [data-agent-gateway-dialog] .gateway-settings-guide .gateway-copy-field { padding: .4rem .55rem; margin-top: 0; }
@@ -134,10 +133,13 @@
 [data-agent-gateway-dialog] .gateway-actions-lane { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; padding-block: .35rem; }
 [data-agent-gateway-dialog] .gateway-credential-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0; }
 [data-agent-gateway-dialog] [data-gateway-live-note] { flex: 1 1 16rem; margin: 0; color: var(--jv-muted); font-size: .8rem; }
-[data-agent-gateway-dialog] .gateway-save { margin: 0 0 0 auto; }
-[data-agent-gateway-dialog] :is(.gateway-settings-guide, .gateway-actions-lane) button { padding: .35rem .6rem; }
+[data-agent-gateway-dialog] .gateway-save { flex-wrap: nowrap; margin: 0 0 0 auto; }
 [data-agent-gateway-dialog] [data-gateway-advanced] { border-top: 1px solid var(--jv-border); padding-top: .45rem; font-size: .85rem; }
+@container gateway (max-width: 800px) {
+  [data-agent-gateway-dialog] .gateway-status-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @container gateway (max-width: 600px) {
+  [data-agent-gateway-dialog] .gateway-status-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   [data-agent-gateway-dialog] [data-gateway-settings] .gateway-name-access-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   [data-agent-gateway-dialog] .gateway-settings-guide .gateway-help-steps { grid-template-columns: minmax(0, 1fr); }
 }
@@ -146,3 +148,7 @@
 }
 
 [data-agent-gateway-dialog] .gateway-provider-card .gateway-provider-icon { width: 30px; height: 30px; }
+
+@container gateway (max-width: 420px) {
+  [data-agent-gateway-dialog] .gateway-status-metrics { grid-template-columns: minmax(0, 1fr); }
+}

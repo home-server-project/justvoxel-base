@@ -275,7 +275,8 @@
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Claude"><img class="gateway-provider-icon" src="/static/ai-providers/claude.svg" alt=""><span><strong>Claude</strong></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Grok"><img class="gateway-provider-icon" src="/static/ai-providers/grok.svg" alt=""><span><strong>Grok</strong></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Gemini"><img class="gateway-provider-icon" src="/static/ai-providers/googlegemini.svg" alt=""><span><strong>Gemini</strong></span></label>
-            <label class="gateway-provider-card"><input type="radio" name="purpose" value="GitHub Copilot"><img class="gateway-provider-icon" src="/static/ai-providers/githubcopilot.svg" alt=""><span><strong>GitHub Copilot</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="GitHub Copilot"><img class="gateway-provider-icon" src="/static/ai-providers/githubcopilot.svg" alt=""><span><strong>GitHub Copilot</strong><small>CLI &amp; VS Code</small></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="OpenClaw"><img class="gateway-provider-icon" src="/static/ai-providers/openclaw.svg" alt=""><span><strong>OpenClaw</strong><small>Control UI &amp; CLI</small></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Other AI / MCP app"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Other AI / MCP app</strong></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Automation / REST API"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Automation / REST API</strong></span></label>
           </div>
@@ -286,18 +287,17 @@
             <label class="gateway-server-item gateway-all-servers"><input class="date-time-switch" type="checkbox" role="switch" data-gateway-all-servers checked><span>All servers</span></label>
           </div>
         </section>
-        <label class="gateway-switch"><span>Enabled</span><input class="date-time-switch" type="checkbox" role="switch" name="enabled"></label>
+        <label class="gateway-switch"><input class="date-time-switch" type="checkbox" role="switch" name="enabled" aria-label="Connection enabled"></label>
       </section>
-      <section data-gateway-status hidden><div data-gateway-status-details></div></section>
+      <section data-gateway-status hidden><div data-gateway-status-details><input class="gateway-expiration" type="datetime-local" name="expires_at" aria-label="Expiration" title="Optional, your local time"></div></section>
       <div class="gateway-actions-lane">
         <div class="action-row gateway-credential-actions" data-gateway-actions hidden>
-          <button type="button" class="danger" data-gateway-delete>Delete</button><button type="button" class="secondary" data-gateway-rotate>Rotate token</button><button type="button" class="secondary" data-gateway-revoke>Revoke token</button>
+          <button type="button" class="secondary" data-gateway-rotate>Rotate token</button><button type="button" class="secondary" data-gateway-revoke>Revoke token</button>
         </div>
         <p data-gateway-live-note hidden>Changes apply to the next request. Operations already accepted may finish.</p>
-        <div class="action-row gateway-save"><button type="submit" data-gateway-save>Create</button></div>
+        <div class="action-row gateway-save"><button type="button" class="danger" data-gateway-delete hidden>Delete</button><button type="submit" data-gateway-save>Create</button></div>
       </div>
       <details data-gateway-advanced hidden><summary>Advanced details</summary>
-        <label>Expiration<input type="datetime-local" name="expires_at" title="Optional, your local time"></label>
         <dl data-gateway-safe-details></dl>
         <section data-gateway-oauth hidden><h4>Developer integration</h4>
           <p>Use the details supplied by your app or sign-in service. Never paste access tokens or private keys here.</p>

@@ -154,6 +154,22 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 		t.Fatal("connection settings template missing")
 	}
 	form := match[1]
+	providers := regexp.MustCompile(`type="radio" name="purpose" value="([^"]+)"`).FindAllStringSubmatch(form, -1)
+	wantProviders := []string{"OpenAI", "Claude", "Grok", "Gemini", "GitHub Copilot", "OpenClaw", "Other AI / MCP app", "Automation / REST API"}
+	if len(providers) != len(wantProviders) {
+		t.Fatal("connection settings must contain exactly the eight approved providers")
+	}
+	for i, want := range wantProviders {
+		if providers[i][1] != want {
+			t.Errorf("provider %d: got %q, want %q", i, providers[i][1], want)
+		}
+	}
+	if strings.Count(form, `value="OpenClaw"`) != 1 || !strings.Contains(form, `/static/ai-providers/openclaw.svg`) || !strings.Contains(form, `<strong>OpenClaw</strong><small>Control UI &amp; CLI</small>`) {
+		t.Error("OpenClaw must have one branded provider card with its local official icon and subtitle")
+	}
+	if !strings.Contains(form, `<strong>GitHub Copilot</strong><small>CLI &amp; VS Code</small>`) {
+		t.Error("Copilot must identify both supported client modes")
+	}
 	if strings.Contains(form, "data-gateway-settings-title") || strings.Contains(form, "Choose servers") {
 		t.Error("Add and Settings must omit redundant headings and the old scope choice")
 	}
@@ -161,12 +177,24 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 		t.Error("All servers must be the first switch in the individual server lane")
 	}
 	previous := -1
-	for _, marker := range []string{"gateway-name-access-row", "data-gateway-providers", "gateway-server-lane", "data-gateway-status hidden", "gateway-actions-lane", "data-gateway-delete", "data-gateway-live-note", "data-gateway-save", "data-gateway-advanced hidden"} {
+	for _, marker := range []string{"gateway-name-access-row", "data-gateway-providers", "gateway-server-lane", "data-gateway-status hidden", "gateway-actions-lane", "data-gateway-live-note", "data-gateway-delete", "data-gateway-save", "data-gateway-advanced hidden"} {
 		index := strings.Index(form, marker)
 		if index <= previous {
 			t.Errorf("missing or out-of-order settings element: %s", marker)
 		}
 		previous = index
+	}
+	if !regexp.MustCompile(`<label class="gateway-switch"><input[^>]*name="enabled"[^>]*aria-label="Connection enabled"[^>]*></label>`).MatchString(form) {
+		t.Error("connection switch must have an accessible label without visible Enabled/Disabled text")
+	}
+	if !regexp.MustCompile(`<div class="action-row gateway-save"><button[^>]*class="danger"[^>]*data-gateway-delete[^>]*>Delete</button><button type="submit" data-gateway-save>Create</button></div>`).MatchString(form) {
+		t.Error("Delete must immediately precede the primary action in the shared action row")
+	}
+	if strings.Count(form, `name="expires_at"`) != 1 || !regexp.MustCompile(`(?s)data-gateway-status-details><input[^>]*type="datetime-local"[^>]*name="expires_at"[^>]*aria-label="Expiration"`).MatchString(form) {
+		t.Error("expiration must remain one accessible editable control inside the metrics lane")
+	}
+	if strings.Contains(form[strings.Index(form, `<details data-gateway-advanced`):], `name="expires_at"`) {
+		t.Error("expiration must not be in Advanced")
 	}
 	if !regexp.MustCompile(`(?s)<details data-gateway-advanced hidden>.*</details>\s*</form>\s*$`).MatchString(form) {
 		t.Error("Advanced details must be collapsed and last")

@@ -34,6 +34,7 @@
     ['Grok', {icon: 'grok', label: 'Grok'}],
     ['Gemini', {icon: 'googlegemini', label: 'Gemini'}],
     ['GitHub Copilot', {icon: 'githubcopilot', label: 'GitHub Copilot'}],
+    ['OpenClaw', {icon: 'openclaw', label: 'OpenClaw'}],
     ['Other AI / MCP app', {label: 'Other AI / MCP app'}],
     ['Automation / REST API', {label: 'Automation / REST API'}],
   ]);
@@ -226,13 +227,14 @@
   };
   const secureAddress = address => new URL(address).protocol === 'https:';
   const renderProviderGuide = (host, purpose, address, options = {}) => {
-    const mode = options.mode || 'ChatGPT';
+    const modes = {OpenAI: ['ChatGPT', 'Codex'], 'GitHub Copilot': ['CLI', 'VS Code'], OpenClaw: ['Control UI', 'CLI']}[purpose];
+    const mode = modes?.includes(options.mode) ? options.mode : modes?.[0];
     const automation = purpose === 'Automation / REST API';
     host.replaceChildren();
     if (!options.settings) {
       const identity = text('div', ''); identity.className = 'gateway-connection-identity';
       const titles = text('div', '');
-      const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Custom connector', Grok: 'Custom MCP connector', Gemini: 'Custom connected app', 'GitHub Copilot': 'Copilot CLI'}[purpose];
+      const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Custom connector', Grok: 'Custom MCP connector', Gemini: 'Custom connected app', 'GitHub Copilot': 'CLI & VS Code', OpenClaw: 'Control UI & CLI'}[purpose];
       titles.append(text('h3', purpose));
       if (subtitle) titles.append(text('p', subtitle));
       identity.append(providerIcon(purpose), titles); host.append(identity);
@@ -256,9 +258,9 @@
     const toolbar = options.settings ? text('div', '') : host;
     if (options.settings) { toolbar.className = 'gateway-guide-toolbar'; host.append(toolbar); }
     toolbar.append(text('h4', 'How to connect'));
-    if (purpose === 'OpenAI') {
-      const tabs = text('div', ''); tabs.className = 'gateway-guide-modes'; tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', 'OpenAI app');
-      for (const choice of ['ChatGPT', 'Codex']) {
+    if (modes && (options.settings || purpose !== 'OpenClaw')) {
+      const tabs = text('div', ''); tabs.className = 'gateway-guide-modes'; tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', purpose + ' app');
+      for (const choice of modes) {
         const button = text('button', choice); button.type = 'button'; button.className = 'secondary'; button.setAttribute('aria-pressed', String(choice === mode));
         button.addEventListener('click', () => renderProviderGuide(host, purpose, address, {...options, mode: choice})); tabs.append(button);
       }
@@ -272,6 +274,19 @@
       const box = text('aside', ''); box.className = warning ? 'notice warning' : 'notice';
       box.append(text('strong', title), text('p', body)); host.append(box); return box;
     };
+    const claudeSteps = ['Open Claude → Customize → Connectors.', 'Select Add → Custom → Web.', 'Enter a name and paste this JustVoxel MCP address.', 'Select Continue.', 'Under Authentication choose Sign in now or Sign in when needed.', 'Under OAuth client choose Register automatically.', 'Select Add.', 'Complete JustVoxel sign-in and approval.'];
+    const copilotCodeSteps = ['Open the Command Palette.', 'Run MCP: Add Server.', 'Choose HTTP.', 'Paste the JustVoxel MCP URL.', 'Enter server ID justvoxel.', 'Choose Global → Copilot Global.', 'Complete the browser OAuth/sign-in prompt when requested.'];
+    const copilotCodeAlternative = 'Alternative: Chat → Open Customizations → MCP Servers → Add Server.';
+    const copilotCloudLimit = 'Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.';
+    const openclawSteps = ['Open OpenClaw → Settings → MCP.', 'Under Configured servers select Add server.', 'Name it JustVoxel and choose Streamable HTTP.', 'Paste this JustVoxel MCP address and select Add server.', 'Configure the server to use OAuth, then select Sign in.', 'Complete JustVoxel sign-in and approval.', 'Verify with: openclaw mcp doctor justvoxel --probe'];
+    const openclawNetwork = 'This local address can work when the OpenClaw Gateway can reach JustVoxel.';
+    const openclawCLI = commandAddress => {
+      // Quote the JSON as one shell argument, including any apostrophe in the URL.
+      const config = JSON.stringify({url: commandAddress, transport: 'streamable-http', auth: 'oauth'}).replace(/'/g, "'\\''");
+      copyBlock(`openclaw mcp set justvoxel '${config}'`, 'Copy command');
+      host.append(text('code', 'openclaw mcp login justvoxel'), text('code', 'openclaw mcp doctor justvoxel --probe'));
+      host.append(text('p', 'OpenClaw opens the JustVoxel OAuth authorization flow during login.'));
+    };
     if (options.settings) {
       const inline = (value, warning = false) => {
         const line = text('p', value); line.className = warning ? 'gateway-inline-note gateway-inline-warning' : 'gateway-inline-note'; host.append(line);
@@ -280,45 +295,57 @@
         OpenAI: mode === 'Codex' ? 'https://developers.openai.com/learn/docs-mcp' : 'https://developers.openai.com/api/docs/guides/custom-mcp-server',
         Claude: 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp',
         Grok: 'https://docs.x.ai/grok/connectors', Gemini: 'https://support.google.com/gemini/answer/17209137',
-        'GitHub Copilot': 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
+        'GitHub Copilot': mode === 'VS Code' ? 'https://code.visualstudio.com/docs/agent-customization/mcp-servers' : 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers',
+        OpenClaw: 'https://docs.openclaw.ai/tools/mcp',
       }[purpose];
       if (official) {
         const link = text('a', 'Official setup guide ↗'); link.href = official; link.target = '_blank'; link.rel = 'noopener noreferrer'; toolbar.append(link);
       }
       if (purpose === 'OpenAI' && mode === 'ChatGPT') {
-        steps(['In ChatGPT add a custom MCP server.', 'Paste this JustVoxel MCP address.', 'Complete JustVoxel sign-in and approval.', 'Create/install the connection.']);
-        if (localAddress(address)) inline('ⓘ Local MCP address — use reachable HTTPS or ChatGPT Secure MCP Tunnel.');
-        else if (!secureAddress(address)) inline('ⓘ Use reachable HTTPS or ChatGPT Secure MCP Tunnel.');
+        steps(['Open ChatGPT → Settings → Plugins → MCPs.', 'Select Add and connect a custom MCP.', 'Choose Streamable HTTP.', 'Enter a name such as JustVoxel and paste this MCP address into URL.', 'Leave Bearer token env var and Headers empty — JustVoxel uses OAuth.', 'Select Save.', 'When ChatGPT opens JustVoxel, sign in and approve the requested access.']);
+        if (localAddress(address)) inline('This address works only inside your local network. ChatGPT runs in the cloud and cannot reach it directly. To connect ChatGPT, use an HTTPS address ChatGPT can reach or ChatGPT Secure MCP Tunnel.');
+        else if (!secureAddress(address)) inline('To connect ChatGPT, use an HTTPS address ChatGPT can reach or ChatGPT Secure MCP Tunnel.');
       } else if (purpose === 'OpenAI') {
         copyBlock(`codex mcp add justvoxel --url ${address}`, 'Copy command');
-        host.append(text('p', 'Verify: codex mcp list'), text('p', 'Codex opens JustVoxel OAuth sign-in when required.'));
-        inline('ⓘ LAN address is usable when this Codex machine can reach JustVoxel.');
+        host.append(text('p', 'Verify: codex mcp list'), text('p', 'If authentication is required, Codex opens the JustVoxel sign-in flow.'));
+        if (localAddress(address)) inline('This local address can work when the computer running Codex can reach JustVoxel.');
       } else if (purpose === 'Claude') {
-        steps(['Customize → Connectors → Add custom connector.', 'Paste this JustVoxel MCP address.', 'Choose OAuth client: Register automatically.', 'Complete JustVoxel sign-in and approval.']);
-        inline('ⓘ Claude remote connectors need an address reachable from Anthropic infrastructure.');
+        steps(claudeSteps);
+        if (localAddress(address)) inline('This address is inside your local network. Claude remote connectors must be able to reach the JustVoxel MCP address from Anthropic infrastructure.');
       } else if (purpose === 'Grok') {
-        steps(['grok.com/connectors → New Connector → Custom.', 'Paste this JustVoxel MCP address.', 'Complete JustVoxel authentication.']);
-        inline(localAddress(address) ? '⚠ Grok requires a publicly reachable secure endpoint or tunnel.' : 'ⓘ Grok requires a publicly reachable secure MCP endpoint.', localAddress(address));
+        steps(['Open grok.com/connectors.', 'Select New Connector → Custom.', 'Paste this JustVoxel MCP URL.', 'Complete authentication.']);
+        if (localAddress(address)) inline('Grok requires a publicly reachable MCP address. This private LAN address will not work directly.', true);
+        else inline('Grok requires a publicly reachable secure MCP address.');
       } else if (purpose === 'Gemini') {
-        steps(['Settings → Connected Apps.', 'Add a custom app.', 'Paste this JustVoxel MCP address.', 'Complete JustVoxel authentication.']);
+        steps(['Open gemini.google.com.', 'Settings → Connected Apps.', 'Under Custom apps select Add a custom app.', 'Paste this JustVoxel MCP URL.', 'Select Next.', 'Complete the authentication flow.']);
         inline('Requirements: 18+ · United States · Personal Google Account · Keep Activity · English');
       } else if (purpose === 'GitHub Copilot') {
-        copyBlock(`copilot mcp add --transport http justvoxel ${address}`, 'Copy command');
-        host.append(text('p', 'Authentication: /mcp auth justvoxel'), text('p', 'Interactive: /mcp add'));
-        inline('ⓘ Copilot CLI may use this LAN address when it can reach JustVoxel.');
-        inline('Cloud agent/code review do not currently support remote OAuth MCP servers.');
+        if (mode === 'VS Code') {
+          steps(copilotCodeSteps);
+          host.append(text('p', copilotCodeAlternative));
+        } else {
+          copyBlock(`copilot mcp add --transport http justvoxel ${address}`, 'Copy command');
+          host.append(text('p', 'Authentication: /mcp auth justvoxel'), text('p', 'Interactive: /mcp add — use Ctrl+S to save.'), text('p', '/mcp auth opens browser authentication when required.'));
+        }
+        if (localAddress(address)) inline(`This local address can work when the computer running ${mode === 'VS Code' ? 'VS Code' : 'Copilot CLI'} can reach JustVoxel.`);
+        inline(copilotCloudLimit);
+      } else if (purpose === 'OpenClaw') {
+        if (mode === 'CLI') openclawCLI(address);
+        else steps(openclawSteps);
+        if (localAddress(address)) inline(openclawNetwork);
       } else if (automation) {
-        steps(['Copy the one-time JustVoxel API token.', 'Store it securely; it is shown only once.', 'Send it as the connection credential.', 'Requests use this connection’s access level and Minecraft scope.']);
+        steps(['Copy the REST API address.', 'Copy the one-time JustVoxel API token after creating the connection.', 'Store the token securely.', 'Use it as the connection credential in the automation/client.']);
       } else {
-        steps(['Add a remote Streamable HTTP MCP server.', 'Paste this JustVoxel MCP address.', 'Complete JustVoxel authentication with your client.']);
-        inline('ⓘ Local clients can use LAN; cloud-client requirements vary.');
+        steps(['Open the MCP-server settings in your client.', 'Add a Streamable HTTP server.', 'Paste this MCP address.', 'Complete the authentication method supported by that client.']);
+        if (localAddress(address)) inline('Local clients can use this address when they can reach JustVoxel. Cloud clients may require a remotely reachable address.');
       }
       return;
     }
     const commandAddress = options.help ? '<MCP_URL>' : address;
     let guide;
     if (purpose === 'OpenAI' && mode === 'ChatGPT') {
-      steps(['Open ChatGPT on the web and open Plugins.', 'Select +, then Add custom MCP server.', 'Enter a name and paste the JustVoxel MCP address.', 'Configure the authentication offered by JustVoxel.', 'Review the risk warning and select “I understand and want to continue”.', 'Complete the normal JustVoxel sign-in and approval when ChatGPT starts authentication.', 'Create as a plugin, then install the plugin.']);
+      steps(['Open ChatGPT → Settings → Plugins → MCPs.', 'Select Add and connect a custom MCP.', 'Choose Streamable HTTP.', 'Enter a name such as JustVoxel and paste the JustVoxel MCP address into URL.', 'Leave Bearer token env var and Headers empty — JustVoxel uses OAuth.', 'Select Save.', 'When ChatGPT opens JustVoxel, sign in and approve the requested access.']);
+      host.append(text('p', 'OpenAI also documents this flow as Plugins → + → Add custom MCP server.'));
       if (localAddress(address)) note('Local MCP address', 'ChatGPT cloud cannot reach this LAN address directly. Use a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.');
       else if (!secureAddress(address)) note('HTTPS endpoint', 'ChatGPT cloud needs a reachable HTTPS endpoint or ChatGPT Secure MCP Tunnel.');
       guide = 'https://developers.openai.com/api/docs/guides/custom-mcp-server';
@@ -329,17 +356,17 @@
       note('Network access', 'This LAN address can work when the computer running Codex can reach JustVoxel.');
       guide = 'https://developers.openai.com/learn/docs-mcp';
     } else if (purpose === 'Claude') {
-      steps(['Open Customize → Connectors.', 'Add a custom connector.', 'Enter a name and the JustVoxel MCP address, then Continue.', 'Review the detected authentication settings and choose Sign in now or Sign in when needed.', 'Under OAuth client choose Register automatically.', 'Select Add to add the connector.', 'Claude starts the OAuth flow and opens JustVoxel sign-in and approval.']);
+      steps([claudeSteps[0], 'Select Add.', 'Choose Custom → Web.', ...claudeSteps.slice(2)]);
       note('OAuth client: Register automatically', 'JustVoxel currently supports Dynamic Client Registration.');
       if (localAddress(address)) note('Remote connector network access', 'Claude remote connectors need an MCP address reachable from Anthropic infrastructure.');
       guide = 'https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp';
     } else if (purpose === 'Grok') {
-      steps(['Open grok.com/connectors.', 'Select New Connector.', 'Select Custom.', 'Enter the JustVoxel MCP address.', 'Complete JustVoxel authentication.']);
+      steps(['Open grok.com/connectors.', 'Select New Connector.', 'Select Custom.', 'Enter the JustVoxel MCP URL.', 'Complete JustVoxel authentication.']);
       if (localAddress(address)) note('Public endpoint required', 'Grok cannot reach this private LAN address directly. Use an appropriate publicly reachable secure endpoint or tunnel.', true);
       else note('Remote connector network access', 'Grok requires a publicly reachable secure MCP endpoint.');
       guide = 'https://docs.x.ai/grok/connectors';
     } else if (purpose === 'Gemini') {
-      steps(['Open gemini.google.com.', 'Open Settings → Connected Apps (or Personal Intelligence → Connected Apps).', 'Under Custom apps, select Add a custom app.', 'Enter the JustVoxel MCP address.', 'Select Next.', 'Complete JustVoxel authentication.']);
+      steps(['Open gemini.google.com.', 'Open Settings → Connected Apps (or Personal Intelligence → Connected Apps).', 'Under Custom apps, select Add a custom app.', 'Enter the JustVoxel MCP URL.', 'Select Next.', 'Complete JustVoxel authentication.']);
       const availability = note('Current Gemini requirements', 'Google may change availability.');
       const list = text('ul', ''); list.className = 'gateway-requirements';
       for (const requirement of ['Age 18+', 'United States', 'Personal Google Account', 'Keep Activity enabled', 'English', 'Initial setup in Gemini web']) list.append(text('li', '✓ ' + requirement));
@@ -347,12 +374,25 @@
       host.append(text('p', 'JustVoxel supports Dynamic Client Registration, so manual OAuth client credentials under Advanced features should not normally be required.'));
       guide = 'https://support.google.com/gemini/answer/17209137';
     } else if (purpose === 'GitHub Copilot') {
-      copyBlock(`copilot mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
-      host.append(text('p', 'If authentication or re-authentication is required, open browser sign-in with:'), text('code', '/mcp auth justvoxel'));
-      host.append(text('p', 'Interactive setup is also available:'), text('code', '/mcp add'));
-      note('Network access', 'Copilot CLI can use this LAN address when the machine running Copilot can reach JustVoxel.');
-      note('Compatibility', 'Copilot cloud agent and Copilot code review currently do not support remote OAuth MCP servers. IDE MCP support varies by IDE and configuration.');
-      guide = 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers';
+      if (mode === 'VS Code') {
+        steps(copilotCodeSteps);
+        host.append(text('p', copilotCodeAlternative));
+      } else {
+        copyBlock(`copilot mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
+        host.append(text('p', 'If authentication or re-authentication is required, open browser sign-in with:'), text('code', '/mcp auth justvoxel'));
+        host.append(text('p', 'Interactive setup is also available: /mcp add — use Ctrl+S to save.'));
+      }
+      note('Network access', mode === 'VS Code' ? 'VS Code can use this LAN address when the machine running VS Code can reach JustVoxel.' : 'Copilot CLI can use this LAN address when the machine running Copilot can reach JustVoxel.');
+      note('Compatibility', copilotCloudLimit);
+      guide = mode === 'VS Code' ? 'https://code.visualstudio.com/docs/agent-customization/mcp-servers' : 'https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers';
+    } else if (purpose === 'OpenClaw') {
+      steps(openclawSteps);
+      host.append(text('p', 'Composer: + → Plugins → Add MCP server…'));
+      host.append(text('h4', 'CLI'));
+      openclawCLI(commandAddress);
+      host.append(text('p', 'Saved configuration/status: openclaw mcp status --verbose'));
+      if (localAddress(address)) host.append(text('p', openclawNetwork));
+      guide = 'https://docs.openclaw.ai/tools/mcp';
     } else if (automation) {
       host.append(text('h4', 'Authentication'), text('p', 'JustVoxel API token'));
       steps(['Create the connection.', 'Copy the one-time scoped JustVoxel API token.', 'Store it securely; the token is shown only once.', 'Send it as the connection credential from the automation or client.', 'Requests remain limited by the configured JustVoxel access level and Minecraft scope.']);
@@ -388,12 +428,8 @@
     const top = form.querySelector('.gateway-name-access-row');
     const enabled = form.querySelector('.gateway-switch');
     const enabledRow = text('div', ''); enabledRow.className = 'gateway-enabled-control';
-    enabledRow.append(text('span', 'Enabled'), enabled);
+    enabledRow.append(enabled);
     top.append(enabledRow);
-    if (c.id) {
-      const expiration = field('expires_at').closest('label');
-      expiration.className = 'gateway-expiration'; top.after(expiration);
-    }
     for (const name of ['name', 'level']) field(name).value = c[name] ?? '';
     // Keep custom purposes from deployed connections without interpreting them as markup or asset paths.
     if (c.purpose && !providers.has(c.purpose)) {
@@ -409,14 +445,8 @@
     }
     form.querySelector('[data-gateway-save]').textContent = c.id ? 'Apply' : 'Create';
     form.querySelector('[data-gateway-advanced]').hidden = !c.id;
-    for (const selector of ['[data-gateway-status]', '[data-gateway-actions]', '[data-gateway-live-note]']) form.querySelector(selector).hidden = !c.id;
+    for (const selector of ['[data-gateway-delete]', '[data-gateway-live-note]']) form.querySelector(selector).hidden = !c.id;
     field('enabled').checked = Boolean(c.enabled);
-    const syncEnabled = () => {
-      const label = form.querySelector('.gateway-switch span');
-      label.textContent = field('enabled').checked ? 'Enabled' : 'Disabled';
-      label.className = field('enabled').checked ? 'gateway-enabled-success' : 'gateway-enabled-danger';
-    };
-    field('enabled').addEventListener('change', syncEnabled); syncEnabled();
     field('server_scope').value = c.all_instances ? 'all' : 'selected';
     const allServers = form.querySelector('[data-gateway-all-servers]');
     allServers.checked = Boolean(c.all_instances);
@@ -451,6 +481,7 @@
       field('server_scope').value = all ? 'all' : 'selected';
       form.querySelector('[data-gateway-scope]').hidden = false;
       instanceOptions.querySelectorAll('input[name="instance_ids"]').forEach(input => { input.disabled = all; });
+      form.querySelector('[data-gateway-actions]').hidden = !c.id || c.auth_mode !== 'token';
       for (const action of ['rotate', 'revoke']) form.querySelector(`[data-gateway-${action}]`).hidden = !c.id || c.auth_mode !== 'token';
     };
     allServers.addEventListener('change', sync); sync();
@@ -467,13 +498,16 @@
       form.querySelectorAll('input[name="purpose"]').forEach(input => input.addEventListener('change', previewProvider));
       previewProvider();
     }
+    const status = form.querySelector('[data-gateway-status-details]');
+    form.querySelector('[data-gateway-status]').hidden = false;
+    status.className = 'minecraft-server-metrics gateway-status-metrics';
+    const expiration = text('div', '');
+    expiration.append(text('span', 'EXPIRATION'), field('expires_at')); status.append(expiration);
     const safeDetails = form.querySelector('[data-gateway-safe-details]');
     if (c.id) {
       for (const [name, value] of [['Connection ID', c.id], ['Safe credential fingerprint', c.fingerprint || 'None'], ['Created', settingsDate(c.created_at)], ['Updated', settingsDate(c.updated_at)]]) {
         safeDetails.append(text('dt', name), text('dd', value || 'Unavailable'));
       }
-      const status = form.querySelector('[data-gateway-status-details]');
-      status.className = 'minecraft-server-metrics gateway-status-metrics';
       const state = !c.enabled ? 'Disabled' : !snapshot.enabled ? 'Gateway off' : 'Ready';
       const auth = c.auth_mode === 'oauth_local' || c.auth_mode === 'oauth' ? 'OAuth' : 'Token';
       for (const [label, value] of [['STATUS', state], ['LAST ACTIVITY', activityLabel(c.last_activity)], ['AUTH', auth], ['SCOPE', c.all_instances ? 'All servers' : `${(c.instance_ids || []).length} servers`]]) {
