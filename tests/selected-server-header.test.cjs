@@ -205,6 +205,10 @@ for (const [workspace, refresh, ticket] of [
       window:{addEventListener: (_, callback) => { context.change = callback; }},
       [`${workspace}Dialog`]:dialog, content, results:content, panelBody:content,
       ...(workspace === 'minecraft' ? {newMinecraftRconState: () => ({})} : {}),
+      ...(workspace === 'plugins' ? {
+        form:{elements:Object.fromEntries(['modrinth', 'hangar', 'curseforge'].map(name => [name, {checked:true,disabled:false}]))},
+        providerServerKey:'old',acceptedServer:{instance_id:'jv-first01'},
+      } : {}),
       [ticket]:0, currentTab:'export', tabURLs:{export:'/workspace/migration/export'},
       currentURL:'/old?server=jv-first01', updateOperation:'old', completedOperation:{}, operationKinds:new Map([['old',{}]]),
       migrationLoadController:{abort() { calls.push('detach-read'); }},
@@ -226,6 +230,15 @@ for (const [workspace, refresh, ticket] of [
     assert.ok(calls.includes('clear'));
     assert.ok(calls.includes('refresh'));
     assert.ok(context[ticket] > 0);
+    if (workspace === 'plugins') {
+      assert.equal(context.providerServerKey, null);
+      assert.equal(context.acceptedServer, null);
+      assert.equal(context.installController, null);
+      for (const control of Object.values(context.form.elements)) {
+        assert.equal(control.checked, false);
+        assert.equal(control.disabled, true);
+      }
+    }
     assert.doesNotMatch(handler, /location\.(?:assign|reload)|cancel|rollback/);
     calls.length = 0; dialog.open = false; context.change({detail:{workspace}});
     assert.ok(!calls.includes('refresh'), 'closed workspace loads when opened later');

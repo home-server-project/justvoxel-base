@@ -685,7 +685,7 @@ test('Minecraft menu scopes a full separator before the success/danger action gr
   const css = readFileSync(`${root}static/minecraft-servers.css`, 'utf8');
   const menu = template.slice(template.indexOf('class="storage-action-menu-popover'), template.indexOf('</details>'));
   let previous = -1;
-  for (const token of ['>Settings<', '>Backups<', '>Update<', '>Plugins<', '>Invite friends<', '>How to connect<', '<hr>', '{{if .CanRestart}}', '>Restart<', '>Delete server<']) {
+  for (const token of ['>Settings<', '>Backups<', '>Update<', '>Plugins &amp; Mods<', '>Invite friends<', '>How to connect<', '<hr>', '{{if .CanRestart}}', '>Restart<', '>Delete server<']) {
     const index = menu.indexOf(token);
     assert.ok(index > previous, token); previous = index;
   }

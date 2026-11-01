@@ -277,3 +277,47 @@ func authenticatedSystemUpdateRequest(method, target, form string) *http.Request
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
 	return req
 }
+
+type fakeUpdateRecoveryAPI struct {
+	fakeSystemUpdatesAPI
+	forceCalls int
+}
+
+func (f *fakeUpdateRecoveryAPI) AdminSystemUpdateForce(context.Context, string) (api.AdminSystemUpdateStatus, error) {
+	f.forceCalls++
+	return f.status, nil
+}
+func TestSystemUpdateForceRequiresAdminCSRFAndNoOptions(t *testing.T) {
+	for _, tc := range []struct {
+		role, body string
+		want       int
+	}{
+		{"administrator", "csrf=token", 200},
+		{"operator", "csrf=token", 403},
+		{"administrator", "csrf=wrong", 403},
+		{"administrator", "csrf=token&command=reboot", 400},
+		{"administrator", "csrf=token&args=--anything", 400},
+	} {
+		t.Run(tc.role+tc.body, func(t *testing.T) {
+			client := &fakeUpdateRecoveryAPI{fakeSystemUpdatesAPI: fakeSystemUpdatesAPI{role: tc.role, status: systemUpdateFixture()}}
+			client.status.ActivationFailed = true
+			client.status.RecoveryStatus = "finalized"
+			app, err := New(client, Config{ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := httptest.NewRecorder()
+			app.Handler().ServeHTTP(w, authenticatedSystemUpdateRequest(http.MethodPost, "http://example/api/system-updates/force", tc.body))
+			if w.Code != tc.want {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			wantCalls := 0
+			if tc.want == 200 {
+				wantCalls = 1
+			}
+			if client.forceCalls != wantCalls || client.rebootCalls != 0 {
+				t.Fatal("unexpected privileged operation", client.forceCalls, client.rebootCalls)
+			}
+		})
+	}
+}

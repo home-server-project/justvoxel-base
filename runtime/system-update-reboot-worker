@@ -77,6 +77,11 @@ if [[ ${backup_minecraft} == yes ]]; then
     done
 fi
 
+# Persist the exact activation expectation only once shutdown preparation succeeds.
+if ! /usr/libexec/justvoxel/management-agent system-update-expect "${JV_UPDATE_REBOOT_DIGEST:-}"; then
+    write_state failed 'Update reboot evidence could not be saved. Reboot was cancelled.' 0 0 activation_evidence_failed
+    exit 6
+fi
 write_state rebooting 'Rebooting JustVoxel.' 0 0
 if ! systemctl reboot; then
     restore_instances

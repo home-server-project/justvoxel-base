@@ -30,16 +30,22 @@ type AdminSystemUpdateDeployment struct {
 }
 
 type AdminSystemUpdateStatus struct {
-	OK             bool                         `json:"ok"`
-	ReadOnly       bool                         `json:"read_only"`
-	RebootRequired bool                         `json:"reboot_required"`
-	Checked        bool                         `json:"checked,omitempty"`
-	CheckState     string                       `json:"check_state,omitempty"`
-	Running        AdminSystemUpdateDeployment  `json:"running"`
-	Staged         *AdminSystemUpdateDeployment `json:"staged,omitempty"`
-	Available      *AdminSystemUpdateDeployment `json:"available,omitempty"`
-	Rollback       *AdminSystemUpdateDeployment `json:"rollback,omitempty"`
-	Message        string                       `json:"message,omitempty"`
+	ActivationPending     bool                         `json:"activation_pending"`
+	ActivationFailed      bool                         `json:"activation_failed"`
+	ActivationRecoverable bool                         `json:"activation_recoverable"`
+	ExpectedDigest        string                       `json:"expected_digest,omitempty"`
+	RecoveryStatus        string                       `json:"recovery_status,omitempty"`
+	RecoveryMessage       string                       `json:"recovery_message,omitempty"`
+	OK                    bool                         `json:"ok"`
+	ReadOnly              bool                         `json:"read_only"`
+	RebootRequired        bool                         `json:"reboot_required"`
+	Checked               bool                         `json:"checked,omitempty"`
+	CheckState            string                       `json:"check_state,omitempty"`
+	Running               AdminSystemUpdateDeployment  `json:"running"`
+	Staged                *AdminSystemUpdateDeployment `json:"staged,omitempty"`
+	Available             *AdminSystemUpdateDeployment `json:"available,omitempty"`
+	Rollback              *AdminSystemUpdateDeployment `json:"rollback,omitempty"`
+	Message               string                       `json:"message,omitempty"`
 }
 
 func (c *Client) AdminSystemUpdateStatus(ctx context.Context, session string) (AdminSystemUpdateStatus, error) {
@@ -235,4 +241,8 @@ func decodeAdminSystemUpdateRebootStatus(reader io.Reader, target *AdminSystemUp
 		target.Players = []string{}
 	}
 	return nil
+}
+
+func (c *Client) AdminSystemUpdateForce(ctx context.Context, session string) (AdminSystemUpdateStatus, error) {
+	return c.adminSystemUpdateRequestPath(ctx, session, http.MethodPost, adminSystemUpdatesPath+"/force", 3*time.Minute)
 }

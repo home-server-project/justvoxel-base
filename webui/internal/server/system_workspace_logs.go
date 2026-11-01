@@ -83,7 +83,7 @@ func (a *App) systemWorkspaceLog(w http.ResponseWriter, r *http.Request) {
 
 func validWorkspaceLogID(category, id string) bool {
 	switch category {
-	case "setup", "migration", "restore", "plugins", "reset", "network", "support", "operation":
+	case "setup", "migration", "restore", "plugins", "reset", "network", "update", "support", "operation":
 	default:
 		return false
 	}

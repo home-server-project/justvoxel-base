@@ -57,7 +57,9 @@ func addonTestHost(t *testing.T, data string, d addonDefinition) {
 	pluginTestJar(t, filepath.Join(data, "plugins", d.Host+".jar"), map[string]string{"plugin.yml": "name: " + name + "\nversion: 1\nmain: " + main + "\n"})
 }
 func addonTestContext() pluginServerContext {
-	return pluginServerContext{InstanceID: "jv-a1b2c3", Configured: true, ServerType: "paper", ServerSoftware: "Paper", MinecraftVersion: "1.21.8", Supported: true}
+	out := pluginContentContext("paper")
+	out.InstanceID, out.Configured, out.MinecraftVersion = "jv-a1b2c3", true, "1.21.8"
+	return out
 }
 func TestAddonHostsAndAuthoritativeTargets(t *testing.T) {
 	for _, d := range addonDefinitions {

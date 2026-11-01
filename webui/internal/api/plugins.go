@@ -13,14 +13,21 @@ import (
 	"time"
 )
 
+type PluginProviderSupport struct {
+	Modrinth   bool `json:"modrinth"`
+	Hangar     bool `json:"hangar"`
+	CurseForge bool `json:"curseforge"`
+}
 type PluginServerContext struct {
-	InstanceID       string `json:"instance_id"`
-	Configured       bool   `json:"configured"`
-	ServerType       string `json:"server_type"`
-	ServerSoftware   string `json:"server_software"`
-	MinecraftVersion string `json:"minecraft_version"`
-	Supported        bool   `json:"supported"`
-	Message          string `json:"message,omitempty"`
+	ContentKind      string                `json:"content_kind"`
+	Providers        PluginProviderSupport `json:"providers"`
+	InstanceID       string                `json:"instance_id"`
+	Configured       bool                  `json:"configured"`
+	ServerType       string                `json:"server_type"`
+	ServerSoftware   string                `json:"server_software"`
+	MinecraftVersion string                `json:"minecraft_version"`
+	Supported        bool                  `json:"supported"`
+	Message          string                `json:"message,omitempty"`
 }
 type InstalledPlugin struct {
 	Source         string `json:"source,omitempty"`
@@ -73,11 +80,14 @@ type PluginCatalogProject struct {
 	MetadataError    string                `json:"metadata_error,omitempty"`
 }
 type PluginCatalogCursor struct {
-	ModrinthOffset int  `json:"modrinth_offset"`
-	HangarOffset   int  `json:"hangar_offset"`
-	HangarFirst    bool `json:"hangar_first"`
+	CurseForgeOffset int  `json:"curseforge_offset"`
+	ProviderTurn     int  `json:"provider_turn"`
+	ModrinthOffset   int  `json:"modrinth_offset"`
+	HangarOffset     int  `json:"hangar_offset"`
+	HangarFirst      bool `json:"hangar_first"`
 }
 type PluginCatalog struct {
+	CurseForge bool                   `json:"curseforge"`
 	Server     PluginServerContext    `json:"server"`
 	Modrinth   bool                   `json:"modrinth"`
 	Hangar     bool                   `json:"hangar"`
@@ -116,26 +126,26 @@ func (c *Client) AdminPluginInventory(ctx context.Context, session string, updat
 // ValidatePluginDiscoverQuery permits only the bounded catalog contract.
 func ValidatePluginDiscoverQuery(query url.Values) error {
 	for key, values := range query {
-		if (key != "q" && key != "compatible_only" && key != "release_only" && key != "modrinth_offset" && key != "hangar_offset" && key != "modrinth" && key != "hangar" && key != "hangar_first" && key != "limit") || len(values) != 1 {
+		if (key != "q" && key != "compatible_only" && key != "release_only" && key != "modrinth_offset" && key != "hangar_offset" && key != "modrinth" && key != "hangar" && key != "hangar_first" && key != "curseforge" && key != "curseforge_offset" && key != "provider_turn" && key != "limit") || len(values) != 1 {
 			return errors.New("Invalid catalog query.")
 		}
 	}
 	if len(query.Get("q")) > 200 {
 		return errors.New("Search is too long.")
 	}
-	for _, key := range []string{"compatible_only", "release_only", "modrinth", "hangar", "hangar_first"} {
+	for _, key := range []string{"compatible_only", "release_only", "modrinth", "hangar", "curseforge", "hangar_first"} {
 		if values, present := query[key]; present && values[0] != "true" && values[0] != "false" {
 			return errors.New("Invalid catalog filter.")
 		}
 	}
-	for _, key := range []string{"modrinth_offset", "hangar_offset"} {
+	for _, key := range []string{"modrinth_offset", "hangar_offset", "curseforge_offset", "provider_turn"} {
 		if values, present := query[key]; present {
 			value := values[0]
 			if value == "" || strings.Trim(value, "0123456789") != "" {
 				return errors.New("Invalid catalog offset.")
 			}
 			offset, err := strconv.Atoi(value)
-			if err != nil || offset < 0 || offset > 10000 {
+			if err != nil || offset < 0 || offset > 10000 || key == "provider_turn" && offset > 2 {
 				return errors.New("Invalid catalog offset.")
 			}
 		}
@@ -177,6 +187,7 @@ type PluginInstallApplyRequest struct {
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }
 type PluginInstallArtifact struct {
+	Target        string   `json:"target,omitempty"`
 	Source        string   `json:"source,omitempty"`
 	ProjectID     string   `json:"project_id"`
 	VersionID     string   `json:"version_id"`
@@ -385,7 +396,7 @@ func ValidPluginIdentity(source, id string) bool {
 	if source == "" || source == "Modrinth" {
 		return validPluginProjectID(id)
 	}
-	if source != "Hangar" || len(id) == 0 || len(id) > 19 || id[0] == '0' || strings.Trim(id, "0123456789") != "" {
+	if (source != "Hangar" && source != "CurseForge") || len(id) == 0 || len(id) > 19 || id[0] == '0' || strings.Trim(id, "0123456789") != "" {
 		return false
 	}
 	n, err := strconv.ParseInt(id, 10, 64)
@@ -397,7 +408,7 @@ func ValidatePluginIconQuery(query url.Values) error {
 			return errors.New("Invalid plugin icon request")
 		}
 	}
-	if !ValidPluginIdentity(query.Get("source"), query.Get("project_id")) || (query.Get("source") == "Hangar" && len(query["icon_url"]) != 0) {
+	if query.Get("source") == "CurseForge" || !ValidPluginIdentity(query.Get("source"), query.Get("project_id")) || (query.Get("source") == "Hangar" && len(query["icon_url"]) != 0) {
 		return errors.New("Invalid plugin icon request")
 	}
 	return nil

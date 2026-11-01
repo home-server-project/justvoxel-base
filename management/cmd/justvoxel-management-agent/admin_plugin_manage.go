@@ -179,6 +179,9 @@ func verifyManagedPluginAt(root *os.File, e pluginManifestEntry) error {
 	return nil
 }
 func resolveManagedPluginLocation(path string, e pluginManifestEntry) (string, error) {
+	if pluginTarget(e.Target) != "plugins" {
+		return "", errors.New("Lifecycle actions are not available yet for mods")
+	}
 	active, err := openPluginDirectory(path)
 	if err != nil && !errors.Is(err, unix.ENOENT) {
 		return "", errors.New("Active plugin directory is unsafe")
@@ -230,7 +233,7 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	if !slices.Contains([]string{"enable", "disable", "remove"}, action) || !validPluginIdentity(source, project) {
 		return p, errors.New("Invalid plugin action or project identity")
 	}
-	if !server.Supported || server.MinecraftVersion == "" {
+	if !server.Supported || javaServerContentKind(server.ServerType) != "plugins" || server.MinecraftVersion == "" {
 		return p, errors.New("Current Paper/Purpur server context is unavailable")
 	}
 	data, err := openPluginDataDirectory(path)
@@ -250,7 +253,7 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	p.Manifest = raw
 	found := false
 	for _, e := range manifest.Artifacts {
-		if pluginIdentity(e.Source, e.ProjectID) == pluginIdentity(source, project) {
+		if pluginTarget(e.Target) == "plugins" && pluginIdentity(e.Source, e.ProjectID) == pluginIdentity(source, project) {
 			p.Entry = e
 			found = true
 		}
@@ -269,7 +272,7 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	for _, parent := range p.Entry.RequiredBy {
 		// Orphan relationships may remain after removal of the parent.
 		for _, e := range manifest.Artifacts {
-			if pluginIdentity(e.Source, e.ProjectID) == pluginParentIdentity(parent) {
+			if pluginTarget(e.Target) == "plugins" && pluginIdentity(e.Source, e.ProjectID) == pluginParentIdentity(parent) {
 				state, eerr := resolveManagedPluginLocation(path, e)
 				if eerr != nil {
 					return p, errors.New("Required managed parent state cannot be safely verified")

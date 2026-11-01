@@ -38,14 +38,21 @@ var pluginCatalogClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
+type pluginProviderSupport struct {
+	Modrinth   bool `json:"modrinth"`
+	Hangar     bool `json:"hangar"`
+	CurseForge bool `json:"curseforge"`
+}
 type pluginServerContext struct {
-	InstanceID       string `json:"instance_id"`
-	Configured       bool   `json:"configured"`
-	ServerType       string `json:"server_type"`
-	ServerSoftware   string `json:"server_software"`
-	MinecraftVersion string `json:"minecraft_version"`
-	Supported        bool   `json:"supported"`
-	Message          string `json:"message,omitempty"`
+	ContentKind      string                `json:"content_kind"`
+	Providers        pluginProviderSupport `json:"providers"`
+	InstanceID       string                `json:"instance_id"`
+	Configured       bool                  `json:"configured"`
+	ServerType       string                `json:"server_type"`
+	ServerSoftware   string                `json:"server_software"`
+	MinecraftVersion string                `json:"minecraft_version"`
+	Supported        bool                  `json:"supported"`
+	Message          string                `json:"message,omitempty"`
 }
 type installedPlugin struct {
 	Source         string `json:"source,omitempty"`
@@ -101,11 +108,14 @@ type pluginCatalogProject struct {
 	MetadataError    string                `json:"metadata_error,omitempty"`
 }
 type pluginCatalogCursor struct {
-	ModrinthOffset int  `json:"modrinth_offset"`
-	HangarOffset   int  `json:"hangar_offset"`
-	HangarFirst    bool `json:"hangar_first"`
+	CurseForgeOffset int  `json:"curseforge_offset"`
+	ProviderTurn     int  `json:"provider_turn"`
+	ModrinthOffset   int  `json:"modrinth_offset"`
+	HangarOffset     int  `json:"hangar_offset"`
+	HangarFirst      bool `json:"hangar_first"`
 }
 type pluginCatalog struct {
+	CurseForge bool                   `json:"curseforge"`
 	Server     pluginServerContext    `json:"server"`
 	Modrinth   bool                   `json:"modrinth"`
 	Hangar     bool                   `json:"hangar"`
@@ -163,26 +173,9 @@ func (s *server) pluginContext(w http.ResponseWriter, r *http.Request) (pluginSe
 		return pluginServerContext{}, "", false
 	}
 	c := record.Runtime
-	out := pluginServerContext{InstanceID: id, Configured: true, ServerType: c.Software, MinecraftVersion: c.Version, Supported: javaServerPluginsWorkspace(c.Software)}
-	switch c.Software {
-	case "paper":
-		out.ServerSoftware = "Paper"
-	case "purpur":
-		out.ServerSoftware = "Purpur"
-	case "pufferfish", "leaf":
-		caps, _ := javaServerSoftware(c.Software)
-		out.ServerSoftware = caps.Name
-	case "spigot":
-		out.ServerSoftware = "Spigot"
-	case "vanilla":
-		out.ServerSoftware = "Vanilla"
-	}
-	if !out.Supported {
-		out.Message = "Plugins are available for Paper, Purpur and Spigot. This server software does not support the Plugins workspace."
-		if c.Software == "vanilla" {
-			out.Message = "Plugins are available for Paper, Purpur and Spigot. Vanilla does not support plugins."
-		}
-	}
+	out := pluginContentContext(c.Software)
+	out.InstanceID, out.Configured, out.MinecraftVersion = id, true, c.Version
+
 	return out, record.Storage.DataPath, true
 }
 
@@ -254,9 +247,13 @@ func (s *server) adminPluginsInstalled(w http.ResponseWriter, r *http.Request) {
 	out := pluginInventory{Server: server, Plugins: []installedPlugin{}}
 	if server.Supported {
 		var err error
-		out.Plugins, err = readPluginInventory(path)
+		if server.ContentKind == "mods" {
+			out.Plugins, err = readModInventory(path, server.ServerType)
+		} else {
+			out.Plugins, err = readPluginInventory(path)
+		}
 		if err != nil {
-			writeError(w, http.StatusServiceUnavailable, "Plugin inventory is unavailable: plugins must be a readable directory, not a symbolic link.")
+			writeError(w, http.StatusServiceUnavailable, "Content inventory is unavailable: the target must be a readable real directory, not a symbolic link.")
 			return
 		}
 	}
@@ -275,6 +272,9 @@ func readPluginInventory(dataPath string) ([]installedPlugin, error) {
 		manifest, _, manifestErr := readPluginManifest(dataPath)
 		if manifestErr == nil {
 			for _, entry := range manifest.Artifacts {
+				if pluginTarget(entry.Target) != "plugins" {
+					continue
+				}
 				out = append(out, managedPluginInventoryItem(dataPath, entry))
 			}
 		}
@@ -319,6 +319,9 @@ func readPluginInventory(dataPath string) ([]installedPlugin, error) {
 	manifest, _, manifestErr := readPluginManifest(dataPath)
 	if manifestErr == nil {
 		for _, managed := range manifest.Artifacts {
+			if pluginTarget(managed.Target) != "plugins" {
+				continue
+			}
 			present := false
 			for _, item := range out {
 				if item.Filename == managed.Filename {
@@ -530,6 +533,9 @@ func modrinthPluginJSON(ctx context.Context, path string, query url.Values, out 
 var modrinthPluginID = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
 
 func pluginLoaders(serverType string) []string {
+	if caps, ok := javaServerSoftware(serverType); ok && caps.ModLoader {
+		return []string{serverType}
+	}
 	if serverType == "spigot" {
 		return []string{"spigot", "bukkit"}
 	}
@@ -554,6 +560,7 @@ func pluginVersionCompatible(v pluginCatalogVersion, server pluginServerContext)
 }
 
 type pluginDiscoverQuery struct {
+	CurseForge bool
 	Compatible bool
 	Release    bool
 	Modrinth   bool
@@ -566,14 +573,14 @@ type pluginDiscoverQuery struct {
 func pluginQuery(q url.Values) (pluginDiscoverQuery, error) {
 	out := pluginDiscoverQuery{Compatible: true, Release: true, Modrinth: true, Limit: 8, Search: q.Get("q")}
 	for key, values := range q {
-		if !slices.Contains([]string{"q", "compatible_only", "release_only", "modrinth", "hangar", "modrinth_offset", "hangar_offset", "hangar_first", "limit"}, key) || len(values) != 1 {
+		if !slices.Contains([]string{"q", "compatible_only", "release_only", "modrinth", "hangar", "modrinth_offset", "hangar_offset", "hangar_first", "curseforge", "curseforge_offset", "provider_turn", "limit"}, key) || len(values) != 1 {
 			return out, errors.New("invalid catalog query")
 		}
 	}
 	if len(out.Search) > 200 {
 		return out, errors.New("search is too long")
 	}
-	for key, target := range map[string]*bool{"compatible_only": &out.Compatible, "release_only": &out.Release, "modrinth": &out.Modrinth, "hangar": &out.Hangar, "hangar_first": &out.Cursor.HangarFirst} {
+	for key, target := range map[string]*bool{"compatible_only": &out.Compatible, "release_only": &out.Release, "modrinth": &out.Modrinth, "hangar": &out.Hangar, "curseforge": &out.CurseForge, "hangar_first": &out.Cursor.HangarFirst} {
 		if values, present := q[key]; present {
 			if values[0] != "true" && values[0] != "false" {
 				return out, errors.New("invalid catalog boolean")
@@ -581,14 +588,14 @@ func pluginQuery(q url.Values) (pluginDiscoverQuery, error) {
 			*target = values[0] == "true"
 		}
 	}
-	for key, target := range map[string]*int{"modrinth_offset": &out.Cursor.ModrinthOffset, "hangar_offset": &out.Cursor.HangarOffset, "limit": &out.Limit} {
+	for key, target := range map[string]*int{"modrinth_offset": &out.Cursor.ModrinthOffset, "hangar_offset": &out.Cursor.HangarOffset, "curseforge_offset": &out.Cursor.CurseForgeOffset, "provider_turn": &out.Cursor.ProviderTurn, "limit": &out.Limit} {
 		if values, present := q[key]; present {
 			value := values[0]
 			if value == "" || strings.Trim(value, "0123456789") != "" {
 				return out, errors.New("invalid catalog position")
 			}
 			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 || n > 10000 || (key == "limit" && (n < 1 || n > 24)) {
+			if err != nil || n < 0 || n > 10000 || (key == "provider_turn" && n > 2) || (key == "limit" && (n < 1 || n > 24)) {
 				return out, errors.New("invalid catalog position")
 			}
 			*target = n
@@ -615,12 +622,20 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !server.Supported {
-		query.Modrinth, query.Hangar = false, false
-	} else if _, err := hangarPluginPlatform(server.ServerType); err != nil {
-		query.Hangar = false
+		query.Modrinth, query.Hangar, query.CurseForge = false, false, false
+	} else {
+		if !server.Providers.Hangar {
+			query.Hangar = false
+		}
+		if query.CurseForge {
+			if _, err := readCurseForgeKey(); err != nil {
+				query.CurseForge = false
+			}
+		}
 	}
-	out := pluginCatalog{Server: server, Modrinth: query.Modrinth, Hangar: query.Hangar, Cursor: query.Cursor, Projects: []pluginCatalogProject{}}
-	if !server.Supported || (query.Compatible && server.MinecraftVersion == "") || (!query.Modrinth && !query.Hangar) {
+
+	out := pluginCatalog{CurseForge: query.CurseForge, Server: server, Modrinth: query.Modrinth, Hangar: query.Hangar, Cursor: query.Cursor, Projects: []pluginCatalogProject{}}
+	if !server.Supported || (query.Compatible && server.MinecraftVersion == "") || (!query.Modrinth && !query.Hangar && !query.CurseForge) {
 		writeJSON(w, 200, out)
 		return
 	}
@@ -646,9 +661,21 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	out.Projects, out.NextCursor = mergePluginCatalogPages(modrinth, hangar, query.Cursor, query.Limit)
-	out.Total = modrinth.Total + hangar.Total
-	if err := annotateInstalledPluginProjects(dataPath, out.Projects); err != nil {
+	curseforge := pluginCatalogPage{Offset: query.Cursor.CurseForgeOffset, End: query.Cursor.CurseForgeOffset, NextOffset: -1}
+	if query.CurseForge {
+		curseforge, err = discoverCurseForgePlugins(ctx, server, query)
+		if err != nil {
+			writeError(w, 502, err.Error())
+			return
+		}
+	}
+	if query.CurseForge {
+		out.Projects, out.NextCursor = mergeContentCatalogPages([]pluginCatalogPage{modrinth, hangar, curseforge}, query.Cursor, query.Limit)
+	} else {
+		out.Projects, out.NextCursor = mergePluginCatalogPages(modrinth, hangar, query.Cursor, query.Limit)
+	}
+	out.Total = modrinth.Total + hangar.Total + curseforge.Total
+	if err := annotateInstalledPluginProjects(dataPath, out.Projects, server.ContentKind); err != nil {
 		writeError(w, 409, "Plugin ownership is unavailable. Discover cannot safely offer installation.")
 		return
 	}
@@ -657,14 +684,20 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 
 // Ownership suppresses installation even when the owned JAR needs attention.
 // Read the existing v1 manifest without migrating or inferring ownership by name.
-func annotateInstalledPluginProjects(dataPath string, projects []pluginCatalogProject) error {
+func annotateInstalledPluginProjects(dataPath string, projects []pluginCatalogProject, targets ...string) error {
+	target := "plugins"
+	if len(targets) > 0 {
+		target = targets[0]
+	}
 	manifest, _, err := readPluginManifest(dataPath)
 	if err != nil {
 		return err
 	}
 	owned := make(map[string]pluginManifestEntry, len(manifest.Artifacts))
 	for _, entry := range manifest.Artifacts {
-		owned[pluginIdentity(entry.Source, entry.ProjectID)] = entry
+		if pluginTarget(entry.Target) == target {
+			owned[pluginIdentity(entry.Source, entry.ProjectID)] = entry
+		}
 	}
 	for i := range projects {
 		project := &projects[i]
@@ -675,7 +708,16 @@ func annotateInstalledPluginProjects(dataPath string, projects []pluginCatalogPr
 		project.Installed = true
 		project.InstallAvailable = false
 		project.InstalledState = "attention"
-		if state, err := resolveManagedPluginLocation(dataPath, entry); err == nil {
+		if target == "mods" {
+			root, err := openContentDirectory(dataPath, target)
+			if err == nil {
+				verifyErr := verifyManagedArtifactAt(root, entry)
+				root.Close()
+				if verifyErr == nil {
+					project.InstalledState = "installed"
+				}
+			}
+		} else if state, err := resolveManagedPluginLocation(dataPath, entry); err == nil {
 			project.InstalledState = state
 		}
 	}
@@ -719,13 +761,19 @@ func mergePluginCatalogPages(m, h pluginCatalogPage, cursor pluginCatalogCursor,
 func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, searchText string, compatible, release bool, offset, limit int) (pluginCatalogPage, error) {
 	out := pluginCatalogPage{Projects: []pluginCatalogProject{}, Offset: offset, NextOffset: -1, End: offset}
 	loaders := pluginLoaders(server.ServerType)
-	facets := [][]string{{"all_project_types:plugin"}}
+	kind := "plugin"
+	if javaServerContentKind(server.ServerType) == "mods" {
+		kind = "mod"
+	}
+	facets := [][]string{{"all_project_types:" + kind}}
 	loaderFacets := []string{}
 	if compatible {
 		for _, loader := range loaders {
 			loaderFacets = append(loaderFacets, "categories:"+loader)
 		}
 		facets = append(facets, loaderFacets, []string{"versions:" + server.MinecraftVersion})
+	} else if kind == "mod" {
+		facets = append(facets, []string{"categories:" + server.ServerType})
 	} else {
 		facets = append(facets, []string{"categories:paper", "categories:purpur", "categories:spigot", "categories:bukkit"})
 	}
@@ -790,9 +838,9 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 				}
 				// Always restrict selected versions to server plugin platforms, including
 				// when browsing beyond the active server's compatibility filter.
-				plugin := false
+				plugin := kind == "mod" && pluginLoaderOverlap(v.Loaders, server.ServerType)
 				for _, loader := range v.Loaders {
-					if slices.Contains([]string{"paper", "purpur", "spigot", "bukkit"}, loader) {
+					if kind == "plugin" && slices.Contains([]string{"paper", "purpur", "spigot", "bukkit"}, loader) {
 						plugin = true
 					}
 				}
@@ -1294,4 +1342,48 @@ func (s *server) selectedPluginStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, adminOperationResponse{Operation: &journal})
+}
+
+// Rotate across enabled providers, retaining unconsumed raw positions. The
+// cursor turn matters even at capacity one, preventing starvation on every page.
+func mergeContentCatalogPages(pages []pluginCatalogPage, cursor pluginCatalogCursor, limit int) ([]pluginCatalogProject, *pluginCatalogCursor) {
+	out := []pluginCatalogProject{}
+	used := make([]int, len(pages))
+	next := cursor
+	turn := cursor.ProviderTurn
+	for len(out) < limit {
+		found := false
+		for step := 0; step < len(pages); step++ {
+			i := (turn + step) % len(pages)
+			if used[i] >= len(pages[i].Projects) {
+				continue
+			}
+			out = append(out, pages[i].Projects[used[i]])
+			used[i]++
+			turn = (i + 1) % len(pages)
+			found = true
+			break
+		}
+		if !found {
+			break
+		}
+	}
+	next.ProviderTurn = turn
+	offsets := []*int{&next.ModrinthOffset, &next.HangarOffset, &next.CurseForgeOffset}
+	more := false
+	for i, page := range pages {
+		switch {
+		case used[i] == len(page.Projects):
+			*offsets[i] = page.End
+		case used[i] == 0:
+			*offsets[i] = page.Offset
+		default:
+			*offsets[i] = page.Positions[used[i]-1]
+		}
+		more = more || used[i] < len(page.Projects) || page.NextOffset >= 0
+	}
+	if more {
+		return out, &next
+	}
+	return out, nil
 }

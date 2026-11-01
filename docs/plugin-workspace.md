@@ -1,9 +1,40 @@
-# Plugin Workspace
+# Plugins & Mods workspace
 
-The workspace supports Paper, Purpur and Spigot. Spigot uses only explicit
-Spigot/Bukkit-compatible Modrinth releases for the exact Minecraft version;
-Hangar remains unavailable for Spigot. Mod-loader and native Bedrock servers
-do not expose the Bukkit Plugins workspace. See [server software](server-software.md).
+Administrators open **Control Center → Minecraft → Plugins & Mods**. The selected
+server determines the content directory and available catalog providers.
+
+| Server software | Content | Providers |
+| --- | --- | --- |
+| Paper, Purpur, Pufferfish, Leaf | Plugins | Modrinth, Hangar, configured CurseForge |
+| Spigot | Plugins | Modrinth and configured CurseForge; explicit Bukkit compatibility |
+| Fabric, Forge, NeoForge, Quilt | Mods | Modrinth and configured CurseForge; exact loader and Minecraft version |
+| Vanilla Java, native Bedrock | Unavailable | No plugin/mod catalog |
+
+Supported providers default on when selecting a server; CurseForge requires a
+configured API key. Unsupported providers stay off. Search and cursor history
+reset when the selected server context changes. Provider icons and the shorter
+search field fit within the existing workspace and wrap on smaller screens.
+
+Mod inventory reads only the real `mods` directory. Installation resolves bounded
+required dependencies, verifies exact provider/game/loader evidence, stages JARs,
+creates the existing verified cold backup, and records private transaction evidence
+before placement. It never overwrites or adopts unmanaged JARs. Modrinth SHA-512
+and CurseForge SHA-1 downloads are verified; ownership always records exact local
+SHA-512. Static loader descriptors are bounded and checked without executing JAR
+code. Minecraft runtime health is verified after restart, which does not prove
+individual mod functionality. Failure removes only unchanged transaction artifacts
+and restores the original service state using the existing recovery model.
+
+Mods have no enable/disable/update/remove lifecycle in this scope. Add-ons remain
+available only for supported Bukkit plugin hosts. Existing plugin descriptor,
+lifecycle, backup, and recovery behavior remains authoritative.
+
+Ownership keeps schema `v1`: omitted target means `plugins`, explicit `plugins`
+means `plugins`, and `mods` means `mods`. Other targets are rejected. Target is
+part of artifact identity and transaction fingerprints; identical plugin and mod
+basenames are distinct objects. Older omitted-target evidence remains readable.
+
+The following sections describe the established plugin behavior and its history.
 
 ## Cycle 1 — read-only discovery and inventory
 
@@ -351,15 +382,17 @@ When no valid direct descriptor exists, exact known JAR entries
 `fabric.mod.json`, `quilt.mod.json`, `META-INF/mods.toml`,
 `META-INF/neoforge.mods.toml` and `META-INF/sponge_plugins.json` identify a
 loader-based server mod. Their presence only improves classification and the
-read-only rejection explanation; these files are never parsed or executed.
+read-only rejection explanation on plugin servers. On mod servers the selected
+loader descriptor is inspected statically; JAR code is never executed by validation.
 A valid direct Paper/Bukkit descriptor remains authoritative, and normal strict
 descriptor validation still applies. Unknown JARs retain the generic rejection.
-Loader-based server mods remain outside current Plugin Install scope and require
-a separate loader/runtime installation path. No
-Ignite or other mod-loader support or mods directory is added, and releases such
-as NoDim or Slumber are not made installable by publisher metadata. The Agent and
-WebUI use the same rejection:
-“Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates.”
+On plugin servers, loader-based mods require the matching mod-loader server rather
+than a Bukkit directory. Unsupported loader systems such as Ignite remain outside
+this workspace. Publisher plugin metadata alone never makes such a JAR installable.
+The Agent and WebUI use the same rejection:
+“This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server.”
+For Fabric, Forge, NeoForge and Quilt servers, the workspace instead checks the
+matching loader descriptor and installs verified mods into `mods`.
 Install-time inspection remains independent and authoritative.
 
 All needed JARs are downloaded, size/hash checked and inspected in private Agent
@@ -621,7 +654,8 @@ The authoritative reset plan includes fingerprinted `plugins_action`:
 `delete_with_internal_data` keeps existing whole internal-data deletion;
 `remove_managed_jars` removes exact Plugins-managed JAR ownership while external,
 network or unknown data is preserved. Preserved-data resets verify every manifest
-entry in exactly one active/disabled location, persist private cleanup evidence,
+plugin entry in exactly one active/disabled location and every mod entry in `mods`,
+persist private cleanup evidence,
 and atomically stage those JARs before the destructive helper. Unsafe evidence
 blocks reset. Helper failure restores and verifies the staged JARs. Successful
 completion removes the manifest and empty disabled ownership store before
@@ -629,7 +663,12 @@ discarding staging. Retry recognizes existing staged files and durable helper
 completion rather than duplicating or losing JARs. Manual plugins and plugin
 configuration/data folders remain when the data path is preserved. Internal
 reset verifies that manifest/disabled ownership state did not survive deletion.
-Full Factory Reset policy is unchanged.
+Mods use a private `mods/` child beneath the existing reset staging area; plugins
+retain their deployed flat staging layout. Both sets must be verified and staged
+before ownership is removed. Rollback restores exact originals, and replay is
+idempotent. Unmanaged mods and the real `mods` directory remain untouched. Whole
+data deletion still uses the existing authoritative whole-tree path without
+separate artifact cleanup. Full Factory Reset policy is unchanged.
 
 
 ## Managed Add-ons — local content uploads
@@ -722,27 +761,25 @@ existing Plugins ownership schema, runtime targets or SELinux policy.
 
 ## CurseForge API configuration
 
-Plugins keeps its existing name and tabs, with **CurseForge API** following
+Plugins & Mods includes **CurseForge API** following
 Discover, Installed and Add-ons. Administrators can configure, replace or remove
 an approved third-party API key there. The tab contains the password field
 directly and links to
 [CurseForge's official application help](https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key);
 approval is required, and saving a key does not validate it against CurseForge.
 
-The Discover CurseForge switch starts off. Without a configured key, enabling
-it immediately returns it to off and opens a compact notice beside it. The
-notice closes after 15 seconds, with X or Escape; repeating the attempt restarts
-the timer. Configure API selects the API tab and focuses its key field without
-opening an overlay.
-If configuration status cannot be loaded, the field and Save API key remain usable
-so administrators can still save or replace a key; presence remains unknown.
-With a key configured, the switch stays on while the workspace is open and shows
-that catalog support will arrive in the next integration step. This switch does
-not reload or change Modrinth/Hangar results or pagination.
-
-CurseForge catalog/search/download/install is not implemented in this cycle.
-No CurseForge parameter is sent to the existing catalog endpoint. Existing
-Modrinth, Hangar and plugin management behavior is unchanged.
+The Discover CurseForge switch defaults on for a supported server when a key is
+configured. Without a key it stays off and attempts to enable it show the existing
+inline configuration notice. The catalog resolves the official Minecraft game
+and content class, filters exact game/loader compatibility, and uses bounded
+pagination and dependency resolution. API requests use a fixed HTTPS origin,
+private authentication header, bounded responses and timeouts, and no redirects.
+Artifacts use only validated official CDN hosts without the API credential.
+Search and install failures return a retryable provider error without exposing
+keys. Configuration removal takes effect for subsequent requests; failed lookups
+do not poison later retries. Provider cursors preserve unconsumed positions and
+rotate fairly across enabled catalogs. CurseForge project cards use initials
+when no local project icon is available.
 
 The Management Agent stores the key at
 `/var/lib/justvoxel/management/curseforge/api-key`. The containing directory must
@@ -752,8 +789,7 @@ permissions fail closed. Replacement writes and syncs a private temporary file,
 then atomically renames it and syncs the directory. Removal unlinks the file and
 syncs the directory; this does not claim physical erasure from storage media.
 Keys must contain 1–1024 bytes, must not be whitespace-only, and must contain no
-control characters or line separators. No runtime/container configuration uses
-the key yet.
+control characters or line separators. Only the privileged Agent uses the key; runtime/container configuration never receives it.
 
 Authenticated administrator-only `GET`, `PUT`, and `DELETE` requests to
 `/api/plugins/workspace/curseforge-api` proxy to the same methods at

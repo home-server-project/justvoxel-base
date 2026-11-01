@@ -184,3 +184,30 @@ func (s *server) adminCurseForgeAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, curseForgeStatus{Configured: configured})
 }
+
+// Credentials remain inside the Agent. Validate the opened inode, not a prior
+// presence check, so replacement cannot race validation of another file.
+func readCurseForgeKey() (string, error) {
+	curseForgeMu.Lock()
+	defer curseForgeMu.Unlock()
+	dir, err := openCurseForgeDirectory(curseForgeDirectory)
+	if err != nil {
+		return "", errCurseForgeStorage
+	}
+	defer dir.Close()
+	fd, err := unix.Openat(int(dir.Fd()), curseForgeKeyFile, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return "", errCurseForgeStorage
+	}
+	f := os.NewFile(uintptr(fd), curseForgeKeyFile)
+	defer f.Close()
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&07777 != 0600 || st.Uid != 0 || st.Gid != 0 || st.Nlink != 1 || st.Size < 1 || st.Size > curseForgeKeyLimit {
+		return "", errCurseForgeStorage
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, curseForgeKeyLimit+1))
+	if err != nil || !validCurseForgeKey(string(raw)) {
+		return "", errCurseForgeStorage
+	}
+	return string(raw), nil
+}

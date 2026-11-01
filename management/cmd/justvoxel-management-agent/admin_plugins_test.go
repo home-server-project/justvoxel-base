@@ -174,12 +174,18 @@ func TestVanillaPluginsUnsupportedWithoutCatalog(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
 	rr := httptest.NewRecorder()
 	s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover", ""))
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"supported":false`) || !strings.Contains(rr.Body.String(), "Vanilla does not support plugins") || !strings.Contains(rr.Body.String(), `"minecraft_version":"1.21.8"`) {
+	if rr.Code != http.StatusOK {
 		t.Fatalf("vanilla: %d %s", rr.Code, rr.Body.String())
 	}
 	var catalog pluginCatalog
-	if err := json.Unmarshal(rr.Body.Bytes(), &catalog); err != nil || catalog.Modrinth || catalog.Hangar || len(catalog.Projects) != 0 {
-		t.Fatalf("unsupported sources: %+v %v", catalog, err)
+	if err := json.Unmarshal(rr.Body.Bytes(), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if catalog.Server.InstanceID != "jv-a1b2c3" || !catalog.Server.Configured || catalog.Server.ServerType != "vanilla" || catalog.Server.MinecraftVersion != "1.21.8" || catalog.Server.ContentKind != "" || catalog.Server.Supported || catalog.Server.Message != "Vanilla does not support server plugins or loader mods." {
+		t.Fatalf("unsupported server context: %+v", catalog.Server)
+	}
+	if catalog.Server.Providers != (pluginProviderSupport{}) || catalog.Modrinth || catalog.Hangar || catalog.CurseForge || len(catalog.Projects) != 0 {
+		t.Fatalf("unsupported sources: %+v", catalog)
 	}
 }
 

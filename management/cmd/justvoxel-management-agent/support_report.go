@@ -249,7 +249,11 @@ func (s *operationStore) storeSupportReport(id string, data []byte) (diagnosticL
 }
 
 func (s *operationStore) storeDiagnosticReport(category, id string, data []byte) (diagnosticLogEntry, error) {
-	if (category != "support" && category != "network") || !validOperationID(id) || len(data) > supportReportLimit {
+	limit := supportReportLimit
+	if category == "update" {
+		limit = operationDiagnosticLimit
+	}
+	if (category != "support" && category != "network" && category != "update") || !validOperationID(id) || len(data) > limit {
 		return diagnosticLogEntry{}, errors.New("invalid support report")
 	}
 	s.diagnosticMu.Lock()

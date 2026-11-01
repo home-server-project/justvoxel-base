@@ -149,8 +149,8 @@ func TestCurseForgeWorkspaceMarkupAndSecretBoundary(t *testing.T) {
 	}
 	query := js[strings.Index(js, "  const discoverQuery ="):]
 	query = strings.SplitN(query, "\n", 2)[0]
-	if strings.Contains(strings.ToLower(query), "curseforge") {
-		t.Fatal("unsupported provider in catalog query")
+	if !strings.Contains(query, "curseForgeConfigured && curseForgeSwitch.checked") || strings.Contains(query, "curseForgeKey.value") {
+		t.Fatal("catalog must use configured provider selection without credentials")
 	}
 }
 func TestCurseForgeInlineFormAndNoticeLifecycle(t *testing.T) {
@@ -175,7 +175,7 @@ func TestCurseForgeInlineFormAndNoticeLifecycle(t *testing.T) {
  const panel=make(),panelBody=make();
  const text=()=>make(),panelAction=(label,action)=>{const n=make();n.label=label;n.listeners.click=action;return n;};
  let opened=0, confirmRemove; const showPanel=()=>{opened++;},closePanel=()=>{},overlayActions=(cancel,remove)=>{confirmRemove=remove.listeners.click;};
- let tab="discover";
+ let tab="discover";const acceptedServer={providers:{curseforge:true}};let providerServerKey="paper",searchTimer=null,loads=0;const resetCursors=()=>{},load=()=>loads++;
  let respond=async()=>({ok:true,status:200,json:async()=>({configured:true})});
  const fetch=async (url,options)=>{requests.push({url,options});return respond(options);};
  const queueMicrotask=()=>{};
@@ -194,7 +194,7 @@ func TestCurseForgeInlineFormAndNoticeLifecycle(t *testing.T) {
  curseForgeSwitch.checked=true;curseForgeSwitch.listeners.change();get("[data-curseforge-notice-configure]").click();
  assert.equal(tab,"curseforge-api");assert.equal(opened,0);assert.equal(curseForgeKey.focused,true);assert.equal(curseForgeNotice.hidden,true);
  tab="discover";applyCurseForgeStatus({configured:true});curseForgeSwitch.checked=true;curseForgeSwitch.listeners.change();
- assert.equal(curseForgeSwitch.checked,true);assert.equal(curseForgeNotice.hidden,true);assert.equal(curseForgeInfo.hidden,false);assert.equal(requests.length,0);
+ assert.equal(curseForgeSwitch.checked,true);assert.equal(curseForgeNotice.hidden,true);assert.equal(curseForgeInfo.hidden,true);assert.equal(requests.length,0);
  applyCurseForgeStatus({configured:false});assert.equal(curseForgeSwitch.checked,false);assert.equal(curseForgeInfo.hidden,true);
  curseForgeSwitch.checked=true;curseForgeSwitch.listeners.change();assert.equal(curseForgeNotice.hidden,false);
  const status=get("[data-curseforge-status]"),mask=get("[data-curseforge-mask]");

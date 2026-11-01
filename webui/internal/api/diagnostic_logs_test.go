@@ -10,7 +10,7 @@ import (
 
 func TestValidDiagnosticLogIdentifier(t *testing.T) {
 	const validID = "12345678-1234-4234-8234-123456789abc"
-	categories := []string{"setup", "migration", "restore", "plugins", "reset", "network", "support", "operation"}
+	categories := []string{"setup", "migration", "restore", "plugins", "reset", "network", "update", "support", "operation"}
 	for _, category := range categories {
 		t.Run(category, func(t *testing.T) {
 			if !validDiagnosticLogIdentifier(category, validID) {

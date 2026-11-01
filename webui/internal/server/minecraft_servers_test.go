@@ -208,7 +208,7 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 			t.Fatal("software/menu row", row)
 		}
 		previous := -1
-		for _, label := range []string{">Settings</a>", ">Backups</a>", ">Update</a>", ">Migration</a>", ">Plugins</a>", ">Invite friends</button>", ">How to connect</a>", ">Delete server</button>"} {
+		for _, label := range []string{">Settings</a>", ">Backups</a>", ">Update</a>", ">Migration</a>", ">Plugins &amp; Mods</a>", ">Invite friends</button>", ">How to connect</a>", ">Delete server</button>"} {
 			index := strings.Index(row, label)
 			if index <= previous {
 				t.Errorf("missing/out-of-order %s", label)

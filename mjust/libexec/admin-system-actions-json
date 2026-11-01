@@ -121,7 +121,7 @@ apply_action() {
     esac
 
     if ! instances="$("${shutdown_helper}" check)"; then
-        emit_error "${action}" player_status_unavailable 'Could not confirm Minecraft player status through RCON.'
+        emit_error "${action}" player_status_unavailable 'Could not confirm Minecraft player status.'
         return 3
     fi
     online="$(jq '.online' <<<"${instances}")"

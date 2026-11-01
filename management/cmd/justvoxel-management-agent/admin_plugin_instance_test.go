@@ -12,6 +12,25 @@ func pluginTestData(t *testing.T) string { return pluginTestDataFor(t, "paper", 
 func pluginTestDataFor(t *testing.T, software, version string) string {
 	t.Helper()
 	f := newInstanceActivationFixtureFor(t, software, version)
+	// Combined-content fixtures use the same pinned runtime contract as the appliance.
+	if capabilities, ok := javaServerSoftware(software); ok && (capabilities.ModLoader || software == "spigot") {
+		c := &f.configs[0]
+		c.VersionPolicy = "pinned"
+		c.ImageTag = "java21"
+		if java25GameReleasePattern.MatchString(version) {
+			c.ImageTag = "java25"
+		}
+		if software == "spigot" {
+			c.ImageTag += "-jdk"
+		} else {
+			c.LoaderVersion = "1.0.0"
+		}
+		dir, _, _ := f.backend.paths(c.ID)
+		record := instanceRuntimeRecord{SchemaVersion: 1, Runtime: *c, Storage: instanceStorageFor(f.snapshot, c.ID), Firewall: []instanceFirewallRule{}}
+		if err := f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+			t.Fatal(err)
+		}
+	}
 	f.activateBoth()
 	old := instanceRuntimes
 	instanceRuntimes = f.backend

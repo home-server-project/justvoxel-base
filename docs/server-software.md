@@ -30,13 +30,14 @@ separately; disabling it permits a valid Java server to continue. Fabric and
 NeoForge require exact platform compatibility; Forge, Quilt and Vanilla are Java
 only. Existing storage, backup and port safety remain authoritative.
 
-| Software | Bukkit Plugins workspace | Managed Bedrock cross-play |
+| Software | Plugins & Mods workspace | Managed Bedrock cross-play |
 | --- | --- | --- |
-| Paper, Purpur | Modrinth and Hangar | Existing Spigot-family implementation |
-| Spigot | Modrinth: explicit Spigot/Bukkit metadata | Spigot-family Geyser/Floodgate with managed ViaVersion |
-| Fabric | Unavailable | Only a proven current Geyser-Fabric game/loader pair, Floodgate-Fabric and exact-version Fabric API |
-| NeoForge | Unavailable | Only a proven current Geyser-NeoForge game/loader pair and Floodgate-NeoForge |
-| Vanilla, Forge, Quilt | Unavailable | Unavailable |
+| Paper, Purpur, Pufferfish, Leaf | Plugins: Modrinth, Hangar, configured CurseForge | Existing Spigot-family implementation |
+| Spigot | Plugins: Modrinth and configured CurseForge with Bukkit compatibility | Spigot-family Geyser/Floodgate with managed ViaVersion |
+| Fabric | Mods: Modrinth and configured CurseForge | Only a proven current Geyser-Fabric game/loader pair, Floodgate-Fabric and exact-version Fabric API |
+| NeoForge | Mods: Modrinth and configured CurseForge | Only a proven current Geyser-NeoForge game/loader pair and Floodgate-NeoForge |
+| Forge, Quilt | Mods: Modrinth and configured CurseForge | Unavailable |
+| Vanilla | Unavailable | Unavailable |
 | Native Bedrock | Unavailable | Native Bedrock clients; no Geyser/Floodgate |
 
 Spigot's Hangar provider stays unavailable: the current Hangar platform mapping

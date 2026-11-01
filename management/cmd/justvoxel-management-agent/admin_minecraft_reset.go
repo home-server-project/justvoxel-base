@@ -462,7 +462,7 @@ func prepareMinecraftResetPlugins(plan *adminMinecraftResetPlanResponse) error {
 	}
 	evidence := minecraftResetPluginPlan{plan.DataPath, uint64(st.Dev), st.Ino, raw, []pluginLocationEvidence{}}
 	for _, entry := range manifest.Artifacts {
-		state, err := resolveManagedPluginLocation(plan.DataPath, entry)
+		state, err := resolveResetManagedLocation(plan.DataPath, entry)
 		if err != nil {
 			return err
 		}
@@ -479,7 +479,9 @@ func prepareMinecraftResetPlugins(plan *adminMinecraftResetPlanResponse) error {
 			return err
 		}
 		for _, name := range names {
-			if !slices.ContainsFunc(evidence.Entries, func(e pluginLocationEvidence) bool { return e.State == "disabled" && e.Entry.Filename == name }) {
+			if !slices.ContainsFunc(evidence.Entries, func(e pluginLocationEvidence) bool {
+				return pluginTarget(e.Entry.Target) == "plugins" && e.State == "disabled" && e.Entry.Filename == name
+			}) {
 				return errors.New("Disabled plugin store contains an unowned or ambiguous file")
 			}
 		}
@@ -617,8 +619,14 @@ func (s *server) readResetPluginTransaction(id string) (*minecraftResetPluginTra
 	if validatePluginManifest(manifest) != nil || len(manifest.Artifacts) != len(tx.Plugins.Entries) {
 		return nil, errors.New("Incomplete reset plugin evidence")
 	}
+	seen := map[string]bool{}
 	for _, e := range tx.Plugins.Entries {
-		if !slices.Contains([]string{"enabled", "disabled"}, e.State) || !slices.ContainsFunc(manifest.Artifacts, func(m pluginManifestEntry) bool { return reflect.DeepEqual(m, e.Entry) }) || !safePluginFilename(e.Entry.Filename) || !pluginHashPattern.MatchString(e.Entry.SHA512) || !pluginMainPattern.MatchString(e.Entry.Main) || !pluginNamePattern.MatchString(e.Entry.PluginName) || managedPluginDescriptor(e.Entry.Filename, e.Entry.PluginName, e.Entry.Main) != "" {
+		key := contentManifestIdentity(e.Entry)
+		if seen[key] {
+			return nil, errors.New("Duplicate reset artifact evidence")
+		}
+		seen[key] = true
+		if !validPluginTarget(e.Entry.Target) || (e.Entry.Target == "mods" && e.State != "enabled") || !slices.Contains([]string{"enabled", "disabled"}, e.State) || !slices.ContainsFunc(manifest.Artifacts, func(m pluginManifestEntry) bool { return reflect.DeepEqual(m, e.Entry) }) || !safePluginFilename(e.Entry.Filename) || !pluginHashPattern.MatchString(e.Entry.SHA512) || (pluginTarget(e.Entry.Target) == "plugins" && (!pluginMainPattern.MatchString(e.Entry.Main) || !pluginNamePattern.MatchString(e.Entry.PluginName) || managedPluginDescriptor(e.Entry.Filename, e.Entry.PluginName, e.Entry.Main) != "")) {
 			return nil, errors.New("Unsafe reset plugin identity")
 		}
 	}
@@ -789,6 +797,12 @@ func stageResetPluginJars(tx minecraftResetPluginTransaction) error {
 	}
 	defer closeResetPluginRoots(active, disabled, staging)
 	for _, e := range tx.Plugins.Entries {
+		if e.Entry.Target == "mods" {
+			if err := moveResetMod(tx, e.Entry, staging, false); err != nil {
+				return err
+			}
+			continue
+		}
 		source := active
 		if e.State == "disabled" {
 			source = disabled
@@ -833,6 +847,12 @@ func restoreResetPluginJars(tx minecraftResetPluginTransaction) error {
 	}
 	defer closeResetPluginRoots(active, disabled, staging)
 	for _, e := range tx.Plugins.Entries {
+		if e.Entry.Target == "mods" {
+			if err := moveResetMod(tx, e.Entry, staging, true); err != nil {
+				return err
+			}
+			continue
+		}
 		target := active
 		if e.State == "disabled" {
 			target = disabled
@@ -918,6 +938,12 @@ func commitResetPluginCleanup(tx minecraftResetPluginTransaction) error {
 		return errors.New("Reset ownership manifest changed")
 	}
 	for _, e := range tx.Plugins.Entries {
+		if e.Entry.Target == "mods" {
+			if err := checkResetModStaged(tx, e.Entry, staging, raw != nil, false); err != nil {
+				return err
+			}
+			continue
+		}
 		for _, root := range []*os.File{active, disabled} {
 			exists, err := pluginFilePresent(root, e.Entry.Filename)
 			if err != nil || exists {
@@ -965,6 +991,12 @@ func commitResetPluginCleanup(tx minecraftResetPluginTransaction) error {
 		return err
 	}
 	for _, e := range tx.Plugins.Entries {
+		if e.Entry.Target == "mods" {
+			if err := checkResetModStaged(tx, e.Entry, staging, false, true); err != nil {
+				return err
+			}
+			continue
+		}
 		exists, err := pluginFilePresent(staging, e.Entry.Filename)
 		if err != nil {
 			return err
@@ -1081,4 +1113,122 @@ func pluginInstanceIDForResetEvidence(s *server, id string) string {
 		return ""
 	}
 	return tx.InstanceID
+}
+
+// Plugin artifacts retain their deployed flat staging namespace. Mods use a
+// private child, so identical plugin/mod basenames remain distinct objects.
+func resetModRoots(tx minecraftResetPluginTransaction, staging *os.File) (*os.File, *os.File, error) {
+	if err := checkResetPluginIdentity(tx.Plugins); err != nil {
+		return nil, nil, err
+	}
+	active, err := openContentDirectory(tx.Plugins.DataPath, "mods")
+	if err != nil {
+		return nil, nil, err
+	}
+	staged, err := openPrivatePluginChild(staging, "mods", true)
+	if err != nil {
+		active.Close()
+		return nil, nil, err
+	}
+	if err = staging.Sync(); err != nil {
+		active.Close()
+		staged.Close()
+		return nil, nil, err
+	}
+	return active, staged, nil
+}
+func checkPinnedResetModDirectories(tx minecraftResetPluginTransaction, active, staging, mods *os.File) error {
+	if err := checkResetPluginIdentity(tx.Plugins); err != nil {
+		return err
+	}
+	current, err := openContentDirectory(tx.Plugins.DataPath, "mods")
+	if err != nil {
+		return err
+	}
+	defer current.Close()
+	parent, err := openPluginOperationStaging(tx.Plugins.DataPath, tx.OperationID, false)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	child, err := openPrivatePluginChild(parent, "mods", false)
+	if err != nil {
+		return err
+	}
+	defer child.Close()
+	for _, pair := range [][2]*os.File{{active, current}, {staging, parent}, {mods, child}} {
+		before, e := pair[0].Stat()
+		after, e2 := pair[1].Stat()
+		if e != nil || e2 != nil || !os.SameFile(before, after) {
+			return errors.New("Pinned reset mod directory changed")
+		}
+	}
+	return nil
+}
+func moveResetMod(tx minecraftResetPluginTransaction, e pluginManifestEntry, staging *os.File, restore bool) error {
+	active, mods, err := resetModRoots(tx, staging)
+	if err != nil {
+		return err
+	}
+	defer closeResetPluginRoots(active, mods)
+	a, err := pluginFilePresent(active, e.Filename)
+	if err != nil {
+		return err
+	}
+	b, err := pluginFilePresent(mods, e.Filename)
+	if err != nil {
+		return err
+	}
+	if a == b {
+		return errors.New("Reset mod is missing or duplicated")
+	}
+	from, to := active, mods
+	if b {
+		from, to = mods, active
+	}
+	if err = verifyManagedArtifactAt(from, e); err != nil {
+		return err
+	}
+	if err = checkPinnedResetModDirectories(tx, active, staging, mods); err != nil {
+		return err
+	}
+	if restore == a {
+		return nil
+	}
+	if err = unix.Renameat2(int(from.Fd()), e.Filename, int(to.Fd()), e.Filename, unix.RENAME_NOREPLACE); err != nil {
+		return err
+	}
+	return errors.Join(from.Sync(), to.Sync())
+}
+func checkResetModStaged(tx minecraftResetPluginTransaction, e pluginManifestEntry, staging *os.File, required, remove bool) error {
+	active, mods, err := resetModRoots(tx, staging)
+	if err != nil {
+		return err
+	}
+	defer closeResetPluginRoots(active, mods)
+	present, err := pluginFilePresent(active, e.Filename)
+	if err != nil || present {
+		return errors.New("Managed mod reappeared outside reset staging")
+	}
+	present, err = pluginFilePresent(mods, e.Filename)
+	if err != nil {
+		return err
+	}
+	if !present && required {
+		return errors.New("Reset mod rollback copy disappeared before ownership commit")
+	}
+	if present {
+		if err = verifyManagedArtifactAt(mods, e); err != nil {
+			return err
+		}
+	}
+	if err = checkPinnedResetModDirectories(tx, active, staging, mods); err != nil {
+		return err
+	}
+	if remove && present {
+		if err = unix.Unlinkat(int(mods.Fd()), e.Filename, 0); err != nil {
+			return err
+		}
+	}
+	return mods.Sync()
 }

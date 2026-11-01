@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
@@ -59,6 +60,8 @@ type pluginInstallApplyRequest struct {
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }
 type pluginInstallArtifact struct {
+	Target        string   `json:"target,omitempty"`
+	SHA1          string   `json:"-"`
 	Source        string   `json:"source,omitempty"`
 	ProjectID     string   `json:"project_id"`
 	VersionID     string   `json:"version_id"`
@@ -98,6 +101,7 @@ type pluginInstallPlan struct {
 	DataPath             string                  `json:"-"`
 }
 type pluginManifestEntry struct {
+	Target        string   `json:"target,omitempty"`
 	Source        string   `json:"source,omitempty"`
 	ProjectID     string   `json:"project_id"`
 	VersionID     string   `json:"version_id"`
@@ -308,15 +312,15 @@ func (s *server) adminPluginInstallCurrent(w http.ResponseWriter, r *http.Reques
 }
 
 func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerContext, dataPath, projectID, versionID string) (pluginInstallPlan, error) {
-	plan := pluginInstallPlan{Source: "Modrinth", ProjectID: projectID, VersionID: versionID, Server: serverContext, DataPath: dataPath, Location: filepath.Join(dataPath, "plugins"), RestartRequired: true, Compatibility: "Compatible according to publisher metadata", Artifacts: []pluginInstallArtifact{}, DisplayDependencies: []pluginDependency{}}
-	if !serverContext.Supported || !javaServerPluginsWorkspace(serverContext.ServerType) || serverContext.MinecraftVersion == "" || !filepath.IsAbs(dataPath) || !modrinthPluginID.MatchString(projectID) || !modrinthPluginID.MatchString(versionID) {
-		return plan, errors.New("A known Paper, Purpur or Spigot Minecraft version and configured data path are required")
+	plan := pluginInstallPlan{Source: "Modrinth", ProjectID: projectID, VersionID: versionID, Server: serverContext, DataPath: dataPath, Location: filepath.Join(dataPath, javaServerContentKind(serverContext.ServerType)), RestartRequired: true, Compatibility: "Compatible according to publisher metadata", Artifacts: []pluginInstallArtifact{}, DisplayDependencies: []pluginDependency{}}
+	if !serverContext.Supported || javaServerContentKind(serverContext.ServerType) == "" || serverContext.MinecraftVersion == "" || !filepath.IsAbs(dataPath) || !modrinthPluginID.MatchString(projectID) || !modrinthPluginID.MatchString(versionID) {
+		return plan, errors.New("A supported server, exact Minecraft version and configured data path are required")
 	}
 	manifest, _, err := readPluginManifest(dataPath)
 	if err != nil {
 		return plan, errors.New("Plugin ownership manifest is unsafe or malformed")
 	}
-	root, err := openPluginDirectory(dataPath)
+	root, err := openContentDirectory(dataPath, javaServerContentKind(serverContext.ServerType))
 	if err != nil {
 		return plan, errors.New("Plugins must be an existing real directory")
 	}
@@ -341,6 +345,9 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 				return errors.New("Modrinth project/version identity mismatch")
 			}
 			if parent != "" && !pluginLoaderOverlap(v.Loaders, serverContext.ServerType) {
+				if javaServerContentKind(serverContext.ServerType) == "mods" {
+					return errors.New("Required mod dependency has an incompatible loader")
+				}
 				plan.DisplayDependencies = append(plan.DisplayDependencies, pluginDependency{ProjectID: project, VersionID: version, Type: "required"})
 				return nil
 			}
@@ -357,6 +364,9 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 				return errors.New("Modrinth dependency project identity mismatch")
 			}
 			if len(dependencyProject.Loaders) > 0 && !pluginLoaderOverlap(dependencyProject.Loaders, serverContext.ServerType) {
+				if javaServerContentKind(serverContext.ServerType) == "mods" {
+					return errors.New("Required mod dependency has an incompatible loader")
+				}
 				plan.DisplayDependencies = append(plan.DisplayDependencies, pluginDependency{ProjectID: project, Type: "required"})
 				return nil
 			}
@@ -438,7 +448,7 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 		if err := modrinthPluginJSON(ctx, "/project/"+project, nil, &metadata); err != nil || metadata.ID != project || metadata.Name == "" {
 			return errors.New("Plugin project metadata unavailable")
 		}
-		a := pluginInstallArtifact{Source: "Modrinth", ProjectID: project, VersionID: v.ID, VersionNumber: v.Number, Name: metadata.Name, Filename: f.Filename, Size: f.Size, SHA512: f.Hashes.SHA512, URL: f.URL, Requested: parent == "", RequiredBy: []string{}}
+		a := pluginInstallArtifact{Target: javaServerContentKind(serverContext.ServerType), Source: "Modrinth", ProjectID: project, VersionID: v.ID, VersionNumber: v.Number, Name: metadata.Name, Filename: f.Filename, Size: f.Size, SHA512: f.Hashes.SHA512, URL: f.URL, Requested: parent == "", RequiredBy: []string{}}
 		if parent != "" {
 			a.RequiredBy = append(a.RequiredBy, parent)
 		}
@@ -448,6 +458,9 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 		component := managedPluginSlug(metadata.Slug)
 		if component == "" {
 			component = managedPluginIdentity(f.Filename, "")
+		}
+		if javaServerContentKind(serverContext.ServerType) == "mods" {
+			component = ""
 		}
 		if component != "" {
 			if a.Requested {
@@ -460,7 +473,7 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 			a.Satisfied, a.ExistingFilename, a.ExistingHash, a.PluginName, a.Main = "JustVoxel managed", filename, hash, identity.Name, identity.Main
 		} else {
 			for _, entry := range manifest.Artifacts {
-				if pluginIdentity(entry.Source, entry.ProjectID) != pluginIdentity("Modrinth", project) {
+				if pluginTarget(entry.Target) != pluginTarget(a.Target) || pluginIdentity(entry.Source, entry.ProjectID) != pluginIdentity("Modrinth", project) {
 					continue
 				}
 				if a.Requested {
@@ -477,9 +490,9 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 				if err != nil {
 					return errors.New("Managed dependency identity unavailable")
 				}
-				identity, err := inspectStagedPlugin(jar, entry.Filename)
+				identity, err := inspectServerPlugin(jar, entry.Filename, serverContext.ServerType)
 				jar.Close()
-				if err != nil || identity.Name != entry.PluginName || identity.Main != entry.Main {
+				if err != nil || (javaServerContentKind(serverContext.ServerType) == "plugins" && (identity.Name != entry.PluginName || identity.Main != entry.Main)) {
 					return errors.New("Managed dependency descriptor differs from its manifest")
 				}
 				a.Satisfied, a.ExistingFilename, a.ExistingHash, a.PluginName, a.Main = "Managed by Plugins", entry.Filename, hash, entry.PluginName, entry.Main
@@ -541,7 +554,7 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 
 var errPluginLoaderArtifact = errors.New("JAR contains loader metadata without a valid direct plugin descriptor")
 
-const pluginLoaderReviewRejection = "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates."
+const pluginLoaderReviewRejection = "This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server."
 
 const pluginBlueMapReviewRejection = "BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there."
 
@@ -572,6 +585,9 @@ func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error
 			return errors.New(pluginLoaderReviewRejection)
 		}
 		if inspectErr != nil {
+			if javaServerContentKind(plan.Server.ServerType) == "mods" {
+				return inspectErr
+			}
 			return errors.New(pluginDirectReviewRejection)
 		}
 		if pluginSource(artifact.Source) == "Hangar" && managedPluginDescriptor(artifact.Filename, identity.Name, identity.Main) != "" {
@@ -616,10 +632,10 @@ func fingerprintPluginPlan(plan pluginInstallPlan) string {
 		artifacts = append(artifacts, evidence{a, a.URL, fingerprintPluginHash(a), a.SHA256, a.ExistingFilename, a.ExistingHash})
 	}
 	data, _ := json.Marshal(struct {
-		InstanceID, Server, Version, Path, Source, Project, Release string
-		Artifacts                                                   []evidence
-		Display                                                     []pluginDependency
-	}{plan.Server.InstanceID, plan.Server.ServerType, plan.Server.MinecraftVersion, plan.DataPath, pluginSource(plan.Source), plan.ProjectID, plan.VersionID, artifacts, plan.DisplayDependencies})
+		InstanceID, Server, Version, Path, Source, Project, Release, Target, Location string
+		Artifacts                                                                     []evidence
+		Display                                                                       []pluginDependency
+	}{plan.Server.InstanceID, plan.Server.ServerType, plan.Server.MinecraftVersion, plan.DataPath, pluginSource(plan.Source), plan.ProjectID, plan.VersionID, javaServerContentKind(plan.Server.ServerType), plan.Location, artifacts, plan.DisplayDependencies})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
@@ -716,7 +732,7 @@ func classifyGenericPluginInventory(dataPath string, f *os.File, item *installed
 		return
 	}
 	for _, e := range manifest.Artifacts {
-		if e.Filename != item.Filename {
+		if pluginTarget(e.Target) != "plugins" || e.Filename != item.Filename {
 			continue
 		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -957,8 +973,9 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	defer f.Close()
 	h := sha512.New()
 	h256 := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h, h256), io.LimitReader(response.Body, a.Size+1))
-	if err != nil || n != a.Size || (pluginSource(a.Source) == "Modrinth" && hex.EncodeToString(h.Sum(nil)) != a.SHA512) || (pluginSource(a.Source) == "Hangar" && hex.EncodeToString(h256.Sum(nil)) != a.SHA256) {
+	h1 := sha1.New()
+	n, err := io.Copy(io.MultiWriter(f, h, h256, h1), io.LimitReader(response.Body, a.Size+1))
+	if err != nil || n != a.Size || (pluginSource(a.Source) == "CurseForge" && hex.EncodeToString(h1.Sum(nil)) != a.SHA1) || (pluginSource(a.Source) == "Modrinth" && hex.EncodeToString(h.Sum(nil)) != a.SHA512) || (pluginSource(a.Source) == "Hangar" && hex.EncodeToString(h256.Sum(nil)) != a.SHA256) {
 		return "", errors.New("Plugin download hash or size verification failed")
 	}
 	if err := f.Sync(); err != nil {
@@ -1352,6 +1369,7 @@ var startPluginInstallWorker = func(s *server, id string, plan pluginInstallPlan
 // Durable transaction evidence is private, independent of browser-safe journals.
 // It records all potential placements before touching the plugin directory.
 type pluginTransaction struct {
+	Target            string                `json:"target,omitempty"`
 	InstanceID        string                `json:"instance_id"`
 	DataPath          string                `json:"data_path,omitempty"`
 	MinecraftVersion  string                `json:"minecraft_version,omitempty"`
@@ -1365,6 +1383,7 @@ type pluginTransaction struct {
 // Preflight records creation before any Minecraft/service/plugin mutation. It
 // deliberately contains no original service-state claim.
 type pluginPreflight struct {
+	Target           string `json:"target,omitempty"`
 	InstanceID       string `json:"instance_id"`
 	Source           string `json:"source,omitempty"`
 	SchemaVersion    string `json:"schema_version"`
@@ -1486,7 +1505,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		return failUntouched(errors.New("Private transaction evidence unavailable"))
 	}
 	defer evidenceDirectory.Close()
-	preflight := pluginPreflight{InstanceID: plan.Server.InstanceID, Source: pluginSource(plan.Source), SchemaVersion: "v1", OperationID: id, PlanFingerprint: plan.Fingerprint, DataPath: plan.DataPath, MinecraftVersion: plan.Server.MinecraftVersion, ProjectID: plan.ProjectID, VersionID: plan.VersionID}
+	preflight := pluginPreflight{Target: javaServerContentKind(plan.Server.ServerType), InstanceID: plan.Server.InstanceID, Source: pluginSource(plan.Source), SchemaVersion: "v1", OperationID: id, PlanFingerprint: plan.Fingerprint, DataPath: plan.DataPath, MinecraftVersion: plan.Server.MinecraftVersion, ProjectID: plan.ProjectID, VersionID: plan.VersionID}
 	if err := publishPluginEvidence(evidenceDirectory, "preflight.json", preflight); err != nil {
 		return failUntouched(errors.New("Pre-mutation evidence could not be saved"))
 	}
@@ -1538,14 +1557,18 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 			return failUntouched(err)
 		}
 		a.PluginName, a.Main = identity.Name, identity.Main
+		if javaServerContentKind(plan.Server.ServerType) == "mods" {
+			a.PluginName = "mod-" + a.ProjectID
+			a.Main = ""
+		}
 		if a.Requested && pluginSource(a.Source) == "Modrinth" && a.ProjectID == "99IreA6y" && identity.Main == "de.bluecolored.bluemap.entities.PaperEntrypoint" {
 			return failUntouched(errors.New(pluginBlueMapReviewRejection))
 		}
-		if component := managedPluginDescriptor(a.Filename, a.PluginName, a.Main); component != "" {
+		if component := managedPluginDescriptor(a.Filename, a.PluginName, a.Main); pluginTarget(a.Target) == "plugins" && component != "" {
 			if a.Requested {
 				return failUntouched(errors.New("Requested JAR is a JustVoxel-managed component"))
 			}
-			root, err := openPluginDirectory(plan.DataPath)
+			root, err := openContentDirectory(plan.DataPath, javaServerContentKind(plan.Server.ServerType))
 			if err != nil {
 				return failUntouched(err)
 			}
@@ -1561,7 +1584,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if err := revalidatePluginInstall(ctx, s, plan); err != nil {
 		return failUntouched(err)
 	}
-	root, err := openPluginDirectory(plan.DataPath)
+	root, err := openContentDirectory(plan.DataPath, javaServerContentKind(plan.Server.ServerType))
 	if err != nil {
 		return failUntouched(errors.New("Plugin directory unavailable"))
 	}
@@ -1592,7 +1615,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if err != nil {
 		return failUntouched(err)
 	}
-	tx := pluginTransaction{InstanceID: plan.Server.InstanceID, DataPath: plan.DataPath, MinecraftVersion: plan.Server.MinecraftVersion, SchemaVersion: "v1", OperationID: id, PlanFingerprint: plan.Fingerprint, OriginallyRunning: originallyRunning, Artifacts: []pluginManifestEntry{}}
+	tx := pluginTransaction{Target: javaServerContentKind(plan.Server.ServerType), InstanceID: plan.Server.InstanceID, DataPath: plan.DataPath, MinecraftVersion: plan.Server.MinecraftVersion, SchemaVersion: "v1", OperationID: id, PlanFingerprint: plan.Fingerprint, OriginallyRunning: originallyRunning, Artifacts: []pluginManifestEntry{}}
 	for _, a := range plan.Artifacts {
 		if a.Satisfied == "" {
 			tx.Artifacts = append(tx.Artifacts, pluginManifestArtifact(a))
@@ -1664,7 +1687,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	for _, a := range created {
 		expected = append(expected, a.PluginName)
 	}
-	if err := verifyPluginStartup(plan.DataPath, expected); err != nil {
+	if err := verifyContentStartup(plan.DataPath, expected, javaServerContentKind(plan.Server.ServerType)); err != nil {
 		recordPluginStartupEvidence(s.operations, id, plan.DataPath, expected)
 		return rollback(err)
 	}
@@ -1700,7 +1723,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		matched := false
 		for i := range manifest.Artifacts {
 			e := &manifest.Artifacts[i]
-			if pluginIdentity(e.Source, e.ProjectID) == pluginIdentity(a.Source, a.ProjectID) {
+			if pluginTarget(e.Target) == pluginTarget(a.Target) && pluginIdentity(e.Source, e.ProjectID) == pluginIdentity(a.Source, a.ProjectID) {
 				matched = true
 				for _, parent := range a.RequiredBy {
 					if !slices.Contains(e.RequiredBy, parent) {
@@ -1716,7 +1739,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	}
 	sort.Slice(manifest.Artifacts, func(i, j int) bool {
 		a, b := manifest.Artifacts[i], manifest.Artifacts[j]
-		aIdentity, bIdentity := pluginIdentity(a.Source, a.ProjectID), pluginIdentity(b.Source, b.ProjectID)
+		aIdentity, bIdentity := contentManifestIdentity(a), contentManifestIdentity(b)
 		if aIdentity != bIdentity {
 			return aIdentity < bIdentity
 		}
@@ -1737,6 +1760,12 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if !originallyRunning {
 		status = "Plugin installed. Minecraft runtime verified; plugin verified active. Minecraft returned to its original stopped state."
 	}
+	if javaServerContentKind(plan.Server.ServerType) == "mods" {
+		status = "Mods installed. Artifact/provider/loader compatibility validated; Minecraft restarted and runtime health verified."
+		if !originallyRunning {
+			status += " Minecraft returned to its original stopped state."
+		}
+	}
 	if _, err := s.operations.transition(id, operationSucceeded, "complete", status); err != nil {
 		return err
 	}
@@ -1744,7 +1773,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	return nil
 }
 func pluginManifestArtifact(a pluginInstallArtifact) pluginManifestEntry {
-	return pluginManifestEntry{Source: pluginSource(a.Source), ProjectID: a.ProjectID, VersionID: a.VersionID, VersionNumber: a.VersionNumber, Filename: a.Filename, SHA512: a.SHA512, PluginName: a.PluginName, Main: a.Main, Requested: a.Requested, RequiredBy: a.RequiredBy}
+	return pluginManifestEntry{Target: a.Target, Source: pluginSource(a.Source), ProjectID: a.ProjectID, VersionID: a.VersionID, VersionNumber: a.VersionNumber, Filename: a.Filename, SHA512: a.SHA512, PluginName: a.PluginName, Main: a.Main, Requested: a.Requested, RequiredBy: a.RequiredBy}
 }
 func revalidatePluginInstall(ctx context.Context, s *server, plan pluginInstallPlan) error {
 	ctx = withPluginInstance(ctx, plan.Server.InstanceID)
@@ -1762,7 +1791,7 @@ func revalidatePluginInstall(ctx context.Context, s *server, plan pluginInstallP
 	return nil
 }
 func checkPluginDirectoryIdentity(dataPath string, root *os.File) error {
-	current, err := openPluginDirectory(dataPath)
+	current, err := openContentDirectory(dataPath, root.Name())
 	if err != nil {
 		return errors.New("Plugin directory changed")
 	}
@@ -1778,6 +1807,9 @@ func checkPluginDirectoryIdentity(dataPath string, root *os.File) error {
 	return nil
 }
 func checkPluginInstallCollisions(root *os.File, plan pluginInstallPlan) error {
+	if javaServerContentKind(plan.Server.ServerType) == "mods" {
+		return checkModInstallCollisions(root, plan)
+	}
 	// A fresh descriptor-bound inventory detects identity collisions, including a
 	// manually renamed JAR. Unknown descriptors block safely rather than guessing.
 	names, err := root.Readdirnames(-1)
@@ -1839,7 +1871,7 @@ func checkPluginInstallCollisions(root *os.File, plan pluginInstallPlan) error {
 }
 
 func placePluginArtifact(root *os.File, directory, id string, a pluginInstallArtifact) (bool, error) {
-	if managedPluginDescriptor(a.Filename, a.PluginName, a.Main) != "" {
+	if pluginTarget(a.Target) == "plugins" && managedPluginDescriptor(a.Filename, a.PluginName, a.Main) != "" {
 		return false, errors.New("JustVoxel components cannot be placed generically")
 	}
 	source, err := os.Open(filepath.Join(directory, a.Filename))
@@ -1957,7 +1989,7 @@ func commitPluginManifestContent(dataPath string, previous []byte, manifest plug
 	return true, unix.Fsync(dataFD)
 }
 func removePluginTransactionArtifact(root *os.File, a pluginInstallArtifact) error {
-	if managedPluginDescriptor(a.Filename, a.PluginName, a.Main) != "" {
+	if pluginTarget(a.Target) == "plugins" && managedPluginDescriptor(a.Filename, a.PluginName, a.Main) != "" {
 		return errors.New("JustVoxel components cannot be removed generically")
 	}
 	hash, err := hashPluginAt(root, a.Filename)
@@ -2142,12 +2174,12 @@ func readPluginTransaction(base, id string) (pluginTransaction, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&tx) != nil || decoder.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || validatePluginInstance(tx.InstanceID, tx.DataPath) != nil || tx.OperationID != id || !operationFingerprintPattern.MatchString(tx.PlanFingerprint) || len(tx.Artifacts) == 0 || len(tx.Artifacts) > pluginMaxArtifacts {
+	if decoder.Decode(&tx) != nil || decoder.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || !validPluginTarget(tx.Target) || validatePluginInstance(tx.InstanceID, tx.DataPath) != nil || tx.OperationID != id || !operationFingerprintPattern.MatchString(tx.PlanFingerprint) || len(tx.Artifacts) == 0 || len(tx.Artifacts) > pluginMaxArtifacts {
 		return tx, errors.New("Invalid transaction evidence")
 	}
 	projects, filenames := map[string]bool{}, map[string]bool{}
 	for _, a := range tx.Artifacts {
-		if !validPluginIdentity(a.Source, a.ProjectID) || !validPluginIdentity(a.Source, a.VersionID) || a.VersionNumber == "" || len(a.VersionNumber) > 256 || !safePluginFilename(a.Filename) || !pluginHashPattern.MatchString(a.SHA512) || !pluginNamePattern.MatchString(a.PluginName) || managedPluginDescriptor(a.Filename, a.PluginName, a.Main) != "" || (a.Main != "" && !pluginMainPattern.MatchString(a.Main)) || projects[pluginIdentity(a.Source, a.ProjectID)] || filenames[strings.ToLower(a.Filename)] || len(a.RequiredBy) > pluginMaxArtifacts {
+		if !validPluginTarget(a.Target) || pluginTarget(a.Target) != pluginTarget(tx.Target) || !validPluginIdentity(a.Source, a.ProjectID) || !validPluginIdentity(a.Source, a.VersionID) || a.VersionNumber == "" || len(a.VersionNumber) > 256 || !safePluginFilename(a.Filename) || !pluginHashPattern.MatchString(a.SHA512) || !validManagedDescriptorEvidence(a) || projects[pluginIdentity(a.Source, a.ProjectID)] || filenames[strings.ToLower(a.Filename)] || len(a.RequiredBy) > pluginMaxArtifacts {
 			return tx, errors.New("Invalid transaction artifact")
 		}
 		for _, parent := range a.RequiredBy {
@@ -2162,7 +2194,7 @@ func readPluginTransaction(base, id string) (pluginTransaction, error) {
 
 // Both proofs are read-only: acknowledgement cannot repair or delete a JAR.
 func provePluginTransactionFiles(dataPath string, tx pluginTransaction) (bool, error) {
-	root, err := openPluginDirectory(dataPath)
+	root, err := openContentDirectory(dataPath, pluginTarget(tx.Target))
 	if err != nil {
 		return false, err
 	}
@@ -2195,7 +2227,7 @@ func provePluginTransactionFiles(dataPath string, tx pluginTransaction) (bool, e
 			if reflect.DeepEqual(entry, a) {
 				exact = true
 			}
-			if pluginIdentity(entry.Source, entry.ProjectID) == pluginIdentity(a.Source, a.ProjectID) || (pluginSource(entry.Source) == pluginSource(a.Source) && entry.VersionID == a.VersionID) || strings.EqualFold(entry.Filename, a.Filename) || entry.SHA512 == a.SHA512 {
+			if pluginTarget(entry.Target) == pluginTarget(a.Target) && (pluginIdentity(entry.Source, entry.ProjectID) == pluginIdentity(a.Source, a.ProjectID) || (pluginSource(entry.Source) == pluginSource(a.Source) && entry.VersionID == a.VersionID) || strings.EqualFold(entry.Filename, a.Filename) || entry.SHA512 == a.SHA512) {
 				previous = false
 			}
 		}
@@ -2223,17 +2255,21 @@ func readPluginPreflight(base, id string) (pluginPreflight, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&evidence) != nil || d.Decode(new(any)) != io.EOF || evidence.SchemaVersion != "v1" || validatePluginInstance(evidence.InstanceID, evidence.DataPath) != nil || !validOperationID(evidence.OperationID) || evidence.OperationID != id || !operationFingerprintPattern.MatchString(evidence.PlanFingerprint) || !filepath.IsAbs(evidence.DataPath) || filepath.Clean(evidence.DataPath) != evidence.DataPath || len(evidence.DataPath) > 4096 || strings.ContainsAny(evidence.DataPath, "\x00\r\n") || evidence.MinecraftVersion == "" || len(evidence.MinecraftVersion) > 128 || strings.ContainsAny(evidence.MinecraftVersion, "\x00\r\n") || !validPluginIdentity(evidence.Source, evidence.ProjectID) || !validPluginIdentity(evidence.Source, evidence.VersionID) {
+	if d.Decode(&evidence) != nil || d.Decode(new(any)) != io.EOF || evidence.SchemaVersion != "v1" || !validPluginTarget(evidence.Target) || validatePluginInstance(evidence.InstanceID, evidence.DataPath) != nil || !validOperationID(evidence.OperationID) || evidence.OperationID != id || !operationFingerprintPattern.MatchString(evidence.PlanFingerprint) || !filepath.IsAbs(evidence.DataPath) || filepath.Clean(evidence.DataPath) != evidence.DataPath || len(evidence.DataPath) > 4096 || strings.ContainsAny(evidence.DataPath, "\x00\r\n") || evidence.MinecraftVersion == "" || len(evidence.MinecraftVersion) > 128 || strings.ContainsAny(evidence.MinecraftVersion, "\x00\r\n") || !validPluginIdentity(evidence.Source, evidence.ProjectID) || !validPluginIdentity(evidence.Source, evidence.VersionID) {
 		return evidence, errors.New("Invalid preflight evidence")
 	}
 	return evidence, nil
 }
 
 func provePluginPreflight(base string, journal operationJournal, dataPath string) error {
+	evidence, err := readPluginPreflight(base, journal.OperationID)
+	if err != nil {
+		return err
+	}
 	if _, err := readPluginEvidence(base, journal.OperationID, "transaction.json"); !errors.Is(err, errPluginEvidenceAbsent) {
 		return errors.New("Mutation evidence is present or unsafe")
 	}
-	root, err := openPluginDirectory(dataPath)
+	root, err := openContentDirectory(dataPath, pluginTarget(evidence.Target))
 	if err != nil {
 		return err
 	}
@@ -2259,7 +2295,7 @@ func (s *server) acknowledgePluginPreflight(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	serverContext, dataPath, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r)
-	if !ok || !serverContext.Supported || !javaServerPluginsWorkspace(serverContext.ServerType) || dataPath != evidence.DataPath || serverContext.MinecraftVersion != evidence.MinecraftVersion {
+	if !ok || !serverContext.Supported || javaServerContentKind(serverContext.ServerType) != pluginTarget(evidence.Target) || dataPath != evidence.DataPath || serverContext.MinecraftVersion != evidence.MinecraftVersion {
 		writeError(w, 409, "Pre-mutation server context could not be verified")
 		return
 	}
@@ -2286,6 +2322,9 @@ func (s *server) acknowledgePluginPreflight(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	status := "Plugin installation was interrupted before Minecraft or plugin files were changed."
+	if pluginTarget(evidence.Target) == "mods" {
+		status = "Mod installation was interrupted before Minecraft or mod files were changed."
+	}
 	resolved, err := s.operations.transition(journal.OperationID, operationResolved, "resolved", status)
 	if err != nil {
 		writeError(w, 409, "Plugin installation could not be resolved")
@@ -2345,7 +2384,7 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 	serverContext, dataPath, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r.WithContext(ctx))
 	// Earlier v1 evidence has no path/version fields. Use authoritative appliance
 	// context, still requiring every recorded artifact and the exact fingerprint.
-	if !ok || !serverContext.Supported || !filepath.IsAbs(dataPath) || (tx.OriginallyRunning && serverContext.MinecraftVersion == "" && tx.MinecraftVersion == "") || (tx.DataPath != "" && tx.DataPath != dataPath) || (tx.MinecraftVersion != "" && serverContext.MinecraftVersion != "" && tx.MinecraftVersion != serverContext.MinecraftVersion) {
+	if !ok || !serverContext.Supported || javaServerContentKind(serverContext.ServerType) != pluginTarget(tx.Target) || !filepath.IsAbs(dataPath) || (tx.OriginallyRunning && serverContext.MinecraftVersion == "" && tx.MinecraftVersion == "") || (tx.DataPath != "" && tx.DataPath != dataPath) || (tx.MinecraftVersion != "" && serverContext.MinecraftVersion != "" && tx.MinecraftVersion != serverContext.MinecraftVersion) {
 		writeError(w, 409, "Transaction server context could not be verified")
 		return
 	}
@@ -2373,7 +2412,7 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 			for _, a := range tx.Artifacts {
 				expected = append(expected, a.PluginName)
 			}
-			if err := verifyPluginStartup(dataPath, expected); err != nil {
+			if err := verifyContentStartup(dataPath, expected, pluginTarget(tx.Target)); err != nil {
 				writeError(w, 409, "Installed plugin runtime state could not be verified")
 				return
 			}
@@ -2394,6 +2433,15 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 		status = "Previous plugin state verified after administrator repair; Minecraft remains stopped."
 		if installed {
 			status = "Installed plugin files and ownership verified after administrator repair; Minecraft remains stopped."
+		}
+	}
+	if pluginTarget(tx.Target) == "mods" {
+		status = "Previous mod files and ownership verified; Minecraft runtime state restored."
+		if installed {
+			status = "Installed mod files and ownership verified; Minecraft runtime health verified. Individual mod functionality is not proven."
+		}
+		if !active {
+			status += " Minecraft remains stopped."
 		}
 	}
 	resolved, err := s.operations.transition(journal.OperationID, operationResolved, "resolved", status)
@@ -2442,7 +2490,7 @@ func validatePluginManifest(m pluginManifest) error {
 	}
 	projects, filenames := map[string]bool{}, map[string]bool{}
 	for _, e := range m.Artifacts {
-		if !validPluginIdentity(e.Source, e.ProjectID) || !validPluginIdentity(e.Source, e.VersionID) || e.VersionNumber == "" || len(e.VersionNumber) > 256 || !safePluginFilename(e.Filename) || !pluginHashPattern.MatchString(e.SHA512) || !pluginNamePattern.MatchString(e.PluginName) || managedPluginDescriptor(e.Filename, e.PluginName, e.Main) != "" || (e.Main != "" && !pluginMainPattern.MatchString(e.Main)) || projects[pluginIdentity(e.Source, e.ProjectID)] || filenames[strings.ToLower(e.Filename)] || len(e.RequiredBy) > 1024 {
+		if !validPluginTarget(e.Target) || !validPluginIdentity(e.Source, e.ProjectID) || !validPluginIdentity(e.Source, e.VersionID) || e.VersionNumber == "" || len(e.VersionNumber) > 256 || !safePluginFilename(e.Filename) || !pluginHashPattern.MatchString(e.SHA512) || !validManagedDescriptorEvidence(e) || projects[contentManifestIdentity(e)] || filenames[pluginTarget(e.Target)+":"+strings.ToLower(e.Filename)] || len(e.RequiredBy) > 1024 {
 			return errors.New("invalid plugin manifest identity")
 		}
 		for _, parent := range e.RequiredBy {
@@ -2450,12 +2498,15 @@ func validatePluginManifest(m pluginManifest) error {
 				return errors.New("invalid dependency relationship")
 			}
 		}
-		projects[pluginIdentity(e.Source, e.ProjectID)], filenames[strings.ToLower(e.Filename)] = true, true
+		projects[contentManifestIdentity(e)], filenames[pluginTarget(e.Target)+":"+strings.ToLower(e.Filename)] = true, true
 	}
 	return nil
 }
 
 func inspectServerPlugin(file *os.File, filename, serverType string) (installedPlugin, error) {
+	if javaServerContentKind(serverType) == "mods" {
+		return inspectStagedMod(file, filename, serverType)
+	}
 	identity, err := inspectStagedPlugin(file, filename)
 	if err != nil || serverType != "spigot" {
 		return identity, err

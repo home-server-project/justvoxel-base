@@ -23,16 +23,18 @@ type bootcDeploymentImage struct {
 }
 
 type bootcDeployment struct {
+	Ostree       *bootcOstreeIdentity  `json:"ostree,omitempty"`
 	Image        bootcDeploymentImage  `json:"image"`
 	CachedUpdate *bootcDeploymentImage `json:"cachedUpdate,omitempty"`
 	DownloadOnly bool                  `json:"downloadOnly"`
 }
 
 type bootcStatusPayload struct {
-	Booted   *bootcDeployment `json:"booted"`
-	Staged   *bootcDeployment `json:"staged"`
-	Rollback *bootcDeployment `json:"rollback"`
-	ReadOnly bool             `json:"readOnly"`
+	RollbackQueued bool             `json:"rollbackQueued"`
+	Booted         *bootcDeployment `json:"booted"`
+	Staged         *bootcDeployment `json:"staged"`
+	Rollback       *bootcDeployment `json:"rollback"`
+	ReadOnly       bool             `json:"readOnly"`
 }
 
 type bootcStatusDocument struct {
@@ -47,16 +49,25 @@ type adminSystemUpdateDeployment struct {
 }
 
 type adminSystemUpdateStatus struct {
-	OK             bool                         `json:"ok"`
-	ReadOnly       bool                         `json:"read_only"`
-	RebootRequired bool                         `json:"reboot_required"`
-	Checked        bool                         `json:"checked,omitempty"`
-	CheckState     string                       `json:"check_state,omitempty"`
-	Running        adminSystemUpdateDeployment  `json:"running"`
-	Staged         *adminSystemUpdateDeployment `json:"staged,omitempty"`
-	Available      *adminSystemUpdateDeployment `json:"available,omitempty"`
-	Rollback       *adminSystemUpdateDeployment `json:"rollback,omitempty"`
-	Message        string                       `json:"message,omitempty"`
+	queued                *bootcDeployment
+	ActivationPending     bool   `json:"activation_pending"`
+	ActivationFailed      bool   `json:"activation_failed"`
+	ActivationRecoverable bool   `json:"activation_recoverable"`
+	ExpectedDigest        string `json:"expected_digest,omitempty"`
+	RecoveryStatus        string `json:"recovery_status,omitempty"`
+	RecoveryMessage       string `json:"recovery_message,omitempty"`
+	stagedDownloadOnly    bool
+	stagedOstree          *bootcOstreeIdentity
+	OK                    bool                         `json:"ok"`
+	ReadOnly              bool                         `json:"read_only"`
+	RebootRequired        bool                         `json:"reboot_required"`
+	Checked               bool                         `json:"checked,omitempty"`
+	CheckState            string                       `json:"check_state,omitempty"`
+	Running               adminSystemUpdateDeployment  `json:"running"`
+	Staged                *adminSystemUpdateDeployment `json:"staged,omitempty"`
+	Available             *adminSystemUpdateDeployment `json:"available,omitempty"`
+	Rollback              *adminSystemUpdateDeployment `json:"rollback,omitempty"`
+	Message               string                       `json:"message,omitempty"`
 }
 
 var runBootcStatus = func(ctx context.Context) ([]byte, error) {
@@ -104,6 +115,9 @@ func activateDownloadedSystemUpdate(ctx context.Context, digest string) error {
 		if err == nil {
 			err = json.Unmarshal(data, &doc)
 		}
+		if err == nil && doc.Status.Staged == nil && doc.Status.RollbackQueued && doc.Status.Rollback != nil && doc.Status.Rollback.Image.ImageDigest == digest && !doc.Status.Rollback.DownloadOnly {
+			doc.Status.Staged = doc.Status.Rollback
+		}
 		if err == nil && (doc.APIVersion != "org.containers.bootc/v1" || doc.Status.ReadOnly || doc.Status.Booted == nil || !operationFingerprintPattern.MatchString(doc.Status.Booted.Image.ImageDigest) || doc.Status.Staged == nil || doc.Status.Staged.Image.ImageDigest != digest || doc.Status.Booted.Image.ImageDigest == digest) {
 			err = errors.New("staged image changed; refresh and try again")
 		}
@@ -131,6 +145,7 @@ func activateDownloadedSystemUpdate(ctx context.Context, digest string) error {
 
 func registerAdminSystemUpdateRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/system/updates", s.adminSystemUpdateStatus)
+	mux.HandleFunc("POST /v1/admin/system/updates/force", s.adminSystemUpdateForce)
 	mux.HandleFunc("POST /v1/admin/system/updates/check", s.adminSystemUpdateCheck)
 	mux.HandleFunc("POST /v1/admin/system/updates", s.adminSystemUpdate)
 }
@@ -175,7 +190,19 @@ func collectAdminSystemUpdateStatus(ctx context.Context) (adminSystemUpdateStatu
 	rollback := bootcDeploymentForAPI(document.Status.Rollback)
 	available := bootcImageForAPI(document.Status.Booted.CachedUpdate)
 
+	var downloadOnly bool
+	var ostree *bootcOstreeIdentity
+	if document.Status.Staged != nil {
+		downloadOnly = document.Status.Staged.DownloadOnly
+		ostree = document.Status.Staged.Ostree
+	}
+	var queued *bootcDeployment
+	if document.Status.RollbackQueued {
+		queued = document.Status.Rollback
+	}
 	return adminSystemUpdateStatus{
+		queued:             queued,
+		stagedDownloadOnly: downloadOnly, stagedOstree: ostree,
 		OK:             true,
 		ReadOnly:       document.Status.ReadOnly,
 		RebootRequired: staged != nil && staged.Digest != running.Digest,
@@ -193,7 +220,7 @@ func (s *server) adminSystemUpdateStatus(w http.ResponseWriter, r *http.Request)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	status, err := collectAdminSystemUpdateStatus(ctx)
+	status, err := s.collectSystemUpdateStatus(ctx)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "system update status is unavailable")
 		return
@@ -325,7 +352,7 @@ func (s *server) adminSystemUpdateCheck(w http.ResponseWriter, r *http.Request) 
 	defer s.systemUpdateMu.Unlock()
 
 	statusCtx, statusCancel := context.WithTimeout(r.Context(), 10*time.Second)
-	before, err := collectAdminSystemUpdateStatus(statusCtx)
+	before, err := s.collectSystemUpdateStatus(statusCtx)
 	statusCancel()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "system update status is unavailable")
@@ -352,7 +379,7 @@ func (s *server) adminSystemUpdateCheck(w http.ResponseWriter, r *http.Request) 
 	}
 
 	afterCtx, afterCancel := context.WithTimeout(r.Context(), 10*time.Second)
-	after, err := collectAdminSystemUpdateStatus(afterCtx)
+	after, err := s.collectSystemUpdateStatus(afterCtx)
 	afterCancel()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update check completed but deployment status could not be verified")
@@ -384,7 +411,7 @@ func (s *server) adminSystemUpdate(w http.ResponseWriter, r *http.Request) {
 	defer lock.Close()
 
 	statusCtx, statusCancel := context.WithTimeout(r.Context(), 10*time.Second)
-	before, err := collectAdminSystemUpdateStatus(statusCtx)
+	before, err := s.collectSystemUpdateStatus(statusCtx)
 	statusCancel()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "system update status is unavailable")
@@ -407,7 +434,7 @@ func (s *server) adminSystemUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	afterCtx, afterCancel := context.WithTimeout(r.Context(), 10*time.Second)
-	after, err := collectAdminSystemUpdateStatus(afterCtx)
+	after, err := s.collectSystemUpdateStatus(afterCtx)
 	afterCancel()
 	if err != nil {
 		if s.store != nil {
@@ -425,6 +452,16 @@ func (s *server) adminSystemUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if after.RebootRequired && s.operations != nil {
+		id, logErr := newOperationID()
+		if logErr == nil {
+			logErr = s.operations.updateLog(id, "Update staged successfully.\nexpected_digest="+after.Staged.Digest)
+		}
+		if logErr != nil {
+			writeError(w, 503, "Update staged, but its Update log could not be saved")
+			return
+		}
+	}
 	after.Checked = true
 	if after.RebootRequired {
 		after.CheckState = "staged_current"

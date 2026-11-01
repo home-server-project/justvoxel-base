@@ -11,13 +11,13 @@ import (
 )
 
 func TestPluginDiscoverExplicitSourcesAndCursors(t *testing.T) {
-	for _, raw := range []string{"", "limit=1", "limit=13", "limit=24", "modrinth=true&hangar=false", "modrinth=false&hangar=true", "modrinth=true&hangar=true", "modrinth=false&hangar=false", "modrinth_offset=0&hangar_offset=10000&hangar_first=true&limit=12"} {
+	for _, raw := range []string{"", "limit=1", "limit=13", "limit=24", "modrinth=true&hangar=false", "curseforge=true&curseforge_offset=2&provider_turn=2", "modrinth=false&hangar=true", "modrinth=true&hangar=true", "modrinth=false&hangar=false", "modrinth_offset=0&hangar_offset=10000&hangar_first=true&limit=12"} {
 		q, _ := url.ParseQuery(raw)
 		if err := ValidatePluginDiscoverQuery(q); err != nil {
 			t.Fatal(raw, err)
 		}
 	}
-	for _, raw := range []string{"modrinth=", "hangar=0", "hangar=True", "modrinth=true&modrinth=false", "hangar=true&hangar=true", "source=hangar", "source=unknown", "provider=Modrinth", "offset=0", "hangar_first=1", "hangar_first=", "hangar_offset=10001", "modrinth_offset=-1", "hangar_offset=%2B1", "modrinth_offset=", "hangar_offset=1&hangar_offset=2", "limit=0", "limit=25", "limit=1.2", "limit=1&limit=24", "limit=%2B24", "q=a&q=b", "compatible_only=", "release_only=maybe"} {
+	for _, raw := range []string{"curseforge=1", "curseforge_offset=-1", "curseforge_offset=10001", "provider_turn=3", "curseforge=true&curseforge=false", "modrinth=", "hangar=0", "hangar=True", "modrinth=true&modrinth=false", "hangar=true&hangar=true", "source=hangar", "source=unknown", "provider=Modrinth", "offset=0", "hangar_first=1", "hangar_first=", "hangar_offset=10001", "modrinth_offset=-1", "hangar_offset=%2B1", "modrinth_offset=", "hangar_offset=1&hangar_offset=2", "limit=0", "limit=25", "limit=1.2", "limit=1&limit=24", "limit=%2B24", "q=a&q=b", "compatible_only=", "release_only=maybe"} {
 		q, _ := url.ParseQuery(raw)
 		if err := ValidatePluginDiscoverQuery(q); err == nil {
 			t.Fatal("accepted", raw)
@@ -59,5 +59,19 @@ func TestPluginProviderRequestsAreExplicit(t *testing.T) {
 		if ValidatePluginIconQuery(query) == nil {
 			t.Fatal("unsafe query", query)
 		}
+	}
+}
+
+func TestCombinedContentResponseContract(t *testing.T) {
+	var plan PluginInstallPlan
+	raw := `{"source":"CurseForge","server":{"instance_id":"jv-a1b2c3","server_type":"fabric","content_kind":"mods","supported":true,"providers":{"modrinth":true,"hangar":false,"curseforge":true}},"artifacts":[{"target":"mods","filename":"example.jar"}]}`
+	if err := json.Unmarshal([]byte(raw), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Server.ContentKind != "mods" || plan.Server.Providers.Hangar || !plan.Server.Providers.CurseForge || len(plan.Artifacts) != 1 || plan.Artifacts[0].Target != "mods" {
+		t.Fatal(plan)
+	}
+	if !ValidPluginIdentity("CurseForge", "123") || ValidPluginIdentity("CurseForge", "0") || ValidPluginIdentity("CurseForge", "../123") {
+		t.Fatal("CurseForge provider identity")
 	}
 }

@@ -38,7 +38,7 @@ func validPluginIdentity(source, id string) bool {
 	switch pluginSource(source) {
 	case "Modrinth":
 		return modrinthPluginID.MatchString(id)
-	case "Hangar":
+	case "Hangar", "CurseForge":
 		n, err := strconv.ParseInt(id, 10, 64)
 		return hangarIDPattern.MatchString(id) && err == nil && n > 0
 	}
@@ -71,6 +71,8 @@ func resolveProviderPluginInstallPlan(ctx context.Context, server pluginServerCo
 	switch pluginSource(source) {
 	case "Modrinth":
 		return resolvePluginInstallPlan(ctx, server, path, project, version)
+	case "CurseForge":
+		return resolveCurseForgeInstallPlan(ctx, server, path, project, version)
 	case "Hangar":
 		return resolveHangarPluginInstallPlan(ctx, server, path, project, version)
 	}
@@ -144,12 +146,17 @@ func validPluginDownloadMetadata(a pluginInstallArtifact) bool {
 	switch pluginSource(a.Source) {
 	case "Modrinth":
 		return safePluginArtifactURL(a.URL) && pluginHashPattern.MatchString(a.SHA512)
+	case "CurseForge":
+		return safeCurseForgeArtifactURL(a.URL) && curseForgeSHA1.MatchString(a.SHA1)
 	case "Hangar":
 		return safeHangarArtifactURL(a.URL) && hangarHashPattern.MatchString(a.SHA256)
 	}
 	return false
 }
 func fingerprintPluginHash(a pluginInstallArtifact) string {
+	if pluginSource(a.Source) == "CurseForge" {
+		return a.SHA1
+	}
 	if pluginSource(a.Source) == "Hangar" {
 		return a.SHA256
 	}
@@ -298,7 +305,7 @@ func resolveHangarPluginInstallPlan(ctx context.Context, server pluginServerCont
 			a.Satisfied, a.ExistingFilename, a.ExistingHash, a.PluginName, a.Main = "JustVoxel managed", filename, hash, identity.Name, identity.Main
 		} else {
 			for _, e := range manifest.Artifacts {
-				if pluginIdentity(e.Source, e.ProjectID) != key {
+				if pluginTarget(e.Target) != "plugins" || pluginIdentity(e.Source, e.ProjectID) != key {
 					continue
 				}
 				if a.Requested {
@@ -413,7 +420,7 @@ func validPluginIconQuery(query url.Values) bool {
 	if !validPluginIdentity(source, query.Get("project_id")) {
 		return false
 	}
-	return source != "Hangar" || len(query["icon_url"]) == 0
+	return source != "CurseForge" && (source != "Hangar" || len(query["icon_url"]) == 0)
 }
 
 type hangarFileInfo struct {

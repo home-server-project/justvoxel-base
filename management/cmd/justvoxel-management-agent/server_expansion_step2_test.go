@@ -17,7 +17,7 @@ func TestSpigotProviderCapabilitySeparation(t *testing.T) {
 		t.Fatal("PAPER is not Spigot evidence")
 	}
 	for _, software := range []string{"vanilla", "forge", "fabric", "neoforge", "quilt", "bedrock"} {
-		if javaServerPluginsWorkspace(software) || len(pluginLoaders(software)) != 0 {
+		if javaServerPluginsWorkspace(software) || (javaServerContentKind(software) == "" && len(pluginLoaders(software)) != 0) {
 			t.Fatalf("Bukkit workspace exposed for %s", software)
 		}
 	}

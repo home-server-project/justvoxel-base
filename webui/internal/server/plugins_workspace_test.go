@@ -190,7 +190,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	discover := behavior[project:installed]
-	for _, want := range []string{`interactiveCard(card, project.title, () => reviewRejection`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = ["Modrinth", "Hangar"].includes(project.source) && !managed && !project.installed && project.install_available`, `reviewPlugin(project.project_id, version.id, project, readOnlyReview)`} {
+	for _, want := range []string{`interactiveCard(card, project.title, () => reviewRejection`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && project.install_available`, `reviewPlugin(project.project_id, version.id, project, readOnlyReview)`} {
 		if !strings.Contains(discover, want) {
 			t.Fatalf("Discover summary or Info missing %s", want)
 		}
@@ -622,7 +622,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 	for _, want := range []string{
 		`identity.append(identityTile(name, projectID, iconURL, source), text("h3", name))`,
 		`header.append(identityTile(name, projectID, iconURL, source), copy)`,
-		`const iconProjectID = ["Modrinth", "Hangar"].includes(project.source) ? project.project_id : undefined;`,
+		`const iconProjectID = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) ? project.project_id : undefined;`,
 		`overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed && !managed ? installedStatus() : null, project.icon_url || "", project.source)`,
 		`}, iconProjectID, project.icon_url || "", project.source)`,
 		`overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type,`,
@@ -834,7 +834,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 		t.Fatal("plugin workspace missing")
 	}
 	js = js[start:end]
-	for _, want := range []string{`aria-label="Search plugins"`, `placeholder="Search plugins"`, `role="switch" name="modrinth" data-plugins-modrinth checked`, `role="switch" name="hangar" data-plugins-hangar>Hangar`, `>Compatible only`, `>Release only`} {
+	for _, want := range []string{`aria-label="Search plugins or mods"`, `placeholder="Search plugins or mods"`, `role="switch" name="modrinth" data-plugins-modrinth disabled`, `role="switch" name="hangar" data-plugins-hangar disabled><img`, `>Compatible only`, `>Release only`} {
 		if !strings.Contains(header, want) {
 			t.Fatal("toolbar control missing", want)
 		}
@@ -860,7 +860,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 	if page < 0 || previous <= page || next <= previous {
 		t.Fatal("pagination order changed")
 	}
-	for _, want := range []string{`display:flex;flex-direction:column;gap:.55rem;flex:1`, `.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:nowrap`, `flex:1 1 120px`, `.plugins-search-filters{display:flex;flex:none;align-items:center;gap:.5rem;margin-left:auto}`, `--plugins-card-height:144px`, `height:var(--plugins-card-height)`, `.plugins-result-card.is-selected{border-color:var(--jv-success)`, `color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))`, `.plugins-result-card:focus-visible`, `justify-content:flex-end;gap:.6rem;margin-top:auto`, `@container(max-width:680px){.plugins-search{flex-wrap:wrap}`} {
+	for _, want := range []string{`display:flex;flex-direction:column;gap:.55rem;flex:1`, `.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:wrap`, `flex:1 1 38%`, `.plugins-search-filters{display:flex;flex:1 1 auto;flex-wrap:wrap;min-width:0;align-items:center;gap:.5rem;margin-left:auto}`, `--plugins-card-height:144px`, `height:var(--plugins-card-height)`, `.plugins-result-card.is-selected{border-color:var(--jv-success)`, `color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))`, `.plugins-result-card:focus-visible`, `justify-content:flex-end;gap:.6rem;margin-top:auto`, `@container(max-width:680px){.plugins-search{flex-wrap:wrap}`} {
 		if !strings.Contains(css, want) {
 			t.Fatal("approved layout rule missing", want)
 		}
@@ -1034,7 +1034,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
         const installation = await pluginRequest("operation", null, controller.signal);
         if (current !== generation) return;
         if (!pluginInventorySafe(installation.operation)) {
-          state.textContent = "Plugin operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
+          state.textContent = "Managed content operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
           inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
           return;
         }
@@ -1057,7 +1057,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
 	}
 	for _, want := range []string{
 		`const refreshWorkspace = () => globalThis.justVoxelServerSelection(pluginsDialog.querySelector("[data-server-selector-slot]"), true)
-    .then(() => { refreshCurseForgeStatus(); resetCursors(); load(); }).catch(error => { if (state) state.textContent = error.message; });`,
+    .then(async () => { await refreshCurseForgeStatus(); resetCursors(); load(); }).catch(error => { if (state) state.textContent = error.message; });`,
 		`pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", refreshWorkspace)`,
 		`pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener("click"`,
 		`setupWorkspaceWindow(pluginsDialog, { onOpen: () => { updateCapacity(false); refreshWorkspace(); resumePluginInstall(); }`,
@@ -1121,11 +1121,11 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		}
 	}
 	review := between("  const reviewPlugin =", "  const resumePluginInstall =")
-	if strings.Count(review, `showPanel("Plugin installation", true)`) != 2 {
+	if strings.Count(review, "showPanel(`${contentSingular() === \"mod\" ? \"Mod\" : \"Plugin\"} installation`, true)") != 2 {
 		t.Fatal("review preparation and review must allow backdrop dismissal")
 	}
 	for _, area := range []string{between("  const showOperation =", "  const pollOperation ="), between("  const applyPlugin =", "  const readableSize ="), between("  const panelError =", "  const showOperation =")} {
-		if (!strings.Contains(area, `showPanel();`) && !strings.Contains(area, `showPanel(lifecycle ? "Plugin management" : "Plugin installation", false, sameOperation);`)) || strings.Contains(area, `showPanel("Plugin installation", true)`) || strings.Contains(area, "overlayDismissible = true") {
+		if (!strings.Contains(area, `showPanel();`) && !strings.Contains(area, "showPanel(lifecycle ? \"Plugin management\" : `${contentSingular() === \"mod\" ? \"Mod\" : \"Plugin\"} installation`, false, sameOperation);")) || strings.Contains(area, "showPanel(`${contentSingular() === \"mod\" ? \"Mod\" : \"Plugin\"} installation`, true)") || strings.Contains(area, "overlayDismissible = true") {
 			t.Fatal("operation rendering or submission allowed backdrop dismissal")
 		}
 	}
@@ -1271,7 +1271,7 @@ func TestPluginsWorkspaceApprovedLiveSearchAndSharedTabs(t *testing.T) {
 func TestPluginsWorkspaceStableOperationIdentity(t *testing.T) {
 	script := pluginWorkspaceScript(t)
 	operation := pluginScriptSection(t, script, "  const showOperation =", "  const pollOperation =")
-	for _, want := range []string{`const sameOperation = !panel.hidden && operationViewID === operation.operation_id`, `showPanel(lifecycle ? "Plugin management" : "Plugin installation", false, sameOperation)`, `if (!sameOperation) {`, `operationViewID = operation.operation_id`} {
+	for _, want := range []string{`const sameOperation = !panel.hidden && operationViewID === operation.operation_id`, "showPanel(lifecycle ? \"Plugin management\" : `${contentSingular() === \"mod\" ? \"Mod\" : \"Plugin\"} installation`, false, sameOperation)", `if (!sameOperation) {`, `operationViewID = operation.operation_id`} {
 		if !strings.Contains(operation, want) {
 			t.Fatal("operation identity lifecycle missing", want)
 		}
@@ -1380,7 +1380,7 @@ const pluginRequest = async (route) => { requests.push(route); if (route !== "op
  }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("operation gates: %v\n%s", err, output)
 	}
@@ -1429,7 +1429,7 @@ panel.hidden = true; showOperation({...op,operation_id:"two"});
 assert.equal(headerCount,3);
 }
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("operation DOM lifecycle: %v\n%s", err, output)
 	}
@@ -1457,7 +1457,7 @@ assert(prevented); assert.equal(timers.size,0); assert.equal(loads,2);
 for (const filter of filterEvents) { events.input(); filter(); assert.equal(timers.size,0); }
 assert.equal(loads,6);
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("live plugin search: %v\n%s", err, output)
 	}
@@ -1493,7 +1493,7 @@ func TestPluginWorkspaceApprovedPolish(t *testing.T) {
 		}
 	}
 	review := pluginScriptSection(t, script, "  const reviewPlugin =", "  const resumePluginInstall =")
-	for _, want := range []string{`project?.project_id === plan.project_id ? project.icon_url || "" : undefined`, `Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates.`} {
+	for _, want := range []string{`project?.project_id === plan.project_id ? project.icon_url || "" : undefined`, `This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server.`} {
 		if !strings.Contains(review, want) {
 			t.Fatal("Discover review explanation/icon missing", want)
 		}
@@ -1540,7 +1540,7 @@ func TestPluginsWorkspaceIconSearchURLValidationAndForwarding(t *testing.T) {
 }
 
 func TestPluginWorkspaceLoaderReviewRejectionIsForwardedWithoutInstall(t *testing.T) {
-	message := "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates."
+	message := "This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server."
 	client := &fakePluginsInstallAPI{planError: &api.ResponseError{StatusCode: http.StatusConflict, Message: message}}
 	app, err := New(client, Config{})
 	if err != nil {
@@ -1575,7 +1575,7 @@ assert.equal(new URL(installed.image.src, "https://appliance.example").searchPar
 assert.equal(identityTile("Manual", undefined).image, undefined);
 assert.equal(new URL(identityTile("No search icon", "root", "").image.src, "https://appliance.example").searchParams.has("icon_url"), false);
 `
-	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
+	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("same-origin icon delivery: %v\n%s", err, output)
 	}
 }
@@ -1665,7 +1665,7 @@ const hangarURL=new URL(hangarImage.src,"https://appliance.example");assert.equa
 hangarImage.emit("error");assert.equal(hangarImage.removed,true);assert.equal(hangarTile.textContent,"HA");assert.equal(hangarImage.requests.length,1);assert(!hangarTile.classList.contains("has-logo"));
 assert.equal(identityTile("Manual",undefined).image,undefined);
 `
-	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
+	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("icon fallback: %v\n%s", err, output)
 	}
 }
@@ -1694,7 +1694,7 @@ assert.equal(activations,2); assert.equal(cards[0].classList.contains("is-select
 closePanel(); assert.equal(panel.hidden,true);assert.equal(workspaceShell.inert,false);
 for(const c of cards){assert.equal(c.classList.contains("is-selected"),false);assert.equal(c.attrs["aria-pressed"],"false");}
 `
-	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
+	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("selection lifecycle: %v\n%s", err, output)
 	}
 	css, err := assets.ReadFile("static/app.css")
@@ -1832,17 +1832,17 @@ func TestGenericPluginWorkspaceOperationAcceptsAllFourMutations(t *testing.T) {
 func TestPluginsDiscoverSourceControlsAndReadOnlyCards(t *testing.T) {
 	script := pluginWorkspaceScript(t)
 	header, _ := assets.ReadFile("templates/header.html")
-	for _, want := range []string{`name="modrinth" data-plugins-modrinth checked`, `name="hangar" data-plugins-hangar>Hangar`, `placeholder="Search plugins"`} {
+	for _, want := range []string{`name="modrinth" data-plugins-modrinth disabled`, `name="hangar" data-plugins-hangar disabled><img`, `placeholder="Search plugins or mods"`} {
 		if !strings.Contains(string(header), want) {
 			t.Fatal("source control", want)
 		}
 	}
-	for _, bad := range []string{`aria-readonly="true"`, `data-plugins-hangar disabled`, `plugins-source-fixed`, `plugins-source-unavailable`} {
+	for _, bad := range []string{`aria-readonly="true"`, `plugins-source-fixed`, `plugins-source-unavailable`} {
 		if strings.Contains(string(header), bad) {
 			t.Fatal("placeholder remains", bad)
 		}
 	}
-	for _, want := range []string{`modrinth: String(form.elements.modrinth.checked)`, `hangar: String(form.elements.hangar.checked)`, `modrinth_offset: String(position.modrinth_offset)`, `hangar_offset: String(position.hangar_offset)`, `hangar_first: String(position.hangar_first)`, `input[name="modrinth"],input[name="hangar"]`, `Enable Modrinth or Hangar to browse plugins.`, `resetCursors();`} {
+	for _, want := range []string{`modrinth: String(providerServerKey !== null && form.elements.modrinth.checked)`, `hangar: String(providerServerKey !== null && form.elements.hangar.checked)`, `modrinth_offset: String(position.modrinth_offset)`, `hangar_offset: String(position.hangar_offset)`, `hangar_first: String(position.hangar_first)`, `input[name="modrinth"],input[name="hangar"]`, `Enable a catalog provider to browse ${contentPlural()}.`, `resetCursors();`} {
 		if !strings.Contains(script, want) {
 			t.Fatal("source/cursor request", want)
 		}
@@ -1856,6 +1856,7 @@ func TestPluginsDiscoverSourceControlsAndReadOnlyCards(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 const imageRequests = [];
+let acceptedServer={content_kind:"plugins"};const contentSingular=()=>"plugin";
 class Node {
  constructor(tag) { this.tag=tag; this.children=[]; this.events={}; this.attrs={}; this.dataset={}; this.className=""; this.textContent=""; this.classList={add:(c)=>{this.className+=" "+c},remove:()=>{},toggle:()=>{}}; }
  append(...nodes) { this.children.push(...nodes); }
@@ -1944,7 +1945,7 @@ for (const root of [modrinth,panelBody]) {
  assert.equal(tiles[0].children.filter(n=>n.tag==="img").length,1);
 }
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("catalog card source boundary: %v\n%s", err, out)
 	}
@@ -1975,7 +1976,7 @@ assert.equal(pageCursors.length,3);
 for(const c of controls){pageIndex=2;cursor=third;nextCursor=third;c.change();assert.equal(pageIndex,0);assert.deepEqual(cursor,original);assert.deepEqual(pageCursors,[original]);assert.equal(nextCursor,null);}
 assert.equal(loads,8);
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("composite cursor navigation: %v\n%s", err, out)
 	}
@@ -1986,68 +1987,45 @@ func TestPluginsDiscoverRequestsEnabledSources(t *testing.T) {
 	loader := pluginScriptSection(t, script, "  const discoverQuery =", "  const discoverCapacity =")
 	program := `
 const assert=require("node:assert/strict");
-const requests=[];
-const elements={q:{value:"query"},compatible_only:{checked:true},release_only:{checked:true},modrinth:{checked:true},hangar:{checked:false}};
-const form={elements,querySelectorAll:()=>Object.values(elements),querySelector:selector=>{
- assert.equal(selector,'input[name="hangar"]');return elements.hangar;
-}};
-const state={},context={},pagination={},previous={},next={};
-const pageLabel={};
-let pageCursors=[],totalPages=1,discoverServerKey=null;const resetCursors=()=>{throw new Error("unexpected context reset")};
-const document={body:{classList:{contains:()=>true}}};
-const pluginsDialog={};
-const curseForgeSection={},curseForgeSwitch={},curseForgeNotice={contains:()=>false},syncCurseForgeInfo=()=>{};
-const results={classList:{toggle:()=>{}},replaceChildren:()=>{},append:()=>{throw new Error("unexpected result")}};
+const requests=[];let resets=0,providerServerKey=null,acceptedServer=null,discoverServerKey=null,curseForgeConfigured=false;
+const elements={q:{value:"query",setAttribute(){}},compatible_only:{checked:true},release_only:{checked:true},modrinth:{checked:false},hangar:{checked:false},curseforge:{checked:false}};
+const form={elements,querySelectorAll:()=>Object.values(elements)};
+const state={},context={},pagination={},previous={},next={},pageLabel={};
+let pageCursors=[],totalPages=1;const resetCursors=()=>{resets++};
+const document={body:{classList:{contains:()=>true}}};const pluginsDialog={};
+const curseForgeSection={},curseForgeSwitch=elements.curseforge,curseForgeNotice={contains:()=>false},syncCurseForgeInfo=()=>{};
+const results={classList:{toggle(){}},replaceChildren(){},append(){throw new Error("unexpected result")}};
 let generation=0,controller=null,tab="discover",pageLimit=1,pageIndex=0,nextCursor=null,total=0;
-let cursor={modrinth_offset:8,hangar_offset:3,hangar_first:true};
-const clearInventoryTimer=()=>{};
-const renderProject=()=>{throw new Error("unexpected card")};
-const server={supported:true,minecraft_version:"1.21.8",server_type:"paper",server_software:"Paper"};
-const window={location:{assign:()=>{throw new Error("unexpected navigation")}}};
+let cursor={modrinth_offset:8,hangar_offset:3,curseforge_offset:2,provider_turn:1,hangar_first:true};
+const clearInventoryTimer=()=>{},renderProject=()=>{throw new Error("unexpected card")};
+const server={instance_id:"jv-paper1",supported:true,minecraft_version:"1.21.8",server_type:"paper",server_software:"Paper",content_kind:"plugins",providers:{modrinth:true,hangar:true,curseforge:true}};
+const window={location:{assign(){throw new Error("unexpected navigation")}}};
+const contentPlural=()=>acceptedServer?.content_kind==="mods"?"mods":"plugins",contentSingular=()=>acceptedServer?.content_kind==="mods"?"mod":"plugin";
 const fetch=async(url,options)=>{
- requests.push({url,options});
- return {ok:true,status:200,json:async()=>({server,modrinth:elements.modrinth.checked,hangar:server.server_type!=="spigot"&&elements.hangar.checked,projects:[],cursor,next_cursor:null,total})};
+ requests.push({url,options});return {ok:true,status:200,json:async()=>({server,modrinth:elements.modrinth.checked,hangar:elements.hangar.checked,curseforge:curseForgeConfigured&&elements.curseforge.checked,projects:[],cursor,next_cursor:null,total})};
 };
 ` + loader + `
 (async()=>{
+ assert.equal(acceptDiscoverContext(server),false);assert(elements.modrinth.checked);assert(elements.hangar.checked);assert(!elements.curseforge.checked);
  for(const [m,h] of [[true,false],[false,true],[true,true],[false,false]]){
-  elements.modrinth.checked=m;elements.hangar.checked=h;
-  const before=controller;
-  const requestCount=requests.length;
-  await load();
-  assert.equal(requests.length,requestCount+1);
-  if(before)assert(before.signal.aborted);
-  const req=requests.at(-1);assert(req.url.startsWith("/api/plugins/workspace/discover?"));
-  const q=new URL(req.url,"https://appliance.example").searchParams;
-  assert.equal(q.get("modrinth"),String(m));assert.equal(q.get("hangar"),String(h));
-  assert.equal(q.get("modrinth_offset"),"8");assert.equal(q.get("hangar_offset"),"3");assert.equal(q.get("hangar_first"),"true");
+  elements.modrinth.checked=m;elements.hangar.checked=h;const before=controller;await load();if(before)assert(before.signal.aborted);
+  const req=requests.at(-1),q=new URL(req.url,"https://appliance.example").searchParams;
+  assert.equal(q.get("modrinth"),String(m));assert.equal(q.get("hangar"),String(h));assert.equal(q.get("curseforge"),"false");
+  assert.equal(q.get("modrinth_offset"),"8");assert.equal(q.get("hangar_offset"),"3");assert.equal(q.get("curseforge_offset"),"2");assert.equal(q.get("provider_turn"),"1");
   assert.equal(q.get("q"),"query");assert.equal(q.get("limit"),"1");assert.equal(req.options.credentials,"same-origin");
-  assert(!elements.modrinth.disabled);assert(!elements.hangar.disabled);
  }
- // The local workspace request is allowed; neither provider is enabled upstream.
- assert.equal(new URL(requests.at(-1).url,"https://appliance.example").searchParams.get("modrinth"),"false");
- assert.equal(new URL(requests.at(-1).url,"https://appliance.example").searchParams.get("hangar"),"false");
- assert.equal(state.textContent,"Enable Modrinth or Hangar to browse plugins.");
- assert.equal(pageLabel.textContent,"Page 1 of 1");
- assert(next.disabled);assert(previous.disabled);
- elements.modrinth.checked=true;elements.hangar.checked=true;
- total=25;pageLimit=8;
- await load();assert.equal(pageLabel.textContent,"Page 1 of 4");
- pageIndex=1;
- await load();assert.equal(pageLabel.textContent,"Page 2 of 4");assert(!previous.disabled);
- total=0;pageIndex=0;
- await load();assert.equal(pageLabel.textContent,"Page 1 of 1");
- // A new selected-server context starts with no cursor history.
- discoverServerKey=null;
- server.server_type="spigot";server.server_software="Spigot";
- elements.modrinth.checked=true;elements.hangar.checked=true;
- await load();assert(elements.hangar.disabled);assert(!elements.hangar.checked);assert(!elements.modrinth.disabled);
- await load();
- const spigotQuery=new URL(requests.at(-1).url,"https://appliance.example").searchParams;
- assert.equal(spigotQuery.get("modrinth"),"true");assert.equal(spigotQuery.get("hangar"),"false");
+ assert.equal(state.textContent,"Enable a catalog provider to browse plugins.");
+ curseForgeConfigured=true;server.server_type="spigot";server.providers.hangar=false;assert.equal(acceptDiscoverContext(server),false);
+ assert(!elements.hangar.checked);assert(elements.hangar.disabled);assert(elements.curseforge.checked);await load();
+ assert.equal(new URL(requests.at(-1).url,"https://appliance.example").searchParams.get("curseforge"),"true");
+ server.server_type="fabric";server.content_kind="mods";acceptDiscoverContext(server);await load();assert.equal(elements.q.placeholder,"Search mods");assert(elements.hangar.disabled);
+ server.server_type="vanilla";server.content_kind="";server.supported=false;server.message="Vanilla does not support plugins or mods";acceptDiscoverContext(server);await load();
+ for(const name of ["modrinth","hangar","curseforge"]){assert(elements[name].disabled);assert(!elements[name].checked)}
+ assert.equal(state.textContent,server.message);assert(resets>=4);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
+
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("source requests: %v\n%s", err, out)
 	}
@@ -2091,11 +2069,11 @@ func TestPluginsPageCursorInvalidationEvents(t *testing.T) {
 	workspace := pluginScriptSection(t, script, "  const refreshWorkspace = () => globalThis.justVoxelServerSelection(pluginsDialog", "  // Role discovery")
 	program := `
 const assert=require("node:assert/strict");
-const eventNode=()=>({events:{},addEventListener(event,fn){this.events[event]=fn}});
+const eventNode=()=>({setAttribute(){},events:{},addEventListener(event,fn){this.events[event]=fn}});
 const pageLabel={};let totalPages=1,pageLimit=8,capacityTimer=null,searchTimer=null,loads=0,resumes=0,closes=0,options;
 let wantedCapacity=8;const discoverCapacity=()=>wantedCapacity;
 const controls=["compatible_only","release_only","modrinth","hangar"].map(name=>({...eventNode(),name}));
-const form={...eventNode(),elements:{q:eventNode()},querySelectorAll:()=>controls};
+const form={...eventNode(),elements:{q:eventNode(),modrinth:eventNode(),hangar:eventNode(),curseforge:eventNode()},querySelectorAll:()=>controls};
 const previous=eventNode(),next=eventNode(),pluginsOpen=eventNode(),refresh=eventNode(),close=eventNode();
 const tabs=[{...eventNode(),dataset:{pluginsTab:"discover"},setAttribute:()=>{}},{...eventNode(),dataset:{pluginsTab:"installed"},setAttribute:()=>{}}];
 const selectorSlot={};let selectionRefreshes=0,curseForgeRefreshes=0;
@@ -2109,13 +2087,13 @@ const clearTimeout=()=>{},setTimeout=(fn)=>{searchTimer=fn;return fn},clearInven
 ` + cursors + `
 const load=()=>{loads++;generation++;controller?.abort();};
 ` + capacity + workspace + `
-let discoverServerKey=null;
+let discoverServerKey=null,providerServerKey=null,acceptedServer=null;const curseForgeConfigured=false;
 ` + pluginScriptSection(t, script, "  const acceptDiscoverContext =", "  const load =") + `
 const second={modrinth_offset:7,hangar_offset:4,hangar_first:true};
 const dirty=()=>{pageCursors=[firstCursor(),second];pageIndex=1;cursor=second;nextCursor=second;totalPages=85;pageLabel.textContent="Page 2 of 85";controller=new AbortController()};
 const clean=()=>{assert.equal(pageIndex,0);assert.deepEqual(cursor,firstCursor());assert.deepEqual(pageCursors,[firstCursor()]);assert.equal(nextCursor,null);assert.equal(pageLabel.textContent,"Page 1 of 1")};
 (async()=>{
-assert(acceptDiscoverContext({server_software:"Paper",minecraft_version:"1"}));
+assert(!acceptDiscoverContext({server_software:"Paper",minecraft_version:"1"}));
 dirty();assert(!acceptDiscoverContext({server_software:"Future",minecraft_version:"2"}));clean();
 dirty();const refreshing=refresh.events.click();assert.equal(selectionRefreshes,1);assert.equal(curseForgeRefreshes,0);assert.equal(loads,0);assert.equal(pageIndex,1);
 await refreshing;clean();assert.equal(curseForgeRefreshes,1);assert.equal(loads,1);
@@ -2124,14 +2102,14 @@ dirty();const searchSignal=controller.signal;form.elements.q.events.input();clea
 dirty();let prevented=false;form.events.submit({preventDefault:()=>prevented=true});clean();assert(prevented);
 dirty();wantedCapacity=12;updateCapacity();clean();assert.equal(pageLimit,12);
 dirty();const closeSignal=controller.signal;options.onClose();assert.equal(curseForgeKey.value,"");clean();assert(closeSignal.aborted);assert.equal(closes,1);
-dirty();options.onOpen();assert.equal(resumes,1);await Promise.resolve();clean();assert.equal(selectionRefreshes,2);assert.equal(curseForgeRefreshes,2);
+dirty();options.onOpen();assert.equal(resumes,1);await new Promise(resolve=>setImmediate(resolve));clean();assert.equal(selectionRefreshes,2);assert.equal(curseForgeRefreshes,2);
 dirty();tabs[1].events.click();clean();assert.equal(tab,"installed");tabs[0].events.click();clean();assert.equal(tab,"discover");
 // Normal Previous/Next still navigate the composite cursor history.
 nextCursor=second;next.events.click();assert.deepEqual(cursor,second);assert.equal(pageIndex,1);
 previous.events.click();assert.deepEqual(cursor,firstCursor());assert.equal(pageIndex,0);
 })().catch(error=>{console.error(error);process.exitCode=1});
 `
-	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
+	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("cursor invalidation: %v\n%s", err, out)
 	}
 }
@@ -2150,7 +2128,7 @@ const stopPolling=()=>{throw new Error("installed project entered installation")
  assert.equal(infos,2);assert.equal(requests,0);
 })().catch(error=>{console.error(error);process.exitCode=1});
 `
-	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
+	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("installed review guard: %v\n%s", err, out)
 	}
 }

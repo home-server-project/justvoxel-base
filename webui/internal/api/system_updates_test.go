@@ -110,3 +110,20 @@ func TestAdminSystemUpdateRebootStatusReadsCountdown(t *testing.T) {
 		t.Fatalf("unexpected reboot status: %#v", result)
 	}
 }
+
+func TestAdminSystemUpdateForceUsesFixedEmptyRequestAndDecodesRecovery(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != adminSystemUpdatesPath+"/force" || r.URL.RawQuery != "" || r.Body != nil {
+			t.Fatal("unexpected recovery capability", r)
+		}
+		if r.Header.Get("Authorization") != "Bearer session-token" {
+			t.Fatal("missing authorization")
+		}
+		body := `{"ok":true,"read_only":false,"reboot_required":true,"activation_pending":true,"activation_failed":true,"activation_recoverable":false,"expected_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","recovery_status":"finalized","recovery_message":"Update recovery is verified.","running":{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+	status, err := client.AdminSystemUpdateForce(context.Background(), "session-token")
+	if err != nil || !status.ActivationFailed || status.ActivationRecoverable || status.RecoveryStatus != "finalized" {
+		t.Fatal(status, err)
+	}
+}

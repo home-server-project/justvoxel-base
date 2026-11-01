@@ -157,7 +157,7 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	if err := migrateOperationDiagnostics(legacyOperationLogsDir, logsDir); err != nil {
 		return nil, err
 	}
-	for _, category := range []string{"migration-logs", "restore-logs", "plugins-logs", "reset-logs", "network-logs", "support"} {
+	for _, category := range []string{"migration-logs", "restore-logs", "plugins-logs", "reset-logs", "network-logs", "update-logs", "support"} {
 		if err := ensurePrivateDirectory(filepath.Join(logsDir, category)); err != nil {
 			return nil, err
 		}

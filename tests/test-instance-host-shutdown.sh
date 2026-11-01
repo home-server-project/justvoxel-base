@@ -61,6 +61,10 @@ elif tool=='management-agent':
     if a[0]=='system-update-activate':
         assert a[1]=='sha256:'+'b'*64
         sys.exit(1 if d.get('activation_fail') else 0)
+    if a[0]=='system-update-expect':
+        assert a[1]=='sha256:'+'b'*64
+        assert not d['running'], 'expectation belongs immediately before reboot'
+        sys.exit(1 if d.get('expectation_fail') else 0)
     assert a[0]=='instance-version-backup'
     assert not d['running'], 'backup must be cold across the appliance'
     sys.exit(1 if a[1]==d['backup_fail'] else 0)
@@ -150,6 +154,8 @@ else: sys.exit(2)
         self.assertEqual([c for c in self.calls() if c[0]=='management-agent'], [
             ['management-agent', 'system-update-activate',
              'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'],
+            ['management-agent', 'system-update-expect',
+             'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'],
         ])
         self.assertEqual([c for c in self.calls() if c[:2]==['management-agent', 'instance-version-backup']], [])
         self.assertIn(['systemctl', 'reboot'], self.calls())
@@ -205,6 +211,30 @@ else: sys.exit(2)
         for helper, args in (('admin-system-actions-json', ('apply', 'reboot', '--confirm-players')),
                              ('admin-system-update-reboot-json', ('request', '--confirm-players'))):
             self.run_helper(helper, *args, rc=3)
+        self.assertEqual(self.changed('stop'), [])
+        self.assertFalse(any(c[0]=='systemd-run' for c in self.calls()))
+
+    def test_java_player_response_plain_and_sgr_accepted(self):
+        self.instances([IDS[0]])
+        for suffix in ('', '\x1b[0m'):
+            with self.subTest(suffix=repr(suffix)):
+                self.data['players'][IDS[0]] = 'There are 0 of a max of 10 players online:' + suffix
+                self.save()
+                result = self.run_helper('instance-host-shutdown-prepare', 'check')
+                self.assertEqual(result['online'], 0)
+                self.assertEqual(result['players'], [])
+                self.assertTrue(result['instances'][0]['running'])
+
+    def test_java_non_sgr_escape_never_stops_or_queues(self):
+        self.instances([IDS[0]])
+        for response in ('There are 0 of a max of 10 players online:\x1b[2J',
+                         'There are 1 of a max of 10 players online: Alex\x1b[2J'):
+            with self.subTest(response=repr(response)):
+                self.data['players'][IDS[0]] = response
+                self.save()
+                self.run_helper('instance-host-shutdown-prepare', 'check', rc=1)
+                self.run_helper('admin-system-actions-json', 'apply', 'reboot', rc=3)
+                self.run_helper('admin-system-update-reboot-json', 'request', rc=3)
         self.assertEqual(self.changed('stop'), [])
         self.assertFalse(any(c[0]=='systemd-run' for c in self.calls()))
 
@@ -289,7 +319,17 @@ else: sys.exit(2)
         backup = next(i for i,c in enumerate(calls) if c[:2]==['management-agent','instance-version-backup'])
         self.assertLess(activate, stop)
         self.assertLess(stop, backup)
-        self.assertLess(backup, calls.index(['systemctl','reboot']))
+        expect = next(i for i,c in enumerate(calls) if c[:2]==['management-agent','system-update-expect'])
+        self.assertLess(backup, expect)
+        self.assertLess(expect, calls.index(['systemctl','reboot']))
+
+    def test_expectation_failure_cancels_reboot_and_restores_running_servers(self):
+        self.instances(IDS[:2])
+        self.data['expectation_fail'] = True
+        self.save()
+        self.run_helper('system-update-reboot-worker', rc=6)
+        self.assertNotIn(['systemctl', 'reboot'], self.calls())
+        self.assert_running(IDS[:2])
 
     def test_player_confirmation_does_not_activate_or_queue(self):
         self.instances(IDS[:2], {IDS[1]: 'There are 1 of a max of 20 players online: Steve'})

@@ -1241,6 +1241,7 @@ const initSystemUpdateWorkspace = () => {
   const state = systemUpdateDialog.querySelector("[data-system-update-state]");
   const error = systemUpdateDialog.querySelector("[data-system-update-error]");
   const updateButton = systemUpdateDialog.querySelector("[data-system-update-button]");
+  const forceButton = systemUpdateDialog.querySelector("[data-system-update-force]");
   const rebootPanel = systemUpdateDialog.querySelector("[data-system-update-reboot]");
   const rebootTitle = systemUpdateDialog.querySelector("[data-system-update-reboot-title]");
   const backupToggle = systemUpdateDialog.querySelector("[data-system-update-backup]");
@@ -1325,7 +1326,7 @@ const initSystemUpdateWorkspace = () => {
 
   const freshUpdateAvailable = () => latestStatus?.check_state === "update_available";
 
-  const baseRebootLabel = () => freshUpdateAvailable() ? "Update & reboot" : "Reboot into update";
+  const baseRebootLabel = () => !latestStatus?.activation_failed && freshUpdateAvailable() ? "Update & reboot" : "Reboot into update";
 
   const showRebootPlayers = (result) => {
     if (!rebootPlayers) return;
@@ -1346,7 +1347,11 @@ const initSystemUpdateWorkspace = () => {
     const readOnly = Boolean(latestStatus?.read_only);
     const checkState = latestStatus?.check_state || "";
     const canStage = !readOnly && !checking && !updating && !rebootWorkflowActive &&
-      (checkState === "update_available" || checkState === "unknown");
+      (latestStatus?.activation_failed || checkState === "update_available" || checkState === "unknown");
+    if (forceButton) {
+      forceButton.hidden = latestStatus?.activation_failed !== true || latestStatus?.activation_recoverable !== true;
+      forceButton.disabled = readOnly || checking || updating || rebootWorkflowActive;
+    }
     if (updateButton) updateButton.disabled = !canStage;
     if (refreshButton) refreshButton.disabled = checking || updating || rebootWorkflowActive;
     if (backupToggle) {
@@ -1481,7 +1486,9 @@ const initSystemUpdateWorkspace = () => {
     }
 
     if (state) {
-      if (status.read_only) {
+      if (status.activation_failed) {
+        state.textContent = status.recovery_message || "The staged image did not activate on the previous reboot. See Update logs.";
+      } else if (status.read_only) {
         state.textContent = "System updates are unavailable on this read-only deployment.";
       } else if (status.checked) {
         state.textContent = status.message || "Registry check complete.";
@@ -1600,7 +1607,7 @@ const initSystemUpdateWorkspace = () => {
       if (!csrfInput) throw new Error("Update check is unavailable.");
 
       if (state) {
-        state.textContent = local.reboot_required
+        state.textContent = local.activation_failed ? local.recovery_message : local.reboot_required
           ? "An update is staged. Checking the registry for anything newer…"
           : "Checking the registry for updates…";
       }
@@ -1628,7 +1635,7 @@ const initSystemUpdateWorkspace = () => {
       if (availableValue) availableValue.textContent = "Check failed";
       if (availableImage) availableImage.textContent = "";
       if (state) {
-        state.textContent = latestStatus?.reboot_required
+        state.textContent = latestStatus?.activation_failed ? latestStatus.recovery_message : latestStatus?.reboot_required
           ? "Staged update shown. Registry freshness could not be verified."
           : "Running deployment shown. Registry freshness could not be verified.";
       }
@@ -1745,6 +1752,40 @@ const initSystemUpdateWorkspace = () => {
     }
   };
 
+  const forceSystemUpdate = async () => {
+    if (updating || checking || rebootWorkflowActive || !csrfInput || latestStatus?.activation_recoverable !== true) return;
+    if (quickToggle) quickToggle.checked = true;
+    updateWarningText();
+    resetPlayerConfirmation();
+    updating = true;
+    syncActionAvailability();
+    if (state) state.textContent = "Preparing the staged update for another reboot…";
+    if (error) error.hidden = true;
+    try {
+      const response = await fetch("/api/system-updates/force", {
+        method: "POST", credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ csrf: csrfInput.value }).toString(),
+      });
+      if (handleAuthResponse(response)) return;
+      const result = await readResponse(response);
+      if (!response.ok) {
+        // The failed command may have changed deployments. Refresh authority
+        // before deciding whether recovery can still be offered.
+        await loadLocalSystemUpdateStatus();
+        showSystemUpdateError(result.error || "Update recovery failed. See Update logs.", true);
+        return;
+      }
+      renderSystemUpdate(result);
+    } catch (_) {
+      latestStatus = null;
+      showSystemUpdateError("Update recovery status is unavailable. Refresh before continuing.");
+    } finally {
+      updating = false;
+      syncActionAvailability();
+    }
+  };
+
   const workspaceWindow = setupWorkspaceWindow(systemUpdateDialog, {
     onOpen: () => {
       void refreshMinecraftAvailability();
@@ -1764,6 +1805,7 @@ const initSystemUpdateWorkspace = () => {
   });
 
   closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  forceButton?.addEventListener("click", forceSystemUpdate);
   refreshButton?.addEventListener("click", checkSystemUpdate);
   updateButton?.addEventListener("click", () => applySystemUpdate(false));
   rebootButton?.addEventListener("click", requestUpdateReboot);
@@ -5215,7 +5257,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const renderLogs = async (sequence) => {
     const payload = await systemFetchJSON("/api/system/workspace/logs");
     if (!payload || sequence !== loadSequence || !content) return;
-    const groups = ["Setup", "Migration", "Restore", "Plugins", "Reset", "Network", "Support", "Failed units"];
+    const groups = ["Setup", "Migration", "Restore", "Plugins", "Reset", "Network", "Update", "Support", "Failed units"];
     const logs = Array.isArray(payload.logs) ? payload.logs : [];
     const failedUnits = Array.isArray(payload.failed_units) ? payload.failed_units : [];
     const root = document.createElement("div");
@@ -6928,8 +6970,11 @@ if (pluginsDialog && pluginsOpen) {
   const next = pluginsDialog.querySelector("[data-plugins-next]");
   const pageLabel = pluginsDialog.querySelector("[data-plugins-page]");
   let totalPages = 1, discoverServerKey = null;
+  let providerServerKey = null, acceptedServer = null;
+  const contentPlural = () => acceptedServer?.content_kind === "mods" ? "mods" : acceptedServer?.content_kind === "plugins" ? "plugins" : "plugins or mods";
+  const contentSingular = () => acceptedServer?.content_kind === "mods" ? "mod" : "plugin";
   let pageLimit = 8, capacityTimer = null;
-  const firstCursor = () => ({ modrinth_offset: 0, hangar_offset: 0, hangar_first: false });
+  const firstCursor = () => ({ modrinth_offset: 0, hangar_offset: 0, curseforge_offset: 0, provider_turn: 0, hangar_first: false });
   let pageCursors = [firstCursor()], pageIndex = 0;
   const resetCursors = () => { pageCursors = [firstCursor()]; pageIndex = 0; cursor = firstCursor(); nextCursor = null; totalPages = 1; pageLabel.textContent = "Page 1 of 1"; };
   let tab = "discover", cursor = firstCursor(), nextCursor = null, generation = 0, controller = null;
@@ -6946,7 +6991,7 @@ if (pluginsDialog && pluginsOpen) {
     tile.setAttribute("aria-hidden", "true");
     tile.dataset.tone = String(Array.from(name || "?").reduce((sum, char) => sum + char.codePointAt(0), 0) & 3);
     // Search logos get one metadata retry; absent search logos start with metadata.
-    if (typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID)) {
+    if (source !== "CurseForge" && typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID)) {
       const image = document.createElement("img");
       image.alt = "";
       image.decoding = "async";
@@ -7089,10 +7134,10 @@ if (pluginsDialog && pluginsOpen) {
     const badges = document.createElement("div");
     badges.className = "plugins-card-badges";
     const platform = server.server_software || server.server_type;
-    const installedState = project.installed_state === "enabled" ? "Enabled" : project.installed_state === "disabled" ? "Disabled" : "Needs attention";
+    const installedState = project.installed_state === "installed" ? "Present" : project.installed_state === "enabled" ? "Enabled" : project.installed_state === "disabled" ? "Disabled" : "Needs attention";
     const identityBadges = [[version?.version_number, "plugins-badge-version"], [platform, "plugins-badge-server"], [server.minecraft_version && `MC ${server.minecraft_version}`, "plugins-badge-minecraft"]];
     if (project.installed) {
-      identityBadges.push(["Installed", "plugins-badge-installed"], [installedState, project.installed_state === "enabled" ? "plugins-badge-enabled" : project.installed_state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-attention"]);
+      identityBadges.push(["Installed", "plugins-badge-installed"], [installedState, ["enabled", "installed"].includes(project.installed_state) ? "plugins-badge-enabled" : project.installed_state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-attention"]);
     }
     identityBadges.filter(([value]) => value).forEach((badge) => badges.append(pluginBadge(...badge)));
     if (!version || project.metadata_error) card.append(text("p", "Release metadata unavailable", "plugins-card-meta"));
@@ -7131,10 +7176,10 @@ if (pluginsDialog && pluginsOpen) {
       }
       if (project.metadata_error || !version) panelBody.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
     };
-    const iconProjectID = ["Modrinth", "Hangar"].includes(project.source) ? project.project_id : undefined;
+    const iconProjectID = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) ? project.project_id : undefined;
     const managed = project.source === "Modrinth" && ["geyser", "floodgate", "viaversion"].includes(project.slug);
     if (managed) badges.append(text("span", "JustVoxel managed", "plugins-badge"));
-    const installable = ["Modrinth", "Hangar"].includes(project.source) && !managed && !project.installed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.id;
+    const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.id;
     let reviewRejection = "";
     const readOnlyReview = (reason) => {
       reviewRejection = reason;
@@ -7159,12 +7204,12 @@ if (pluginsDialog && pluginsOpen) {
     card.className = "plugins-result-card";
     const name = plugin.name || plugin.filename;
     const projectID = plugin.project_id || plugin.icon_project_id || undefined;
-    const management = plugin.management === "justvoxel" ? "JustVoxel managed" : plugin.management === "plugins" ? "Managed by Plugins" : "Manual / unmanaged";
+    const management = plugin.management === "justvoxel" ? "JustVoxel managed" : plugin.management === "plugins" ? (acceptedServer?.content_kind === "mods" ? "Managed content" : "Managed by Plugins") : "Manual / unmanaged";
     card.append(text("h3", name), text("p", `Version: ${plugin.version || "Unknown"}`, "plugins-card-release"));
     const badges = document.createElement("div");
     badges.className = "plugins-card-badges";
     badges.append(text("span", management, "plugins-badge plugins-management"));
-    const managed = plugin.management === "plugins" && ["enabled", "disabled"].includes(plugin.state);
+    const managed = acceptedServer?.content_kind === "plugins" && plugin.management === "plugins" && ["enabled", "disabled"].includes(plugin.state);
     const stateLabel = managed ? (plugin.state === "disabled" ? "Disabled" : "Enabled") : "";
     const stateClass = plugin.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled";
     if (plugin.management === "plugins") badges.append(pluginBadge("Installed", "plugins-badge-installed"));
@@ -7178,7 +7223,7 @@ if (pluginsDialog && pluginsOpen) {
       overlayHeader(name, "", [[plugin.version || "Version unknown", "plugins-badge-version"], management, [plugin.management === "plugins" && "Installed", "plugins-badge-installed"], [stateLabel, stateClass], [attention && "Needs attention", "plugins-badge-attention"]], projectID, plugin.management === "plugins" ? installedStatus() : null, undefined, plugin.source || "Modrinth");
       overlaySection("JAR").append(text("p", plugin.filename));
       overlaySection("Metadata").append(text("p", plugin.metadata_status || "Unknown"));
-      overlaySection("Management").append(text("p", plugin.management === "justvoxel" ? "Generic Install is unavailable for this component." : plugin.management === "plugins" ? "Lifecycle actions verify the exact recorded JAR. Plugin configuration and data are preserved." : "Plugins will not adopt or overwrite this JAR."));
+      overlaySection("Management").append(text("p", acceptedServer?.content_kind === "mods" ? "Lifecycle actions are not available yet." : plugin.management === "justvoxel" ? "Generic Install is unavailable for this component." : plugin.management === "plugins" ? "Lifecycle actions verify the exact recorded JAR. Plugin configuration and data are preserved." : "Plugins will not adopt or overwrite this JAR."));
       overlaySection("Update status").append(text("p", updateStatus));
       if (plugin.project_id || plugin.version_id) {
         const identity = infoRows(overlaySection("Version details"));
@@ -7205,7 +7250,7 @@ if (pluginsDialog && pluginsOpen) {
   panel.tabIndex = -1;
   panel.hidden = true;
   panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-label", "Plugin installation");
+  panel.setAttribute("aria-label", `${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`);
   panel.setAttribute("aria-modal", "true");
   const panelBody = document.createElement("div");
   panelBody.className = "plugins-install-content";
@@ -7240,7 +7285,7 @@ if (pluginsDialog && pluginsOpen) {
     if (returnFocus?.isConnected) returnFocus.focus();
     else pluginsDialog.querySelector('[data-plugins-tab][aria-selected="true"]')?.focus();
   };
-  const showPanel = (label = "Plugin installation", dismissible = false, preserveIdentity = false) => {
+  const showPanel = (label = `${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, dismissible = false, preserveIdentity = false) => {
     overlayDismissible = dismissible;
     const focusedLabel = panel.contains(document.activeElement) ? document.activeElement.textContent : null;
     if (panel.hidden) returnFocus = document.activeElement;
@@ -7288,11 +7333,13 @@ if (pluginsDialog && pluginsOpen) {
     curseForgeNotice.hidden = true;
   };
   const syncCurseForgeInfo = () => {
-    curseForgeInfo.hidden = tab !== "discover" || !curseForgeConfigured || !curseForgeSwitch.checked;
+    curseForgeInfo.hidden = true;
   };
   const applyCurseForgeStatus = (status) => {
+    const wasConfigured = curseForgeConfigured;
     curseForgeConfigured = status.configured === true;
-    curseForgeSwitch.disabled = false;
+    curseForgeSwitch.disabled = !acceptedServer?.providers?.curseforge;
+    if (!wasConfigured && curseForgeConfigured && providerServerKey && acceptedServer?.providers?.curseforge) curseForgeSwitch.checked = true;
     if (!curseForgeConfigured) curseForgeSwitch.checked = false;
     else dismissCurseForgeNotice();
     pluginsDialog.querySelector("[data-curseforge-status]").textContent = curseForgeConfigured ? "Configured" : "Not configured";
@@ -7316,7 +7363,6 @@ if (pluginsDialog && pluginsOpen) {
   const refreshCurseForgeStatus = async () => {
     const revision = ++curseForgeRevision;
     curseForgeSwitch.disabled = true;
-    curseForgeConfigured = false;
     pluginsDialog.querySelector("[data-curseforge-mask]").hidden = true;
     curseForgeRemove.hidden = true;
     curseForgeSave.textContent = "Save API key";
@@ -7326,6 +7372,7 @@ if (pluginsDialog && pluginsOpen) {
       if (revision === curseForgeRevision) applyCurseForgeStatus(status);
     } catch {
       if (revision !== curseForgeRevision) return;
+      curseForgeConfigured = false;
       curseForgeSwitch.checked = false;
       syncCurseForgeInfo();
       pluginsDialog.querySelector("[data-curseforge-status]").textContent = "Configuration status is unavailable. You can still save or replace the API key.";
@@ -7343,7 +7390,7 @@ if (pluginsDialog && pluginsOpen) {
       curseForgeNoticeTimer = setTimeout(dismissCurseForgeNotice, 15000);
     } else dismissCurseForgeNotice();
     syncCurseForgeInfo();
-    // Deliberately no catalog load: this provider has no catalog integration yet.
+    clearTimeout(searchTimer); resetCursors(); load();
   });
   pluginsDialog.querySelector("[data-curseforge-notice-dismiss]").addEventListener("click", dismissCurseForgeNotice);
   pluginsDialog.addEventListener("keydown", (event) => {
@@ -7515,12 +7562,12 @@ if (pluginsDialog && pluginsOpen) {
     if (operation.operation_type === "plugin_addon_install") return showAddonOperation(operation);
     const sameOperation = !panel.hidden && operationViewID === operation.operation_id;
        const lifecycle = operation.operation_type !== "plugin_install";
-    showPanel(lifecycle ? "Plugin management" : "Plugin installation", false, sameOperation);
+    showPanel(lifecycle ? "Plugin management" : `${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, false, sameOperation);
     const success = operation.state === "succeeded";
     const attention = operation.state === "needs_attention";
     const terminal = ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(operation.state);
     const identity = operationIdentity?.operation_id === operation.operation_id ? operationIdentity : null;
-    const heading = lifecycle ? (success ? "Plugin action verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Plugin action did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Changing managed plugin") : success ? "Plugin installation verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Installing plugin";
+    const heading = lifecycle ? (success ? "Plugin action verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Plugin action did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Changing managed plugin") : success ? (acceptedServer?.content_kind === "mods" ? "Mods installed" : "Plugin installation verified") : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : contentSingular() === "mod" ? "Installing mod" : "Installing plugin";
     if (!sameOperation) {
       overlayHeader(identity?.name || heading, "", [[identity?.version, "plugins-badge-version"]], identity?.project_id, null, undefined, identity?.source || "Modrinth");
       operationViewID = operation.operation_id;
@@ -7629,14 +7676,14 @@ if (pluginsDialog && pluginsOpen) {
     stopPolling();
     const current = installGeneration;
     installController = new AbortController();
-    showPanel("Plugin installation", true);
+    showPanel(`${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, true);
     panelBody.append(text("h3", "Preparing installation review…"));
     overlayActions(panelAction("Close", closePanel, true));
     try {
       if (await blockPluginInstall(current)) return;
       const plan = await pluginRequest("install/plan", { source: project?.source || "Modrinth", project_id: projectID, version_id: versionID }, installController.signal);
       if (current !== installGeneration) return;
-      showPanel("Plugin installation", true);
+      showPanel(`${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, true);
       overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, panelAction("Install", () => applyPlugin(plan)), project?.project_id === plan.project_id ? project.icon_url || "" : undefined, plan.source);
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
       const about = infoRows(overlaySection("About this version"));
@@ -7676,11 +7723,11 @@ if (pluginsDialog && pluginsOpen) {
       });
       overlaySection("Files to install").append(files);
       const installation = infoRows(overlaySection("Installation"));
-      installation("Target plugin directory", plan.installation_location);
+      installation("Target content directory", plan.installation_location);
       installation("Changes", "Verified cold backup before changes; then install the listed files.");
       const restart = infoRows(overlaySection("Restart"));
       restart("Required", plan.restart_required ? "Yes" : "No");
-      restart("Verification", "Minecraft starts/restarts to load and verify plugins");
+      restart("Verification", acceptedServer?.content_kind === "mods" ? "Artifact/provider/loader compatibility validated; Minecraft restarts and runtime health is verified. Mod functionality is not proven." : "Minecraft starts/restarts to load and verify plugins");
       restart("Original stopped state", "Returns to stopped after verification");
       if (plan.confirmation_required) {
         const section = overlaySection("Players");
@@ -7694,7 +7741,7 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration || error.name === "AbortError") return;
       if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.");
       else if (error.message === "BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there." && readOnlyReview) readOnlyReview(error.message);
-      else if (error.message === "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates." && readOnlyReview) readOnlyReview("Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates.");
+      else if (error.message === "This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server." && readOnlyReview) readOnlyReview(error.message);
       else panelError(error);
     }
   };
@@ -7736,15 +7783,27 @@ if (pluginsDialog && pluginsOpen) {
     }
     inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
   };
-  const discoverQuery = (position) => new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), modrinth: String(form.elements.modrinth.checked), hangar: String(form.elements.hangar.checked), modrinth_offset: String(position.modrinth_offset), hangar_offset: String(position.hangar_offset), hangar_first: String(position.hangar_first), limit: String(pageLimit) });
+  const discoverQuery = (position) => new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), modrinth: String(providerServerKey !== null && form.elements.modrinth.checked), hangar: String(providerServerKey !== null && form.elements.hangar.checked), curseforge: String(providerServerKey !== null && curseForgeConfigured && curseForgeSwitch.checked), modrinth_offset: String(position.modrinth_offset), hangar_offset: String(position.hangar_offset), curseforge_offset: String(position.curseforge_offset), provider_turn: String(position.provider_turn), hangar_first: String(position.hangar_first), limit: String(pageLimit) });
   // Compare authoritative context before accepting cursor history from any response.
   const acceptDiscoverContext = (server) => {
-    const key = JSON.stringify(server);
-    const changed = discoverServerKey !== null && discoverServerKey !== key;
+    const key = JSON.stringify([server.instance_id, server.server_type, server.minecraft_version, server.content_kind, server.providers]);
+    const initialize = providerServerKey !== key;
+    acceptedServer = server;
     discoverServerKey = key;
-    if (changed) resetCursors();
-    return !changed;
+    form.elements.q.placeholder = server.content_kind === "mods" ? "Search mods" : server.content_kind === "plugins" ? "Search plugins" : "Search plugins or mods";
+    form.elements.q.setAttribute("aria-label", form.elements.q.placeholder);
+    for (const name of ["modrinth", "hangar", "curseforge"]) {
+      const control = form.elements[name];
+      const supported = server.supported && server.providers?.[name] === true;
+      control.disabled = !supported;
+      if (initialize) control.checked = supported && (name !== "curseforge" || curseForgeConfigured);
+      if (!supported || name === "curseforge" && !curseForgeConfigured) control.checked = false;
+    }
+    providerServerKey = key;
+    if (initialize) resetCursors();
+    return !initialize;
   };
+
   const addonRequest = async (route, kind, file, plan = null, confirmPlayers = false) => {
     const selection = globalThis.justVoxelSelectionGeneration.plugins;
     try {
@@ -7859,7 +7918,7 @@ if (pluginsDialog && pluginsOpen) {
     const current = ++generation;
     controller?.abort();
     controller = new AbortController();
-    state.textContent = "Loading plugins…";
+    state.textContent = `Loading ${contentPlural()}…`;
     results.replaceChildren();
     results.classList.toggle("plugins-addon-results", tab === "addons");
     pagination.hidden = tab !== "discover";
@@ -7872,7 +7931,7 @@ if (pluginsDialog && pluginsOpen) {
         const installation = await pluginRequest("operation", null, controller.signal);
         if (current !== generation) return;
         if (!pluginInventorySafe(installation.operation)) {
-          state.textContent = "Plugin operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
+          state.textContent = "Managed content operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
           inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
           return;
         }
@@ -7882,21 +7941,22 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== generation) return;
       if (response.status === 401) { window.location.assign("/login"); return; }
       if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); return; }
-      if (!response.ok) throw new Error(payload.error || "Plugin information is unavailable.");
+      if (!response.ok) throw new Error(payload.error || "Managed content information is unavailable.");
       const server = payload.server;
-      if (tab === "discover" && !acceptDiscoverContext(server)) { load(); return; }
+      const contextReady = acceptDiscoverContext(server);
       form.querySelectorAll("input,button").forEach((control) => { if (control === curseForgeSwitch || curseForgeNotice.contains(control)) return; control.disabled = !server.supported; });
       if (!server.supported) { state.textContent = server.message; return; }
-      const hangarChoice = form.querySelector('input[name="hangar"]');
-      if (hangarChoice && server.server_type === "spigot") { hangarChoice.checked = false; hangarChoice.disabled = true; }
+      acceptDiscoverContext(server);
+      if (tab === "discover" && !contextReady) { load(); return; }
       if (tab === "addons") {
+        if (server.content_kind !== "plugins") { state.textContent = "Add-ons require a Bukkit plugin host and are unavailable for loader mods."; return true; }
         payload.sections.forEach((section) => results.append(renderAddonSection(section)));
         state.textContent = "Select a local file. Host plugins perform runtime loading; updates and removal are not available yet.";
         return true;
       }
       const items = tab === "discover" ? payload.projects : payload.plugins;
       items.forEach((item) => results.append(tab === "discover" ? renderProject(item, server) : renderInstalled(item)));
-      state.textContent = tab === "discover" && !payload.modrinth && !payload.hangar ? "Enable Modrinth or Hangar to browse plugins." : server.message || (items.length ? "" : tab === "discover" ? "No plugins match these filters on this page." : "No installed plugin JARs found.");
+      state.textContent = tab === "discover" && !payload.modrinth && !payload.hangar && !payload.curseforge ? `Enable a catalog provider to browse ${contentPlural()}.` : server.message || (items.length ? "" : tab === "discover" ? `No ${contentPlural()} match these filters on this page.` : `No installed ${contentSingular()} JARs found.`);
       if (tab === "discover") {
         cursor = payload.cursor;
         nextCursor = payload.next_cursor;
@@ -7912,7 +7972,7 @@ if (pluginsDialog && pluginsOpen) {
       }
       return true;
     } catch (error) { if (error.staleSelection) return;
-      if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
+      if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Managed content information is unavailable.";
     } finally {
       if (current === generation) {
         if (tab === "discover") {
@@ -7959,12 +8019,14 @@ if (pluginsDialog && pluginsOpen) {
     operationIdentity = null;
     resetCursors();
     discoverServerKey = null;
+    providerServerKey = null; acceptedServer = null;
+    for (const name of ["modrinth", "hangar", "curseforge"]) { form.elements[name].checked = false; form.elements[name].disabled = true; }
     results.replaceChildren();
     if (pluginsDialog.open) { load(); resumePluginInstall(); }
   });
   const refreshWorkspace = () => globalThis.justVoxelServerSelection(pluginsDialog.querySelector("[data-server-selector-slot]"), true)
-    .then(() => { refreshCurseForgeStatus(); resetCursors(); load(); }).catch(error => { if (state) state.textContent = error.message; });
-  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { updateCapacity(false); refreshWorkspace(); resumePluginInstall(); }, onClose: () => { curseForgeKey.value = ""; dismissCurseForgeNotice(); curseForgeSwitch.checked = false; syncCurseForgeInfo(); clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); resetCursors(); closePanel(); } });
+    .then(async () => { await refreshCurseForgeStatus(); resetCursors(); load(); }).catch(error => { if (state) state.textContent = error.message; });
+  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { updateCapacity(false); refreshWorkspace(); resumePluginInstall(); }, onClose: () => { providerServerKey = null; acceptedServer = null; curseForgeKey.value = ""; dismissCurseForgeNotice(); curseForgeSwitch.checked = false; syncCurseForgeInfo(); clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); resetCursors(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const controlCenter = document.querySelector("[data-control-center]");

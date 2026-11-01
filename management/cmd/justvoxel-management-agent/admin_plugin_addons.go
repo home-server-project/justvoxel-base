@@ -256,7 +256,7 @@ func resolveAddonHost(data string, d addonDefinition, inventory []installedPlugi
 		return host, relative, err
 	}
 	for _, e := range manifest.Artifacts {
-		if e.Filename == selected.Filename && selected.Management != "plugins" {
+		if pluginTarget(e.Target) == "plugins" && e.Filename == selected.Filename && selected.Management != "plugins" {
 			host.Message = "Host ownership needs attention."
 			return host, relative, nil
 		}
@@ -763,7 +763,7 @@ type addonPlan struct {
 
 func resolveAddonPlan(serverContext pluginServerContext, data string, u addonUpload) (addonPlan, error) {
 	p := addonPlan{Server: serverContext, DataPath: data, RestartRequired: u.Kind != "worldedit_schematic", Players: []string{}}
-	if !serverContext.Supported || serverContext.MinecraftVersion == "" {
+	if !serverContext.Supported || javaServerContentKind(serverContext.ServerType) != "plugins" || serverContext.MinecraftVersion == "" {
 		return p, errors.New("A known Paper or Purpur server is required")
 	}
 	name, identity, validation, err := validateAddon(u.File, u.Kind, u.Filename)
@@ -834,7 +834,7 @@ func (s *server) adminAddonInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := addonInventory{Server: sc, Sections: []addonSection{}}
-	if !sc.Supported {
+	if !sc.Supported || javaServerContentKind(sc.ServerType) != "plugins" {
 		writeJSON(w, 200, out)
 		return
 	}

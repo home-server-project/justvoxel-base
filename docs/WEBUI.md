@@ -232,10 +232,15 @@ availability, and final host action acceptance.
 
 Desktop workspaces can be dragged by their headers and resized from the browser’s bottom corner. Window geometry is saved separately for each signed-in user. In **System → History**, drag the divider between Open notifications and Detailed history to adjust their widths. **System → Logs** has a horizontal category selector above Files and Viewer. Its divider adjusts those two columns. Both dividers can also be focused with Tab and moved with the Left and Right arrow keys.
 
-## Plugins lifecycle and diagnostics
+## Plugins & Mods lifecycle and diagnostics
 
-**Minecraft → Plugins → Installed** shows Enabled or Disabled for verified
-Plugins-managed entries. Their information overlay offers one yellow state
+**Minecraft → Plugins & Mods → Installed** shows Enabled or Disabled for verified
+plugin entries. Mod-loader servers show active mod inventory with ownership and
+attention status; mod lifecycle actions are not available yet. Discover uses
+Modrinth and configured CurseForge for mods, and adds Hangar for eligible plugin
+servers. Exact server and loader compatibility is required. See
+[Plugins & Mods](plugin-workspace.md) for installation and recovery behavior.
+Plugin information overlays offer one yellow state
 action (**Disable** when enabled, **Enable** when disabled) and red **Remove**.
 Manual/unmanaged plugins and JustVoxel-managed Geyser, Floodgate and ViaVersion
 remain read only. Enable/Disable review has Cancel and one yellow final action.
@@ -250,7 +255,7 @@ shortcut where available. Re-check recovery retains maintenance exclusion until
 an exact target or restored original state can be verified.
 
 System Logs categories appear exactly in this order: **Setup, Migration,
-Restore, Plugins, Reset, Network, Support, Failed units**. Plugins supports the same
+Restore, Plugins, Reset, Network, Update, Support, Failed units**. Plugins supports the same
 list/select/read/download flow as other operation groups. Deep links accept
 `workspace=system&tab=logs&log_group=plugins&log_id=<operation UUID>` with existing
 identifier validation. Plugin startup failure evidence is bounded and sanitized;
@@ -269,7 +274,9 @@ In **System -> Logs -> Support**, administrators can select **Generate support r
 **System → Factory Reset → Reset Minecraft** review states that Plugins-managed
 JARs installed through JustVoxel will be removed. When Minecraft data outside
 internal storage is preserved, manual plugins and plugin configuration/data
-folders are preserved too. Reset stages exact verified managed JARs before its
+folders are preserved too. Managed mod JARs installed through Plugins & Mods are
+also removed from preserved data; unmanaged mods and the `mods` directory remain.
+Reset stages exact verified managed plugin and mod JARs before its
 helper and retains recovery evidence through failure/retry. Internal-data reset
 continues to delete the whole Minecraft data tree. Full Factory Reset policy is
 unchanged.
@@ -366,3 +373,22 @@ or Internet exposure is configured automatically. Provider/application and
 package/subscription support determine actual connectivity; JustVoxel does not
 need a provider model API key to expose MCP/REST. See
 [AI-API-CONNECTIONS.md](AI-API-CONNECTIONS.md) for the full guide.
+
+## System Update activation recovery
+
+Updates normally follow **Download & stage → Reboot into update** and activate
+automatically when the new image boots. JustVoxel keeps the existing Minecraft
+player warning and shutdown checks, including the 60-second warning or 10-second
+**Quick reboot** warning.
+
+If a reboot leaves the old image running with the expected update still staged,
+JustVoxel records the failure under **System Settings → Logs → Update**. When it
+can verify that recovery is available, System Update shows a yellow **Force
+update** action. This prepares the staged image, turns Quick reboot on, and does
+not reboot. After recovery is verified, press **Reboot into update** explicitly.
+Normal users should not need CLI OSTree commands. If recovery cannot be verified,
+retain the Update logs for support; the action is offered only while the backend
+can prove the staged deployment is recoverable.
+
+Successful Update logs are short. Failure and recovery logs retain deployment
+comparisons and redacted recovery output for support or a future issue report.

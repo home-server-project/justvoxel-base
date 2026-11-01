@@ -2547,7 +2547,7 @@ func TestStagedPluginLoaderClassificationPreservesDescriptorValidation(t *testin
 }
 
 func TestPluginLoaderRejectionStableWording(t *testing.T) {
-	if pluginLoaderReviewRejection != "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates." {
+	if pluginLoaderReviewRejection != "This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server." {
 		t.Fatal("loader rejection wording changed")
 	}
 }

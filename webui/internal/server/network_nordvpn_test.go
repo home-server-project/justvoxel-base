@@ -223,7 +223,7 @@ func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(app), `["Setup", "Migration", "Restore", "Plugins", "Reset", "Network", "Support", "Failed units"]`) {
+	if !strings.Contains(string(app), `["Setup", "Migration", "Restore", "Plugins", "Reset", "Network", "Update", "Support", "Failed units"]`) {
 		t.Fatal("log ordering")
 	}
 }

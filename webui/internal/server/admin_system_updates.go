@@ -20,6 +20,7 @@ type adminSystemUpdatesAPI interface {
 
 func (a *App) registerAdminSystemUpdatePages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/system-updates", a.systemUpdateStatus)
+	mux.HandleFunc("POST /api/system-updates/force", a.systemUpdateForce)
 	mux.HandleFunc("POST /api/system-updates/check", a.systemUpdateCheck)
 	mux.HandleFunc("POST /api/system-updates", a.systemUpdateApply)
 	mux.HandleFunc("GET /api/system-updates/reboot", a.systemUpdateRebootStatus)
@@ -175,4 +176,29 @@ func writeSystemUpdateJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (a *App) systemUpdateForce(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	session, client, ok := a.systemUpdateRequest(w, r, true)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" || len(r.PostForm) != 1 || len(r.PostForm["csrf"]) != 1 {
+		http.Error(w, "Force update takes no options", http.StatusBadRequest)
+		return
+	}
+	recovery, ok := client.(interface {
+		AdminSystemUpdateForce(context.Context, string) (api.AdminSystemUpdateStatus, error)
+	})
+	if !ok {
+		http.Error(w, "Update recovery is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	status, err := recovery.AdminSystemUpdateForce(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	writeSystemUpdateJSON(w, http.StatusOK, status)
 }

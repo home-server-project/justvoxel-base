@@ -180,7 +180,7 @@ func validDiagnosticOperationType(value string) bool {
 
 func validDiagnosticCategory(value string) bool {
 	switch value {
-	case "setup", "migration", "restore", "plugins", "reset", "network", "support", "operation":
+	case "setup", "migration", "restore", "plugins", "reset", "network", "update", "support", "operation":
 		return true
 	}
 	return false
@@ -296,7 +296,7 @@ func (s *operationStore) listDiagnosticLogs() ([]diagnosticLogEntry, error) {
 	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return nil, err
 	}
-	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "network", "support"} {
+	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "network", "update", "support"} {
 		dir := s.diagnosticCategoryDirectory(category)
 		if err := validatePrivateDiagnosticDirectory(dir); err != nil {
 			return nil, err

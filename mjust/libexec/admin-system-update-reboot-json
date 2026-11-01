@@ -51,7 +51,7 @@ request_reboot() {
     fi
 
     if ! instances="$("${shutdown_helper}" check)"; then
-        emit_error player_status_unavailable 'Could not confirm Minecraft player status through RCON.'
+        emit_error player_status_unavailable 'Could not confirm Minecraft player status.'
         return 3
     fi
     online="$(jq '.online' <<<"${instances}")"

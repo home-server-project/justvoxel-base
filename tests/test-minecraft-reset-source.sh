@@ -95,4 +95,15 @@ fi
 grep -Fq 'retryMinecraftReset' "${agent}"
 grep -Fq 'func (s *operationStore) retryMinecraftReset' "${operations}"
 
+# Managed mods share Reset durability while retaining a separate staging namespace.
+grep -Fq 'resolveResetManagedLocation(plan.DataPath, entry)' "${agent}"
+grep -Fq 'pluginTarget(e.Entry.Target) == "plugins" && e.State == "disabled"' "${agent}"
+grep -Fq 'moveResetMod(tx, e.Entry, staging, false)' "${agent}"
+grep -Fq 'moveResetMod(tx, e.Entry, staging, true)' "${agent}"
+grep -Fq 'openPrivatePluginChild(staging, "mods", true)' "${agent}"
+grep -Fq 'checkPinnedResetModDirectories' "${agent}"
+grep -Fq 'unix.RENAME_NOREPLACE' "${agent}"
+grep -Fq 'checkResetModStaged(tx, e.Entry, staging, raw != nil, false)' "${agent}"
+grep -Fq 'checkResetModStaged(tx, e.Entry, staging, false, true)' "${agent}"
+
 echo 'Minecraft reset source contract OK'

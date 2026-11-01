@@ -15,7 +15,7 @@ import (
 
 func TestWorkspaceLogIdentifiersAreAllowlisted(t *testing.T) {
 	id := "12345678-1234-4123-8123-123456789abc"
-	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "network", "support", "operation"} {
+	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "network", "update", "support", "operation"} {
 		if !validWorkspaceLogID(category, id) {
 			t.Fatalf("rejected %s log", category)
 		}

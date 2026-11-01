@@ -116,3 +116,15 @@ func javaServerManagedViaVersion(software string) bool {
 	}
 	return false
 }
+
+// The combined workspace derives its content mode from the capability table.
+func javaServerContentKind(software string) string {
+	c, ok := javaServerSoftware(software)
+	if ok && c.BukkitPlugins && c.PluginsWorkspace {
+		return "plugins"
+	}
+	if ok && c.ModLoader {
+		return "mods"
+	}
+	return ""
+}

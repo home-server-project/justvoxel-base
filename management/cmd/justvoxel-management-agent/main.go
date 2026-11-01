@@ -134,6 +134,13 @@ func main() {
 		if err := containerHistoryCommand(context.Background(), args[1:]); err != nil {
 			fatal("container image history: %v", err)
 		}
+	case "system-update-expect":
+		if os.Geteuid() != 0 || len(args) != 2 {
+			fatal("invalid system update expectation")
+		}
+		if err := prepareSystemUpdateExpectation(context.Background(), args[1]); err != nil {
+			fatal("Update reboot evidence could not be saved: %v", err)
+		}
 	case "system-update-activate":
 		if os.Geteuid() != 0 || len(args) != 2 {
 			fatal("invalid system update activation")

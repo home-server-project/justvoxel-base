@@ -80,8 +80,9 @@ def player_state(instance):
             time.sleep(0.1)
         raise ValueError('Bedrock player status unavailable')
     raw = run('podman', 'exec', 'minecraft-' + instance, 'rcon-cli', 'list')
+    raw = re.sub(r'\x1b\[[0-9;]*m', '', raw)
     match = players.fullmatch(raw)
-    if not match:
+    if not match or '\x1b' in raw:
         raise ValueError('players')
     online, maximum = int(match[1]), int(match[2])
     names = [name.strip() for name in match[3].split(',')] if match[3].strip() else []

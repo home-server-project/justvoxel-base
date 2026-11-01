@@ -20,7 +20,7 @@ type DiagnosticLogEntry struct {
 }
 
 func validDiagnosticLogIdentifier(category, id string) bool {
-	return (category == "setup" || category == "migration" || category == "restore" || category == "plugins" || category == "reset" || category == "operation" || category == "support" || category == "network") && persistentOperationIDPattern.MatchString(id)
+	return (category == "setup" || category == "migration" || category == "restore" || category == "plugins" || category == "reset" || category == "operation" || category == "support" || category == "network" || category == "update") && persistentOperationIDPattern.MatchString(id)
 }
 
 func (c *Client) AdminDiagnosticLogs(ctx context.Context, session string) ([]DiagnosticLogEntry, error) {
@@ -52,7 +52,7 @@ func (c *Client) AdminDiagnosticLogs(ctx context.Context, session string) ([]Dia
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, err
 	}
-	if len(payload.Logs) > 6*200 {
+	if len(payload.Logs) > 8*200 {
 		return nil, errors.New("management API returned too many diagnostic logs")
 	}
 	for _, entry := range payload.Logs {

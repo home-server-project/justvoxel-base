@@ -338,7 +338,7 @@ test('diagnostic routes, confirmation/recovery and System Logs/Failed units rema
   assert.match(logs, /validWorkspaceLogID\(category, id\)/);
   assert.match(logs, /AdminDiagnosticLog\(r.Context\(\), session, category, id\)/);
   assert.match(logs, /text\/plain; charset=utf-8/);
-  assert.match(logs, /case "setup", "migration", "restore", "plugins", "reset", "network", "support", "operation"/);
+  assert.match(logs, /case "setup", "migration", "restore", "plugins", "reset", "network", "update", "support", "operation"/);
   assert.match(logs, /AdminFailedUnitJournal/);
   assert.match(app, /Keep current server/);
   assert.match(app, /Review and retry Factory Reset/);
