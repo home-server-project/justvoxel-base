@@ -209,6 +209,7 @@ jobs:
           # Git tree entries include paths, modes and blob IDs, never timestamps.
           input_identity="$({
             git ls-tree -r -z HEAD -- management templates mjust system_files \
+              runtime/system-update-reboot-worker \
               build_files/build-common.sh \
               build_files/build-management-agent.sh \
               build_files/management-agent-package.Containerfile \

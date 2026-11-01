@@ -4,7 +4,7 @@ set -euo pipefail
 
 dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
 mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
-cp -a /repo/management /repo/templates /repo/mjust /repo/system_files /repo/build_files /work/
+cp -a /repo/management /repo/templates /repo/mjust /repo/system_files /repo/build_files /repo/runtime /work/
 cd /work/management
 export HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off
 
