@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -281,10 +282,16 @@ func TestConnectionGuideControlCenterAndSafety(t *testing.T) {
 		t.Fatal("safe read-only launcher missing")
 	}
 	js, _ := assets.ReadFile("static/how-to-connect.js")
-	for _, forbidden := range []string{"innerHTML", "fetch(", "localStorage", "sessionStorage"} {
+	for _, forbidden := range []string{"innerHTML", "localStorage", "sessionStorage", "POST", "PUT", "PATCH", "DELETE", "XMLHttpRequest", "sendBeacon", "workspaceServerSelections", "justVoxelSelectServer", "justVoxelSelectedURL", "justVoxelSelectionGeneration", "data-server-selector-slot", "data-server-workspace", "readWorkspaceWindowState", "writeWorkspaceWindowState"} {
 		if strings.Contains(string(js), forbidden) {
 			t.Fatalf("unsafe presentation behavior %s", forbidden)
 		}
+	}
+	if got := len(regexp.MustCompile(`\bfetch\s*\(`).FindAll(js, -1)); got != 1 {
+		t.Fatalf("expected exactly one read-only inventory fetch, got %d", got)
+	}
+	if !strings.Contains(string(js), `fetch('/api/minecraft/workspace/selection?selection=none', { credentials: 'same-origin', cache: 'no-store' })`) {
+		t.Fatal("inventory fetch must use the exact selection=none URL and same-origin/no-store options with default GET and no mutation body")
 	}
 	status := guideFixture()
 	status.Minecraft.Version = `<script>alert('x')</script>`
@@ -351,12 +358,12 @@ func TestConnectionGuidePlayitRenderedPublicAddresses(t *testing.T) {
 func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	client := &connectionGuideAPI{fakeAPI: fakeAPI{statusResult: guideFixture()}}
 	body := guidePage(t, client, &http.Cookie{Name: sessionCookie, Value: "session-token"}).Body.String()
-	for _, absent := range []string{"connect-navigation", "/static/justvoxel-logo.png", "Minecraft Friends Connection Guide", "LET’S PLAY TOGETHER", ">Server<", "Enter your hostname", "Hostname / domain", "connect-switch", "data-connect-message", "<small>Available", "<small>Not connected", "<small>Stopped", "<small>Connected", "Save as PDF", "Preview the guide below"} {
+	for _, absent := range []string{`<select class="connect-server"`, "connect-navigation", "/static/justvoxel-logo.png", "Minecraft Friends Connection Guide", "LET’S PLAY TOGETHER", ">Server<", "Enter your hostname", "Hostname / domain", "connect-switch", "data-connect-message", "<small>Available", "<small>Not connected", "<small>Stopped", "<small>Connected", "Save as PDF", "Preview the guide below"} {
 		if strings.Contains(body, absent) {
 			t.Fatalf("unapproved presentation %q", absent)
 		}
 	}
-	for _, want := range []string{`class="connect-controls panel"`, `class="connect-title-row title-row"`, `class="connect-server" aria-label="Server"`, `class="connect-print-logo" src="/static/justvoxel-login-logo.png"`, "JustVoxel Connection Guide", "Current server — Paper 1.21.8", "Choose how your friends will join, then save the connection guide to share.", "Hostname only — no https:// or port."} {
+	for _, want := range []string{`class="connect-controls panel"`, `class="connect-title-row title-row"`, `class="connect-server-lane"`, `id="connect-server-label">Server:`, `class="server-selector"`, `class="server-selector-menu"`, `class="server-selector-option"`, `data-server-id=`, `aria-labelledby="connect-server-label connect-server-name"`, `class="connect-print-logo" src="/static/justvoxel-login-logo.png"`, "JustVoxel Connection Guide", "Current server — Paper 1.21.8", "Choose how your friends will join, then save the connection guide to share.", "Hostname only — no https:// or port."} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("approved presentation missing %q", want)
 		}
@@ -489,12 +496,12 @@ func TestConnectionGuideOwnServerSelection(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/html") {
 		t.Fatalf("selection page: %d %s", response.Code, body)
 	}
-	for _, want := range []string{`<option value="">Choose server</option>`, `value="jv-family1"`, `>family Survival</option>`, `value="jv-kids001"`, `>Kids Creative</option>`, "Choose a server to see its connection guide."} {
+	for _, want := range []string{`<details class="server-selector" data-selected-server="">`, `<summary aria-labelledby="connect-server-label connect-server-name"><span id="connect-server-name">Choose server</span></summary>`, `<button type="button" class="server-selector-option" data-server-id="jv-family1" aria-pressed="false"><span>family Survival</span></button>`, `<button type="button" class="server-selector-option" data-server-id="jv-kids001" aria-pressed="false"><span>Kids Creative</span></button>`, "Choose a server to see its connection guide."} {
 		if !strings.Contains(body, want) {
 			t.Errorf("selection page missing %q", want)
 		}
 	}
-	for _, absent := range []string{"Choose a Minecraft server.", "Minecraft is not configured yet", "data-connect-guide", "jv-legacy1"} {
+	for _, absent := range []string{`aria-pressed="true"`, "Choose a Minecraft server.", "Minecraft is not configured yet", "data-connect-guide", "jv-legacy1"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("selection page contains %q", absent)
 		}
@@ -504,8 +511,13 @@ func TestConnectionGuideOwnServerSelection(t *testing.T) {
 	}
 	response = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect?server=jv-kids001", ""))
 	body = response.Body.String()
-	if response.Code != http.StatusOK || !strings.Contains(body, `value="jv-kids001" selected>Kids Creative</option>`) || !strings.Contains(body, "Kids Creative — Purpur 1.21.8") || !strings.Contains(body, `value="jv-family1"`) {
+	if response.Code != http.StatusOK {
 		t.Fatalf("explicit selection: %d %s", response.Code, body)
+	}
+	for _, want := range []string{`<details class="server-selector" data-selected-server="jv-kids001">`, `<summary aria-labelledby="connect-server-label connect-server-name"><span id="connect-server-name">Kids Creative</span></summary>`, `<button type="button" class="server-selector-option" data-server-id="jv-kids001" aria-pressed="true"><span>Kids Creative</span></button>`, `<button type="button" class="server-selector-option" data-server-id="jv-family1" aria-pressed="false"><span>family Survival</span></button>`, "Kids Creative — Purpur 1.21.8"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("explicit selection missing %q", want)
+		}
 	}
 	delete(client.runtimes, "jv-family1")
 	client.reads = nil
