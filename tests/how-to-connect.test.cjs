@@ -196,7 +196,7 @@ test('approved page layout uses a full-width action lane and the same guide and 
   }
   assert.match(template, /class="connect-controls panel"/);
   assert.match(template, /class="connect-eyebrow eyebrow"/);
-  assert.match(template, /class="connect-title-row title-row"><h1 id="connect-title">How to connect<\/h1><div data-server-selector-slot><label>Server: <select class="connect-server" aria-label="Server">/);
+  assert.match(template, /class="connect-title-row title-row"><h1 id="connect-title">How to connect<\/h1><div class="connect-server-lane">/);
   assert.ok(!template.includes('>Server<'));
   assert.match(template, /<label for="connect-domain">Custom domain<\/label>\s*<input id="connect-domain"[^>]+disabled>\s*<input id="connect-custom" type="checkbox" role="switch"/);
   assert.ok(template.includes('Hostname only — no https:// or port.'));
@@ -362,10 +362,62 @@ test('invitation is a native dialog with selectable plain text outside the singl
   assert.match(template, /data-connect-copy>Copy invitation<\/button>/);
   assert.match(template, /data-connect-invitation-close>Close<\/button>/);
   assert.ok(template.indexOf('</dialog>') < template.indexOf('<article class="connect-guide"'));
-  for (const forbidden of ['execCommand', 'fetch(', 'XMLHttpRequest', 'navigator.share', 'sendBeacon', 'WebSocket', 'localStorage', 'sessionStorage', 'innerHTML']) {
+  assert.ok(!source.slice(source.indexOf('  const guide =')).includes('fetch('));
+  for (const forbidden of ['execCommand', 'XMLHttpRequest', 'navigator.share', 'sendBeacon', 'WebSocket', 'localStorage', 'sessionStorage', 'innerHTML']) {
     assert.ok(!source.includes(forbidden), forbidden);
   }
 });
+
+function selectorFixture({ search = '', popover = true, inventory = { servers: [] }, failure = false, ok = true } = {}) {
+  const selector = new Element({ selectedServer: 'jv-family1' });
+  const summary = new Element();
+  summary.textContent = 'Family Survival';
+  summary.children = [];
+  summary.prepend = icon => summary.children.unshift(icon);
+  summary.focus = () => { summary.focused = true; };
+  summary.getBoundingClientRect = () => ({ width: 160, left: 900, bottom: 100 });
+  const menu = new Element();
+  menu.style = {};
+  menu.matches = () => menu.popoverOpen === true;
+  if (popover) {
+    menu.showPopover = () => { menu.popoverOpen = true; };
+    menu.hidePopover = () => { menu.popoverOpen = false; };
+  }
+  const options = ['jv-family1', 'jv-kids001', 'jv-noicon1'].map(serverId => {
+    const option = new Element({ serverId });
+    option.textContent = serverId === 'jv-family1' ? 'Family Survival' : 'Kids';
+    option.children = [];
+    option.prepend = icon => option.children.unshift(icon);
+    return option;
+  });
+  menu.querySelectorAll = () => options;
+  selector.querySelector = query => query === 'summary' ? summary : menu;
+  const page = { querySelector: query => query === '.server-selector' ? selector : null };
+  const location = { search };
+  const requests = [];
+  const events = {};
+  vm.runInNewContext(source, {
+    document: {
+      querySelector: () => page,
+      createElement: tag => {
+        assert.equal(tag, 'img');
+        const icon = new Element();
+        icon.remove = () => {
+          for (const element of [summary, ...options]) element.children = element.children.filter(child => child !== icon);
+        };
+        return icon;
+      },
+    },
+    window: { location, innerWidth: 1000, innerHeight: 600, addEventListener: (type, fn) => { events[type] = fn; } },
+    URLSearchParams,
+    fetch: async (url, init) => {
+      requests.push({ url, init });
+      if (failure) throw new Error('inventory unavailable');
+      return { ok, json: async () => inventory };
+    },
+  });
+  return { selector, summary, menu, options, location, requests, events };
+}
 
 test('standalone server selector navigates by immutable ID and preserves only invite=1', () => {
   for (const [search, expected] of [
@@ -373,22 +425,118 @@ test('standalone server selector navigates by immutable ID and preserves only in
     ['?server=jv-family1&invite=1&domain=unsafe&other=discard', '/minecraft/how-to-connect?server=jv-kids001&invite=1'],
     ['?invite=0&other=discard', '/minecraft/how-to-connect?server=jv-kids001'],
   ]) {
-    const select = new Element();
-    const location = { search };
-    const page = { querySelector: selector => selector === '.connect-server' ? select : null };
-    vm.runInNewContext(source, { document: { querySelector: () => page }, window: { location }, URLSearchParams });
-    select.value = 'jv-kids001';
-    select.listeners.change();
-    assert.equal(location.href, expected);
+    const f = selectorFixture({ search });
+    f.selector.open = true;
+    f.selector.listeners.toggle();
+    let navigated = false;
+    Object.defineProperty(f.location, 'href', { set(value) {
+      navigated = true;
+      assert.equal(f.selector.open, false);
+      assert.equal(f.menu.popoverOpen, false);
+      assert.equal(value, expected);
+    } });
+    f.options[1].listeners.click();
+    assert.equal(navigated, true);
+  }
+  for (const id of ['', 'Purpur', 'jv-bad', 'jv-ABCDEF', '../server', 'jv-kids001&invite=1']) {
+    const f = selectorFixture();
+    f.options[1].dataset.serverId = id;
+    f.options[1].listeners.click();
+    assert.equal(f.location.href, undefined, id);
   }
 });
 
+test('selector menu follows summary geometry, supports fallback and closes on Escape and print', () => {
+  for (const popover of [true, false]) {
+    const f = selectorFixture({ popover });
+    f.selector.open = true;
+    f.selector.listeners.toggle();
+    assert.equal(popover ? f.menu.popoverOpen : !f.menu.hidden, true);
+    assert.equal(f.menu.style.width, '160px');
+    assert.equal(f.menu.style.left, '836px');
+    assert.equal(f.menu.style.top, '103px');
+    assert.equal(f.menu.style.maxHeight, '240px');
+    let prevented = false;
+    f.selector.listeners.keydown({ key: 'Escape', preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(f.selector.open, false);
+    assert.equal(f.summary.focused, true);
+    assert.equal(popover ? f.menu.popoverOpen : !f.menu.hidden, false);
+    f.selector.open = true;
+    f.selector.listeners.toggle();
+    f.events.beforeprint();
+    assert.equal(f.selector.open, false);
+    assert.equal(popover ? f.menu.popoverOpen : !f.menu.hidden, false);
+    if (popover) {
+      f.selector.open = true;
+      f.menu.popoverOpen = false;
+      f.menu.listeners.toggle();
+      assert.equal(f.selector.open, false);
+    }
+  }
+});
 
-test('invitation keeps Close secondary before primary Copy; selector reuses workspace styling', () => {
+test('authoritative inventory enriches only matching icons without changing template names or choices', async () => {
+  const f = selectorFixture({ inventory: { servers: [
+    { id: 'jv-kids001', name: 'Untrusted replacement', software: 'purpur', software_icon: '/static/kids.svg' },
+    { id: 'jv-family1', name: '<img onerror=alert(1)>', software: 'paper', software_icon: '/static/family.svg' },
+    { id: 'jv-absent1', name: 'Family Survival', software_icon: '/static/absent.svg' },
+    { id: 'jv-noicon1', name: 'Kids', software: 'purpur' },
+  ] } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].url, '/api/minecraft/workspace/selection?selection=none');
+  assert.equal(f.requests[0].init.credentials, 'same-origin');
+  assert.equal(f.requests[0].init.cache, 'no-store');
+  assert.equal(f.summary.textContent, 'Family Survival');
+  assert.equal(f.options[1].textContent, 'Kids');
+  assert.equal(f.options.length, 3);
+  for (const [element, src] of [[f.summary, '/static/family.svg'], [f.options[0], '/static/family.svg'], [f.options[1], '/static/kids.svg']]) {
+    assert.equal(element.children.length, 1);
+    const icon = element.children[0];
+    assert.equal(icon.className, 'server-selector-icon');
+    assert.equal(icon.alt, '');
+    assert.equal(icon.src, src);
+    icon.listeners.error();
+    assert.equal(element.children.length, 0);
+    assert.ok(element.textContent);
+  }
+  assert.equal(f.options[2].children.length, 0);
+});
+
+test('inventory failure or malformed inventory leaves text-only navigation usable', async () => {
+  for (const config of [{ failure: true }, { ok: false }, { inventory: {} }]) {
+    const f = selectorFixture(config);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.summary.textContent, 'Family Survival');
+    assert.equal(f.summary.children.length, 0);
+    assert.equal(f.options[1].disabled, false);
+    f.options[1].listeners.click();
+    assert.equal(f.location.href, '/minecraft/how-to-connect?server=jv-kids001');
+  }
+});
+
+test('invitation keeps Close secondary before primary Copy; selector reuses workspace presentation only', () => {
   const template = readFileSync(path.join(__dirname, '../webui/internal/server/templates/how_to_connect.html'), 'utf8');
+  const css = readFileSync(path.join(__dirname, '../webui/internal/server/static/how-to-connect.css'), 'utf8');
   assert.match(template, /class="secondary" data-connect-invitation-close>Close<\/button><button type="button" data-connect-copy>Copy invitation/);
-  assert.match(template, /data-server-selector-slot><label>Server: <select/);
-  assert.doesNotMatch(template, /data-workspace-window|data-workspace-refresh|data-workspace-close|Select server/);
+  const lane = template.split('<div class="connect-server-lane">')[1].split('</details>')[0];
+  assert.match(lane, /<span id="connect-server-label">Server:<\/span>\s*<details class="server-selector"/);
+  assert.match(lane, /data-selected-server="{{.SelectedMinecraftID}}"/);
+  assert.match(lane, /<summary[^>]+aria-labelledby="connect-server-label connect-server-name"/);
+  assert.match(lane, /{{else}}Choose server{{end}}/);
+  assert.match(lane, /class="server-selector-menu" popover="auto"/);
+  assert.match(lane, /{{range .ConnectionServers}}<button[^>]+class="server-selector-option" data-server-id="{{.ID}}"/);
+  assert.match(lane, /<span>{{.Name}}<\/span>/);
+  assert.ok(template.includes('(not .ConnectionServers)'));
+  assert.ok(template.includes('Minecraft is not configured yet'));
+  assert.doesNotMatch(template, /<select|data-workspace-window|data-workspace-refresh|data-workspace-close|Select server|src="\/static\/app.js"/);
+  assert.match(css, /\.connect-server-lane\{display:flex;align-items:center;gap:[^;]+;min-width:0;max-width:100%/);
+  assert.doesNotMatch(css, /data-server-selector-slot|\.server-selector(?:[>{. :]|-)/);
+  for (const forbidden of ['localStorage', 'sessionStorage', 'justVoxelSelectServer', 'workspaceServerSelections', 'data-server-workspace', 'data-workspace', 'innerHTML']) {
+    assert.ok(!source.includes(forbidden), forbidden);
+  }
+  assert.equal((source.match(/fetch\(/g) || []).length, 1);
 });
 
 test('NordVPN participates in selected preview, PDF and invitation through generic method handling', () => {

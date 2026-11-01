@@ -8,6 +8,9 @@
 .connect-page p,.connect-page li{line-height:1.65}.connect-page p{margin:8px 0 14px}
 .connect-eyebrow{font-weight:800}
 .connect-title-row{align-items:center}.connect-title-row h1{margin:10px 0 16px}
+.connect-server-lane{display:flex;align-items:center;gap:.5rem;min-width:0;max-width:100%;margin-left:auto}
+.connect-server-lane>span{flex:none;white-space:nowrap}
+.connect-server-lane>details{min-width:0;max-width:calc(100vw - 8rem)}
 
 .connect-methods{display:grid;gap:10px}
 .connect-method-row{display:grid;gap:10px 24px;min-width:0}
@@ -34,7 +37,7 @@
 .connect-guide-footer{text-align:center;margin-top:30px;padding-top:18px;border-top:1px solid var(--jv-border);font-size:.85rem;color:var(--jv-muted)}.connect-print-blocked{display:none}
 @media(max-width:640px){
  .connect-shell{padding:20px 14px 40px}.connect-controls,.connect-empty,.connect-guide{padding:20px}
- .connect-title-row{flex-wrap:wrap;gap:.75rem}.connect-title-row [data-server-selector-slot]{max-width:100%}
+ .connect-title-row{flex-wrap:wrap;gap:.75rem}
  .connect-method-row-primary,.connect-method-row-private,.connect-cards{grid-template-columns:1fr}.connect-method{padding:14px}
  .connect-actions{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.connect-domain label{grid-column:1/-1}.connect-domain small{grid-column:1;grid-row:3}.connect-actions button{grid-column:1/-1;grid-row:4}
 }
@@ -63,6 +66,3 @@
  .connect-card,.connect-endpoint{break-inside:avoid}.connect-instructions h2,.connect-card h3,.connect-endpoint h4{break-after:avoid}.connect-guide-footer{break-inside:avoid}
  .connect-page:not(.connect-print-ready) .connect-guide{display:none!important}.connect-page:not(.connect-print-ready) .connect-print-blocked{display:block!important}
 }
-/* Match the workspace selector without adding workspace window controls. */
-.connect-title-row [data-server-selector-slot] label{color:var(--jv-text);font-size:.88rem;line-height:1.35}
-.connect-title-row [data-server-selector-slot] select{box-sizing:border-box;max-width:100%;padding:.52rem .65rem;border-color:var(--jv-border-strong);border-radius:8px;background:var(--jv-surface-sunken);color:var(--jv-text);font:inherit}

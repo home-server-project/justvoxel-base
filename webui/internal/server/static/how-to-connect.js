@@ -1,14 +1,75 @@
 (() => {
   'use strict';
   const page = document.querySelector('[data-connect-page]');
-  const serverSelect = page?.querySelector('.connect-server');
-  serverSelect?.addEventListener('change', () => {
-    const params = new URLSearchParams();
-    if (serverSelect.value) params.set('server', serverSelect.value);
-    if (new URLSearchParams(window.location.search).get('invite') === '1') params.set('invite', '1');
-    const query = params.toString();
-    window.location.href = '/minecraft/how-to-connect' + (query ? '?' + query : '');
-  });
+  const selector = page?.querySelector('.server-selector');
+  if (selector) {
+    const summary = selector.querySelector('summary');
+    const menu = selector.querySelector('.server-selector-menu');
+    const options = Array.from(menu.querySelectorAll('.server-selector-option'));
+    const validServerID = id => typeof id === 'string' && /^jv-[a-z0-9]{6,12}$/.test(id);
+    const popover = typeof menu.showPopover === 'function';
+    const close = () => {
+      selector.open = false;
+      if (popover && menu.matches(':popover-open')) menu.hidePopover();
+      if (!popover) menu.hidden = true;
+    };
+    const position = () => {
+      const bounds = summary.getBoundingClientRect();
+      const width = Math.min(bounds.width, window.innerWidth - 8);
+      menu.style.boxSizing = 'border-box';
+      menu.style.width = `${width}px`;
+      menu.style.left = `${Math.max(4, Math.min(bounds.left, window.innerWidth - width - 4))}px`;
+      menu.style.top = `${bounds.bottom + 3}px`;
+      menu.style.maxHeight = `${Math.max(0, Math.min(240, window.innerHeight - bounds.bottom - 10))}px`;
+    };
+    selector.addEventListener('toggle', () => {
+      if (!selector.open) { close(); return; }
+      if (popover) menu.showPopover();
+      else menu.hidden = false;
+      position();
+    });
+    if (popover) menu.addEventListener('toggle', () => {
+      if (!menu.matches(':popover-open')) selector.open = false;
+    });
+    selector.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); close(); summary.focus(); }
+    });
+    window.addEventListener('resize', () => { if (selector.open) position(); });
+    window.addEventListener('scroll', () => { if (selector.open) position(); }, true);
+    window.addEventListener('beforeprint', close);
+    options.forEach(option => option.addEventListener('click', () => {
+      const id = option.dataset.serverId;
+      if (!validServerID(id)) return;
+      close();
+      const params = new URLSearchParams({ server: id });
+      if (new URLSearchParams(window.location.search).get('invite') === '1') params.set('invite', '1');
+      window.location.href = '/minecraft/how-to-connect?' + params.toString();
+    }));
+    // Inventory enriches icons only; template IDs and names remain authoritative.
+    const enrichIcons = async () => {
+      try {
+        const response = await fetch('/api/minecraft/workspace/selection?selection=none', { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!Array.isArray(data.servers)) return;
+        const addIcon = (element, id) => {
+          const server = data.servers.find(server => server.id === id);
+          if (!validServerID(id) || typeof server?.software_icon !== 'string' || !server.software_icon) return;
+          const icon = document.createElement('img');
+          icon.className = 'server-selector-icon';
+          icon.src = server.software_icon;
+          icon.alt = '';
+          icon.addEventListener('error', () => icon.remove());
+          element.prepend(icon);
+        };
+        options.forEach(option => addIcon(option, option.dataset.serverId));
+        addIcon(summary, selector.dataset.selectedServer);
+      } catch (_) {
+        // Optional icons must never prevent text-only server navigation.
+      }
+    };
+    void enrichIcons();
+  }
   const guide = page?.querySelector('[data-connect-guide]');
   if (!guide) return;
   const switches = Array.from(page.querySelectorAll('[data-connect-method]'));

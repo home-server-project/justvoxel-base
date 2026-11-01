@@ -16,7 +16,15 @@
 {{else}}
 <section class="connect-controls panel" aria-labelledby="connect-title">
   <p class="connect-eyebrow eyebrow">JUSTVOXEL · SHARE THE ADVENTURE</p>
-  <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><div data-server-selector-slot><label>Server: <select class="connect-server" aria-label="Server">{{if not .SelectedMinecraftID}}<option value="">Choose server</option>{{end}}{{range .ConnectionServers}}<option value="{{.ID}}"{{if eq .ID $.SelectedMinecraftID}} selected{{end}}>{{.Name}}</option>{{end}}</select></label></div></div>
+  <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><div class="connect-server-lane">
+    <span id="connect-server-label">Server:</span>
+    <details class="server-selector" data-selected-server="{{.SelectedMinecraftID}}">
+      <summary aria-labelledby="connect-server-label connect-server-name"><span id="connect-server-name">{{if .SelectedMinecraftID}}{{range .ConnectionServers}}{{if eq .ID $.SelectedMinecraftID}}{{.Name}}{{end}}{{end}}{{else}}Choose server{{end}}</span></summary>
+      <div class="server-selector-menu" popover="auto">
+        {{range .ConnectionServers}}<button type="button" class="server-selector-option" data-server-id="{{.ID}}" aria-pressed="{{if eq .ID $.SelectedMinecraftID}}true{{else}}false{{end}}"><span>{{.Name}}</span></button>{{end}}
+      </div>
+    </details>
+  </div></div>
   {{if not .SelectedMinecraftID}}<p>Choose a server to see its connection guide.</p>
 </section>
   {{else}}
