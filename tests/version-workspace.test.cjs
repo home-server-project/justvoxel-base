@@ -609,9 +609,10 @@ test('Container combines controls and previous images in one outer card with sep
  assert.ok(!identity.all().includes(page.update()));
  assert.ok(!panel.children.some(node=>node.dataset.containerRow==='actions'));
  assert.match(cssRule('.version-container-panel .version-container-summary'),/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
- assert.match(cssRule('.version-container-panel .version-container-summary'),/border:0;border-radius:0/);
+ assert.equal(identity.className,'version-status-grid version-container-row version-container-summary');
+ assert.doesNotMatch(cssRule('.version-container-panel .version-container-summary'),/border:0|border-radius:0|background:transparent|padding:0/);
  assert.match(cssRule('.version-container-panel .version-container-summary>div'),/display:grid/);
- assert.match(cssRule('.version-container-panel .version-container-summary>div+div'),/border-left:1px solid var\(--jv-border\)/);
+ assert.match(cssRule('.version-container-panel .version-container-summary>div'),/padding:\.4rem \.55rem;border:0/);
  assert.deepEqual(identity.children.map(cell=>cell.children[0].textContent),['Server','Image','Status']);
  assert.ok(identity.children.every(cell=>cell.children[1].tag==='strong'));
  assert.equal(retentionInput(page).parent,controls.children[1]);
@@ -624,25 +625,53 @@ test('Container combines controls and previous images in one outer card with sep
  assert.equal(restore.parent.className,'backup-command-actions');
  const footer=restore.parent.parent;
  assert.equal(footer.className,'backup-command-bar version-container-footer');
- assert.equal(footer.parent,panel);assert.equal(panel.children.at(-1),footer);
+ assert.equal(footer.parent,history);assert.equal(history.children.at(-1),footer);
+ assert.equal(history.children[1].className,'backup-file-grid');
+ assert.equal(history.children[1].children[0].className,'backup-library-empty');
  assert.equal(footer.children[0].className,'backup-library-summary');
  assert.deepEqual(footer.children[0].children.map(cell=>cell.children[0].textContent),['Images','Total size','Selected','Status']);
  assert.match(cssRule('.version-container-panel .version-container-footer'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0/);
- assert.match(cssRule('.version-container-history'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0/);
+ assert.match(cssRule('.version-container-history'),/border:1px solid var\(--jv-border\);border-radius:var\(--jv-radius\);background:var\(--jv-surface-sunken\)/);
  assert.match(cssRule('.version-container-retention input'),/width:3\.25rem;flex:none/);
- assert.match(cssRule('.version-container-panel .version-container-controls'),/grid-template-columns:repeat\(4,minmax\(0,1fr\)\) auto/);
- assert.match(cssRule('.version-container-panel .version-container-controls'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/grid-template-columns:minmax\(0,2fr\) minmax\(0,\.85fr\) minmax\(0,1\.1fr\) minmax\(0,1\.4fr\) auto/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/border:1px solid var\(--jv-border\);border-radius:var\(--jv-radius\);background:var\(--jv-surface-sunken\)/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/gap:var\(--jv-space-md\)/);
  assert.match(cssRule('.version-container-panel .version-container-controls>label'),/flex-direction:column;align-items:flex-start/);
  assert.match(cssRule('.version-container-panel .version-container-controls>label'),/white-space:normal/);
  assert.match(cssRule('.version-container-controls>label>span'),/font-size:\.75rem/);
- assert.match(cssRule('.version-container-controls>:is(label+label,.version-container-action-lane)'),/border-left:1px solid var\(--jv-border\)/);
- assert.match(cssRule('.version-container-action-lane'),/justify-content:center/);
- assert.match(cssRule('.version-container-controls>.version-container-action-lane'),/padding:\.55rem/);
- assert.match(cssRule('.version-container-panel .version-container-controls>label'),/padding:\.55rem/);
+ const containerStyles=css.slice(css.indexOf('/* Version / Container: one surface'),css.indexOf('/* Version / Container owns'));
+ assert.doesNotMatch(containerStyles,/border-left/);
+ assert.doesNotMatch(cssRule('.version-container-panel .version-container-controls'),/border:0|border-radius:0|background:transparent/);
+ assert.match(cssRule('.version-container-action-lane'),/justify-content:flex-end/);
+ assert.match(cssRule('.version-container-controls>.version-container-action-lane'),/align-self:end/);
+ assert.match(cssRule('.version-container-panel .version-container-controls>label'),/padding:0/);
  assert.match(cssRule('.version-container-panel'),/container-type:inline-size/);
  assert.match(css,/@container\(max-width:700px\)\{\.version-container-panel \.version-container-controls\{grid-template-columns:minmax\(0,1fr\)\}/);
  assert.match(css,/@media\(max-width:700px\)\{\.version-container-panel \.version-container-controls\{grid-template-columns:minmax\(0,1fr\)\}/);
  assert.match(cssRule('.version-container-panel .version-container-footer'),/justify-content:space-between/);
+});
+test('Container inherits Version summary framing and typography and bounds the empty library',()=>{
+ assert.ok(css.includes('.version-status-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:0;padding:.15rem var(--jv-space-sm);border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface-sunken)}'));
+ assert.ok(css.includes('.version-status-grid span{color:var(--jv-muted);font-size:.75rem}'));
+ assert.ok(css.includes('.version-status-grid strong{font-size:.89rem;line-height:1.3;overflow-wrap:anywhere}'));
+ const summaryOverrides=css.slice(css.indexOf('/* Version / Container: one surface'),css.indexOf('/* Version / Container owns')).match(/[^{}]*version-container-summary[^{}]*\{[^}]*\}/g);
+ assert.ok(summaryOverrides.length>0);
+ for(const rule of summaryOverrides) assert.doesNotMatch(rule,/background:|border-left:|font-size:/);
+ const empty=cssRule('.version-container-history .backup-library-empty');
+ assert.match(empty,/grid-column:1 \/ -1/);
+ assert.match(empty,/min-height:62px/);
+ assert.match(empty,/border:1px dashed var\(--jv-border-strong\);border-radius:10px;color:var\(--jv-muted\)/);
+ assert.match(cssRule('.version-container-footer .backup-library-summary'),/flex-wrap:wrap;gap:\.85rem/);
+ assert.match(cssRule('.version-container-footer .backup-library-summary span'),/font-size:\.7rem;text-transform:uppercase;letter-spacing:\.08em/);
+ assert.match(cssRule('.version-container-footer .backup-library-summary strong'),/font-size:1rem/);
+ assert.match(cssRule('.version-container-footer .backup-command-actions'),/gap:\.4rem;flex-wrap:wrap/);
+ for(const responsive of ['@media(max-width:700px)','@container(max-width:700px)']) {
+  const start=css.indexOf(responsive+'{.version-container-panel');
+  assert.ok(start>=0);
+  const rules=css.slice(start,css.indexOf('\n',start));
+  assert.ok(rules.includes('.version-container-history .backup-file-grid{grid-template-columns:1fr}'));
+  assert.ok(rules.includes('.version-container-panel .version-container-footer{align-items:stretch;flex-direction:column}'));
+ }
 });
 test('Container retention is limited to one or two and missing defaults to one',async()=>{
  const page=containerWorkspace({statusReply:()=>({state:'up_to_date'})});await page.mount();
@@ -938,6 +967,15 @@ test('Container retained grid keeps empty columns and uses compact Backups sizin
  assert.match(cssRule('.version-container-history .backup-file-icon svg'),/width:18px;height:18px;fill:none;stroke:currentColor/);
  assert.match(cssRule('.version-container-history .backup-file-copy strong'),/font-size:\.82rem/);
  assert.match(cssRule('.version-container-history .backup-file-copy span'),/font-size:\.74rem/);
+ const card=cssRule('.version-container-workspace .version-container-history .backup-file-card');
+ assert.match(card,/min-height:56px;margin:0;padding:\.4rem \.5rem;gap:\.45rem/);
+ assert.match(card,/border:1px solid var\(--jv-border\);border-radius:10px;background:var\(--jv-surface\)/);
+ // Keep hover and selection specific enough to override the scoped card background.
+ const hover=cssRule('.version-container-workspace .version-container-history .backup-file-selectable:hover');
+ const selected=cssRule('.version-container-workspace .version-container-history .backup-file-selectable:has(.backup-file-checkbox:checked)');
+ assert.match(hover,/border-color:var\(--jv-accent\);background:/);
+ assert.match(selected,/border-color:var\(--jv-accent\);background:/);
+ assert.match(selected,/box-shadow:inset 0 0 0 1px var\(--jv-accent\)/);
  assert.doesNotMatch(source,/M12 3 3 7\.5/);
 });
 test('Container footer sums retained sizes and reflects existing operation state including polling',async()=>{

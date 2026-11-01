@@ -1262,6 +1262,10 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if !strings.Contains(markup, `<a class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
 		t.Fatal("How to connect must reuse shared button styling and retain its destination")
 	}
+	if !strings.Contains(styles, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:40px;min-height:40px;padding:0 .2rem}`) {
+		t.Fatal("Control Center heading must retain the compact 40px rhythm")
+	}
+
 	for _, rule := range regexp.MustCompile(`(?m)^\.control-center-heading\{([^}]*)\}`).FindAllStringSubmatch(styles, -1) {
 		if strings.Contains(rule[1], "border-bottom:") || strings.Contains(rule[1], "border:") {
 			t.Fatal("Control Center heading must not have a divider before Session & Power")

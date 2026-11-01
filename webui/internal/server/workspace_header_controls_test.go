@@ -276,3 +276,87 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 		t.Error("provider manuals and developer integration must remain available in collapsed details")
 	}
 }
+
+func TestWorkspaceHeaderGeometryAndNeutralShells(t *testing.T) {
+	read := func(name string) string {
+		t.Helper()
+		data, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	css := read("static/app.css")
+	network := read("static/network-workspace.css")
+	rules := regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1)
+	shared := ""
+	for _, rule := range rules {
+		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-dialog-header,") && strings.Contains(rule[2], "height:40px") {
+			shared = rule[0]
+		}
+		if (strings.Contains(rule[1], "workspace-header") || strings.Contains(rule[1], "system-monitor-header") || strings.Contains(rule[1], "system-update-dialog-header")) && !strings.Contains(rule[1], "-header-button") && regexp.MustCompile(`min-height:(48|52)px`).MatchString(rule[2]) {
+			t.Errorf("obsolete workspace header geometry: %s", rule[0])
+		}
+	}
+	for _, name := range []string{"network-workspace-header", "system-workspace-header", "minecraft-workspace-header", "plugins-workspace-header", "version-workspace-header", "system-monitor-header", "storage-workspace-header", "backups-workspace-header", "migration-workspace-header", "system-update-dialog-header"} {
+		if !strings.Contains(shared, "."+name) {
+			t.Errorf("%s does not share the workspace lane", name)
+		}
+	}
+	for _, declaration := range []string{"height:40px;min-height:40px", "flex:none", "align-items:center", "padding:3px var(--jv-workspace-edge)"} {
+		if !strings.Contains(shared, declaration) {
+			t.Errorf("shared workspace header missing %s", declaration)
+		}
+	}
+	if strings.Contains(shared, "!important") {
+		t.Error("workspace geometry must use the normal cascade")
+	}
+	networkRule := regexp.MustCompile(`\.network-workspace-header\{([^}]*)\}`).FindStringSubmatch(network)
+	if len(networkRule) != 2 || !strings.Contains(networkRule[1], "height:40px;min-height:40px;padding:3px") || strings.Contains(networkRule[1], "48px") {
+		t.Fatal("Network must follow the 40px contract")
+	}
+	for _, name := range []string{"plugins", "version"} {
+		rule := regexp.MustCompile(`\.` + name + `-workspace-header\{([^}]*)\}`).FindStringSubmatch(css)
+		if len(rule) != 2 || strings.Contains(rule[1], "height:") || strings.Contains(rule[1], "padding:") {
+			t.Errorf("%s must inherit shared lane geometry", name)
+		}
+	}
+	for _, want := range []string{
+		`.app-header.topbar{height:40px;min-height:40px;`,
+		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}`,
+		`.workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}`,
+		`.workspace-window .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem}`,
+		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close):is(:hover,:focus-visible){background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}`,
+		`.workspace-window .server-selector>summary{height:32px;min-height:32px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;`,
+		`.workspace-window .server-selector>summary:is(:hover,:focus-visible),.workspace-window .server-selector[open]>summary{background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}`,
+		`[data-server-selector-compact] .server-selector>summary{padding:.15rem .3rem;font-size:.75rem}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("shared header/control contract missing %s", want)
+		}
+	}
+	for _, selector := range []string{".workspace-window :is(.workspace-header-refresh,.workspace-header-close)", ".workspace-window .server-selector>summary"} {
+		if !strings.Contains(css, selector+"{background:#fff;border-color:#cbd4da;color:#34414a}") {
+			t.Errorf("light neutral shell missing for %s", selector)
+		}
+	}
+	for _, want := range []string{
+		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close):is(:hover,:focus-visible){background:#eef6f1;border-color:#86b99a;color:#184c31}`,
+		`.workspace-window .server-selector>summary:is(:hover,:focus-visible),.workspace-window .server-selector[open]>summary{background:#eef6f1;border-color:#86b99a;color:#184c31}`,
+		`.server-selector>summary,.server-selector-option{display:flex;align-items:center;gap:.4rem;min-width:0;padding:.4rem .55rem;border:1px solid #303942;border-radius:7px;background:#171d22;color:inherit;font-size:.85rem;line-height:1.2;cursor:pointer;list-style:none}`,
+		`.server-selector-option{width:100%;margin:0;text-align:left;border-color:transparent;background:transparent}`,
+		`.server-selector-option:hover,.server-selector-option[aria-pressed="true"]{background:#25382e;border-color:#4f8b69}`,
+		`.server-selector-menu{position:fixed;inset:auto;margin:0;z-index:170;max-width:calc(100vw - 8px);max-height:240px;color:#eef1f4;overflow:auto;padding:.25rem;border:1px solid #303942;border-radius:8px;background:#171d22;box-shadow:0 12px 28px #0007}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("light state or unchanged selector menu contract missing %s", want)
+		}
+	}
+	for _, rule := range rules {
+		if strings.Contains(rule[1], "workspace-header-refresh") && !strings.Contains(rule[1], ":hover") && !strings.Contains(rule[1], ":focus-visible") {
+			if regexp.MustCompile(`background:(#25382e|#e3f1e8|#68bd8e)`).MatchString(rule[2]) {
+				t.Errorf("Refresh retains a permanently green shell: %s", rule[0])
+			}
+		}
+	}
+}

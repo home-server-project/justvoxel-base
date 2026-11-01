@@ -9,7 +9,10 @@
 .connect-eyebrow{font-weight:800}
 .connect-title-row{align-items:center}.connect-title-row h1{margin:10px 0 16px}
 
-.connect-methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 24px}
+.connect-methods{display:grid;gap:10px}
+.connect-method-row{display:grid;gap:10px 24px;min-width:0}
+.connect-method-row-primary{grid-template-columns:repeat(2,minmax(0,1fr))}
+.connect-method-row-private{grid-template-columns:repeat(3,minmax(0,1fr))}
 .connect-method{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;min-width:0;border:1px solid var(--jv-border);background:var(--jv-surface-sunken);border-radius:var(--jv-radius)}
 .connect-method-label{margin:0;font-weight:700}
 .connect-actions{display:grid;width:100%;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:4px 16px;margin-top:20px}
@@ -32,7 +35,7 @@
 @media(max-width:640px){
  .connect-shell{padding:20px 14px 40px}.connect-controls,.connect-empty,.connect-guide{padding:20px}
  .connect-title-row{flex-wrap:wrap;gap:.75rem}.connect-title-row [data-server-selector-slot]{max-width:100%}
- .connect-methods,.connect-cards{grid-template-columns:1fr}.connect-method{padding:14px}
+ .connect-method-row-primary,.connect-method-row-private,.connect-cards{grid-template-columns:1fr}.connect-method{padding:14px}
  .connect-actions{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.connect-domain label{grid-column:1/-1}.connect-domain small{grid-column:1;grid-row:3}.connect-actions button{grid-column:1/-1;grid-row:4}
 }
 .connect-invite-controls{margin-top:16px}

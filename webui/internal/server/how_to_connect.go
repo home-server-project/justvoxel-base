@@ -215,6 +215,7 @@ func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, server
 		{ID: "tailscale", Name: "Tailscale", Note: "Works only for users with access to the same Tailscale network.", Status: "Unavailable"},
 		{ID: "netbird", Name: "NetBird", Note: "Works only for peers with access to the relevant NetBird network.", Status: "Unavailable"},
 		{ID: "playit", Name: "Playit.gg", Note: "Use the public tunnel connection information below. Public ports may differ from local ports.", Status: "Unavailable"},
+		{ID: "nordvpn", Name: "NordVPN Meshnet", Note: "Works only for peers with access to this NordVPN Meshnet.", Status: "Unavailable"},
 	}
 	local := &guide.Methods[1]
 	if usableConnectionIP(status.System.IPv4, true) {
@@ -240,7 +241,7 @@ func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, server
 				break
 			}
 			if method.ID != "playit" {
-				if usableConnectionIP(provider.IP, false) {
+				if usableConnectionIP(provider.IP, false) && (method.ID != "nordvpn" || validConnectionPort(mc.JavaPort)) {
 					method.Endpoints = localConnectionEndpoints(provider.IP, status)
 				}
 			} else if provider.ServiceActive {

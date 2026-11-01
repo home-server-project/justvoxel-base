@@ -336,7 +336,7 @@ if (versionLauncher && versionDialog) {
     const operationState = metric("Status", "Checking…");
     const historyActions = document.createElement("div"); historyActions.className = "backup-command-actions";
     const restore = document.createElement("button"); restore.type = "button"; restore.textContent = "Restore selected"; restore.disabled = true;
-    historyActions.appendChild(restore); footer.append(summary, historyActions); library.appendChild(images);
+    historyActions.appendChild(restore); footer.append(summary, historyActions); library.append(images, footer);
     let selectedDigest = "";
     const imageSelectors = [];
     const sizeLabel = (bytes) => bytes > 0 ? bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(1)} GB` : `${Math.ceil(bytes / 1048576)} MB` : "";
@@ -344,7 +344,7 @@ if (versionLauncher && versionDialog) {
     const progress = document.createElement("div");
     const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = "";
     terminal.textContent = "Checking the selected container image…";
-    panel.append(identity, controls, helper, library, footer);
+    panel.append(identity, controls, helper, library);
     root.append(panel, progress, terminal);
     if (!current()) return;
     content.replaceChildren(root);
@@ -561,7 +561,7 @@ if (versionLauncher && versionDialog) {
       }
       imageCount.textContent = String(retained.length);
       totalSizeValue.textContent = sizeLabel(totalSize) || "0 MB";
-      if (!retained.length) { const empty = document.createElement("p"); empty.className = "muted compact"; empty.textContent = "No previous container images."; images.appendChild(empty); }
+      if (!retained.length) { const empty = document.createElement("p"); empty.className = "backup-library-empty"; empty.textContent = "No previous container images."; images.appendChild(empty); }
       if (status.server_name) serverLine.replaceChildren(...line("Server", status.server_name).children);
       imageLine.replaceChildren(...line("Image", status.image).children);
       statusLine.replaceChildren(...line("Status", containerLabel(status.state)).children);

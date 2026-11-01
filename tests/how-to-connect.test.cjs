@@ -20,7 +20,7 @@ class Element {
   setCustomValidity(value) { this.validity = value; }
   set innerHTML(_) { throw new Error('unsafe HTML insertion'); }
 }
-function fixture({ local = true, bedrock = false, search = '', clipboard } = {}) {
+function fixture({ local = true, bedrock = false, search = '', clipboard, nordvpn = true } = {}) {
   const guide = new Element();
   const domain = new Element();
   const print = new Element();
@@ -36,12 +36,13 @@ function fixture({ local = true, bedrock = false, search = '', clipboard } = {})
   const summary = new Element();
   const java = new Element();
   const domainAddresses = Array.from({ length: bedrock ? 2 : 1 }, () => new Element());
-  const ids = ['custom', 'local', 'tailscale', 'netbird', 'playit'];
+  const ids = ['custom', 'local', 'tailscale', 'netbird', 'playit', 'nordvpn'];
   const switches = ids.map(id => new Element({ connectMethod: id }));
   switches[1].disabled = !local;
   switches[1].checked = local;
   switches[2].disabled = true;
-  const cards = ids.map(id => new Element({ connectCard: id, connectName: id }));
+  switches[5].disabled = !nordvpn;
+  const cards = ids.map(id => new Element({ connectCard: id, connectName: id === 'nordvpn' ? 'NordVPN Meshnet' : id }));
   const endpoints = (address, javaJoin, port = '19139') => [
     new Element({ connectEndpoint: 'Java', connectJoin: javaJoin }),
     ...(bedrock ? [new Element({ connectEndpoint: 'Bedrock', connectAddress: address, connectPort: port })] : []),
@@ -52,6 +53,7 @@ function fixture({ local = true, bedrock = false, search = '', clipboard } = {})
     endpoints('100.80.0.8', '100.80.0.8:25571'),
     endpoints('100.90.0.9', '100.90.0.9:25571'),
     [new Element({ connectEndpoint: 'Java', connectJoin: 'example.gl.joinmc.link:12345' })],
+    endpoints('100.96.0.10', '100.96.0.10:25571'),
   ];
   methodEndpoints[0].forEach(endpoint => { endpoint.querySelector = () => domainAddresses[1]; });
   cards.forEach((card, i) => { card.querySelectorAll = () => methodEndpoints[i]; });
@@ -96,7 +98,7 @@ test('local defaults to selected; print-ready guide includes exactly the selecte
   assert.equal(f.print.disabled, false);
   assert.equal(f.invite.disabled, false);
   assert.equal(f.summary.textContent, 'local');
-  assert.deepEqual(f.cards.map(card => card.hidden), [true, false, true, true, true]);
+  assert.deepEqual(f.cards.map(card => card.hidden), [true, false, true, true, true, true]);
   f.switches[3].checked = true;
   f.switches[3].listeners.change();
   assert.equal(f.summary.textContent, 'local · netbird');
@@ -210,8 +212,8 @@ test('approved page layout uses a full-width action lane and the same guide and 
   assert.match(method, /<div class="connect-method">\s*<label[^>]+>{{.Name}}<\/label>\s*<input[^>]+role="switch"[^>]+>\s*<\/div>/);
   assert.ok(!/<small|<span/.test(method));
   const grid = template.slice(template.indexOf('<div class="connect-methods">'), template.indexOf('<div class="connect-actions connect-domain">'));
-  const order = Array.from(grid.matchAll(/eq \.ID "(local|playit|tailscale|netbird)"/g), match => match[1]);
-  assert.deepEqual(order, ['local', 'playit', 'tailscale', 'netbird']);
+  const order = Array.from(grid.matchAll(/eq \.ID "(local|playit|tailscale|netbird|nordvpn)"/g), match => match[1]);
+  assert.deepEqual(order, ['local', 'playit', 'tailscale', 'netbird', 'nordvpn']);
   assert.match(template, /class="connect-print-logo" src="\/static\/justvoxel-login-logo.png"/);
   const login = readFileSync(path.join(__dirname, '../webui/internal/server/templates/login.html'), 'utf8');
   assert.ok(login.includes('src="/static/justvoxel-login-logo.png"'));
@@ -243,9 +245,11 @@ test('approved page layout uses a full-width action lane and the same guide and 
   assert.ok(frame.includes('border:1px solid var(--jv-border)'));
   assert.ok(frame.includes('background:var(--jv-surface-sunken)'));
   assert.ok(frame.includes('border-radius:var(--jv-radius)'));
-  assert.match(screen, /\.connect-methods\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);/);
+  assert.match(screen, /\.connect-methods\{display:grid;gap:10px\}/);
+  assert.match(screen, /\.connect-method-row-primary\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+  assert.match(screen, /\.connect-method-row-private\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)\}/);
   assert.match(screen, /@media\(max-width:640px\)/);
-  assert.match(screen, /\.connect-methods,\.connect-cards\{grid-template-columns:1fr\}/);
+  assert.match(screen, /\.connect-method-row-primary,\.connect-method-row-private,\.connect-cards\{grid-template-columns:1fr\}/);
   assert.match(screen, /\.connect-actions button\{grid-column:4;grid-row:1;white-space:nowrap\}/);
   // Colors are supplied by app.css classes/tokens, and switches have no local painting.
   assert.ok(!/#[a-f0-9]{3,8}\b/i.test(screen));
@@ -385,4 +389,64 @@ test('invitation keeps Close secondary before primary Copy; selector reuses work
   assert.match(template, /class="secondary" data-connect-invitation-close>Close<\/button><button type="button" data-connect-copy>Copy invitation/);
   assert.match(template, /data-server-selector-slot><label>Server: <select/);
   assert.doesNotMatch(template, /data-workspace-window|data-workspace-refresh|data-workspace-close|Select server/);
+});
+
+test('NordVPN participates in selected preview, PDF and invitation through generic method handling', () => {
+  for (const bedrock of [false, true]) {
+    const f = fixture({ bedrock });
+    assert.equal(f.cards[5].hidden, true);
+    assert.ok(!f.summary.textContent.includes('NordVPN'));
+    f.invite.listeners.click();
+    assert.ok(!f.invitationText.value.includes('NordVPN'));
+    f.close.listeners.click();
+    f.switches[1].checked = false;
+    f.switches[5].checked = true;
+    f.switches[5].listeners.change();
+    assert.equal(f.guide.hidden, false);
+    assert.deepEqual(f.cards.map(card => card.hidden), [true, true, true, true, true, false]);
+    assert.equal(f.summary.textContent, 'NordVPN Meshnet');
+    f.events.beforeprint();
+    assert.equal(f.classes.has('connect-print-ready'), true);
+    f.print.listeners.click();
+    assert.equal(f.prints(), 1);
+    f.invite.listeners.click();
+    assert.equal(f.invitationText.value, 'Join my Minecraft Family Survival on JustVoxel\n\nNordVPN Meshnet\nJava: 100.96.0.10:25571' + (bedrock ? '\nBedrock: 100.96.0.10:19139' : ''));
+    f.close.listeners.click();
+    f.switches[5].checked = false;
+    f.switches[1].checked = true;
+    f.switches[5].listeners.change();
+    assert.equal(f.cards[5].hidden, true);
+    assert.equal(f.summary.textContent, 'local');
+    f.invite.listeners.click();
+    assert.ok(!f.invitationText.value.includes('NordVPN'));
+  }
+});
+
+test('unavailable NordVPN cannot contribute to preview, PDF or invitation even if checked', () => {
+  const f = fixture({ local: false, nordvpn: false });
+  assert.equal(f.switches[5].disabled, true);
+  f.switches[5].checked = true;
+  f.switches[5].listeners.change();
+  assert.equal(f.cards[5].hidden, true);
+  assert.equal(f.guide.hidden, true);
+  assert.equal(f.summary.textContent, '');
+  assert.equal(f.print.disabled, true);
+  f.events.beforeprint();
+  assert.equal(f.classes.has('connect-print-ready'), false);
+  f.print.listeners.click();
+  assert.equal(f.prints(), 0);
+  f.invite.listeners.click();
+  assert.equal(f.invitation.open, false);
+  assert.equal(f.invitationText.value, '');
+});
+
+test('private method row and PS5 warning include all three private networks', () => {
+  const template = readFileSync(path.join(__dirname, '../webui/internal/server/templates/how_to_connect.html'), 'utf8');
+  const privateRow = template.split('<div class="connect-method-row connect-method-row-private">')[1].split('</div>')[0];
+  const ids = Array.from(privateRow.matchAll(/eq \.ID "([^"]+)"/g), match => match[1]);
+  assert.deepEqual(ids, ['tailscale', 'netbird', 'nordvpn']);
+  assert.ok(template.includes('Tailscale, NetBird and NordVPN Meshnet still require access to the relevant private network on the connecting device. These PS5 methods do not grant that access.'));
+  const css = readFileSync(path.join(__dirname, '../webui/internal/server/static/how-to-connect.css'), 'utf8');
+  const mobile = css.slice(css.indexOf('@media(max-width:640px)'), css.indexOf('.connect-invite-controls'));
+  assert.match(mobile, /\.connect-method-row-primary,\.connect-method-row-private,\.connect-cards\{grid-template-columns:1fr\}/);
 });

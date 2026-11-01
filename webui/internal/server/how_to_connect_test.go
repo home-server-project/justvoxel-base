@@ -147,7 +147,7 @@ func TestConnectionGuideUnconfigured(t *testing.T) {
 	}
 }
 func TestConnectionGuideAvailability(t *testing.T) {
-	for _, id := range []string{"local", "tailscale", "netbird"} {
+	for _, id := range []string{"local", "tailscale", "netbird", "nordvpn"} {
 		for _, value := range []string{"192.168.1.5", "100.80.0.8", "", "0.0.0.0", "127.0.0.1", "169.254.1.2", "224.0.0.1", "https://auth.example"} {
 			for _, connected := range []bool{false, true} {
 				status := guideFixture()
@@ -303,7 +303,7 @@ func TestConnectionGuideRenderedUnavailableSwitches(t *testing.T) {
 		{ID: "playit", Connected: true, ServiceActive: true, Tunnels: []api.PlayitTunnel{{DisplayAddress: "disabled.playit.gg", Destination: "127.0.0.1:25571", Disabled: true}}},
 	}}}
 	body := guidePage(t, client, &http.Cookie{Name: sessionCookie, Value: "session-token"}).Body.String()
-	for _, id := range []string{"local", "tailscale", "netbird", "playit"} {
+	for _, id := range []string{"local", "tailscale", "netbird", "playit", "nordvpn"} {
 		if !strings.Contains(body, `data-connect-method="`+id+`" disabled`) {
 			t.Fatalf("%s switch is selectable", id)
 		}
@@ -378,16 +378,21 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	}
 	controls := body[controlsStart:actionsStart]
 	previous := -1
-	for _, id := range []string{"local", "playit", "tailscale", "netbird"} {
+	for _, id := range []string{"local", "playit", "tailscale", "netbird", "nordvpn"} {
 		position := strings.Index(controls, `data-connect-method="`+id+`"`)
 		if position <= previous {
 			t.Fatalf("method %s is missing or out of row order", id)
 		}
 		previous = position
 	}
-	if strings.Count(controls, `class="connect-method"`) != 4 || strings.Count(controls, `role="switch"`) != 4 || strings.Contains(controls, "<small") || strings.Contains(controls, "<span") {
+	if strings.Count(controls, `class="connect-method"`) != 5 || strings.Count(controls, `role="switch"`) != 5 || strings.Contains(controls, "<small") || strings.Contains(controls, "<span") {
 		t.Fatal("method cells must contain only their label and shared switch")
 	}
+	privateStart := strings.Index(controls, `class="connect-method-row connect-method-row-private"`)
+	if privateStart < 0 || strings.Count(controls[privateStart:], `class="connect-method"`) != 3 {
+		t.Fatal("private networks must share one three-cell row")
+	}
+
 	label := strings.Index(body, `<label for="connect-domain">Custom domain</label>`)
 	input := strings.Index(body, `id="connect-domain" type="text"`)
 	switchInput := strings.Index(body, `id="connect-custom" type="checkbox" role="switch"`)
@@ -572,5 +577,99 @@ func TestDirectServerInvitationUnavailableDefault(t *testing.T) {
 	response := httptestResponse(app, authenticatedAdminRequest("GET", "/api/minecraft/servers/invitation?server=jv-family1", ""))
 	if response.Code != 409 || !strings.Contains(response.Body.String(), "No default invitation") || strings.Contains(response.Body.String(), `"invitation":`) {
 		t.Fatal("invented address", response.Body.String())
+	}
+}
+
+func TestConnectionGuideNordVPNAuthorityAndPorts(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		id          string
+		ip          string
+		connected   bool
+		javaPort    int
+		bedrock     bool
+		bedrockPort int
+		available   bool
+		endpoints   int
+	}{
+		{"java", "nordvpn", "100.96.0.10", true, 25571, false, 19139, true, 1},
+		{"both editions", "nordvpn", "100.96.0.10", true, 25571, true, 19139, true, 2},
+		{"invalid bedrock port", "nordvpn", "100.96.0.10", true, 25571, true, 65536, true, 1},
+		{"invalid java port", "nordvpn", "100.96.0.10", true, 0, true, 19139, false, 0},
+		{"out of range java port", "nordvpn", "100.96.0.10", true, 65536, true, 19139, false, 0},
+		{"disconnected", "nordvpn", "100.96.0.10", false, 25571, true, 19139, false, 0},
+		{"wrong case", "NordVPN", "100.96.0.10", true, 25571, true, 19139, false, 0},
+		{"display name is not ID", "NordVPN Meshnet", "100.96.0.10", true, 25571, true, 19139, false, 0},
+		{"prefix is not ID", "nordvpn-other", "100.96.0.10", true, 25571, true, 19139, false, 0},
+		{"empty", "nordvpn", "", true, 25571, true, 19139, false, 0},
+		{"unspecified", "nordvpn", "0.0.0.0", true, 25571, true, 19139, false, 0},
+		{"loopback", "nordvpn", "127.0.0.1", true, 25571, true, 19139, false, 0},
+		{"link local", "nordvpn", "169.254.1.2", true, 25571, true, 19139, false, 0},
+		{"multicast", "nordvpn", "224.0.0.1", true, 25571, true, 19139, false, 0},
+		{"URL", "nordvpn", "https://100.96.0.10", true, 25571, true, 19139, false, 0},
+		{"IPv6 loopback", "nordvpn", "::1", true, 25571, true, 19139, false, 0},
+		{"IPv6 link local", "nordvpn", "fe80::1", true, 25571, true, 19139, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := guideFixture()
+			status.Minecraft.JavaPort = tc.javaPort
+			status.Minecraft.Bedrock = tc.bedrock
+			status.Minecraft.BedrockPort = tc.bedrockPort
+			// Other system addresses never replace this provider's own connection evidence.
+			status.System.IPv4 = "192.168.1.5"
+			status.System.Tailscale = "100.80.0.8"
+			status.System.NetBird = "100.90.0.9"
+			provider := api.RemoteAccessProvider{
+				ID:            tc.id,
+				IP:            tc.ip,
+				Connected:     tc.connected,
+				ServiceActive: true,
+				Configured:    true,
+				Summary:       "private-setup-marker",
+				Account:       "private-account-marker",
+				NordName:      "private-nord-name-marker",
+				DashboardURL:  "https://private-auth.example/secret-marker",
+				Meshnet:       "100.99.0.99",
+			}
+			remote := api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{provider}}
+			guide := newConnectionGuide(status, remote, "")
+			if len(guide.Methods) != 6 || guide.Methods[4].ID != "playit" || guide.Methods[5].ID != "nordvpn" {
+				t.Fatal("NordVPN must be appended without changing existing method indexes")
+			}
+			method := guide.Methods[5]
+			if method.Name != "NordVPN Meshnet" || method.Available != tc.available || method.Default || len(method.Endpoints) != tc.endpoints {
+				t.Fatalf("unexpected Meshnet guide: %+v", method)
+			}
+			if tc.available {
+				java := method.Endpoints[0]
+				if java.Edition != "Java" || java.Address != tc.ip || java.Port != "25571" || java.JoinAddress != tc.ip+":25571" {
+					t.Fatalf("wrong Java endpoint: %+v", java)
+				}
+				if tc.endpoints == 2 {
+					bedrock := method.Endpoints[1]
+					if bedrock.Edition != "Bedrock" || bedrock.Address != tc.ip || bedrock.Port != "19139" || bedrock.JoinAddress != tc.ip+":19139" {
+						t.Fatalf("wrong Bedrock endpoint: %+v", bedrock)
+					}
+				}
+			}
+			body := guidePage(t, &connectionGuideAPI{fakeAPI: fakeAPI{statusResult: status}, remote: remote}, &http.Cookie{Name: sessionCookie, Value: "session-token"}).Body.String()
+			if strings.Contains(body, `data-connect-method="nordvpn" disabled`) == tc.available || strings.Contains(body, `data-connect-card="nordvpn"`) != tc.available {
+				t.Fatal("Meshnet switch/card availability does not follow authoritative evidence")
+			}
+			if tc.available && !strings.Contains(body, `data-connect-card="nordvpn" data-connect-name="NordVPN Meshnet" hidden`) {
+				t.Fatal("available Meshnet card must remain hidden until selected")
+			}
+			for _, forbidden := range []string{provider.Account, provider.NordName, provider.DashboardURL, provider.Meshnet, provider.Summary, "secret-marker"} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("private provider metadata rendered: %s", forbidden)
+				}
+			}
+		})
+	}
+	status := guideFixture()
+	status.System.Tailscale = "100.80.0.8"
+	status.System.NetBird = "100.90.0.9"
+	if newConnectionGuide(status, api.RemoteAccessStatus{}, "").Methods[5].Available {
+		t.Fatal("legacy system status must not substitute for a NordVPN provider")
 	}
 }
