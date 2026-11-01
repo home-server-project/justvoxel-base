@@ -167,14 +167,25 @@ func TestSetupResolutionPinsAndOptionalCrossplay(t *testing.T) {
 }
 
 func TestAdvancedJavaSoftwareCanContinueWithoutCrossplay(t *testing.T) {
-	for _, software := range []string{"paper", "purpur", "spigot", "vanilla", "fabric", "neoforge", "forge", "quilt"} {
+	for _, software := range []string{"paper", "purpur", "spigot", "pufferfish", "leaf", "vanilla", "fabric", "neoforge", "forge", "quilt"} {
 		t.Run(software, func(t *testing.T) {
 			_, base := newAddServerTestApp(t)
 			loader := ""
-			if setupNeedsExactRuntime(software) && software != "spigot" {
+			if setupNeedsExactRuntime(software) && software != "spigot" && software != "pufferfish" && software != "leaf" {
 				loader = "0.18.0"
 			}
-			preview := &exactSetupPreviewAPI{addServerTestAPI: base, status: api.AdminVersionStatus{SelectedCandidate: "1.21.8", ImageTag: setupRuntimeImage(software, "1.21.8"), LoaderVersion: loader}}
+			game, reason := "1.21.8", ""
+			switch software {
+			case "pufferfish":
+				game = "1.21.10"
+			case "leaf":
+				game, reason = "26.3", "Leaf labels this build Experimental. It is available for setup."
+			case "fabric":
+				game, loader = "26.3", "0.19.5"
+			case "neoforge":
+				game, loader = "26.3", "26.3.0.99"
+			}
+			preview := &exactSetupPreviewAPI{addServerTestAPI: base, status: api.AdminVersionStatus{SelectedCandidate: game, CandidateChannel: "RELEASE", Reason: reason, ImageTag: setupRuntimeImage(software, game), LoaderVersion: loader}}
 			app, err := New(preview, Config{Version: "test", ManagementAPI: "v1"})
 			if err != nil {
 				t.Fatal(err)
@@ -187,7 +198,7 @@ func TestAdvancedJavaSoftwareCanContinueWithoutCrossplay(t *testing.T) {
 			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/server", values))
 			requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/connections", url.Values{"java_port": {"25567"}, "bedrock_port": {"19134"}, "image_tag": {"stable"}, "version_policy": {"recommended"}, "direction": {"next"}}))
 			draft, _ := setupDrafts.get(app, "session-token")
-			if draft.CurrentStep != setupMemoryStep || draft.Server.BedrockEnabled || draft.Minecraft.LoaderVersion != loader {
+			if draft.CurrentStep != setupMemoryStep || draft.Server.BedrockEnabled || draft.Minecraft.LoaderVersion != loader || (setupNeedsExactRuntime(software) && draft.Minecraft.ResolvedVersion != game) {
 				t.Fatalf("Java setup blocked or pin lost: %+v", draft)
 			}
 		})

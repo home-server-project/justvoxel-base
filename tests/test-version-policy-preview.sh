@@ -175,3 +175,40 @@ for invalid in false null '""' '"PAPER"'; do
     result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
     jq -e '.ok == false and .code == "schema_error"' <<< "${result}" >/dev/null
 done
+
+# New-software Java previews resolve independently of managed cross-play JARs.
+# Discovery/exact runtime metadata is exercised in test-setup-runtime-resolution.sh
+# and test-paper-fork-versions.sh; this fixture isolates the preview boundary.
+cat >> "${fixture_dir}/common.sh" <<'STUB'
+resolve_setup_java_runtime() {
+    [[ $2 == recommended || ( $2 == pinned && $3 == 26.3 ) ]] || return 1
+    case "$1" in
+        fabric) printf '%s' '{"game":"26.3","loader":"0.19.5","image":"java25"}' ;;
+        neoforge) printf '%s' '{"game":"26.3","loader":"26.3.0.99","image":"java25"}' ;;
+        leaf) printf '%s' '{"game":"26.3","loader":"","image":"java25","reason":"Leaf labels this build Experimental. It is available for setup."}' ;;
+        *) return 1 ;;
+    esac
+}
+jv_crossplay_mod_compatible() {
+    printf '%s\n' "$*" >> "${DATA_PATH}.crossplay-checks"
+    [[ ${CROSSPLAY_VERIFIED:-no} == yes ]]
+}
+curl() { echo 'Unexpected network request in preview fixture' >&2; return 1; }
+STUB
+for software in fabric neoforge; do
+    case "${software}" in fabric) loader=0.19.5 ;; neoforge) loader=26.3.0.99 ;; esac
+    for policy in recommended pinned; do
+        preview="$(bash "${fixture_dir}/status" --server-type "${software}" "${policy}" 26.3 no)"
+        jq -e --arg loader "${loader}" '.selected_candidate == "26.3" and .loader_version == $loader and .image_tag == "java25" and .server_supported and (.crossplay_enabled | not) and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
+        [[ ! -e ${DATA_PATH}.crossplay-checks ]]
+    done
+done
+for software in fabric neoforge; do
+    preview="$(bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
+    jq -e '.crossplay_enabled and (.crossplay_compatible | not) and (.managed_crossplay_available | not) and (.reason | contains("could not be proven"))' <<< "${preview}" >/dev/null
+    [[ -s ${DATA_PATH}.crossplay-checks ]]
+    preview="$(CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
+    jq -e '.crossplay_enabled and .crossplay_compatible and .managed_crossplay_available' <<< "${preview}" >/dev/null
+done
+preview="$(bash "${fixture_dir}/status" --server-type leaf recommended '' no)"
+jq -e '.selected_candidate == "26.3" and .candidate_channel == "RELEASE" and .server_supported and (.reason | contains("Experimental"))' <<< "${preview}" >/dev/null

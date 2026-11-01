@@ -74,17 +74,21 @@ if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${
     image="$(jq -r '.image // empty' <<< "${resolved}")"
     compatible=false
     available=false
-    reason=''
+    reason="$(jq -r '.reason // empty' <<< "${resolved}")"
     if [[ -n ${candidate} ]]; then
         if [[ ${target_type} == spigot || ${target_type} == pufferfish || ${target_type} == leaf ]]; then
             available=true
             geyser="$(resolve_geyser_supported_java_version || true)"
             if [[ -n ${geyser} ]] && server_crossplay_version_compatible "${candidate}" "${geyser}"; then compatible=true; fi
         elif [[ ${target_type} == fabric || ${target_type} == neoforge ]]; then
-            if jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${loader}"; then
-                available=true
-                compatible=true
-            else reason='Managed cross-play compatibility could not be proven for this exact Minecraft and loader version. Java setup is available.'; fi
+            # A Java preview must never download managed cross-play artifacts.
+            # Only an explicit cross-play request proves that independent capability.
+            if [[ $3 == yes ]]; then
+                if jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${loader}"; then
+                    available=true
+                    compatible=true
+                else reason='Managed cross-play compatibility could not be proven for this exact Minecraft and loader version. Java setup is available.'; fi
+            fi
         fi
     else reason='An exact stable Minecraft release and compatible runtime could not be verified. Try again or choose a supported Specific version.'; fi
     jq -n --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" \

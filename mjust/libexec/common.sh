@@ -542,39 +542,56 @@ validate_java_server_selection() {
     fi
 }
 
+# Read only safe archived server identities from the last successful Jenkins build.
+pufferfish_build_version() {
+    local branch="$1"
+    [[ ${branch} =~ ^[0-9]+[.][0-9]+$ ]] || return 1
+    curl --connect-timeout 3 --max-time 12 -fsSL \
+        "https://ci.pufferfish.host/job/Pufferfish-${branch}/lastSuccessfulBuild/api/json" |
+        jq -er '
+            select(.result == "SUCCESS" and
+                (.number | type == "number" and . > 0 and floor == .)) |
+            [.artifacts[] | select(.fileName | type == "string") |
+                select(.fileName | test("^pufferfish-paperclip-[0-9]+[.][0-9]+([.][0-9]+)?-R0[.]1-SNAPSHOT-(mojmap|reobf)[.]jar$"))] |
+            select(length > 0 and all(.[]; .fileName as $name |
+                (.relativePath | type == "string" and
+                    test("^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$") and
+                    (split("/") | all(.[]; . != ".." and . != ".")) and
+                    (endswith("/" + $name) or . == $name)))) |
+            map(.fileName | capture("^pufferfish-paperclip-(?<version>[0-9]+[.][0-9]+([.][0-9]+)?)-R0").version) |
+            unique | select(length == 1) | .[0]'
+}
+
+# Return the exact verified Leaf build, retaining its upstream channel for advice.
+leaf_build_metadata() {
+    local version="$1" metadata build
+    [[ ${version} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || return 1
+    metadata="$(curl --connect-timeout 3 --max-time 12 -fsSL \
+        "https://api.leafmc.one/v2/projects/leaf/versions/${version}")" || return 1
+    build="$(jq -er --arg version "${version}" '
+        select(.project_id == "leaf" and .version == $version) |
+        .builds | select(type == "array" and length > 0 and
+            all(.[]; type == "number" and . > 0 and floor == .)) | max' <<< "${metadata}")" || return 1
+    curl --connect-timeout 3 --max-time 12 -fsSL \
+        "https://api.leafmc.one/v2/projects/leaf/versions/${version}/builds/${build}" |
+        jq -e --arg version "${version}" --argjson build "${build}" '
+            select(.project_id == "leaf" and .version == $version and .build == $build and
+                .downloads.application.name == ("leaf-" + $version + "-" + ($build | tostring) + ".jar") and
+                (.downloads.application.sha256 | type == "string" and test("^[a-fA-F0-9]{64}$")))'
+}
+
 # Verify the artifact that the runtime will actually select. Paper compatibility
 # never establishes availability of a Pufferfish or Leaf Minecraft release.
 paper_fork_version_available() {
-    local software="$1" version="$2" branch metadata build
+    local software="$1" version="$2" branch resolved
     [[ ${version} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
     case "${software}" in
         pufferfish)
             branch="$(cut -d. -f1,2 <<< "${version}")"
-            curl --connect-timeout 3 --max-time 12 -fsSL \
-                "https://ci.pufferfish.host/job/Pufferfish-${branch}/lastSuccessfulBuild/api/json" |
-                jq -e --arg version "${version}" '
-                    .result == "SUCCESS" and
-                    (.number | type == "number" and . > 0 and floor == .) and
-                    any(.artifacts[]; .fileName as $name |
-                        (["pufferfish-paperclip-" + $version + "-R0.1-SNAPSHOT-mojmap.jar",
-                          "pufferfish-paperclip-" + $version + "-R0.1-SNAPSHOT-reobf.jar"] | index($name) != null) and
-                        (.relativePath | type == "string" and length > 0 and
-                            (split("/") | all(.[]; . != ".." and . != "")) and (endswith("/" + $name) or . == $name)))' >/dev/null
+            resolved="$(pufferfish_build_version "${branch}")" || return 1
+            [[ ${resolved} == "${version}" ]]
             ;;
-        leaf)
-            metadata="$(curl --connect-timeout 3 --max-time 12 -fsSL \
-                "https://api.leafmc.one/v2/projects/leaf/versions/${version}")" || return 1
-            build="$(jq -er --arg version "${version}" '
-                select(.project_id == "leaf" and .version == $version) |
-                .builds | select(type == "array" and length > 0 and
-                    all(.[]; type == "number" and . > 0 and floor == .)) | max' <<< "${metadata}")" || return 1
-            curl --connect-timeout 3 --max-time 12 -fsSL \
-                "https://api.leafmc.one/v2/projects/leaf/versions/${version}/builds/${build}" |
-                jq -e --arg version "${version}" --argjson build "${build}" '
-                    .project_id == "leaf" and .version == $version and .build == $build and
-                    .downloads.application.name == ("leaf-" + $version + "-" + ($build | tostring) + ".jar") and
-                    (.downloads.application.sha256 | type == "string" and test("^[a-fA-F0-9]{64}$"))' >/dev/null
-            ;;
+        leaf) leaf_build_metadata "${version}" >/dev/null ;;
         *) return 1 ;;
     esac
 }
@@ -649,7 +666,7 @@ resolve_setup_loader() {
             local api=https://meta.fabricmc.net/v2
             [[ ${software} != quilt ]] || api=https://meta.quiltmc.org/v3
             curl --connect-timeout 3 --max-time 8 -fsSL "${api}/versions/loader/${game}" |
-                jq -er '[.[] | .loader | select(.stable != false) | .version | select(test("^[0-9]+([.][0-9]+){1,3}$"))][0] // empty'
+                jq -er --arg software "${software}" '[.[] | .loader | select(if $software == "fabric" then .stable == true else .stable != false end) | .version | select(test("^[0-9]+([.][0-9]+){1,3}$"))][0] // empty'
             ;;
         forge)
             curl --connect-timeout 3 --max-time 8 -fsSL https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json |
@@ -662,7 +679,7 @@ resolve_setup_loader() {
                 prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
             else return 1; fi
             metadata="$(curl --connect-timeout 3 --max-time 8 -fsSL https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml)" || return 1
-            printf '%s\n' "${metadata}" | sed -n 's/.*<version>\([0-9][0-9.]*\)<\/version>.*/\1/p' |
+            printf '%s\n' "${metadata}" | sed 's/<version>/\n<version>/g' | sed -n 's/.*<version>\([0-9][0-9.]*\)<\/version>.*/\1/p' |
                 jq -Rrs --arg prefix "${prefix}" 'split("\n") | map(select(startswith($prefix) and test("^[0-9]+([.][0-9]+){2,3}$"))) | sort_by(split(".") | map(tonumber)) | last // empty'
             ;;
         *) return 1 ;;
@@ -670,13 +687,39 @@ resolve_setup_loader() {
 }
 
 resolve_setup_java_runtime() {
-    local software="$1" policy="$2" specific="$3" game loader image releases
+    local software="$1" policy="$2" specific="$3" game loader image releases branches branch discovered metadata reason
     case "${policy}" in recommended|pinned) ;; *) return 1 ;; esac
     if [[ ${policy} == pinned ]]; then
         [[ ${specific} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
         releases="${specific}"
     else
-        releases="$(vanilla_metadata | jq -er '[.versions[] | select(.type == "release") | .id][0:8][]')" || return 1
+        case "${software}" in
+            pufferfish)
+                # Discover job branches from official releases, but select the
+                # archived artifact identity rather than guessing a game patch.
+                branches="$(vanilla_metadata | jq -er '[.versions[] | select(.type == "release") |
+                    .id | select(test("^[0-9]+[.][0-9]+([.][0-9]+)?$")) |
+                    split(".")[0:2] | join(".")] | unique | sort_by(split(".") | map(tonumber)) | reverse[]')" || return 1
+                releases=''
+                while IFS= read -r branch; do
+                    discovered="$(pufferfish_build_version "${branch}")" || continue
+                    [[ $(cut -d. -f1,2 <<< "${discovered}") == "${branch}" ]] || continue
+                    java_server_version_available pufferfish "${discovered}" || continue
+                    releases="${discovered}"
+                    break
+                done <<< "${branches}"
+                ;;
+            leaf)
+                releases="$(curl --connect-timeout 3 --max-time 12 -fsSL https://api.leafmc.one/v2/projects/leaf |
+                    jq -er 'select(.project_id == "leaf") | .versions |
+                        map(select(type == "string" and test("^[0-9]+[.][0-9]+([.][0-9]+)?$"))) |
+                        unique | sort_by(split(".") | map(tonumber)) | reverse[]')" || return 1
+                ;;
+            fabric|neoforge)
+                releases="$(vanilla_metadata | jq -er '.versions[] | select(.type == "release") | .id')" || return 1
+                ;;
+            *) releases="$(vanilla_metadata | jq -er '[.versions[] | select(.type == "release") | .id][0:8][]')" || return 1 ;;
+        esac
     fi
     while IFS= read -r game; do
         if [[ ${game} =~ ^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$ ]]; then image=java21
@@ -686,7 +729,14 @@ resolve_setup_java_runtime() {
         loader="$(resolve_setup_loader "${software}" "${game}")" || continue
         validate_java_server_selection "${software}" pinned "${game}" "${loader}" "${image}" || continue
         java_server_version_available "${software}" "${game}" "${loader}" || continue
-        jq -cn --arg game "${game}" --arg loader "${loader}" --arg image "${image}" '{game:$game,loader:$loader,image:$image}'
+        reason=''
+        if [[ ${software} == leaf ]]; then
+            metadata="$(leaf_build_metadata "${game}")" || continue
+            if jq -e '(.channel // "" | ascii_downcase) == "experimental"' <<< "${metadata}" >/dev/null; then
+                reason='Leaf labels this build Experimental. It is available for setup.'
+            fi
+        fi
+        jq -cn --arg game "${game}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" '{game:$game,loader:$loader,image:$image,reason:$reason}'
         return
     done <<< "${releases}"
     return 1

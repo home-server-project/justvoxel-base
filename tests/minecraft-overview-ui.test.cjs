@@ -546,8 +546,8 @@ test('Reviewed settings reuse confirmed graceful lifecycle and preserve protecte
   // Pin the protected policy files independently of any RAM controls in app.js.
   const {createHash} = require('node:crypto');
   const protectedFiles = {
-    'webui/internal/server/static/settings.js': '1d0bbeac49eea81a7e913f59bc770fb333b9ebb232030d73bc1bb518a05a3801',
-    'mjust/libexec/common.sh': 'c6f895e4c125e8b55a4221805bb069390ad08f1adbded9913c8c9f6658eeec78',
+    'webui/internal/server/static/settings.js': '54e77f57fca811b4c303d4c56326bbdcc958f738ac697986e0a4925e32fbd5ea',
+    'mjust/libexec/common.sh': 'ae8cdd7fa4e64b93902d3470b9dd71b60fbbf1ab6d08f73674098afa39fdf765',
   };
   for (const [path, expected] of Object.entries(protectedFiles)) {
     assert.equal(createHash('sha256').update(readFileSync(`${__dirname}/../${path}`)).digest('hex'), expected, path);

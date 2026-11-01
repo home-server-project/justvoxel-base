@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -113,5 +115,50 @@ func TestPaperForkChoicesAndSharedPresentation(t *testing.T) {
 	}
 	if serverSoftware("unknown") != "Software unavailable" || serverSoftwareIcon("unknown") != "" {
 		t.Fatal("unknown presentation changed")
+	}
+}
+
+func TestSetupValidCandidateAdvisoryDoesNotBlockContinue(t *testing.T) {
+	script, err := assets.ReadFile("static/settings.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(script)
+	start := strings.Index(source, "  const channelLabel =")
+	end := strings.Index(source, "  const refresh = async () =>")
+	if start < 0 || end <= start {
+		t.Fatal("version preview renderer missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+const vm = require("node:vm");
+const source = ` + fmt.Sprintf("%q", source[start:end]) + `;
+const node = () => ({children: [], append(...nodes) { this.children.push(...nodes); }, replaceChildren(...nodes) { this.children = nodes; }});
+const preview = node(), next = {disabled: true};
+const form = {dataset: {serverType: "leaf"}, querySelector() { return null; }};
+const context = {document: {createElement: node}, preview, next, form};
+vm.createContext(context);
+vm.runInContext(source + "globalThis.render = show;", context);
+const status = {selected_candidate: "26.3", candidate_channel: "RELEASE", crossplay_enabled: false, reason: "Leaf labels this build Experimental. It is available for setup."};
+context.render(status, "recommended");
+assert.equal(next.disabled, false);
+assert(preview.children[0].className.includes("success setup-version-panel"));
+assert(preview.children[0].children.some(n => n.textContent === "26.3"));
+assert(preview.children[0].children.some(n => n.textContent === "Minecraft build classification: Release"));
+assert(preview.children[1].className.includes("warning"));
+assert.equal(preview.children[1].textContent, status.reason);
+assert(!preview.children.some(n => n.textContent === "Version information is unavailable"));
+context.render({...status, reason: ""}, "recommended");
+assert.equal(preview.children.length, 2); // Candidate and compatibility, no empty advisory.
+assert.equal(next.disabled, false);
+context.render({...status, selected_candidate: "", reason: "No usable build"}, "recommended");
+assert.equal(next.disabled, true);
+context.render({...status, crossplay_enabled: true, crossplay_compatible: false}, "recommended");
+assert.equal(next.disabled, true);
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("setup version advisory: %v\n%s", err, output)
 	}
 }

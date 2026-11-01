@@ -107,8 +107,13 @@
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       {{if eq .Minecraft.ServerType "bedrock"}}
-      <h3>Native Bedrock connection</h3>
-      <dl><div><dt>TCP signaling port</dt><dd>{{.Minecraft.BedrockTCPPort}}</dd></div><div><dt>UDP gameplay range</dt><dd>{{.Minecraft.BedrockUDPStart}}–{{.Minecraft.BedrockUDPEnd}}</dd></div><div><dt>Minecraft version</dt><dd>{{.Minecraft.ResolvedVersion}} · Recommended release</dd></div></dl>
+      <section class="setup-memory" aria-label="Native Bedrock connection">
+        <h3>Native Bedrock connection</h3>
+        <div class="setup-memory-summary"><div><span>TCP signaling port</span><strong>{{.Minecraft.BedrockTCPPort}}</strong></div><div><span>UDP gameplay range</span><strong>{{.Minecraft.BedrockUDPStart}}–{{.Minecraft.BedrockUDPEnd}}</strong></div></div>
+      </section>
+      <div class="setup-version-preview" role="status" aria-live="polite">
+        <div class="notice success setup-version-panel"><span class="setup-version-kicker">Recommended</span><strong class="setup-version-candidate">{{.Minecraft.ResolvedVersion}}</strong><span class="setup-version-note">Minecraft build classification: Release</span></div>
+      </div>
       {{else}}
       <div class="setup-form-grid">
         <label class="setup-field">Minecraft Java TCP port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
@@ -137,18 +142,18 @@
     <form method="post" action="{{$wizard.BasePath}}/resources" class="setup-form">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" id="max-players" value="{{.Server.MaxPlayers}}">
-      {{if eq .Minecraft.ServerType "bedrock"}}
-      <label class="setup-field">Maximum Minecraft memory<input name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="2G"><span class="field-help">Container memory limit for the native Bedrock server.</span></label>
-      {{else}}
-      <div class="setup-memory" data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}"{{if .AddServer}} data-other-memory-mib="{{.OtherMemoryMiB}}"{{end}}>
+      <div class="setup-memory" {{if eq .Minecraft.ServerType "bedrock"}}data-memory-mode="container" {{end}}data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}"{{if .AddServer}} data-other-memory-mib="{{.OtherMemoryMiB}}"{{end}}>
         <div class="setup-memory-summary"><div><span>System memory</span><strong>{{.SystemMemory}} detected</strong></div><div><span>Recommended headroom</span><strong>{{.SystemReserveRecommended}}</strong></div><div><span>Minimum headroom</span><strong>{{.SystemReserveMinimum}}</strong></div></div>
         <p class="field-help">JustVoxel typically uses 0.6–1.0 GiB. Memory outside Minecraft remains available for Linux, cache, backups, updates and temporary spikes.</p>
         <div class="memory-presets" aria-label="Minecraft memory presets"><button type="button" class="secondary" data-memory-preset="light">Light</button><button type="button" data-memory-preset="recommended">Recommended</button><button type="button" class="secondary" data-memory-preset="high">High memory</button><button type="button" class="secondary" data-memory-preset="custom">Custom</button></div>
         <p class="field-help">Presets are starting points based on system memory and headroom. Larger servers or heavier plugins may need High memory or Custom settings.</p>
+        {{if eq .Minecraft.ServerType "bedrock"}}
+        <label class="setup-field">Maximum Minecraft memory<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="2G"><span class="field-help">Container memory limit for the native Bedrock server.</span></label>
+        {{else}}
         <div class="setup-form-grid"><label class="setup-field">Minecraft game memory<input id="java-memory" name="java_memory" value="{{.Minecraft.JavaMemory}}" autocomplete="off" placeholder="4G"><span class="field-help">Memory available directly to the Minecraft Java server. Technical name: Java heap.</span></label><label class="setup-field">Maximum Minecraft memory<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="6G"><span class="field-help">Maximum for Minecraft, Java, plugins and runtime overhead. Technical name: container memory limit.</span></label></div>
+        {{end}}
         <div id="memory-status" class="memory-status" aria-live="polite"></div>
       </div>
-      {{end}}
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>

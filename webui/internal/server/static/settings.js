@@ -1,5 +1,6 @@
 const memoryPanel = document.querySelector("[data-memory-settings]");
 if (memoryPanel) {
+  const containerOnly = memoryPanel.dataset.memoryMode === "container";
   const gameMemory = document.getElementById("java-memory");
   const maxMemory = document.getElementById("container-memory");
   const maxPlayers = document.getElementById("max-players");
@@ -96,7 +97,7 @@ if (memoryPanel) {
   const detectPreset = () => {
     const matching = ["recommended", "light", "high"].find((name) => {
       const values = presetValues(name);
-      return values && parseMemoryMiB(gameMemory?.value) === values.heapMiB &&
+      return values && (containerOnly || parseMemoryMiB(gameMemory?.value) === values.heapMiB) &&
         parseMemoryMiB(maxMemory?.value) === values.maximumMiB;
     });
     markPreset(matching || "custom");
@@ -105,14 +106,15 @@ if (memoryPanel) {
   const applyPreset = (name) => {
     if (name === "custom") {
       markPreset("custom");
-      if (gameMemory) gameMemory.focus();
+      if (containerOnly) maxMemory?.focus();
+      else if (gameMemory) gameMemory.focus();
       updateStatus();
       return;
     }
-    if (!gameMemory || !maxMemory) return;
+    if ((!containerOnly && !gameMemory) || !maxMemory) return;
     const values = presetValues(name);
     if (!values) return;
-    gameMemory.value = memoryValue(values.heapMiB);
+    if (!containerOnly) gameMemory.value = memoryValue(values.heapMiB);
     maxMemory.value = memoryValue(values.maximumMiB);
     markPreset(name);
     updateStatus();
@@ -177,6 +179,9 @@ if (versionPolicy && versionInput && specificVersionField) {
       summary.append(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
     }
     preview.replaceChildren(summary);
+    if (status.selected_candidate && status.reason) {
+      preview.append(make("p", "notice warning setup-version-explanation", status.reason));
+    }
     const compatibility = make("div", "notice " + (!status.crossplay_enabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
     compatibility.append(make("p", "", !status.crossplay_enabled ? (javaOnly ? "This software supports Java only." : form.querySelector("[data-bedrock-toggle]")?.disabled ? (status.reason || "Managed cross-play is unavailable for this selection. Java setup is available.") : "Bedrock cross-play is disabled.") : status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
     if (status.crossplay_enabled && !status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
