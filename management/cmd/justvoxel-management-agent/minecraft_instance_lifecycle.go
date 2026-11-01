@@ -307,7 +307,7 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 				return err
 			}
 			if players.Online > 0 && !warnings {
-				names := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(rawPlayers)))[3]
+				names := instancePlayerListPattern.FindStringSubmatch(normalizeInstanceJavaPlayerList(rawPlayers))[3]
 				return &instancePlayersConfirmation{Players: players, Names: strings.Split(names, ", ")}
 			}
 		}

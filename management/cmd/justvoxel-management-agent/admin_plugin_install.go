@@ -933,7 +933,7 @@ var pluginInstallPlayers = func(ctx context.Context, id string) (int, []string, 
 	if err != nil {
 		return 0, nil, err
 	}
-	parts := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(raw)))
+	parts := instancePlayerListPattern.FindStringSubmatch(normalizeInstanceJavaPlayerList(raw))
 	names := []string{}
 	if players.Online > 0 {
 		names = strings.Split(strings.TrimSpace(parts[3]), ", ")

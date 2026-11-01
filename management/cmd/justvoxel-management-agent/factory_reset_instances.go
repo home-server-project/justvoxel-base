@@ -654,7 +654,7 @@ func (b *instanceRuntimeBackend) factoryResetPlayers(ctx context.Context, id str
 	}
 	names := []string{}
 	if players.Online > 0 {
-		parts := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(raw)))
+		parts := instancePlayerListPattern.FindStringSubmatch(normalizeInstanceJavaPlayerList(raw))
 		names = strings.Split(strings.TrimSpace(parts[3]), ", ")
 	}
 	return players.Online, names, nil

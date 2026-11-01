@@ -216,18 +216,43 @@ else: sys.exit(2)
 
     def test_java_player_response_plain_and_sgr_accepted(self):
         self.instances([IDS[0]])
-        for suffix in ('', '\x1b[0m'):
-            with self.subTest(suffix=repr(suffix)):
-                self.data['players'][IDS[0]] = 'There are 0 of a max of 10 players online:' + suffix
+        for response in ('There are 0 of a max of 10 players online: \n',
+                         '\x1b[32mThere are 0 of a max of 10 players online:\x1b[0m',
+                         'There are 0 of a max of 10 players online:\x1b[0m',
+                         'There are 0 of a max of 10 players online: \n\x1b[0m',
+                         'There are 0 of a max of 10 players online: \n\x1b[0m\n'):
+            with self.subTest(response=repr(response)):
+                self.data['players'][IDS[0]] = response
                 self.save()
                 result = self.run_helper('instance-host-shutdown-prepare', 'check')
                 self.assertEqual(result['online'], 0)
                 self.assertEqual(result['players'], [])
                 self.assertTrue(result['instances'][0]['running'])
 
+    def test_forge_empty_update_preflight_and_guard_bypass(self):
+        self.instances([IDS[0]], {IDS[0]: 'There are 0 of a max of 10 players online: \n\x1b[0m\n'})
+        self.run_helper('admin-system-update-reboot-json', 'request')
+        self.assertTrue(any(c[0]=='systemd-run' for c in self.calls()))
+        self.run_helper('host-shutdown-guard')
+        self.assertIn(['podman', 'kill', '--signal', 'SIGUSR1', 'minecraft-'+IDS[0]], self.calls())
+
+    def test_forge_online_requires_confirmation(self):
+        self.instances([IDS[0]], {IDS[0]: 'There are 1 of a max of 10 players online: Alex\n\x1b[0m\n'})
+        result = self.run_helper('instance-host-shutdown-prepare', 'check')
+        self.assertEqual(result['online'], 1)
+        self.assertEqual(result['players'], ['Alex'])
+        for helper, args in (('admin-system-actions-json', ('apply', 'reboot')),
+                             ('admin-system-update-reboot-json', ('request',))):
+            result = self.run_helper(helper, *args, rc=10)
+            self.assertTrue(result['confirmation_required'])
+            self.assertEqual(result['players'], ['Alex'])
+        self.assertEqual(self.changed('stop'), [])
+        self.assertFalse(any(c[0]=='systemd-run' for c in self.calls()))
+
     def test_java_non_sgr_escape_never_stops_or_queues(self):
         self.instances([IDS[0]])
         for response in ('There are 0 of a max of 10 players online:\x1b[2J',
+                         'There are 0 of a max of 10 players online:\n\x1b]0;evil\x07',
                          'There are 1 of a max of 10 players online: Alex\x1b[2J'):
             with self.subTest(response=repr(response)):
                 self.data['players'][IDS[0]] = response
@@ -251,9 +276,16 @@ else: sys.exit(2)
         self.assertEqual(self.changed('stop'), [])
 
     def test_malformed_player_response_never_stops(self):
-        self.instances(IDS[:2], {IDS[1]: 'There are 0 of a max of 20 players online: Steve'})
-        self.run_helper('admin-system-actions-json', 'apply', 'reboot', rc=3)
-        self.run_helper('admin-system-update-reboot-json', 'request', rc=3)
+        self.instances(IDS[:2])
+        for response in ('There are 0 of a max of 20 players online: Steve',
+                         'There are 2 of a max of 10 players online: Alex',
+                         'malformed'):
+            with self.subTest(response=response):
+                self.data['players'][IDS[1]] = response
+                self.save()
+                self.run_helper('instance-host-shutdown-prepare', 'check', rc=1)
+                self.run_helper('admin-system-actions-json', 'apply', 'reboot', rc=3)
+                self.run_helper('admin-system-update-reboot-json', 'request', rc=3)
         self.assertEqual(self.changed('stop'), [])
 
     def test_worker_backs_up_every_instance_cold(self):

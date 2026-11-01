@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,13 +20,25 @@ type instancePlayers struct {
 // Successful but oversized console output is invalid evidence, not a readiness failure.
 var errInstanceConsoleResponseTooLarge = instanceRuntimeFailure("Instance console is unavailable.")
 
+var instanceJavaPlayerListSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// Remove only SGR decoration, then trim whitespace exposed by a trailing reset.
+// Any remaining escape invalidates the whole response; empty text cannot match.
+func normalizeInstanceJavaPlayerList(raw []byte) string {
+	text := strings.TrimSpace(instanceJavaPlayerListSGR.ReplaceAllString(string(raw), ""))
+	if strings.ContainsRune(text, '\x1b') {
+		return ""
+	}
+	return text
+}
+
 // A failed or truncated response is never interpreted as an empty server.
 func parseInstancePlayers(id string, raw []byte) (instancePlayers, error) {
 	p := instancePlayers{ID: id, State: "unknown"}
 	if len(raw) > 8192 {
 		return p, instanceRuntimeFailure("Player status is unavailable.")
 	}
-	parts := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(raw)))
+	parts := instancePlayerListPattern.FindStringSubmatch(normalizeInstanceJavaPlayerList(raw))
 	if parts != nil {
 		online, e1 := strconv.Atoi(parts[1])
 		maximum, e2 := strconv.Atoi(parts[2])

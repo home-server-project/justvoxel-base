@@ -37,6 +37,87 @@ func TestInstancePlayerProtocol(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceJavaPlayerConsumers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		raw    string
+		online int
+		names  []string
+		valid  bool
+	}{
+		{"paper_empty", "There are 0 of a max of 10 players online: \n", 0, []string{}, true},
+		{"sgr_decorated", "\x1b[32mThere are 1 of a max of 10 players online: Alex\x1b[0m", 1, []string{"Alex"}, true},
+		{"forge_empty", "There are 0 of a max of 10 players online: \n\x1b[0m\n", 0, []string{}, true},
+		{"forge_online", "There are 1 of a max of 10 players online: Alex\n\x1b[0m\n", 1, []string{"Alex"}, true},
+		{"non_sgr_osc", "There are 0 of a max of 10 players online:\n\x1b]0;evil\x07", 0, nil, false},
+		{"non_sgr_csi", "There are 1 of a max of 10 players online: Alex\x1b[2J", 0, nil, false},
+		{"sgr_colon_rejected", "There are 0 of a max of 10 players online:\x1b[38:2:1:2:3m", 0, nil, false},
+		{"malformed", "unknown", 0, nil, false},
+		{"truncated", "There are 2 of a max of 10 players online: Alex\n\x1b[0m\n", 0, nil, false},
+		{"oversized_sgr", "There are 0 of a max of 10 players online:" + strings.Repeat("\x1b[0m", 2048), 0, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newInstanceActivationFixture(t)
+			f.activateBoth()
+			id := f.configs[0].ID
+			f.states[id], f.containers[id] = "active", "running"
+			f.players = tc.raw
+			previous, previousLock := instanceRuntimes, pluginRuntimeLockPath
+			instanceRuntimes = f.backend
+			pluginRuntimeLockPath = filepath.Join(t.TempDir(), "maintenance.lock")
+			t.Cleanup(func() { instanceRuntimes, pluginRuntimeLockPath = previous, previousLock })
+			ctx := context.Background()
+			for name, parse := range map[string]func() (instancePlayers, error){
+				"parser":      func() (instancePlayers, error) { return parseInstancePlayers(id, []byte(tc.raw)) },
+				"maintenance": func() (instancePlayers, error) { return f.backend.players(ctx, id) },
+			} {
+				p, err := parse()
+				if (err == nil) != tc.valid || (tc.valid && (p.State != "online" || p.Online != tc.online || p.Maximum != 10)) || (!tc.valid && p.State != "unknown") {
+					t.Fatalf("%s: incorrect players: %+v %v", name, p, err)
+				}
+			}
+			for name, query := range map[string]func(context.Context, string) (int, []string, error){
+				"reset":  f.backend.factoryResetPlayers,
+				"plugin": pluginInstallPlayers,
+			} {
+				online, names, err := query(ctx, id)
+				if (err == nil) != tc.valid || (tc.valid && (online != tc.online || !reflect.DeepEqual(names, tc.names))) {
+					t.Fatalf("%s: incorrect players: %d %q %v", name, online, names, err)
+				}
+			}
+			if tc.valid && tc.online > 0 {
+				err := f.backend.actionWithWarnings(ctx, id, "stop", false)
+				var confirmation *instancePlayersConfirmation
+				if !errors.As(err, &confirmation) || confirmation.Players.Online != tc.online || confirmation.Players.Maximum != 10 || !reflect.DeepEqual(confirmation.Names, tc.names) {
+					t.Fatal("lifecycle player confirmation lost", err)
+				}
+			}
+			// Exercise the same Stop API used by the WebUI before confirmation.
+			s := adminServerForTest()
+			s.operations = openTestOperationStore(t)
+			mux := http.NewServeMux()
+			registerInstanceRuntimeRoutes(mux, s)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, authorizedRequest("POST", "/v1/minecraft/instances/"+id+"/stop", `{"confirm_players":false}`))
+			if tc.valid {
+				var result minecraftActionResponse
+				if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &result) != nil || result.ConfirmationRequired != (tc.online > 0) {
+					t.Fatal("Stop API failed", rr.Code, rr.Body.String())
+				}
+				if tc.online > 0 && (result.Online != tc.online || !reflect.DeepEqual(result.Players, tc.names)) {
+					t.Fatal("Stop API lost online players", rr.Body.String())
+				}
+			} else if rr.Code == http.StatusOK {
+				t.Fatal("Stop API accepted invalid player evidence", rr.Body.String())
+			}
+			if (!tc.valid || tc.online > 0) && (f.states[id] != "active" || f.containers[id] != "running") {
+				t.Fatal("instance interrupted without verified empty response or confirmation")
+			}
+		})
+	}
+}
+
 func TestInstanceAdministratorCountdownIsolation(t *testing.T) {
 	for _, action := range []string{"stop", "restart"} {
 		t.Run(action, func(t *testing.T) {
