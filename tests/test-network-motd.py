@@ -44,12 +44,15 @@ class ProviderMOTD(unittest.TestCase):
         self.script.write_text(self.source)
         self.env = dict(os.environ, PATH=f"{self.directory}:{os.environ['PATH']}",
                         TS_JSON='{"BackendState":"NeedsLogin"}', TS_FAIL="0",
-                        NB_JSON='{}', PLAYIT_ACTIVE="0")
+                        NB_JSON='{}', PLAYIT_ACTIVE="0", NORD_LOAD="loaded",
+                        NORD_STATE="inactive", NORD_IP_JSON="[]", NORD_IP_FAIL="0")
         commands = {
+            "ip": '[[ $* == "-j -4 address show scope global" ]] || exit 2\n[[ $NORD_IP_FAIL == 0 ]] || exit 1\nprintf "%s" "$NORD_IP_JSON"',
+            "nordvpn": 'echo "NordVPN CLI must never be invoked" >&2; exit 99',
             "nmcli": "exit 0",
             "curl": "exit 1",
             # Tailscale and NetBird are always enabled/running, including fresh tests.
-            "systemctl": 'if [[ $1 == show ]]; then if [[ $* == *playit.service* && $PLAYIT_ACTIVE == 0 ]]; then echo inactive; else echo active; fi; fi\nexit 0',
+            "systemctl": 'if [[ $* == *nordvpnd.service* ]]; then if [[ $* == *LoadState* ]]; then printf "%s" "$NORD_LOAD"; else printf "%s" "$NORD_STATE"; fi; exit 0; fi\nif [[ $1 == show ]]; then if [[ $* == *playit.service* && $PLAYIT_ACTIVE == 0 ]]; then echo inactive; else echo active; fi; fi\nexit 0',
             "tailscale": '[[ $* == "status --json" ]] || exit 2\n[[ $TS_FAIL == 0 ]] || exit 1\nprintf "%s" "$TS_JSON"',
             "netbird": '[[ $* == "status --json" ]] || exit 2\nprintf "%s" "$NB_JSON"',
         }
@@ -148,6 +151,25 @@ class ProviderMOTD(unittest.TestCase):
             self.assertEqual(self.rows()["Playit"], expected)
             self.assertEqual(self.rows(issue=True)["Playit"], expected)
 
+    def test_nordvpn_shared_row_and_cli_choice(self):
+        for state, loaded, evidence, fail, expected in [
+            ("active", "loaded", [{"ifname": "nordlynx", "addr_info": [
+                {"family": "inet", "scope": "global", "local": "100.64.0.8/10"}]}], "0", "100.64.0.8"),
+            ("active", "loaded", [], "0", "Not connected"),
+            ("inactive", "loaded", [], "0", "Stopped"),
+            ("failed", "loaded", [], "0", "Stopped"),
+            ("inactive", "not-found", [], "0", "Unavailable"),
+            ("active", "loaded", [], "1", "Unavailable"),
+        ]:
+            with self.subTest(state=state, loaded=loaded, fail=fail):
+                self.env.update(NORD_STATE=state, NORD_LOAD=loaded,
+                                NORD_IP_JSON=json.dumps(evidence), NORD_IP_FAIL=fail)
+                for issue in (False, True):
+                    self.assertEqual(self.rows(issue, labels="NordVPN"), {"NordVPN": expected})
+                result = subprocess.run([str(self.directory / "remote-status"), "nordvpn"],
+                                        env=self.env, capture_output=True, text=True, check=True)
+                self.assertEqual(result.stdout.strip(), expected)
+
     def test_both_entrypoints_call_shared_motd(self):
         self.assertIn("/usr/libexec/justvoxel/motd --issue", (ROOT / "runtime/justvoxel-console-issue").read_text())
         self.assertIn("exec /usr/libexec/justvoxel/motd", (ROOT / "mjust/libexec/welcome").read_text())
@@ -214,6 +236,55 @@ class LocalRemoteStatus(unittest.TestCase):
             self.assertEqual(result["summary"], "Running")
             self.assertFalse(result["connected"])
             self.assertNotIn("tunnels", result)
+
+    def test_nordvpn_read_only_service_and_interface_evidence(self):
+        for state, loaded, raw, expected, ip in [
+            ("active", "loaded", "100.64.0.8/10", "Connected", "100.64.0.8"),
+            ("active", "loaded", "", "Not connected", ""),
+            ("active", "loaded", "invalid", "Not connected", ""),
+            ("active", "loaded", "fd00::1", "Not connected", ""),
+            ("active", "loaded", "127.0.0.1", "Not connected", ""),
+            ("active", "loaded", "169.254.1.2", "Not connected", ""),
+            ("active", "loaded", "0.0.0.0", "Not connected", ""),
+            ("inactive", "loaded", "100.64.0.8", "Stopped", ""),
+            ("failed", "loaded", "100.64.0.8", "Stopped", ""),
+            ("", "loaded", "", "Unavailable", ""),
+            ("inactive", "not-found", "", "Unavailable", ""),
+        ]:
+            calls = []
+            def command(*args):
+                calls.append(args)
+                if args[0] == "systemctl":
+                    return loaded if "--property=LoadState" in args else state
+                self.assertEqual(args, ("ip", "-j", "-4", "address", "show", "scope", "global"))
+                return json.dumps([{"ifname": "nordlynx", "addr_info": [
+                    {"family": "inet", "scope": "global", "local": raw}]}])
+            with self.subTest(state=state, loaded=loaded, raw=raw):
+                with patch.object(self.helper, "command", side_effect=command), patch.object(
+                        self.helper, "configured", side_effect=AssertionError("no vendor config access")):
+                    result = self.helper.provider_status("nordvpn")
+                    self.assertEqual(result, self.helper.summary(expected, bool(ip), ip))
+                    self.assertEqual(self.helper.display(result), ip or expected)
+                self.assertTrue(all(args[0] in ("systemctl", "ip") for args in calls))
+
+    def test_nordvpn_missing_invalid_or_unavailable_interface_evidence(self):
+        for evidence, expected in [
+            ("", "Unavailable"), ("invalid", "Unavailable"), ("{}", "Unavailable"),
+            ("[]", "Not connected"),
+            (json.dumps([{"ifname": "other", "addr_info": [
+                {"family": "inet", "scope": "global", "local": "100.64.0.8"}]}]), "Not connected"),
+            (json.dumps([{"ifname": "nordlynx"}]), "Unavailable"),
+            (json.dumps([{"ifname": "nordlynx", "addr_info": [
+                {"family": "inet", "scope": "link", "local": "100.64.0.8"}]}]), "Not connected"),
+        ]:
+            def command(*args):
+                if args[0] == "systemctl":
+                    return "loaded" if "--property=LoadState" in args else "active"
+                return evidence
+            with self.subTest(evidence=evidence), patch.object(self.helper, "command", side_effect=command):
+                result = self.helper.provider_status("nordvpn")
+                self.assertEqual(result["summary"], expected)
+                self.assertFalse(result["connected"])
 
     def test_normal_user_ssh_uses_live_status_without_credentials_or_sudo(self):
         for provider, data, expected in [

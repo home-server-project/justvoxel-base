@@ -33,10 +33,10 @@ const systemMarkup = header.match(/<dialog[^>]*data-system-workspace-dialog[\s\S
 const terminalMarkup = header.match(/<dialog[^>]*data-terminal-workspace-dialog[\s\S]*?<\/dialog>/)[0];
 const systemScript = app.slice(app.indexOf('const systemWorkspaceOpen ='), app.indexOf('// Plugin workspace.'));
 const workspaceScript = app.slice(app.indexOf('const terminalDialog ='), app.indexOf('const systemWorkspaceOpen ='));
-test('Terminal is the final normal SYSTEM tile with primary administrator visibility', () => {
+test('Terminal follows File Browser in SYSTEM with primary administrator visibility', () => {
   const section = header.match(/<section class="control-section">\s*<span class="control-section-label">System<\/span>[\s\S]*?<\/section>/)[0];
   assert.deepEqual([...section.matchAll(/<strong>(.*?)<\/strong>/g)].map(match => match[1]),
-    ['System Settings', 'System Monitor', 'System Update', 'System Network', 'Storage', 'File Browser', 'Terminal']);
+    ['System Settings', 'System Monitor', 'System Update', 'System Network', 'Storage', 'File Browser', 'Terminal', 'AI &amp; API Connections']);
   const tile = section.match(/<button[^>]*data-terminal-open[^>]*>[\s\S]*?<\/button>/)[0];
   assert.match(tile, /class="control-tile nav-admin-only"/);
   assert.match(tile, /data-primary-admin-only/);

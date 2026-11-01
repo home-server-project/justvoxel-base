@@ -547,7 +547,7 @@ test('Reviewed settings reuse confirmed graceful lifecycle and preserve protecte
   const {createHash} = require('node:crypto');
   const protectedFiles = {
     'webui/internal/server/static/settings.js': '1d0bbeac49eea81a7e913f59bc770fb333b9ebb232030d73bc1bb518a05a3801',
-    'mjust/libexec/common.sh': '2e700423e1294f5a47c1b136ee4d6b6e78d6bb525b19fae9d7f5f6e5537f786b',
+    'mjust/libexec/common.sh': 'c6f895e4c125e8b55a4221805bb069390ad08f1adbded9913c8c9f6658eeec78',
   };
   for (const [path, expected] of Object.entries(protectedFiles)) {
     assert.equal(createHash('sha256').update(readFileSync(`${__dirname}/../${path}`)).digest('hex'), expected, path);

@@ -460,9 +460,10 @@ test('selection generation detaches scheduled update watching without cancelling
   assert.equal(failed.calls.filter(call=>call.body).length,1);
   assert.equal(failed.calls.at(-1).message,'Response lost');
  });
- test('Version tabs are exactly Container, Minecraft Version, Switch in order', () => {
+ test('Version tabs are exactly Container, Version, Switch in order', () => {
   const html=readFileSync(path.join(__dirname,'../webui/internal/server/templates/header.html'),'utf8');
-  assert.deepEqual([...html.matchAll(/data-version-tab="[^"]+"[^>]*>([^<]+)<\/button>/g)].map(match=>match[1]),['Container','Minecraft Version','Switch']);
+  assert.deepEqual([...html.matchAll(/data-version-tab="[^"]+"[^>]*>([^<]+)<\/button>/g)].map(match=>match[1]),['Container','Version','Switch']);
+  assert.deepEqual([...html.matchAll(/data-version-tab="([^"]+)"/g)].map(match=>match[1]),['container','minecraft','software']);
   assert.doesNotMatch(html,/>Server Software<\/button>/);
  });
 
@@ -471,13 +472,17 @@ class ContainerElement extends Element {
   get textContent() { return (this.ownText || '') + this.children.map(child => child.textContent).join(' '); }
   set innerHTML(_) { throw new Error('Container output must use textContent'); }
 }
-function containerWorkspace({status = 'up_to_date', running = true, pending, statusReply, traceReply, selected = 'jv-family1', previousImages = [], retentionCount = 1, retentionReply, operationReply} = {}) {
+function containerWorkspace({status = 'up_to_date', running = true, pending, statusReply, traceReply, selected = 'jv-family1', previousImages = [], retentionCount = 1, retentionReply, operationReply, serverType = 'paper', imageTag = 'stable', runtimeReply, channelPlanReply, channelStatusReply, channelApplyReply, reviewedPending, online = 0} = {}) {
   const calls = [], timers = [], renders = [];
   const content = new ContainerElement('div');
   const context = vm.createContext({
     URLSearchParams, encodeURIComponent, Number, Boolean, String,
     justVoxelSelectionGeneration: {version: 0}, currentTab: 'container', sequence: 1,
-    csrf: 'csrf', content, state: {}, operationKinds: new Map(),
+    csrf: 'csrf', content, state: {}, operationKinds: new Map(), completedOperation: null, updateOperation: '',
+    statusURL: (policy='',version='',server_type='',image_tag='') => '/api/version/workspace/status?' + new URLSearchParams({policy,version,server_type,image_tag}),
+    stackLabel: value => value, policyLabel: value => value,
+    watchUpdate: id => {calls.push({watch:id});},
+    justVoxelStaleSelection: () => Object.assign(new Error('Stale selection'), {staleSelection:true}),
     versionDialog: {querySelector: () => ({selectedOptions:[{textContent:'22222'}]})},
     document: {createElement: tag => new ContainerElement(tag), createElementNS: (_, tag) => new ContainerElement(tag)},
     card: title => {const panel=new ContainerElement('section');panel.append(Object.assign(new ContainerElement('h2'),{textContent:title}));return panel;},
@@ -488,7 +493,18 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
       calls.push({url,body:options?.body});
       if(url==='/api/version/container/status') return statusReply ? statusReply() : {instance_id:selected,server_name:'22222',image:'docker.io/itzg/minecraft-server:stable',state:status,running,plan_fingerprint:status==='unavailable'?'':'reviewed',restore_fingerprint:'local-reviewed',keep_previous_images:retentionCount,previous_images:previousImages};
       if(url.startsWith('/api/version/container/operation')) return {operation:operationReply ? operationReply(url) : pending};
-      if(url==='/api/minecraft/workspace/snapshot') return {players:{online:0}};
+      if(url.startsWith('/api/version/workspace/status?')) {
+        const tag = new URLSearchParams(url.split('?')[1]).get('image_tag');
+        const runtime = {server_type:serverType,configured_server_type:serverType,server_software:serverType==='spigot'?'Spigot':serverType,image_tag:tag||imageTag,configured_image_tag:imageTag,policy:'pinned',configured_version:'26.3',installed:'26.3',server_supported:true,stack_state:'updates_available',image_state:'updates_available',plan_fingerprint:'channel-reviewed'};
+        return tag ? (channelStatusReply ? channelStatusReply(runtime) : runtime) : (runtimeReply ? runtimeReply(runtime) : runtime);
+      }
+      if(url==='/api/version/workspace/update-operation') return {operation:reviewedPending};
+      if(url==='/api/minecraft/workspace/settings/plan') {
+        const plan = {review:'channel-reviewed',changes:[{field:'image_tag',before:imageTag,after:options.body.get('image_tag')}]};
+        return channelPlanReply ? channelPlanReply(plan) : plan;
+      }
+      if(url==='/api/version/workspace/update') return channelApplyReply ? channelApplyReply(options.body) : {operation:{operation_id:'channel-1',state:'running'}};
+      if(url==='/api/minecraft/workspace/snapshot') return {players:{online}};
       if(url==='/api/version/container/retention') return retentionReply ? retentionReply() : {ok:true};
       if(url==='/api/version/container/acknowledge') { pending = undefined; return {operation:{state:'resolved'}}; }
       if(url==='/api/version/container/update') return {operation:{operation_id:'container-1',state:'running'}};
@@ -500,7 +516,7 @@ function containerWorkspace({status = 'up_to_date', running = true, pending, sta
   });
   const start=source.indexOf('  let containerCompleted =');
   const end=source.indexOf('  const render = async',start);
-  vm.runInContext(source.slice(start,end)+'\nglobalThis.mount = renderContainer;',context);
+  vm.runInContext(reviewSource + source.slice(start,end)+'\nglobalThis.mount = renderContainer;',context);
   return {context,content,calls,timers,renders,mount:()=>context.mount(context.sequence,context.justVoxelSelectionGeneration.version,''),
     toggles:()=>content.all().filter(node=>node.tag==='input'&&node.type==='checkbox'),
     update:()=>content.all().find(node=>node.tag==='button'&&node.textContent==='Update'),
@@ -511,14 +527,14 @@ for(const [status,label,disabled] of [['up_to_date','Up to date',true],['update_
     const page=containerWorkspace({status});await page.mount();
     const rows=page.content.all().filter(node=>'containerRow' in node.dataset);
     assert.deepEqual(rows.map(row=>row.dataset.containerRow),['identity','controls']);
-    assert.match(rows[0].textContent,/Server: 22222.*Image: docker.io\/itzg\/minecraft-server:stable/);
-    assert.match(rows[0].textContent,new RegExp('Status: '+label));
-    assert.equal(rows[0].className,'version-container-row version-container-summary');
+    assert.match(rows[0].textContent,/Server 22222.*Image docker.io\/itzg\/minecraft-server:stable/);
+    assert.match(rows[0].textContent,new RegExp('Status '+label));
+    assert.equal(rows[0].className,'version-status-grid version-container-row version-container-summary');
     assert.equal(rows[0].children.length,3);
     assert.equal(page.update().disabled,disabled);
     assert.ok(page.toggles().every(input=>input.disabled===disabled&&!input.checked));
     assert.equal(page.timers.length,0,'idle availability must not poll');
-    assert.ok(page.calls.every(call=>!call.url?.includes('/workspace/status')));
+    assert.equal(page.calls.filter(call=>call.url?.startsWith('/api/version/workspace/status?')).length,1,'runtime metadata is read once without polling');
   });
 }
 test('Container backup and restart coupling, stopped state, and restart-only action',async()=>{
@@ -565,13 +581,14 @@ test('Container stale status and stale trace cannot replace a new selection',asy
 });
 
 const retainedImage = digest => ({digest,image:'docker.io/itzg/minecraft-server:stable',retained_at:'2026-10-27T12:00:00Z',size:1048576});
+const containerMetrics = page => Object.fromEntries(page.content.all().find(node=>node.className==='backup-library-summary').children.map(cell=>cell.children.map(node=>node.textContent)));
 const retentionInput = page => page.content.all().find(node=>node.type==='number');
 const changeRetention = (page,value) => {const input=retentionInput(page);input.value=value;input.listeners.input();};
 test('Container combines controls and previous images in one outer card with separate untitled output',async()=>{
  const page=containerWorkspace();await page.mount();
  const root=page.content.children[0];
  const panel=root.children[0];
- const history=panel.children.find(node=>node.className==='version-container-history backup-library-section');
+ const history=panel.children.find(node=>node.className==='version-container-history');
  const controls=panel.children.find(node=>node.dataset.containerRow==='controls');
  assert.equal(panel.children[0].textContent,'Minecraft container');
  assert.equal(root.children.filter(node=>node.tag==='section').length,1);
@@ -580,48 +597,58 @@ test('Container combines controls and previous images in one outer card with sep
  assert.ok(!history.className.includes('panel'));
  assert.ok(!history.all().includes(retentionInput(page)));
  assert.ok(!page.content.all().some(node=>node.tag==='button'&&node.textContent==='Save'));
- assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Keep previous images','Restart server now','Create backup before restart','Update']);
- const lane=controls.children[3];
+ assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Server update channel','Keep previous images','Restart server now','Create backup before restart','Update']);
+ const lane=controls.children[4];
  assert.equal(lane.className,'version-container-action-lane');
  assert.equal(page.update().parent,lane);
  assert.equal(page.update().textContent,'Update');
  assert.equal(controls.children.at(-1),lane);
  const identity=panel.children.find(node=>node.dataset.containerRow==='identity');
  assert.equal(identity.children.length,3);
- assert.match(identity.children[2].textContent,/^Status: /);
+ assert.match(identity.children[2].textContent,/^Status /);
  assert.ok(!identity.all().includes(page.update()));
  assert.ok(!panel.children.some(node=>node.dataset.containerRow==='actions'));
- assert.match(cssRule('.version-container-panel .version-container-summary'),/background:var\(--jv-surface-sunken\)/);
- assert.match(cssRule('.version-container-panel .version-container-summary'),/border:1px solid var\(--jv-border\)/);
- assert.match(css,/\.version-container-panel \.version-container-row\s*\{[^}]*flex-wrap: wrap/);
- assert.equal(retentionInput(page).parent,controls.children[0]);
+ assert.match(cssRule('.version-container-panel .version-container-summary'),/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+ assert.match(cssRule('.version-container-panel .version-container-summary'),/border:0;border-radius:0/);
+ assert.match(cssRule('.version-container-panel .version-container-summary>div'),/display:grid/);
+ assert.match(cssRule('.version-container-panel .version-container-summary>div+div'),/border-left:1px solid var\(--jv-border\)/);
+ assert.deepEqual(identity.children.map(cell=>cell.children[0].textContent),['Server','Image','Status']);
+ assert.ok(identity.children.every(cell=>cell.children[1].tag==='strong'));
+ assert.equal(retentionInput(page).parent,controls.children[1]);
  assert.equal(page.terminal().parent,root);assert.equal(root.children.at(-1),page.terminal());
  assert.ok(!panel.all().includes(page.terminal()));
  assert.deepEqual(page.content.all().filter(node=>node.tag==='h2').map(node=>node.textContent),['Minecraft container','Previous container images']);
  assert.doesNotMatch(page.content.textContent,/Console|Installed|Recommended|Geyser|Floodgate|ViaVersion|Minecraft update/);
  assert.match(history.textContent,/No previous container images\./);
- const restore=history.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
- assert.equal(restore.parent.className,'backup-library-summary');
- assert.equal(restore.parent.parent,history);assert.equal(history.children.at(-1),restore.parent);
+ const restore=panel.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
+ assert.equal(restore.parent.className,'backup-command-actions');
+ const footer=restore.parent.parent;
+ assert.equal(footer.className,'backup-command-bar version-container-footer');
+ assert.equal(footer.parent,panel);assert.equal(panel.children.at(-1),footer);
+ assert.equal(footer.children[0].className,'backup-library-summary');
+ assert.deepEqual(footer.children[0].children.map(cell=>cell.children[0].textContent),['Images','Total size','Selected','Status']);
+ assert.match(cssRule('.version-container-panel .version-container-footer'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0/);
+ assert.match(cssRule('.version-container-history'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0/);
  assert.match(cssRule('.version-container-retention input'),/width:3\.25rem;flex:none/);
- assert.match(cssRule('.version-container-panel .version-container-controls'),/grid-template-columns:max-content max-content minmax\(max-content,1fr\) minmax\(0,max-content\)/);
- assert.match(cssRule('.version-container-panel .version-container-controls'),/background:var\(--jv-surface-sunken\)/);
- assert.match(cssRule('.version-container-panel .version-container-controls>label'),/flex-direction:row;align-items:center/);
- assert.match(cssRule('.version-container-panel .version-container-controls>label'),/white-space:nowrap/);
- assert.match(cssRule('.version-container-controls>label>span'),/font-size:inherit/);
- assert.doesNotMatch(cssRule('.version-container-controls>label>span'),/font-size:\s*\.75rem/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/grid-template-columns:repeat\(4,minmax\(0,1fr\)\) auto/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0/);
+ assert.match(cssRule('.version-container-panel .version-container-controls>label'),/flex-direction:column;align-items:flex-start/);
+ assert.match(cssRule('.version-container-panel .version-container-controls>label'),/white-space:normal/);
+ assert.match(cssRule('.version-container-controls>label>span'),/font-size:\.75rem/);
  assert.match(cssRule('.version-container-controls>:is(label+label,.version-container-action-lane)'),/border-left:1px solid var\(--jv-border\)/);
- assert.match(cssRule('.version-container-controls>.version-container-action-lane'),/justify-content:flex-end/);
+ assert.match(cssRule('.version-container-action-lane'),/justify-content:center/);
+ assert.match(cssRule('.version-container-controls>.version-container-action-lane'),/padding:\.55rem/);
+ assert.match(cssRule('.version-container-panel .version-container-controls>label'),/padding:\.55rem/);
  assert.match(cssRule('.version-container-panel'),/container-type:inline-size/);
  assert.match(css,/@container\(max-width:700px\)\{\.version-container-panel \.version-container-controls\{grid-template-columns:minmax\(0,1fr\)\}/);
  assert.match(css,/@media\(max-width:700px\)\{\.version-container-panel \.version-container-controls\{grid-template-columns:minmax\(0,1fr\)\}/);
- assert.match(cssRule('.version-container-history .backup-library-summary'),/justify-content:space-between/);
+ assert.match(cssRule('.version-container-panel .version-container-footer'),/justify-content:space-between/);
 });
 test('Container retention is limited to one or two and missing defaults to one',async()=>{
  const page=containerWorkspace({statusReply:()=>({state:'up_to_date'})});await page.mount();
  const number=retentionInput(page);
  assert.equal(number.value,'1');assert.equal(number.min,'1');assert.equal(number.max,'2');assert.equal(number.step,'1');
- assert.ok(!page.content.all().some(node=>node.tag==='select'));
+ assert.ok(!number.parent.all().some(node=>node.tag==='select'));
  for(const valid of ['1','2']){
   const validPage=containerWorkspace({retentionCount:valid==='1'?2:1});await validPage.mount();
   changeRetention(validPage,valid);assert.equal(validPage.update().disabled,false);
@@ -692,10 +719,10 @@ test('Container lists real previous images and exact selection enables restore',
   const page=containerWorkspace({running,previousImages:[retainedImage(digest)]});await page.mount();
   const restore=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
   assert.equal(restore.disabled,true);
-  const radios=page.content.all().filter(node=>node.type==='radio');assert.equal(radios.length,1);
+  const selectors=page.content.all().filter(node=>node.className==='backup-file-checkbox');assert.equal(selectors.length,1);
   assert.ok(page.content.textContent.includes('sha256:aaaaaaaaaaaa…'));
   assert.ok(!page.content.textContent.includes(digest));
-  radios[0].checked=true;radios[0].listeners.change();assert.equal(restore.disabled,false);
+  selectors[0].checked=true;selectors[0].listeners.change();assert.equal(restore.disabled,false);
   await restore.listeners.click();
   const sent=page.calls.find(call=>call.url==='/api/version/container/update');
   assert.equal(sent.body.get('restore_digest'),digest);assert.equal(sent.body.get('plan_fingerprint'),'local-reviewed');
@@ -703,15 +730,16 @@ test('Container lists real previous images and exact selection enables restore',
   assert.equal(page.calls.some(call=>call.url==='/api/minecraft/workspace/snapshot'),running);
  }
  const empty=containerWorkspace();await empty.mount();
- assert.equal(empty.content.all().filter(node=>node.type==='radio').length,0);
- assert.match(empty.content.textContent,/0 images/);
- assert.equal(empty.content.all().find(node=>node.textContent==='Restore selected').disabled,true);
+ assert.equal(empty.content.all().filter(node=>node.className==='backup-file-checkbox').length,0);
+ assert.equal(containerMetrics(empty)['Images'],'0');
+ assert.equal(empty.content.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected').disabled,true);
 });
 test('Container keep-current action replaces Restore selected in the history footer',async()=>{
  const page=containerWorkspace({status:'update_available',pending:{operation_id:'failed-update',state:'needs_attention'}});await page.mount();
  const keep=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Keep current version');
- assert.ok(keep);assert.equal(keep.parent.className,'backup-library-summary');
- assert.equal(keep.parent.children[0].textContent,'0 images');
+ assert.ok(keep);assert.equal(keep.parent.className,'backup-command-actions');
+ assert.equal(containerMetrics(page)['Images'],'0');
+ assert.equal(containerMetrics(page)['Status'],'needs_attention');
  assert.equal(keep.parent.children.at(-1),keep);
  assert.ok(!page.content.all().some(node=>node.tag==='button'&&node.textContent==='Restore selected'));
  assert.deepEqual(page.update().parent.children,[page.update()]);
@@ -743,7 +771,7 @@ test('Version Container rules precede the Minecraft Network-only CSS region',()=
   '.version-container-retention input',
   '.version-container-history .backup-file-grid',
   '.version-container-history .backup-file-copy',
-  '.version-container-history .backup-library-summary',
+  '.version-container-footer .backup-library-summary',
   '.version-container-workspace .version-container-history .backup-file-card',
  ]) {
   const start=css.indexOf(selector+'{');
@@ -753,13 +781,13 @@ test('Version Container rules precede the Minecraft Network-only CSS region',()=
 });
 test('Old container restore selection and retention callbacks cannot submit for a new server',async()=>{
  const page=containerWorkspace({previousImages:[retainedImage('sha256:'+'a'.repeat(64))]});await page.mount();
- const radio=page.content.all().find(node=>node.type==='radio');
- radio.checked=true;radio.listeners.change();
+ const select=page.content.all().find(node=>node.className==='backup-file-checkbox');
+ select.checked=true;select.listeners.change();
  const restore=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
  changeRetention(page,'2');
  const apply=page.update();
  page.context.justVoxelSelectionGeneration.version++;
- await restore.listeners.click();await apply.listeners.click();radio.listeners.change();
+ await restore.listeners.click();await apply.listeners.click();select.listeners.change();
  assert.ok(!page.calls.some(call=>call.url==='/api/version/container/update'||call.url==='/api/version/container/retention'));
 });
 
@@ -862,29 +890,233 @@ test('Container retained cards reuse backup selection and icon patterns and rest
  const page=containerWorkspace({previousImages:[first,second]});await page.mount();
  const cards=page.content.all().filter(node=>node.className==='backup-file-card backup-file-selectable');
  assert.equal(cards.length,2);
- const radios=cards.map(card=>card.children[0]);
- assert.equal(radios[0].type,'radio');assert.equal(radios[1].type,'radio');
- assert.equal(radios[0].name,radios[1].name);
- assert.equal(radios[0].name,'previous-container-image');
+ const selectors=cards.map(card=>card.children[0]);
+ assert.ok(selectors.every(input=>input.type==='checkbox'&&input.role==='switch'));
+ assert.ok(!page.content.all().some(node=>node.type==='radio'));
+ assert.equal(selectors[0].name,selectors[1].name);
+ assert.equal(selectors[0].name,'previous-container-image');
  for(const [i,card] of cards.entries()) {
   const image=[first,second][i];
   assert.equal(card.children.length,3);
   assert.equal(card.children[1].className,'backup-file-icon');
   assert.equal(card.children[1]['aria-hidden'],'true');
-  assert.equal(card.children[1].children[0].tag,'svg');
+  const icon=card.children[1].children[0];
+  assert.equal(icon.tag,'svg');assert.equal(icon.width,'18');assert.equal(icon.height,'18');
+  assert.equal(icon.fill,'none');assert.equal(icon.stroke,'currentColor');
+  const backups=readFileSync(path.join(__dirname,'../webui/internal/server/templates/backups_workspace.html'),'utf8');
+  for(const shape of icon.children) assert.ok(backups.includes('d="'+shape.d+'"'),'reuse the Backups file icon');
   assert.equal(card.children[2].className,'backup-file-copy');
   assert.equal(card.children[2].children[0].textContent,image.image);
   assert.equal(card.children[2].children[1].title,image.digest);
   assert.ok(card.textContent.includes(new Date(image.retained_at).toLocaleString()));
   assert.match(card.textContent,/1 MB/);
  }
- const restore=page.content.all().find(node=>node.textContent==='Restore selected');
- radios[0].checked=true;radios[0].listeners.change();
+ const restore=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
+ selectors[0].checked=true;selectors[0].listeners.change();
  assert.equal(restore.disabled,false);
- // Native radios in the same named group deselect the first control.
- radios[0].checked=false;radios[1].checked=true;radios[1].listeners.change();
- assert.equal(radios.filter(radio=>radio.checked).length,1);
+ assert.equal(containerMetrics(page)['Selected'],'1');
+ // The Container change handler must deselect the first switch itself.
+ selectors[1].checked=true;selectors[1].listeners.change();
+ assert.equal(selectors[0].checked,false);
+ assert.equal(containerMetrics(page)['Selected'],'1');
+ selectors[1].checked=false;selectors[1].listeners.change();
+ assert.equal(containerMetrics(page)['Selected'],'0');assert.equal(restore.disabled,true);
+ selectors[1].checked=true;selectors[1].listeners.change();
+ assert.equal(selectors.filter(input=>input.checked).length,1);
  await restore.listeners.click();
  assert.equal(page.calls.find(call=>call.url==='/api/version/container/update').body.get('restore_digest'),second.digest);
- assert.match(cssRule('.version-container-workspace .version-container-history .backup-file-card'),/grid-template-columns:32px 36px minmax\(0,1fr\)/);
+ assert.match(cssRule('.version-container-workspace .version-container-history .backup-file-card'),/grid-template-columns:42px 30px minmax\(0,1fr\)/);
+});
+
+test('Container retained grid keeps empty columns and uses compact Backups sizing without opening Backups',()=>{
+ const grid=cssRule('.version-container-history .backup-file-grid');
+ assert.match(grid,/display:grid;grid-template-columns:repeat\(auto-fill,minmax\(min\(100%,310px\),1fr\)\)/);
+ assert.doesNotMatch(grid,/auto-fit/);
+ const backupsCSS=readFileSync(path.join(__dirname,'../webui/internal/server/static/new-backups.css'),'utf8');
+ assert.ok(backupsCSS.includes('grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr))'));
+ assert.match(cssRule('.version-container-history .backup-file-icon'),/width:30px;height:30px/);
+ assert.match(cssRule('.version-container-history .backup-file-icon svg'),/width:18px;height:18px;fill:none;stroke:currentColor/);
+ assert.match(cssRule('.version-container-history .backup-file-copy strong'),/font-size:\.82rem/);
+ assert.match(cssRule('.version-container-history .backup-file-copy span'),/font-size:\.74rem/);
+ assert.doesNotMatch(source,/M12 3 3 7\.5/);
+});
+test('Container footer sums retained sizes and reflects existing operation state including polling',async()=>{
+ const first=retainedImage('sha256:'+'a'.repeat(64));
+ const second={...retainedImage('sha256:'+'b'.repeat(64)),size:2*1048576};
+ const idle=containerWorkspace({previousImages:[first,second]});await idle.mount();
+ assert.deepEqual(containerMetrics(idle),{'Images':'2','Total size':'3 MB','Selected':'0','Status':'Up to date'});
+ for(const state of ['succeeded','resolved','needs_attention','failed']) {
+  const page=containerWorkspace({pending:{operation_id:'container-1',state}});await page.mount();
+  assert.equal(containerMetrics(page)['Status'],state);
+ }
+ const operation={operation_id:'container-1',state:'running'};
+ const active=containerWorkspace({pending:operation});await active.mount();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(containerMetrics(active)['Status'],'running');
+ operation.state='succeeded';await active.timers.shift()();
+ assert.equal(containerMetrics(active)['Status'],'succeeded');
+});
+test('Container operation notice spacing is compact and scoped',()=>{
+ assert.match(cssRule('.version-workspace-body .version-container-workspace .version-operation-status'),/padding:\.45rem \.65rem;margin:0/);
+ assert.match(cssRule('.version-container-workspace .version-operation-status>p'),/margin:0;line-height:1\.35/);
+});
+
+const channelSelect = page => page.content.all().find(node=>node.name==='channel');
+const customTagInput = page => page.content.all().find(node=>node.name==='custom_tag');
+const chooseChannel = (page,value) => { const input=channelSelect(page);input.value=value;input.listeners.change(); };
+const channelReview = page => page.content.all().find(node=>'versionReview' in node.dataset);
+const reviewAction = (page,label) => channelReview(page)?.all().find(node=>node.tag==='button'&&node.textContent===label);
+const channelMutations = page => page.calls.filter(call=>['/api/version/container/retention','/api/version/workspace/update','/api/version/container/update'].includes(call.url));
+
+test('Paper, Purpur and Vanilla share Advanced Setup channel choices in the first equal cell',async()=>{
+ for(const serverType of ['paper','purpur','vanilla']) {
+  const page=containerWorkspace({serverType});await page.mount();
+  const select=channelSelect(page);
+  assert.equal(select.parent.children[0].textContent,'Server update channel');
+  assert.deepEqual(select.children.map(option=>[option.textContent,option.value]),[['Stable (recommended)','stable'],['Latest','latest'],['Custom','custom']]);
+  assert.equal(select.value,'stable');assert.equal(customTagInput(page).hidden,true);
+  assert.equal(select.parent,retentionInput(page).parent.parent.children[0]);
+  assert.deepEqual(page.update().parent.children,[page.update()]);
+  assert.ok(!page.content.all().some(node=>node.tag==='button'&&/Review change|Save channel|Apply channel/.test(node.textContent)));
+ }
+});
+
+test('Configured latest and custom channels initialize truthfully with Custom input in the same cell',async()=>{
+ for(const imageTag of ['latest','some-supported-tag']) {
+  const page=containerWorkspace({imageTag});await page.mount();
+  const select=channelSelect(page),custom=customTagInput(page);
+  assert.equal(select.value,imageTag==='latest'?'latest':'custom');
+  assert.equal(custom.hidden,imageTag==='latest');assert.equal(custom.parent,select.parent);
+  if(imageTag!=='latest') assert.equal(custom.value,imageTag);
+  assert.equal(page.update().disabled,true);
+ }
+});
+
+test('Channel dirty state enables Update, disables manual toggles, and reverting restores normal controls',async()=>{
+ const page=containerWorkspace({status:'restart_needed'});await page.mount();
+ assert.equal(page.update().disabled,true);assert.ok(page.toggles().every(input=>!input.disabled));
+ chooseChannel(page,'latest');
+ assert.equal(page.update().disabled,false);assert.ok(page.toggles().every(input=>input.disabled));
+ assert.equal(retentionInput(page).disabled,false);
+ chooseChannel(page,'stable');
+ assert.equal(page.update().disabled,true);assert.ok(page.toggles().every(input=>!input.disabled));
+ chooseChannel(page,'custom');assert.equal(customTagInput(page).hidden,false);
+ assert.equal(page.update().disabled,true);
+ const custom=customTagInput(page);custom.value='   ';custom.listeners.input();
+ await page.update().listeners.click();assert.equal(channelMutations(page).length,0);assert.equal(channelReview(page),undefined);
+ custom.value='release_1.2-3';custom.listeners.input();assert.equal(page.update().disabled,false);
+ custom.value='stable';custom.listeners.input();assert.equal(page.update().disabled,true);
+ assert.ok(page.toggles().every(input=>!input.disabled));
+});
+
+test('Channel Update reviews the exact tag and applies only the existing fingerprint-bound operation',async()=>{
+ for(const [configured,target] of [['stable','latest'],['latest','stable'],['stable','release_1.2-3']]) {
+  const page=containerWorkspace({imageTag:configured});await page.mount();
+  chooseChannel(page,['stable','latest'].includes(target)?target:'custom');
+  if(target==='release_1.2-3') { const custom=customTagInput(page);custom.value=target;custom.listeners.input(); }
+  await page.update().listeners.click();
+  assert.ok(channelReview(page));assert.equal(channelMutations(page).length,0);
+  const plan=page.calls.find(call=>call.url==='/api/minecraft/workspace/settings/plan');
+  assert.equal(plan.body.get('image_tag'),target);
+  const status=page.calls.find(call=>call.url?.startsWith('/api/version/workspace/status?')&&new URLSearchParams(call.url.split('?')[1]).get('image_tag')===target);
+  assert.ok(status);
+  await reviewAction(page,'Apply changes').listeners.click();
+  const posts=channelMutations(page);assert.equal(posts.length,1);
+  assert.equal(posts[0].url,'/api/version/workspace/update');
+  assert.equal(posts[0].body.get('image_tag'),target);assert.equal(posts[0].body.get('plan_fingerprint'),'channel-reviewed');
+  assert.equal(posts[0].body.has('restart_now'),false);assert.equal(posts[0].body.has('backup_before_restart'),false);
+  assert.ok(page.calls.some(call=>call.watch==='channel-1'));
+ }
+});
+
+test('Unverified or mismatched channel candidates cannot apply',async()=>{
+ for(const override of [{plan_fingerprint:''},{plan_fingerprint:'different-plan'},{image_tag:'other-tag'},{server_supported:false},{installed:''},{stack_state:'unavailable'},{crossplay_enabled:true,crossplay_compatible:false}]) {
+  const page=containerWorkspace({channelStatusReply:status=>({...status,...override})});await page.mount();
+  chooseChannel(page,'latest');await page.update().listeners.click();
+  assert.ok(channelReview(page));assert.equal(reviewAction(page,'Apply changes'),undefined);
+  assert.equal(channelMutations(page).length,0);
+  reviewAction(page,'Cancel review').listeners.click();assert.equal(channelReview(page),undefined);assert.equal(page.update().disabled,false);
+ }
+});
+
+test('Channel plus retention reviews first and cancel never mutates retention',async()=>{
+ const page=containerWorkspace();await page.mount();chooseChannel(page,'latest');changeRetention(page,'2');
+ await page.update().listeners.click();assert.equal(channelMutations(page).length,0);
+ reviewAction(page,'Cancel review').listeners.click();assert.equal(channelMutations(page).length,0);
+ assert.equal(retentionInput(page).value,'2');assert.equal(retentionInput(page).disabled,false);
+ await page.update().listeners.click();await reviewAction(page,'Apply changes').listeners.click();
+ assert.deepEqual(channelMutations(page).map(call=>call.url),['/api/version/container/retention','/api/version/workspace/update']);
+ assert.equal(channelMutations(page)[0].body.get('keep_previous_images'),'2');
+ assert.equal(channelMutations(page)[1].body.get('image_tag'),'latest');
+});
+
+test('Retention failure during channel Apply prevents the reviewed update',async()=>{
+ const page=containerWorkspace({retentionReply:()=>{throw new Error('Retention save failed.');}});await page.mount();
+ chooseChannel(page,'latest');changeRetention(page,'2');await page.update().listeners.click();
+ await reviewAction(page,'Apply changes').listeners.click();
+ assert.deepEqual(channelMutations(page).map(call=>call.url),['/api/version/container/retention']);
+ assert.equal(page.context.state.textContent,'Retention save failed.');
+ assert.equal(reviewAction(page,'Cancel review').disabled,false);
+});
+
+test('Stale channel controls, reviews, and delayed retention saves cannot update another selection',async()=>{
+ const stale=containerWorkspace();await stale.mount();chooseChannel(stale,'latest');
+ stale.context.justVoxelSelectionGeneration.version++;await stale.update().listeners.click();
+ assert.ok(!stale.calls.some(call=>call.body));
+ const reviewed=containerWorkspace();await reviewed.mount();chooseChannel(reviewed,'latest');changeRetention(reviewed,'2');
+ await reviewed.update().listeners.click();reviewed.context.justVoxelSelectionGeneration.version++;
+ await reviewAction(reviewed,'Apply changes').listeners.click();assert.equal(channelMutations(reviewed).length,0);
+ let finish;
+ const saving=containerWorkspace({retentionReply:()=>new Promise(resolve=>{finish=resolve;})});await saving.mount();
+ chooseChannel(saving,'latest');changeRetention(saving,'2');await saving.update().listeners.click();
+ const applying=reviewAction(saving,'Apply changes').listeners.click();
+ saving.context.justVoxelSelectionGeneration.version++;finish({ok:true});await applying;
+ assert.deepEqual(channelMutations(saving).map(call=>call.url),['/api/version/container/retention']);
+});
+
+test('Delayed channel preview cannot attach a review to a new selection',async()=>{
+ let finish;
+ const page=containerWorkspace({channelPlanReply:plan=>new Promise(resolve=>{finish=()=>resolve(plan);})});await page.mount();
+ chooseChannel(page,'latest');const checking=page.update().listeners.click();
+ page.context.justVoxelSelectionGeneration.version++;finish();await checking;
+ assert.equal(channelReview(page),undefined);assert.equal(channelMutations(page).length,0);
+});
+
+test('Exact and fixed runtimes display the actual status tag without channel controls',async()=>{
+ for(const serverType of ['spigot','pufferfish','leaf','forge','neoforge','fabric','quilt','bedrock','unknown']) {
+  const imageTag=serverType==='spigot'?'java25-jdk':serverType==='bedrock'?'fixed-bedrock':'resolved-runtime-tag';
+  const page=containerWorkspace({serverType,imageTag});await page.mount();
+  const cell=retentionInput(page).parent.parent.children[0];
+  assert.equal(cell.children[0].textContent,'Runtime image');assert.equal(cell.children[1].textContent,imageTag);
+  assert.equal(cell.children[2].textContent,`Managed for ${serverType==='spigot'?'Spigot':serverType}`);
+  assert.equal(channelSelect(page),undefined);assert.equal(customTagInput(page),undefined);
+  assert.ok(!cell.all().some(node=>node.tag==='select'||node.tag==='option'));
+ }
+});
+
+test('Container reconnects reviewed channel operations and preserves the existing recovery action',async()=>{
+ for(const state of ['running','needs_attention','failed']) {
+  const page=containerWorkspace({reviewedPending:{operation_id:'channel-pending',state}});await page.mount();
+  assert.equal(page.update().disabled,true);assert.equal(retentionInput(page).disabled,true);
+  if(state==='running') assert.ok(page.calls.some(call=>call.watch==='channel-pending'));
+  else {
+   const keep=page.content.all().find(node=>node.tag==='button'&&node.textContent==='Keep current version');
+   assert.ok(keep);await keep.listeners.click();
+   const body=channelMutations(page)[0].body;assert.equal(body.get('acknowledge'),'yes');assert.equal(body.get('operation_id'),'channel-pending');
+  }
+ }
+});
+
+test('Channel review keeps existing online-player consent and prevents repeated Apply after a lost response',async()=>{
+ const page=containerWorkspace({online:2,channelApplyReply:()=>{throw new Error('Response lost');}});await page.mount();
+ chooseChannel(page,'latest');changeRetention(page,'2');await page.update().listeners.click();
+ const apply=reviewAction(page,'Apply changes');
+ const consent=channelReview(page).all().find(node=>node.tag==='input'&&node.type==='checkbox');
+ assert.ok(consent);assert.equal(apply.disabled,true);
+ await apply.listeners.click();assert.equal(channelMutations(page).length,0);
+ consent.checked=true;consent.listeners.change();await apply.listeners.click();
+ assert.deepEqual(channelMutations(page).map(call=>call.url),['/api/version/container/retention','/api/version/workspace/update']);
+ assert.equal(channelMutations(page)[1].body.get('confirm_players'),'yes');
+ await apply.listeners.click();assert.equal(channelMutations(page).length,2);
+ assert.equal(page.renders.length,1);
 });

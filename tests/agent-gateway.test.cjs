@@ -771,7 +771,7 @@ test('private host detection is independent of HTTP and HTTPS security', () => {
   for (const url of ['http://voxel.example/mcp', 'https://voxel.example/mcp', 'https://172.15.0.1/mcp', 'https://172.32.0.1/mcp', 'https://[fec0::1]/mcp', 'https://[2001:db8::1]/mcp']) assert.equal(context.local(url), false, url);
 });
 
-test('existing settings use equal Name/Access tracks with an unlabeled switch and metric expiration', () => {
+test('existing settings use equal Name/Access tracks with a compact labeled switch and metric expiration', () => {
   const h = settingsHarness({id: 'one', name: 'Home', purpose: 'OpenAI', auth_mode: 'oauth_local', enabled: true, all_instances: true});
   assert.match(form, /gateway-enabled-control"><label class="gateway-switch">/);
   assert.equal(h.node('.gateway-name-access-row').afterChildren, undefined);
@@ -786,13 +786,23 @@ test('existing settings use equal Name/Access tracks with an unlabeled switch an
   assert.match(css, /@container gateway \(max-width: 420px\)/);
 });
 
-test('enabled switch has no visible label and waits for Apply', () => {
+test('enabled switch updates its visible state immediately and waits for Apply', () => {
   const connection = {id: 'one', name: 'Home', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true};
   const h = settingsHarness(connection);
   assert.match(form, /name="enabled" aria-label="Connection enabled"/);
   assert.doesNotMatch(form, /<span>Enabled<\/span>|<span>Disabled<\/span>/);
-  assert.doesNotMatch(js.slice(js.indexOf('  const renderSettings =')), /syncEnabled|gateway-switch span/);
+  assert.equal(h.node('[data-gateway-connection-state]').textContent, 'Enable');
+  assert.equal(h.node('[data-gateway-connection-state]').className, 'gateway-connection-state success');
   h.field('enabled').checked = false;
+  h.field('enabled').listeners.change();
+  assert.equal(h.node('[data-gateway-connection-state]').textContent, 'Disable');
+  assert.equal(h.node('[data-gateway-connection-state]').className, 'gateway-connection-state error');
+  const reopened = settingsHarness({...connection, enabled: false});
+  assert.equal(reopened.node('[data-gateway-connection-state]').textContent, 'Disable');
+  const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
+  assert.match(css, /gateway-connection-state \{ font-weight: 700/);
+  assert.match(css, /gateway-connection-state\.success \{ color: var\(--jv-success\)/);
+  assert.match(css, /gateway-connection-state\.error \{ color: var\(--jv-error\)/);
   assert.equal(connection.enabled, true);
   assert.equal(h.requests.length, 0);
   h.submit();
@@ -996,6 +1006,8 @@ test('Add shares the desktop configuration row and enabled draft with Settings',
   assert.equal((form.match(/name="enabled"/g) || []).length, 1);
   for (const checked of [false, true, false]) {
     h.field('enabled').checked = checked;
+    h.field('enabled').listeners.change();
+    assert.equal(h.node('[data-gateway-connection-state]').textContent, checked ? 'Enable' : 'Disable');
     assert.doesNotMatch(form, /<span>Enabled<\/span>|<span>Disabled<\/span>/);
     assert.equal(h.requests.length, 0);
     assert.equal(draft.enabled, true);
@@ -1071,7 +1083,7 @@ test('cloud modes gate private and non-HTTPS endpoints before any copy or paste 
         ['Gemini', 'Public HTTPS endpoint required', 'publicly reachable HTTPS Streamable HTTP'],
       ]) {
         const content = h.render(purpose, options);
-        assert.ok(content.includes('Before you connect'), purpose);
+        assert.doesNotMatch(content, /Before you connect/, purpose);
         assert.ok(content.includes(title), purpose);
         assert.ok(content.includes(body), purpose);
         assert.ok(!descendants(h.host).some(node => node.className === 'gateway-address'), purpose);
@@ -1550,7 +1562,7 @@ test('Gemini Settings keeps availability and registration background in Help onl
   }
   const h = guideHarness();
   const content = h.render('Gemini', {settings: true});
-  for (const phrase of ['How to connect', 'Before you connect', 'Public HTTPS endpoint required', 'Gemini custom Connected Apps require a publicly reachable HTTPS Streamable HTTP MCP endpoint. The current JustVoxel endpoint does not meet that requirement.']) assert.ok(content.includes(phrase), phrase);
+  for (const phrase of ['How to connect', 'Public HTTPS endpoint required', 'Gemini custom Connected Apps require a publicly reachable HTTPS Streamable HTTP MCP endpoint. The current JustVoxel endpoint does not meet that requirement.']) assert.ok(content.includes(phrase), phrase);
   assert.equal(h.host.children.filter(node => node.tagName === 'p' && node.textContent).length, 1);
   assert.ok(!descendants(h.host).some(node => node.tagName === 'input' || node.tagName === 'ol'));
 });
@@ -1559,7 +1571,7 @@ test('Gemini CLI private HTTP requires HTTPS and explicit private-network OAuth 
   for (const origin of ['http://192.168.0.28:8099', 'http://10.0.0.2', 'http://[fd00::1]', 'http://justvoxel.local', 'http://justvoxel.internal', 'http://100.64.0.2']) {
     const h = guideHarness(origin);
     const content = h.render('Gemini', {settings: true, mode: 'Gemini CLI'});
-    for (const phrase of ['Before you connect', 'Private HTTPS required for OAuth', 'requires HTTPS for non-loopback private endpoints', 'trusted LAN HTTPS endpoint', 'Private-network OAuth discovery must also be explicitly enabled in Gemini CLI']) assert.ok(content.includes(phrase), phrase);
+    for (const phrase of ['Private HTTPS required for OAuth', 'requires HTTPS for non-loopback private endpoints', 'trusted LAN HTTPS endpoint', 'Private-network OAuth discovery must also be explicitly enabled in Gemini CLI']) assert.ok(content.includes(phrase), phrase);
     assert.doesNotMatch(content, /gemini mcp add|gemini mcp list|\/mcp auth justvoxel/);
     assert.ok(!descendants(h.host).some(node => node.tagName === 'input' || node.tagName === 'button' && /Copy/.test(node.textContent)));
     assert.ok(descendants(h.host).some(node => node.href === 'https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md'));
@@ -1599,7 +1611,7 @@ test('Gemini CLI Help gives a connection-specific Streamable HTTP example with o
   }
 });
 
-test('Before you connect appears only for existing blocker modes in Settings and Help', () => {
+test('prerequisite Settings and shared Help guides omit the redundant heading', () => {
   const modes = [
     ['OpenAI', 'ChatGPT', 'cloud'], ['OpenAI', 'Codex', 'local'],
     ['Claude', 'Claude', 'cloud'], ['Claude', 'Claude Code', 'local'],
@@ -1620,7 +1632,7 @@ test('Before you connect appears only for existing blocker modes in Settings and
         const label = `${origin}: ${purpose}: ${mode}: ${options.help ? 'Help' : 'Settings'}`;
         assert.doesNotMatch(content, /Connection prerequisite/, label);
         const headings = descendants(h.host).filter(node => node.tagName === 'h4' && node.textContent === 'Before you connect');
-        assert.equal(headings.length, blocked ? 1 : 0, label);
+        assert.equal(headings.length, 0, label);
         if (blocked && purpose === 'Claude') {
           assert.ok(descendants(h.host).some(node => node.tagName === 'strong' && node.textContent === 'Claude needs a reachable MCP endpoint'), label);
           assert.doesNotMatch(content, /Claude needs a remotely reachable MCP endpoint/);

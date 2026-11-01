@@ -669,6 +669,7 @@ if (quickLook && quickLookToggle) {
 
   const setOpen = (open, persist = true) => {
     quickLook.classList.toggle("is-open", open);
+    topbar?.classList.toggle("quick-look-open", open);
     quickLookToggle.setAttribute("aria-expanded", open ? "true" : "false");
     if (quickLookPanel) {
       quickLookPanel.inert = !open;
@@ -758,13 +759,18 @@ if (quickLook && quickLookToggle) {
     const overlays = quickLook.querySelector("[data-quick-look-overlays]");
     if (overlays) {
       overlays.replaceChildren();
-      [["Tailscale", "tailscale"], ["NetBird", "netbird"], ["Playit", "playit"]].forEach(([label, id]) => {
+      [["Tailscale", "tailscale"], ["NetBird", "netbird"], ["Playit", "playit"], ["NordVPN", "nordvpn"]].forEach(([label, id]) => {
         const provider = providers.find((item) => item.id === id);
-        let value = provider?.summary || "Unavailable";
-        if (provider?.connected && id !== "playit" && provider.ip) value = provider.ip.split("/")[0];
-        if (id === "playit" && provider?.connected && Array.isArray(provider.tunnels)) {
-          const count = provider.tunnels.filter((tunnel) => !tunnel.is_disabled).length;
-          value = count === 0 ? "No tunnels" : `${count} tunnel${count === 1 ? "" : "s"}`;
+        if (provider?.connected !== true) return;
+        let value = "";
+        if (id === "playit") {
+          const count = Array.isArray(provider.tunnels) ? provider.tunnels.filter((tunnel) => tunnel.is_disabled === false).length : 0;
+          if (!count) return;
+          value = `${count} tunnel${count === 1 ? "" : "s"}`;
+        } else {
+          const ip = typeof provider.ip === "string" ? provider.ip.split("/")[0] : "";
+          if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip) || ip.split(".").some((part) => Number(part) > 255)) return;
+          value = ip;
         }
         const line = document.createElement("span");
         const name = document.createElement("span");

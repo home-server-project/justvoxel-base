@@ -21,9 +21,9 @@ func TestQuickLookConcealmentAndAlignment(t *testing.T) {
 	css := read("static/app.css")
 	for _, want := range []string{
 		`.quick-look-panel{visibility:hidden;`,
-		`.quick-look.is-open>.quick-look-panel{visibility:visible;pointer-events:auto}`,
+		`.quick-look.is-open>.quick-look-panel{visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}`,
 		`.quick-look{left:4px;right:4px}`,
-		`z-index:70;transform:translateY(-100%)`,
+		`z-index:70;clip-path:inset(0 -100vmax -100vmax)`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("drawer visibility or responsive contract missing %q", want)
@@ -39,11 +39,31 @@ func TestQuickLookConcealmentAndAlignment(t *testing.T) {
 			t.Fatalf("unclosed %s", selector)
 		}
 		rule := css[start : start+end]
-		if !strings.Contains(rule, "border:1px solid #303942;border-radius:12px;") {
+		shape := "border:1px solid #303942;border-radius:12px;"
+		if selector == ".quick-look-panel{" {
+			shape = "border:1px solid #303942;border-radius:0 0 12px 12px;border-top:0;"
+		}
+		if !strings.Contains(rule, shape) {
 			t.Fatalf("drawer and topbar must share their border and rounded shape: %s", selector)
 		}
 		if strings.HasPrefix(selector, ".app-header") && !strings.Contains(rule, "background:#151a1f;") {
 			t.Fatal("topbar must use an opaque background")
+		}
+	}
+
+	outer := css[strings.Index(css, ".quick-look{"):]
+	outer = outer[:strings.Index(outer, "}")]
+	if strings.Contains(outer, "transform:") {
+		t.Fatal("outer drawer must remain stationary")
+	}
+	for _, want := range []string{
+		".quick-look-panel{visibility:hidden;transform:translateY(-100%)",
+		".quick-look-handle{position:absolute;top:0;transition:top .2s ease;",
+		".quick-look.is-open>.quick-look-handle{top:100%}",
+		".app-header.topbar.quick-look-open{border-bottom-left-radius:0;border-bottom-right-radius:0;box-shadow:none}",
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("joined drawer presentation missing %q", want)
 		}
 	}
 
@@ -64,7 +84,9 @@ const panel = { inert: true, attributes: {}, setAttribute(key, value) { this.att
 const classes = new Set();
 const quickLook = { style: {}, querySelector: () => panel, classList: { toggle(name, open) { open ? classes.add(name) : classes.delete(name); } } };
 const quickLookToggle = { attributes: {}, setAttribute(key, value) { this.attributes[key] = value; } };
-const document = { querySelector: () => ({ getBoundingClientRect: () => bounds }) };
+const topbarClasses = new Set();
+const document = { querySelector: () => ({ getBoundingClientRect: () => bounds,
+  classList: { toggle(name, open) { open ? topbarClasses.add(name) : topbarClasses.delete(name); } } }) };
 const stored = new Map();
 const window = { innerWidth: 1200, addEventListener: (event, callback) => { assert.equal(event, "resize"); resize = callback; },
   localStorage: { setItem: (key, value) => stored.set(key, value) },
@@ -79,6 +101,7 @@ globalThis.justVoxelServerSelection = (slot, refresh) => {
 assert.deepEqual(quickLook.style, { top: "44px", left: "8px", width: "1184px", right: "auto" });
 setOpen(true);
 assert(classes.has("is-open"));
+assert(topbarClasses.has("quick-look-open"));
 assert.equal(panel.inert, false);
 assert.equal(panel.attributes["aria-hidden"], "false");
 assert.equal(quickLookToggle.attributes["aria-expanded"], "true");
@@ -87,6 +110,7 @@ assert.equal(selectionRefreshes, 1);
 assert.equal(stored.get(stateKey("test")), "open");
 setOpen(false);
 assert(!classes.has("is-open"));
+assert(!topbarClasses.has("quick-look-open"));
 assert.equal(panel.inert, true);
 assert.equal(panel.attributes["aria-hidden"], "true");
 assert.equal(quickLookToggle.attributes["aria-expanded"], "false");

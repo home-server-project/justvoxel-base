@@ -204,6 +204,7 @@ for (const [workspace, refresh, ticket] of [
       URL, URLSearchParams, location:{origin:'https://justvoxel.test',search:'?server=jv-second1'},
       window:{addEventListener: (_, callback) => { context.change = callback; }},
       [`${workspace}Dialog`]:dialog, content, results:content, panelBody:content,
+      ...(workspace === 'minecraft' ? {newMinecraftRconState: () => ({})} : {}),
       [ticket]:0, currentTab:'export', tabURLs:{export:'/workspace/migration/export'},
       currentURL:'/old?server=jv-first01', updateOperation:'old', completedOperation:{}, operationKinds:new Map([['old',{}]]),
       migrationLoadController:{abort() { calls.push('detach-read'); }},
@@ -520,4 +521,17 @@ test('shared menu uses top layer, follows native details, and closes on Escape a
   details.open = true; details.events.toggle();
   menu.hidePopover(); menu.events.toggle();
   assert.equal(details.open,false);
+});
+
+test('Quick Look keeps one stationary drawer with shared network row spacing', () => {
+  const css = readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8');
+  const outer = css.match(/\.quick-look\{([^}]+)\}/)[1];
+  assert.doesNotMatch(outer, /transform:/);
+  assert.match(css, /\.quick-look-panel\{[^}]*transform:translateY\(-100%\)/);
+  assert.match(css, /\.quick-look-network-row,\.network-overlay-list>span\{[^}]*grid-template-columns:4\.25rem minmax\(0,1fr\);[^}]*gap:\.5rem/);
+  const quick = source.slice(source.indexOf('const quickLook ='), source.indexOf('  const loadQuickLookIdentity'));
+  assert.match(quick, /topbar\?\.getBoundingClientRect\(\)/);
+  assert.match(quick, /quickLook\.style\.left = bounds\.left/);
+  assert.match(quick, /quickLook\.style\.width = bounds\.width/);
+  assert.equal((quick.match(/fetch\("\/api\/network\/remote-access"/g) || []).length, 1);
 });

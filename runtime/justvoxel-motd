@@ -168,6 +168,7 @@ fi
 remote_status=/usr/libexec/justvoxel/remote-access-status
 tailscale_value="$("${remote_status}" tailscale 2>/dev/null || printf '%s' 'Unavailable')"
 netbird_value="$("${remote_status}" netbird 2>/dev/null || printf '%s' 'Unavailable')"
+nordvpn_value="$("${remote_status}" nordvpn 2>/dev/null || printf '%s' 'Unavailable')"
 playit_value="$("${remote_status}" playit 2>/dev/null || printf '%s' 'Unavailable')"
 
 if [[ ${output_mode} == issue ]]; then
@@ -235,6 +236,7 @@ fi
 line 'Tailscale:' "${white}" "${tailscale_value}"
 line 'NetBird:' "${white}" "${netbird_value}"
 line 'Playit:' "${white}" "${playit_value}"
+line 'NordVPN:' "${white}" "${nordvpn_value}"
 
 if [[ ${output_mode} == issue ]]; then
     printf '\n'

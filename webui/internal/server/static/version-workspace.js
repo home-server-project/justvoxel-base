@@ -109,13 +109,14 @@ if (versionLauncher && versionDialog) {
     status.installed !== status.selected_candidate ||
     (!plan.changes?.length && status.update_available && status.stack_state === "updates_available")
   ));
-  const showReview = (root, form, plan, params, status, players) => {
+  const showReview = (root, form, plan, params, status, players, lifecycle = {}) => {
     const selection = globalThis.justVoxelSelectionGeneration.version;
+    const current = lifecycle.current || (() => selection === globalThis.justVoxelSelectionGeneration.version);
     const versionReview = Boolean(form.elements.policy);
     const channelChange = !versionReview && Boolean(plan.changes?.length);
     const needsUpdate = versionReview ? requiresRuntimeUpdate(plan, status) : status?.image_state === "updates_available";
     const runtimePossible = needsUpdate || channelChange;
-    const blocked = plan.compatibility_blocked || (status?.crossplay_enabled && !status.crossplay_compatible) || (versionReview && (!(status.server_supported ?? status.paper_supported) || !status.installed)) || (needsUpdate && !channelChange && status.stack_state !== "updates_available");
+    const blocked = (lifecycle.current && (!status?.plan_fingerprint || plan.review !== status.plan_fingerprint || status.image_tag !== params.get("image_tag") || !status.server_supported || !status.installed || status.stack_state === "unavailable")) || plan.compatibility_blocked || (status?.crossplay_enabled && !status.crossplay_compatible) || (versionReview && (!(status.server_supported ?? status.paper_supported) || !status.installed)) || (needsUpdate && !channelChange && status.stack_state !== "updates_available");
     root.querySelector("[data-version-review]")?.remove();
     const review = card("Review changes");
     review.dataset.versionReview = "";
@@ -168,7 +169,7 @@ if (versionLauncher && versionDialog) {
       warning.textContent = (status.reason || "Bedrock cross-play compatibility could not be confirmed.") + (versionReview ? " Disable Cross-play first before selecting this version." : "");
       review.appendChild(warning);
     }
-    if (versionReview && blocked && !(status.crossplay_enabled && !status.crossplay_compatible)) {
+    if ((versionReview || lifecycle.current) && blocked && !(status.crossplay_enabled && !status.crossplay_compatible)) {
       const warning = document.createElement("p");
       warning.className = "notice warning";
       warning.textContent = status.reason || "A safe Minecraft update could not be verified.";
@@ -199,7 +200,7 @@ if (versionLauncher && versionDialog) {
     cancel.type = "button";
     cancel.className = "secondary";
     cancel.textContent = "Cancel review";
-    cancel.addEventListener("click", () => { review.remove(); form.hidden = false; });
+    cancel.addEventListener("click", () => { if (!current() || cancel.disabled) return; review.remove(); form.hidden = false; lifecycle.onCancel?.(); });
     actions.appendChild(cancel);
     if ((plan.changes?.length || needsUpdate) && !blocked) {
       const apply = document.createElement("button");
@@ -208,16 +209,21 @@ if (versionLauncher && versionDialog) {
       apply.disabled = confirmationRequired && !checkbox.checked;
       checkbox.addEventListener("change", () => { apply.disabled = confirmationRequired && !checkbox.checked; });
       apply.addEventListener("click", async () => {
+        if (!current() || apply.disabled) return;
         apply.disabled = true;
         cancel.disabled = true;
         checkbox.disabled = true;
         state.textContent = "Applying changes…";
         let saved = false;
+        let updateSent = false;
         try {
           if (confirmationRequired && !checkbox.checked) throw new Error("Confirm online player interruption before applying.");
+          await lifecycle.beforeApply?.();
+          if (!current()) return;
           // Both policy and channel reviews apply one immutable-ID operation.
           // The reviewed fingerprint is revalidated by the Agent; no re-plan loop.
           const body = new URLSearchParams({ csrf, plan_fingerprint: status.plan_fingerprint, confirm_players: checkbox.checked ? "yes" : "no", policy: params.get("version_policy") || "", version: params.get("version") || "", image_tag: params.get("image_tag") || "" });
+          updateSent = true;
           const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
           if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable. Refresh Version to check its status.");
           review.remove();
@@ -226,7 +232,8 @@ if (versionLauncher && versionDialog) {
           watchUpdate(result.operation.operation_id, selection);
           return;
         } catch (failure) {
-          if (failure.staleSelection) return;
+          if (!current() || failure.staleSelection) return;
+          if (lifecycle.current && updateSent) { await render(failure.message); return; }
           // A saved configuration is never automatically reapplied or retried.
           if (saved) await render("Changes saved. " + failure.message);
           else {
@@ -272,11 +279,11 @@ if (versionLauncher && versionDialog) {
     const panel = card("Minecraft container");
     panel.className += " version-container-panel";
     const identity = document.createElement("div");
-    identity.className = "version-container-row version-container-summary";
+    identity.className = "version-status-grid version-container-row version-container-summary";
     identity.dataset.containerRow = "identity";
     const selector = versionDialog.querySelector("[data-selected-server] select");
-    const serverLine = line("Server:", selector?.selectedOptions?.[0]?.textContent || "Unavailable");
-    const imageLine = line("Image:", "Checking…");
+    const serverLine = line("Server", selector?.selectedOptions?.[0]?.textContent || "Unavailable");
+    const imageLine = line("Image", "Checking…");
     identity.append(serverLine, imageLine);
     const controls = document.createElement("div");
     controls.className = "version-container-row version-container-controls";
@@ -289,10 +296,20 @@ if (versionLauncher && versionDialog) {
       input.checked = false; input.disabled = true;
       label.append(title, input); controls.appendChild(label); return input;
     };
-    const statusLine = line("Status:", "Checking…");
+    const statusLine = line("Status", "Checking…");
     const update = document.createElement("button"); update.type = "button"; update.textContent = "Update"; update.disabled = true;
     const actionLane = document.createElement("div"); actionLane.className = "version-container-action-lane";
     actionLane.appendChild(update); identity.appendChild(statusLine);
+    const channelCell = document.createElement("label"); channelCell.className = "version-container-channel";
+    const channelTitle = document.createElement("span"); channelTitle.textContent = "Runtime image";
+    const channel = document.createElement("select"); channel.name = "channel"; channel.setAttribute("aria-label", "Server update channel"); channel.disabled = true;
+    for (const [value, text] of [["stable", "Stable (recommended)"], ["latest", "Latest"], ["custom", "Custom"]]) {
+      const option = document.createElement("option"); option.value = value; option.textContent = text; channel.appendChild(option);
+    }
+    const customTag = document.createElement("input"); customTag.name = "custom_tag"; customTag.autocomplete = "off"; customTag.setAttribute("aria-label", "Custom upstream tag"); customTag.hidden = true;
+    const runtimeTag = document.createElement("strong"); runtimeTag.textContent = "Checking…";
+    const runtimeOwner = document.createElement("small"); runtimeOwner.className = "muted";
+    channelCell.append(channelTitle, runtimeTag); controls.appendChild(channelCell);
     const retentionLabel = document.createElement("label"); retentionLabel.className = "version-container-retention";
     const retentionTitle = document.createElement("span"); retentionTitle.textContent = "Keep previous images";
     const retention = document.createElement("input"); retention.type = "number"; retention.min = "1"; retention.max = "2"; retention.step = "1"; retention.value = "1"; retention.disabled = true;
@@ -301,21 +318,33 @@ if (versionLauncher && versionDialog) {
     const restart = toggle("Restart server now");
     const backup = toggle("Create backup before restart");
     controls.appendChild(actionLane);
-    const library = document.createElement("section"); library.className = "version-container-history backup-library-section";
+    const library = document.createElement("section"); library.className = "version-container-history";
     const historyHeading = document.createElement("h2"); historyHeading.textContent = "Previous container images";
     library.appendChild(historyHeading);
     const images = document.createElement("div"); images.className = "backup-file-grid";
-    const footer = document.createElement("div"); footer.className = "backup-library-summary";
-    const summary = document.createElement("span");
+    const footer = document.createElement("div"); footer.className = "backup-command-bar version-container-footer";
+    const summary = document.createElement("div"); summary.className = "backup-library-summary";
+    const metric = (label, value) => {
+      const cell = document.createElement("div");
+      const title = document.createElement("span"); title.textContent = label;
+      const detail = document.createElement("strong"); detail.textContent = value;
+      cell.append(title, detail); summary.appendChild(cell); return detail;
+    };
+    const imageCount = metric("Images", "0");
+    const totalSizeValue = metric("Total size", "0 MB");
+    const selectedCount = metric("Selected", "0");
+    const operationState = metric("Status", "Checking…");
+    const historyActions = document.createElement("div"); historyActions.className = "backup-command-actions";
     const restore = document.createElement("button"); restore.type = "button"; restore.textContent = "Restore selected"; restore.disabled = true;
-    footer.append(summary, restore); library.append(images, footer);
+    historyActions.appendChild(restore); footer.append(summary, historyActions); library.appendChild(images);
     let selectedDigest = "";
+    const imageSelectors = [];
     const sizeLabel = (bytes) => bytes > 0 ? bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(1)} GB` : `${Math.ceil(bytes / 1048576)} MB` : "";
     const helper = document.createElement("p"); helper.className = "muted compact"; helper.hidden = true;
     const progress = document.createElement("div");
     const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = "";
     terminal.textContent = "Checking the selected container image…";
-    panel.append(identity, controls, helper, library);
+    panel.append(identity, controls, helper, library, footer);
     root.append(panel, progress, terminal);
     if (!current()) return;
     content.replaceChildren(root);
@@ -323,17 +352,44 @@ if (versionLauncher && versionDialog) {
     let operation;
     let busy = true;
     let persistedRetention = "1";
+    let runtimeStatus;
+    let movingChannel = false;
+    let configuredTag = "";
+    const proposedTag = () => channel.value === "custom" ? customTag.value.trim() : channel.value;
+    const channelDirty = () => movingChannel && proposedTag() !== configuredTag;
+    const channelValid = () => !movingChannel || Boolean(proposedTag());
     const retentionValid = () => /^[12]$/.test(retention.value);
     const retentionDirty = () => retention.value !== persistedRetention;
     const containerAction = () => ["update_available", "image_missing", "restart_needed"].includes(plan.state) && Boolean(plan.plan_fingerprint) && (plan.state !== "restart_needed" || restart.checked);
     const sync = () => {
+      selectedCount.textContent = selectedDigest ? "1" : "0";
+      operationState.textContent = operation?.state || containerLabel(plan.state);
+      imageSelectors.forEach((input) => { input.disabled = busy; });
       const actionable = ["update_available", "image_missing", "restart_needed"].includes(plan.state) && Boolean(plan.plan_fingerprint);
-      restart.disabled = busy || !actionable || !plan.running;
-      backup.disabled = busy || !plan.running || (!actionable && !(plan.previous_images || []).length);
+      restart.disabled = busy || channelDirty() || !actionable || !plan.running;
+      backup.disabled = busy || channelDirty() || !plan.running || (!actionable && !(plan.previous_images || []).length);
+      channel.disabled = customTag.disabled = busy;
+      customTag.hidden = channel.value !== "custom";
       retention.disabled = busy;
       restore.disabled = busy || !selectedDigest || !plan.restore_fingerprint;
       if (!plan.running && !containerSubmitted) restart.checked = backup.checked = false;
-      update.disabled = busy || !retentionValid() || (!containerAction() && !retentionDirty());
+      update.disabled = busy || !channelValid() || !retentionValid() || (!channelDirty() && !containerAction() && !retentionDirty());
+    };
+    const channelChanged = () => {
+      if (!current() || busy) return;
+      state.textContent = channelValid() ? "" : "Enter a custom upstream tag.";
+      sync();
+    };
+    channel.addEventListener("change", channelChanged);
+    customTag.addEventListener("input", channelChanged);
+    const saveRetention = async () => {
+      if (!current() || !retentionValid()) throw new Error("Keep previous images must be 1 or 2.");
+      if (!retentionDirty()) return;
+      const value = retention.value;
+      const body = new URLSearchParams({ csrf, keep_previous_images: value });
+      await request("/api/version/container/retention", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+      if (!current()) throw globalThis.justVoxelStaleSelection();
+      persistedRetention = value;
     };
     retention.addEventListener("input", () => {
       if (!current() || busy) return;
@@ -361,6 +417,7 @@ if (versionLauncher && versionDialog) {
         if (!current()) return;
         operationKinds.set(id, "container");
         progress.replaceChildren(operationFrame(operation));
+        operationState.textContent = operation.state;
         if (["succeeded", "resolved", "needs_attention", "failed"].includes(operation.state)) {
           containerCompleted = operation;
           await render();
@@ -393,6 +450,7 @@ if (versionLauncher && versionDialog) {
         operation = result.operation;
         operationKinds.set(operation.operation_id, "container");
         progress.replaceChildren(operationFrame(operation));
+        operationState.textContent = operation.state;
         state.textContent = "";
         void watch(operation.operation_id);
       } catch (failure) {
@@ -405,14 +463,38 @@ if (versionLauncher && versionDialog) {
       if (!current() || busy) return;
       if (!retentionValid()) { state.textContent = "Keep previous images must be 1 or 2."; return; }
       if (update.disabled) return;
+      if (channelDirty()) {
+        if (!channelValid()) return;
+        busy = true; sync();
+        state.textContent = "Reviewing changes…";
+        const imageTag = proposedTag();
+        const policy = runtimeStatus.policy;
+        const version = policy === "pinned" ? runtimeStatus.configured_version : "";
+        const params = new URLSearchParams({ csrf, tab: "version", image_tag: imageTag, version_policy: policy, version });
+        try {
+          const [settingsPlan, candidate, snapshot] = await Promise.all([
+            request("/api/minecraft/workspace/settings/plan", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params }),
+            request(statusURL(policy, version, "", imageTag)),
+            request("/api/minecraft/workspace/snapshot"),
+          ]);
+          if (!current()) return;
+          // The existing review owns confirmation and the fingerprint-bound operation.
+          showReview(root, { elements: {} }, settingsPlan, params, candidate, snapshot?.players, {
+            current, beforeApply: saveRetention,
+            onCancel: () => { busy = false; sync(); },
+          });
+          state.textContent = "";
+        } catch (failure) {
+          if (!current() || failure.staleSelection) return;
+          state.textContent = failure.message; busy = false; sync();
+        }
+        return;
+      }
       if (retentionDirty()) {
-        const value = retention.value;
         busy = true; sync();
         try {
-          const body = new URLSearchParams({ csrf, keep_previous_images: value });
-          await request("/api/version/container/retention", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+          await saveRetention();
           if (!current()) return;
-          persistedRetention = value;
           if (!containerAction()) { await render(); return; }
           busy = false; sync();
         } catch (failure) {
@@ -424,38 +506,65 @@ if (versionLauncher && versionDialog) {
     });
     restore.addEventListener("click", () => submit(true));
     try {
-      const [status, pending] = await Promise.all([
+      const [status, pending, runtime, reviewedPending] = await Promise.all([
         request("/api/version/container/status").catch((failure) => { if (failure.staleSelection) throw failure; return { state: "unavailable", running: false }; }),
         request("/api/version/container/operation"),
+        request(statusURL()).catch((failure) => { if (failure.staleSelection) throw failure; return null; }),
+        request("/api/version/workspace/update-operation"),
       ]);
       if (!current()) return;
       plan = status;
+      runtimeStatus = runtime;
+      configuredTag = runtime?.configured_image_tag || runtime?.image_tag || "";
+      movingChannel = Boolean(runtime && ["paper", "purpur", "vanilla"].includes(runtime.configured_server_type || runtime.server_type));
+      if (movingChannel) {
+        channelTitle.textContent = "Server update channel";
+        channel.value = ["stable", "latest"].includes(configuredTag) ? configuredTag : "custom";
+        customTag.value = channel.value === "custom" ? configuredTag : "";
+        channelCell.replaceChildren(channelTitle, channel, customTag);
+      } else {
+        runtimeTag.textContent = runtime?.image_tag || configuredTag || "Unavailable";
+        runtimeOwner.textContent = runtime ? `Managed for ${runtime.server_software || runtime.server_type}` : "Runtime information unavailable";
+        channelCell.appendChild(runtimeOwner);
+      }
       persistedRetention = String(status.keep_previous_images ?? 1);
       retention.value = persistedRetention;
       const retained = Array.isArray(status.previous_images) ? status.previous_images : [];
       let totalSize = 0;
       for (const image of retained) {
         const entry = document.createElement("label"); entry.className = "backup-file-card backup-file-selectable";
-        const select = document.createElement("input"); select.type = "radio"; select.className = "backup-file-checkbox"; select.name = "previous-container-image"; select.value = image.digest; select.setAttribute("aria-label", "Select previous image " + image.digest);
-        select.addEventListener("change", () => { if (!current() || busy) return; selectedDigest = select.checked ? image.digest : ""; sync(); });
+        const select = document.createElement("input"); select.type = "checkbox"; select.setAttribute("role", "switch"); select.className = "backup-file-checkbox"; select.name = "previous-container-image"; select.value = image.digest; select.setAttribute("aria-label", "Select previous image " + image.digest);
+        imageSelectors.push(select);
+        select.addEventListener("change", () => {
+          if (!current() || busy) return;
+          selectedDigest = select.checked ? image.digest : "";
+          imageSelectors.forEach((input) => { input.checked = input === select && selectedDigest !== ""; });
+          sync();
+        });
         const icon = document.createElement("div"); icon.className = "backup-file-icon"; icon.setAttribute("aria-hidden", "true");
-        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("viewBox", "0 0 24 24");
-        const outline = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        outline.setAttribute("d", "M12 3 3 7.5v9L12 21l9-4.5v-9L12 3ZM3 7.5l9 4.5 9-4.5M12 12v9M7.5 5.25l9 4.5");
-        svg.appendChild(outline); icon.appendChild(svg);
+        // Reuse the Backups file icon, with explicit bounds even before styles load.
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("width", "18"); svg.setAttribute("height", "18");
+        svg.setAttribute("fill", "none"); svg.setAttribute("stroke", "currentColor");
+        for (const geometry of ["M4 4h11l5 5v11H4z", "M15 4v5h5", "M8 14h8M8 17h6"]) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", geometry); svg.appendChild(path);
+        }
+        icon.appendChild(svg);
         const details = document.createElement("div"); details.className = "backup-file-copy";
         const name = document.createElement("strong"); name.textContent = image.image;
-        const metadata = document.createElement("span"); metadata.className = "muted compact";
+        const metadata = document.createElement("span"); metadata.className = "muted";
         const size = sizeLabel(image.size); totalSize += image.size || 0;
         metadata.textContent = `${image.digest.slice(0, 19)}… · ${new Date(image.retained_at).toLocaleString()}${size ? " · " + size : ""}`;
         metadata.title = image.digest;
         details.append(name, metadata); entry.append(select, icon, details); images.appendChild(entry);
       }
-      summary.textContent = `${retained.length} images${totalSize ? " · " + sizeLabel(totalSize) : ""}`;
+      imageCount.textContent = String(retained.length);
+      totalSizeValue.textContent = sizeLabel(totalSize) || "0 MB";
       if (!retained.length) { const empty = document.createElement("p"); empty.className = "muted compact"; empty.textContent = "No previous container images."; images.appendChild(empty); }
-      if (status.server_name) serverLine.replaceChildren(...line("Server:", status.server_name).children);
-      imageLine.replaceChildren(...line("Image:", status.image).children);
-      statusLine.replaceChildren(...line("Status:", containerLabel(status.state)).children);
+      if (status.server_name) serverLine.replaceChildren(...line("Server", status.server_name).children);
+      imageLine.replaceChildren(...line("Image", status.image).children);
+      statusLine.replaceChildren(...line("Status", containerLabel(status.state)).children);
       helper.hidden = status.running || status.state === "unavailable";
       helper.textContent = "The new image will be used on the next server start.";
       operation = pending.operation || containerCompleted;
@@ -469,6 +578,7 @@ if (versionLauncher && versionDialog) {
       if (operation) {
         operationKinds.set(operation.operation_id, "container");
         progress.replaceChildren(operationFrame(operation));
+        operationState.textContent = operation.state;
         try { await trace(operation.operation_id); } catch (failure) { if (current()) state.textContent = failure.message; }
         if (!current()) return;
         if (["needs_attention", "failed"].includes(operation.state)) {
@@ -484,12 +594,34 @@ if (versionLauncher && versionDialog) {
               containerCompleted = null; containerSubmitted = null; await render();
             } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; acknowledge.disabled = false; }
           });
-          footer.replaceChildren(summary, acknowledge);
+          historyActions.replaceChildren(acknowledge);
         } else if (!["succeeded", "resolved"].includes(operation.state)) void watch(operation.operation_id);
+      }
+      const reviewedOperation = reviewedPending.operation || completedOperation;
+      if (reviewedOperation) {
+        const reviewedProgress = operationFrame(reviewedOperation);
+        progress.appendChild(reviewedProgress);
+        const unresolved = !["succeeded", "resolved"].includes(reviewedOperation.state);
+        busy = busy || unresolved;
+        if (["needs_attention", "failed"].includes(reviewedOperation.state)) {
+          const acknowledge = document.createElement("button"); acknowledge.type = "button";
+          acknowledge.textContent = "Keep current version";
+          acknowledge.addEventListener("click", async () => {
+            if (!current() || acknowledge.disabled) return;
+            acknowledge.disabled = true;
+            try {
+              const body = new URLSearchParams({ csrf, acknowledge: "yes", operation_id: reviewedOperation.operation_id });
+              await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+              if (!current()) return;
+              completedOperation = null; await render();
+            } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; acknowledge.disabled = false; }
+          });
+          reviewedProgress.appendChild(acknowledge);
+        } else if (unresolved && !updateOperation) void watchUpdate(reviewedOperation.operation_id, selection);
       }
       sync();
       state.textContent = message || "";
-    } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; statusLine.replaceChildren(...line("Status:", "Unable to check").children); }
+    } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; statusLine.replaceChildren(...line("Status", "Unable to check").children); }
   };
 
   const render = async (message = "", confirmedOperation = completedOperation) => {

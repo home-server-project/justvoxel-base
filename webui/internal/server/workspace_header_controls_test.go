@@ -198,8 +198,11 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 		}
 		previous = index
 	}
-	if !regexp.MustCompile(`<label class="gateway-switch"><input[^>]*name="enabled"[^>]*aria-label="Connection enabled"[^>]*></label>`).MatchString(form) {
-		t.Error("connection switch must have an accessible label without visible Enabled/Disabled text")
+	if !regexp.MustCompile(`<label class="gateway-switch"><input[^>]*name="enabled"[^>]*aria-label="Connection enabled"[^>]*>`).MatchString(form) {
+		t.Error("connection switch must have the accessible label Connection enabled")
+	}
+	if !regexp.MustCompile(`<span class="gateway-connection-state(?: [^"]*)?" data-gateway-connection-state>\s*Disable\s*</span>`).MatchString(form) {
+		t.Error("connection switch must have a visible gateway-connection-state element with data-gateway-connection-state and initial text Disable")
 	}
 	if !regexp.MustCompile(`<div class="action-row gateway-save"><button[^>]*class="danger"[^>]*data-gateway-delete[^>]*>Delete</button><button type="submit" data-gateway-save>Create</button></div>`).MatchString(form) {
 		t.Error("Delete must immediately precede the primary action in the shared action row")

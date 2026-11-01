@@ -114,9 +114,43 @@ def playit_lifecycle(path=PLAYIT_SOCKET):
         return summary(states[state])
 
 
+def nordvpn_status():
+    # Public service and interface evidence only; the vendor CLI is privileged.
+    loaded = command("systemctl", "show", "--property=LoadState", "--value", "nordvpnd.service").strip()
+    if loaded != "loaded":
+        return summary("Unavailable")
+    active = command("systemctl", "show", "--property=ActiveState", "--value", "nordvpnd.service").strip()
+    if active in ("inactive", "failed"):
+        return summary("Stopped")
+    if active != "active":
+        return summary("Unavailable")
+    # Listing all interfaces distinguishes a missing nordlynx from command failure.
+    text = command("ip", "-j", "-4", "address", "show", "scope", "global")
+    try:
+        interfaces = json.loads(text)
+        if not isinstance(interfaces, list):
+            return summary("Unavailable")
+        for interface in interfaces:
+            if interface["ifname"] != "nordlynx":
+                continue
+            for entry in interface["addr_info"]:
+                if entry.get("family") != "inet" or entry.get("scope") != "global":
+                    continue
+                address = ipv4(entry.get("local", ""))
+                if address:
+                    parsed = ipaddress.ip_address(address)
+                    if not (parsed.is_unspecified or parsed.is_loopback or parsed.is_link_local or parsed.is_multicast or parsed.is_reserved):
+                        return summary("Connected", True, address)
+        return summary("Not connected")
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return summary("Unavailable")
+
+
 def provider_status(provider, ipc_only=False):
     if provider == "playit" and ipc_only:
         return playit_lifecycle()
+    if provider == "nordvpn":
+        return nordvpn_status()
     unit = "tailscaled.service" if provider == "tailscale" else provider + ".service"
     active = command("systemctl", "show", "--property=ActiveState", "--value", unit).strip()
     evidence = configured(provider)
@@ -168,7 +202,7 @@ def display(result, compact=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("provider", choices=("tailscale", "netbird", "playit"))
+    parser.add_argument("provider", choices=("tailscale", "netbird", "playit", "nordvpn"))
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--ipc-only", action="store_true")
     parser.add_argument("--details", action="store_true")

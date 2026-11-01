@@ -278,7 +278,7 @@ function cardHarness({responses = [], bootChecked = false, runningChecked = fals
   const feedback = new Element('feedback');
   const calls = [], deletes = [], dialogs = [], selections = [], launches = [], copied = [];
   const dashboard = {dataset: {selectedMinecraftId: ids[0]}};
-  const dropdowns = ['minecraft','version','plugins','backups','migration'].map(workspace => ({workspace,value:ids[0]}));
+  const dropdowns = ['minecraft','version','plugins','backups','migration'].map(workspace => ({workspace,value:ids[0],syncServerSelection(id) { this.value = id; }}));
   const selectionEvents = [];
   const location = {href: `https://justvoxel.test/?workspace=minecraft-servers&server=${ids[0]}&operation=stale`, origin: 'https://justvoxel.test', search: `?workspace=minecraft-servers&server=${ids[0]}&operation=stale`};
   let refreshes = 0;
@@ -449,7 +449,7 @@ test('Inventory reuses the actual Storage menu and bounded responsive card grid'
   assert.match(template, />⋯<\/summary>/);
   assert.doesNotMatch(template, />\.\.\.<\/summary>|<span>Server<\/span>|Enabled ·/);
   assert.match(template, /<span>Server running<\/span>/);
-  assert.match(template, /{{if \.BedrockEnabled}}{{\.BedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable/);
+  assert.match(template, /<span>{{if \.NetworkMember}}Bedrock via Network{{else}}Bedrock port{{end}}<\/span><strong>{{if \.ConnectionAvailable}}{{if \.ConnectionBedrockEnabled}}{{\.ConnectionBedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable{{end}}<\/strong>/);
   for (const page of [template, header]) assert.ok(page.includes('href="/static/storage-browser.css"'));
   assert.doesNotMatch(css, /minecraft-server-more>summary/);
   const menuSurface = css.match(/\.minecraft-server-more \.minecraft-server-more-items \{([^}]+)\}/)[1];
@@ -670,7 +670,7 @@ for (const runningChecked of [false, true]) {
 test('card metrics keep equal tracks and center exact Bedrock port labels and values', () => {
   const template = readFileSync(`${root}templates/minecraft_servers.html`, 'utf8');
   const css = readFileSync(`${root}static/minecraft-servers.css`, 'utf8');
-  assert.match(template, /<span>Bedrock port<\/span>/);
+  assert.match(template, /<span>{{if \.NetworkMember}}Bedrock via Network{{else}}Bedrock port{{end}}<\/span>/);
   assert.match(css, /\.minecraft-server-metrics \{[^}]*grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(css, /\.minecraft-server-metrics>div \{[^}]*text-align: center/);
   assert.match(css, /repeat\(auto-fill,minmax\(min\(100%,420px\),420px\)\)/);
@@ -680,18 +680,18 @@ test('card metrics keep equal tracks and center exact Bedrock port labels and va
   }
 });
 
-test('Minecraft menu scopes a full separator before the bold success/danger action group', () => {
+test('Minecraft menu scopes a full separator before the success/danger action group', () => {
   const template = readFileSync(`${root}templates/minecraft_servers.html`, 'utf8');
   const css = readFileSync(`${root}static/minecraft-servers.css`, 'utf8');
   const menu = template.slice(template.indexOf('class="storage-action-menu-popover'), template.indexOf('</details>'));
   let previous = -1;
-  for (const token of ['>Settings<', '>Backups<', '>Version<', '>Plugins<', '>Invite friends<', '>How to connect<', '<hr>', '{{if .CanRestart}}', '>Restart<', '>Delete server<']) {
+  for (const token of ['>Settings<', '>Backups<', '>Update<', '>Plugins<', '>Invite friends<', '>How to connect<', '<hr>', '{{if .CanRestart}}', '>Restart<', '>Delete server<']) {
     const index = menu.indexOf(token);
     assert.ok(index > previous, token); previous = index;
   }
   assert.match(css, /\.minecraft-server-more \.minecraft-server-more-items>hr \{[^}]*width: 100%;[^}]*height: 0;[^}]*border: 0;[^}]*border-top: 1px solid var\(--jv-border\)/);
   for (const [action, color] of [['restart', 'success'], ['delete', 'error']]) {
-    assert.ok(css.includes(`.minecraft-server-more .minecraft-server-more-items>[data-server-${action}] { color: var(--jv-${color}); font-weight: 800; }`));
+    assert.match(css, new RegExp(`\\.minecraft-server-more \\.minecraft-server-more-items>\\[data-server-${action}\\]\\s*\\{[^}]*\\bcolor:\\s*var\\(--jv-${color}\\);[^}]*\\}`));
   }
   assert.match(css, /\.minecraft-server-more \.minecraft-server-more-items \{[^}]*box-shadow: none/);
 });
@@ -920,4 +920,23 @@ test('periodic live polling retains exactly one 2000 ms interval and never refre
   assert.doesNotMatch(poll, /setTimeout|justVoxelRefreshServers|innerHTML|outerHTML|location\./);
   const app = readFileSync(`${root}static/app.js`, 'utf8');
   assert.ok(app.includes('minecraftServersDialog.querySelector("[data-minecraft-servers-refresh]").addEventListener("click", load)'));
+});
+
+test('Minecraft overflow menu uses Update with the existing version destination and uniform scoped typography',()=>{
+ const template=readFileSync(`${root}templates/minecraft_servers.html`,'utf8');
+ assert.match(template, /href="\/\?workspace=version&amp;server={{\.ContextID}}" data-server-workspace="version">Update<\/a>/);
+ const menu=template.slice(template.indexOf('class="storage-action-menu-popover'),template.indexOf('</details>'));
+ assert.doesNotMatch(menu,/>Version</);
+ const css=readFileSync(`${root}static/app.css`,'utf8');
+ const rule=css.match(/\.minecraft-server-inventory \.minecraft-server-more \.minecraft-server-more-items :is\(button,a\) \{([^}]+)\}/)[1];
+ for(const declaration of ['font-family: inherit','font-size: .88rem','font-weight: 600','line-height: 1.3']) assert.ok(rule.includes(declaration));
+ assert.doesNotMatch(rule,/(^|;)\s*(padding|width|height|background|color)\s*:/);
+ const menuCSS=readFileSync(`${root}static/minecraft-servers.css`,'utf8');
+ for(const [action,color] of [['restart','success'],['delete','error']]) {
+  const semantic=menuCSS.match(new RegExp('\\.minecraft-server-more \\.minecraft-server-more-items>\\[data-server-'+action+'\\] \\{([^}]+)\\}'))[1];
+  assert.ok(semantic.includes(`color: var(--jv-${color})`));
+ }
+ const storage=readFileSync(`${root}static/storage-browser.css`,'utf8');
+ const shared=storage.match(/\.storage-action-menu-popover :is\(button,a\)\{([^}]+)\}/)[1];
+ assert.ok(shared.includes('font-size:.82rem'));assert.ok(shared.includes('font-weight:650'));
 });

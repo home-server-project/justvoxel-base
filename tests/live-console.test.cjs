@@ -272,7 +272,7 @@ function resetHarness() {
 test('both reset progress views open authoritative traces and rerender without duplicate polling', async () => {
   for (const kind of ['minecraft_reset', 'factory_reset']) {
     const { h, content, render } = resetHarness();
-    const operation = { operation_type: kind, operation_id: A, state: 'running', stage: 'working' };
+    const operation = { operation_type: kind, operation_id: A, state: 'running', stage: 'working', ...(kind === 'minecraft_reset' ? { instance_id: 'jv-test001' } : {}) };
     render(operation);
     content.all().find((node) => node.textContent === 'Live Console').fire('click');
     assert.equal(h.reads[0].url, `/api/operations/${encodeURIComponent(A)}/trace`);
@@ -291,9 +291,10 @@ test('both reset progress views open authoritative traces and rerender without d
 test('successful reset transitions close console before existing completion/session behavior', () => {
   for (const kind of ['minecraft_reset', 'factory_reset']) {
     const { h, content, order, render } = resetHarness();
-    render({ operation_type: kind, operation_id: A, state: 'running' });
+    const operation = { operation_type: kind, operation_id: A, ...(kind === 'minecraft_reset' ? { instance_id: 'jv-test001' } : {}) };
+    render({ ...operation, state: 'running' });
     content.all().find((node) => node.textContent === 'Live Console').fire('click');
-    render({ operation_type: kind, operation_id: A, state: 'succeeded' });
+    render({ ...operation, state: 'succeeded' });
     assert.equal(h.workspaces[0].element.open, false); assert.equal(h.timers.size, 0);
     assert.deepEqual(order, kind === 'minecraft_reset' ? ['console-close', 'workspace-close', 'justvoxel:minecraft-reset-complete'] : ['console-close', '/factory-reset-complete']);
     if (kind === 'factory_reset') assert.match(h.context.document.cookie, /jv_factory_reset_complete=1; Path=\/factory-reset-complete; Max-Age=120; SameSite=Strict; Secure/);
@@ -337,7 +338,7 @@ test('diagnostic routes, confirmation/recovery and System Logs/Failed units rema
   assert.match(logs, /validWorkspaceLogID\(category, id\)/);
   assert.match(logs, /AdminDiagnosticLog\(r.Context\(\), session, category, id\)/);
   assert.match(logs, /text\/plain; charset=utf-8/);
-  assert.match(logs, /case "setup", "migration", "restore", "plugins", "reset", "support", "operation"/);
+  assert.match(logs, /case "setup", "migration", "restore", "plugins", "reset", "network", "support", "operation"/);
   assert.match(logs, /AdminFailedUnitJournal/);
   assert.match(app, /Keep current server/);
   assert.match(app, /Review and retry Factory Reset/);

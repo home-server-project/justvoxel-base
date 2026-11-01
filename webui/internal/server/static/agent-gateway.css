@@ -97,8 +97,11 @@
 
 /* Shared Add and Settings configuration lanes. */
 [data-agent-gateway-dialog] [data-gateway-settings] .gateway-name-access-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; }
-[data-agent-gateway-dialog] .gateway-enabled-control { display: grid; gap: .35rem; }
-[data-agent-gateway-dialog] .gateway-enabled-control .gateway-switch { flex-direction: row-reverse; justify-content: flex-end; gap: .5rem; min-height: 2.5rem; white-space: nowrap; }
+[data-agent-gateway-dialog] .gateway-enabled-control { display: flex; align-items: center; }
+[data-agent-gateway-dialog] .gateway-connection-state { font-weight: 700; }
+[data-agent-gateway-dialog] .gateway-connection-state.success { color: var(--jv-success); }
+[data-agent-gateway-dialog] .gateway-connection-state.error { color: var(--jv-error); }
+[data-agent-gateway-dialog] .gateway-enabled-control .gateway-switch { justify-content: flex-start; gap: .5rem; min-height: 2.5rem; white-space: nowrap; }
 [data-agent-gateway-dialog] [data-gateway-settings] .gateway-server-lane { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 0; }
 [data-agent-gateway-dialog] .gateway-server-item { display: flex; align-items: center; gap: .4rem; padding: .3rem .7rem; margin: 0; border-inline-start: 1px solid var(--jv-border); cursor: pointer; flex: 0 0 auto; min-width: 0; max-width: 100%; }
 [data-agent-gateway-dialog] .gateway-server-item:first-child { border-inline-start: 0; padding-inline-start: 0; }

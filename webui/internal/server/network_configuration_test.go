@@ -457,7 +457,7 @@ assert.equal(missing.children[2].textContent, "Ethernet: Unavailable");
 	}
 }
 
-func TestDrawerRetainsNetworkBlockAndAddsCanonicalPlayitRow(t *testing.T) {
+func TestDrawerRetainsNetworkBlockAndShowsActiveRemoteAccess(t *testing.T) {
 	source, err := assets.ReadFile("static/app.js")
 	if err != nil {
 		t.Fatal(err)
@@ -486,15 +486,25 @@ const render = (providers) => {
 ` + strings.Replace(script[start:start+end], `    const overlays = quickLook.querySelector("[data-quick-look-overlays]");`, "", 1) + `
   return overlays.children.map((line) => line.children.map((cell) => cell.textContent));
 };
-assert.deepEqual(render([]), [["Tailscale", "Unavailable"], ["NetBird", "Unavailable"], ["Playit", "Unavailable"]]);
-assert.deepEqual(render(["tailscale", "netbird", "playit"].map((id) => ({ id, summary: "Not configured", connected: true, configured: true, service_active: true }))),
-  [["Tailscale", "Not configured"], ["NetBird", "Not configured"], ["Playit", "Not configured"]]);
-assert.deepEqual(render([{ id: "tailscale", summary: "Awaiting approval" }, { id: "netbird", summary: "Stopped" }, { id: "playit", summary: "Running" }]),
-  [["Tailscale", "Awaiting approval"], ["NetBird", "Stopped"], ["Playit", "Running"]]);
-assert.deepEqual(render([{ id: "tailscale", summary: "Connected", connected: true, ip: "100.64.0.3/16" }, { id: "netbird", summary: "Stopped", connected: false, ip: "100.64.0.4/16" }, { id: "playit", connected: true, tunnels: [{ display_address: "one.playit.gg", is_disabled: false }, { display_address: "two.playit.gg", is_disabled: false }, { display_address: "disabled.playit.gg", is_disabled: true }] }]),
-  [["Tailscale", "100.64.0.3"], ["NetBird", "Stopped"], ["Playit", "2 tunnels"]]);
-for (const tunnels of [[], [{ is_disabled: true }]]) assert.equal(render([{ id: "playit", connected: true, tunnels }])[2][1], "No tunnels");
-assert.equal(render([{ id: "playit", connected: true, tunnels: [{ display_address: "one.playit.gg", is_disabled: false }] }])[2][1], "1 tunnel");
+assert.deepEqual(render([]), []);
+assert.deepEqual(render(["tailscale", "netbird", "nordvpn", "playit"].map(id => ({
+  id, connected:true, configured:true, service_active:true, summary:"Not configured"
+}))), []);
+for (const summary of ["Stopped", "Not configured", "Not connected", "Unavailable"]) {
+  assert.deepEqual(render(["tailscale", "netbird", "playit", "nordvpn"].map(id => ({id, summary, connected: false, ip: "100.64.0.3"}))), []);
+}
+assert.deepEqual(render([{id:"tailscale",connected:true,ip:"100.64.0.3/16"},
+  {id:"netbird",connected:true,ip:"100.64.0.4"}, {id:"nordvpn",connected:true,ip:"100.64.0.5"}]),
+  [["Tailscale","100.64.0.3"],["NetBird","100.64.0.4"],["NordVPN","100.64.0.5"]]);
+for (const ip of ["", "invalid", "fd00::1", "999.1.2.3"]) {
+  assert.deepEqual(render([{id:"nordvpn",connected:true,ip}]), []);
+}
+for (const tunnels of [undefined, [], [{is_disabled:true}]]) {
+  assert.deepEqual(render([{id:"playit",connected:true,tunnels}]), []);
+}
+assert.deepEqual(render([{id:"playit",connected:true,tunnels:[{is_disabled:false},{is_disabled:true}]}]), [["Playit","1 tunnel"]]);
+assert.deepEqual(render([{id:"playit",connected:true,tunnels:[{is_disabled:false},{is_disabled:false},{is_disabled:true}]}]), [["Playit","2 tunnels"]]);
+
 `
 	cmd := exec.Command("node")
 	cmd.Stdin = strings.NewReader(program)

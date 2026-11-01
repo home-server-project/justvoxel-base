@@ -98,15 +98,47 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	for _, want := range []string{
 		`identity.dataset.containerRow = "identity"`,
 		`controls.dataset.containerRow = "controls"`,
-		`identity.className = "version-container-row version-container-summary"`,
+		`identity.className = "version-status-grid version-container-row version-container-summary"`,
 		`identity.appendChild(statusLine)`,
 		`card("Minecraft container")`,
+		`library.className = "version-container-history"`,
+		`footer.className = "backup-command-bar version-container-footer"`,
+		`historyActions.className = "backup-command-actions"`,
+		`metric("Images", "0")`,
+		`metric("Total size", "0 MB")`,
+		`metric("Selected", "0")`,
+		`metric("Status", "Checking…")`,
+		`select.type = "checkbox"; select.setAttribute("role", "switch")`,
+		`imageSelectors.forEach((input) => { input.checked = input === select && selectedDigest !== ""; })`,
+		`selectedCount.textContent = selectedDigest ? "1" : "0"`,
+		`body.set("restore_digest", selectedDigest)`,
 		`toggle("Restart server now")`,
 		`toggle("Create backup before restart")`,
 		`terminal.textContent = text`,
 	} {
 		if !strings.Contains(version, want) {
 			t.Fatalf("Container workspace contract missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`channelTitle.textContent = "Server update channel"`,
+		`channelTitle.textContent = "Runtime image"`,
+		`["paper", "purpur", "vanilla"].includes(runtime.configured_server_type || runtime.server_type)`,
+		`runtimeTag.textContent = runtime?.image_tag || configuredTag || "Unavailable"`,
+		`current, beforeApply: saveRetention`,
+		`plan.review !== status.plan_fingerprint`,
+	} {
+		if !strings.Contains(version, want) {
+			t.Fatalf("Container channel contract missing %q", want)
+		}
+	}
+	for _, label := range []string{
+		`data-version-tab="container" aria-selected="true">Container</button>`,
+		`data-version-tab="minecraft" aria-selected="false">Version</button>`,
+		`data-version-tab="software" aria-selected="false">Switch</button>`,
+	} {
+		if !strings.Contains(header, label) {
+			t.Fatalf("Update tab contract missing %q", label)
 		}
 	}
 	for _, forbidden := range []string{`data-version-custom`, `name="channel"`, `Check for updates`} {

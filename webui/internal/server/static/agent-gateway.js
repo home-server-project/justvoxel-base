@@ -398,7 +398,6 @@
       }
     }
     if (prerequisite) {
-      host.append(text('h4', 'Before you connect'));
       if (geminiCLI) {
         host.append(text('strong', definitelyPrivate ? 'Private HTTPS required for OAuth' : 'HTTPS required for OAuth'));
         host.append(text('p', 'Gemini CLI can use a private Streamable HTTP MCP server, but its OAuth security policy requires HTTPS for non-loopback private endpoints.'));
@@ -579,6 +578,14 @@
     form.querySelector('[data-gateway-advanced]').hidden = !c.id;
     for (const selector of ['[data-gateway-delete]', '[data-gateway-live-note]']) form.querySelector(selector).hidden = !c.id;
     field('enabled').checked = Boolean(c.enabled);
+    const syncEnabled = () => {
+      const enabled = field('enabled').checked;
+      const state = form.querySelector('[data-gateway-connection-state]');
+      state.textContent = enabled ? 'Enable' : 'Disable';
+      state.className = enabled ? 'gateway-connection-state success' : 'gateway-connection-state error';
+    };
+    field('enabled').addEventListener('change', syncEnabled);
+    syncEnabled();
     if (c.expires_at) {
       const date = new Date(c.expires_at);
       field('expires_at').value = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);

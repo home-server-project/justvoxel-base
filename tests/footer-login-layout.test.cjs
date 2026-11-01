@@ -75,7 +75,8 @@ test('login submit reuses Control Center action dimensions and aligns right with
   assert.ok(size.selector.startsWith(':is(button,.button-link)'), 'both buttons use the same final font sizing');
   assert.ok(!size.selector.includes('login-panel'), 'login has no separate font-size override');
   const login = read('templates/login.html');
-  assert.match(login, /<form method="post" action="\/login"><label>Username<input name="username" value="voxel" autocomplete="username" required><\/label><label>Password<input type="password" name="password" autocomplete="current-password" required autofocus><\/label><button type="submit">Sign in<\/button><\/form>/);
+  assert.match(login, /<form method="post" action="\/login">{{if \.OAuthRequest}}<input type="hidden" name="oauth_request" value="{{\.OAuthRequest}}">{{end}}<label>Username<input name="username" autocomplete="username" required><\/label><label>Password<input type="password" name="password" autocomplete="current-password" required autofocus><\/label><button type="submit">Sign in<\/button><\/form>/);
+  assert.doesNotMatch(login, /<input\b[^>]*\bname="username"[^>]*\bvalue="voxel"/);
   assert.match(read('templates/header.html'), /class="control-power-actions[^"\n]*"/);
 });
 
