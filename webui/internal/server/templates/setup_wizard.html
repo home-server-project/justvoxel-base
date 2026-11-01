@@ -106,21 +106,23 @@
     <form method="post" action="{{$wizard.BasePath}}/connections" class="setup-form" data-server-type="{{.Minecraft.ServerType}}" {{if ne .Minecraft.ServerType "bedrock"}}data-setup-connections data-setup-version{{end}}{{if .AddServer}} data-version-preview-url="{{$wizard.BasePath}}/version-preview"{{end}}>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      {{if eq .Minecraft.ServerType "bedrock"}}
-      <section class="setup-memory" aria-label="Native Bedrock connection">
-        <h3>Native Bedrock connection</h3>
-        <div class="setup-memory-summary"><div><span>TCP signaling port</span><strong>{{.Minecraft.BedrockTCPPort}}</strong></div><div><span>UDP gameplay range</span><strong>{{.Minecraft.BedrockUDPStart}}–{{.Minecraft.BedrockUDPEnd}}</strong></div></div>
-      </section>
-      <div class="setup-version-preview" role="status" aria-live="polite">
-        <div class="notice success setup-version-panel"><span class="setup-version-kicker">Recommended</span><strong class="setup-version-candidate">{{.Minecraft.ResolvedVersion}}</strong><span class="setup-version-note">Minecraft build classification: Release</span></div>
-      </div>
-      {{else}}
+      {{if ne .Minecraft.ServerType "bedrock"}}
       <div class="setup-form-grid">
         <label class="setup-field">Minecraft Java TCP port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field" data-bedrock-port-field>Bedrock TCP/UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/TCP and UDP. Used only when Bedrock cross-play is enabled.</span></label>
       </div>
 
+      {{end}}
       <div class="setup-version-columns">
+        {{if eq .Minecraft.ServerType "bedrock"}}
+        <section class="setup-version-column" aria-label="Connection">
+          <label class="setup-field">TCP signaling port<input value="{{.Minecraft.BedrockTCPPort}}" readonly></label>
+          <label class="setup-field">UDP gameplay range<input value="{{.Minecraft.BedrockUDPStart}}–{{.Minecraft.BedrockUDPEnd}}" readonly></label>
+        </section>
+        <section class="setup-version-column" aria-label="Minecraft version">
+          <label class="setup-field">Minecraft version<input value="{{.Minecraft.ResolvedVersion}}" readonly></label>
+        </section>
+        {{else}}
         <section class="setup-version-column" aria-label="Server update channel">
         <label class="setup-field">Server update channel<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls how JustVoxel server software updates are delivered. Choose the Minecraft game version separately.</span></label>
         <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom server update tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported update tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
@@ -130,8 +132,16 @@
         <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
         <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
         </section>
+        {{end}}
       </div>
-      <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
+      <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">
+        {{if .Minecraft.ResolvedVersion}}
+        <div class="notice success setup-version-panel"><span class="setup-version-kicker">Recommended</span><strong class="setup-version-candidate">{{.Minecraft.ResolvedVersion}}</strong><span class="setup-version-note">Minecraft build classification: Release</span></div>
+        {{else}}
+        <div class="notice setup-version-panel"><span class="setup-version-kicker">Minecraft version</span><p class="setup-version-explanation">Checking available versions…</p></div>
+        {{end}}
+      </div>
+      {{if ne .Minecraft.ServerType "bedrock"}}
       <label class="setup-toggle-card"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if or (eq .Minecraft.ServerType "vanilla") (eq .Minecraft.ServerType "forge") (eq .Minecraft.ServerType "quilt")}}This software supports Java only.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked above.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if or (eq .Minecraft.ServerType "vanilla") (eq .Minecraft.ServerType "forge") (eq .Minecraft.ServerType "quilt") (eq .Minecraft.ServerType "fabric") (eq .Minecraft.ServerType "neoforge")}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       {{end}}
       </div>

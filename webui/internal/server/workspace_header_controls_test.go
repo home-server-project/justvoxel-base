@@ -2,6 +2,7 @@ package server
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -60,7 +61,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button:not(.workspace-header-refresh){`) || strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button{`) {
+	if !strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button:not(.workspace-header-refresh){width:32px;height:32px;font-size:1.08rem}`) || strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button{`) {
 		t.Error("network header button rule must leave shared Refresh typography and geometry intact")
 	}
 	css, err := assets.ReadFile("static/app.css")
@@ -277,7 +278,7 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 	}
 }
 
-func TestWorkspaceHeaderGeometryAndNeutralShells(t *testing.T) {
+func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 	read := func(name string) string {
 		t.Helper()
 		data, err := assets.ReadFile(name)
@@ -291,10 +292,10 @@ func TestWorkspaceHeaderGeometryAndNeutralShells(t *testing.T) {
 	rules := regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1)
 	shared := ""
 	for _, rule := range rules {
-		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-dialog-header,") && strings.Contains(rule[2], "height:40px") {
+		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-dialog-header,") && strings.Contains(rule[2], "height:48px") {
 			shared = rule[0]
 		}
-		if (strings.Contains(rule[1], "workspace-header") || strings.Contains(rule[1], "system-monitor-header") || strings.Contains(rule[1], "system-update-dialog-header")) && !strings.Contains(rule[1], "-header-button") && regexp.MustCompile(`min-height:(48|52)px`).MatchString(rule[2]) {
+		if (strings.Contains(rule[1], "workspace-header") || strings.Contains(rule[1], "system-monitor-header") || strings.Contains(rule[1], "system-update-dialog-header")) && !strings.Contains(rule[1], "-header-button") && regexp.MustCompile(`min-height:52px`).MatchString(rule[2]) {
 			t.Errorf("obsolete workspace header geometry: %s", rule[0])
 		}
 	}
@@ -303,7 +304,7 @@ func TestWorkspaceHeaderGeometryAndNeutralShells(t *testing.T) {
 			t.Errorf("%s does not share the workspace lane", name)
 		}
 	}
-	for _, declaration := range []string{"height:40px;min-height:40px", "flex:none", "align-items:center", "padding:3px var(--jv-workspace-edge)"} {
+	for _, declaration := range []string{"height:48px;min-height:48px", "flex:none", "align-items:center", "padding:3px var(--jv-workspace-edge)"} {
 		if !strings.Contains(shared, declaration) {
 			t.Errorf("shared workspace header missing %s", declaration)
 		}
@@ -313,7 +314,7 @@ func TestWorkspaceHeaderGeometryAndNeutralShells(t *testing.T) {
 	}
 	networkRule := regexp.MustCompile(`\.network-workspace-header\{([^}]*)\}`).FindStringSubmatch(network)
 	if len(networkRule) != 2 || !strings.Contains(networkRule[1], "height:40px;min-height:40px;padding:3px") || strings.Contains(networkRule[1], "48px") {
-		t.Fatal("Network must follow the 40px contract")
+		t.Fatal("Network stylesheet must preserve its original header contract; app.css owns the live 48px lane")
 	}
 	for _, name := range []string{"plugins", "version"} {
 		rule := regexp.MustCompile(`\.` + name + `-workspace-header\{([^}]*)\}`).FindStringSubmatch(css)
@@ -323,11 +324,12 @@ func TestWorkspaceHeaderGeometryAndNeutralShells(t *testing.T) {
 	}
 	for _, want := range []string{
 		`.app-header.topbar{height:40px;min-height:40px;`,
-		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}`,
-		`.workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}`,
+		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:40px;min-height:40px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}`,
+		`.workspace-window .workspace-header-close{width:40px;padding:0;font-size:inherit}`,
+		`.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:40px;height:40px;font-size:inherit}`,
 		`.workspace-window .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem}`,
 		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close):is(:hover,:focus-visible){background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}`,
-		`.workspace-window .server-selector>summary{height:32px;min-height:32px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;`,
+		`.workspace-window .server-selector>summary{height:40px;min-height:40px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;`,
 		`.workspace-window .server-selector>summary:is(:hover,:focus-visible),.workspace-window .server-selector[open]>summary{background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}`,
 		`[data-server-selector-compact] .server-selector>summary{padding:.15rem .3rem;font-size:.75rem}`,
 	} {
@@ -352,10 +354,65 @@ func TestWorkspaceHeaderGeometryAndNeutralShells(t *testing.T) {
 			t.Errorf("light state or unchanged selector menu contract missing %s", want)
 		}
 	}
+	for _, want := range []string{
+		`.workspace-window .workspace-header-refresh{border-color:#4f8b69;background:#25382e;color:#c8f2d7}`,
+		`.workspace-window .workspace-header-refresh:is(:hover,:focus-visible){border-color:#78c99d;background:#2f4a39;color:#fff}`,
+		`.workspace-window .workspace-header-refresh{border-color:#86b99a;background:#e3f1e8;color:#184c31}`,
+		`.workspace-window .workspace-header-refresh:is(:hover,:focus-visible){border-color:#4f8b69;background:#d1e9da;color:#184c31}`,
+		`.server-selector{position:relative;width:max-content;min-width:8rem;max-width:100%;`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("normal green header control contract missing %s", want)
+		}
+	}
 	for _, rule := range rules {
-		if strings.Contains(rule[1], "workspace-header-refresh") && !strings.Contains(rule[1], ":hover") && !strings.Contains(rule[1], ":focus-visible") {
-			if regexp.MustCompile(`background:(#25382e|#e3f1e8|#68bd8e)`).MatchString(rule[2]) {
-				t.Errorf("Refresh retains a permanently green shell: %s", rule[0])
+		if strings.Contains(rule[1], "workspace-header-refresh") || strings.Contains(rule[1], "workspace-header-close") || strings.Contains(rule[1], ".workspace-window .server-selector>summary") {
+			if strings.Contains(rule[2], "height:32px") || strings.Contains(rule[2], "width:32px") {
+				t.Errorf("compact workspace control regression: %s", rule[0])
+			}
+		}
+	}
+}
+
+func TestControlCenterTriggerFitsInsideTopbar(t *testing.T) {
+	data, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(data)
+	for _, want := range []string{
+		`.topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;`,
+		`.app-header.topbar{height:40px;min-height:40px;`,
+		`.app-header .control-center{height:32px}`,
+		`.app-header .control-center-trigger{min-height:32px;height:32px;`,
+		`.app-header .control-center-trigger{width:32px;padding:0}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("centered Control Center geometry missing %s", want)
+		}
+	}
+	workspace := regexp.MustCompile(`\.workspace-window :is\(\.workspace-header-refresh,\.workspace-header-close\)\{height:(\d+)px;`).FindStringSubmatch(css)
+	if len(workspace) != 2 {
+		t.Fatal("shared workspace control height missing")
+	}
+	workspaceHeight, err := strconv.Atoi(workspace[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1) {
+		if !strings.Contains(rule[1], ".app-header .control-center-trigger") {
+			continue
+		}
+		if regexp.MustCompile(`\btop\s*:\s*-4px`).MatchString(rule[2]) {
+			t.Errorf("Control Center must not be shifted outside its anchor: %s", rule[0])
+		}
+		for _, height := range regexp.MustCompile(`(?:^|;)\s*(?:min-|max-)?height\s*:\s*(\d+)px`).FindAllStringSubmatch(rule[2], -1) {
+			value, err := strconv.Atoi(height[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value >= 40 || value > workspaceHeight {
+				t.Errorf("Control Center must fit inside the topbar and be no taller than workspace controls: %s", rule[0])
 			}
 		}
 	}

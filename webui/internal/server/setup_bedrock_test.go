@@ -89,17 +89,24 @@ func TestAdvancedNativeBedrockSixStepsAndValidation(t *testing.T) {
 	server.Set("game_mode", "adventure")
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/server", server))
 	body := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
-	for _, want := range []string{`<section class="setup-memory" aria-label="Native Bedrock connection">`, "TCP signaling port", "UDP gameplay range", "1.26.50.1", `notice success setup-version-panel`, `setup-version-kicker">Recommended`, `setup-version-candidate`, "Minecraft build classification: Release"} {
+	for _, want := range []string{`class="setup-version-columns"`, `class="setup-version-column" aria-label="Connection"`, `class="setup-version-preview" id="setup-version-preview"`, "TCP signaling port", "UDP gameplay range", "1.26.50.1", `notice success setup-version-panel`, `setup-version-kicker">Recommended`, `setup-version-candidate`, "Minecraft build classification: Release"} {
 		if !strings.Contains(body, want) {
 			t.Fatal("native Step 2 missing", want)
 		}
 	}
-	for _, forbidden := range []string{`<dl>`, `name="timezone"`, `name="java_port"`, `name="bedrock_enabled"`, `name="image_tag"`, `java21`, `Geyser`, `Floodgate`} {
+	for _, forbidden := range []string{`aria-label="Native Bedrock connection"`, `<h3>Native Bedrock connection</h3>`, `name="loader_version"`, `<dl>`, `name="timezone"`, `name="java_port"`, `name="bedrock_enabled"`, `name="image_tag"`, `java21`, `Geyser`, `Floodgate`} {
 		if strings.Contains(body, forbidden) {
 			t.Fatal("Java field in native Step 2", forbidden)
 		}
 	}
+	if strings.Count(body, `class="setup-version-columns"`) != 1 || strings.Count(body, `id="setup-version-preview"`) != 1 || strings.Count(body, `class="setup-version-column"`) != 2 {
+		t.Fatal("native Step 2 must use one shared version layout and preview")
+	}
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/connections", url.Values{"direction": {"next"}}))
+	resolved, _ := setupDrafts.get(app, "session-token")
+	if resolved.Minecraft.VersionPolicy != "pinned" || resolved.Minecraft.Version != "1.26.50.1" || resolved.Minecraft.ResolvedVersion != "1.26.50.1" {
+		t.Fatal("native Advanced setup lost its authoritative exact release")
+	}
 	body = addWizardRequest(app, http.MethodGet, "", nil).Body.String()
 	if strings.Contains(body, `name="java_memory"`) || strings.Contains(body, "Java heap") || !strings.Contains(body, `name="container_memory"`) {
 		t.Fatal("Bedrock memory uses Java heap")

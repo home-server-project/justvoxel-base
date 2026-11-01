@@ -52,6 +52,10 @@ for (const policy of ["recommended", "latest", "pinned"]) {
   assert(!text().includes("follows"));
   assert.equal(preview.children[0].children.filter(n => n.textContent === "1.21.8").length, 1);
 }
+show({ ...fixture, selected_candidate: "26.3", reason: "Leaf labels this build Experimental. It is available for setup.", crossplay_enabled: false }, "recommended");
+assert.equal(next.disabled, false);
+assert.equal(preview.children[1].className, "notice warning setup-version-panel setup-version-explanation");
+assert(text().includes("Leaf labels this build Experimental. It is available for setup."));
 show({ ...fixture, candidate_channel: "BETA" }, "recommended");
 assert(text().includes("Minecraft build classification: Beta"));
 for (const policy of ["latest", "pinned"]) {
@@ -417,5 +421,54 @@ func TestApprovedSecurityVisualCleanupContract(t *testing.T) {
 		if !strings.Contains(css, want) {
 			t.Fatalf("Security desktop/mobile layout contract missing %q", want)
 		}
+	}
+}
+
+func TestSetupVersionTransportAndInputNotices(t *testing.T) {
+	source := correctionSource(t, "static/settings.js")
+	start := strings.Index(source, "  const channelLabel =")
+	end := strings.Index(source, "  const updateVersionHelp =")
+	if start < 0 || end <= start {
+		t.Fatal("shared version preview renderer missing")
+	}
+	if strings.Contains(source, "preview.textContent =") {
+		t.Fatal("version states must use the shared notice component")
+	}
+	program := `
+const assert = require("node:assert/strict");
+const document = { createElement: () => ({children: [], append(...nodes) { this.children.push(...nodes); }}) };
+const preview = {children: [], replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); }};
+const next = {disabled: false};
+const form = {dataset: {serverType: "pufferfish"}, querySelector: () => null};
+const versionPolicy = {value: "recommended"};
+const versionInput = {value: ""};
+let sequence = 0;
+let fetch = async () => { throw new Error("transport unavailable"); };
+` + source[start:end] + `
+(async () => {
+  await refresh();
+  assert.equal(next.disabled, true);
+  assert.equal(preview.children.length, 1);
+  const failure = preview.children[0];
+  assert.equal(failure.className, "notice error setup-version-panel");
+  assert.equal(failure.children[0].className, "setup-version-kicker");
+  assert.equal(failure.children[0].textContent, "Recommended");
+  assert.equal(failure.children[1].className, "setup-version-explanation");
+  assert.match(failure.children[1].textContent, /Version information is unavailable/);
+  fetch = async () => ({ok: false});
+  await refresh();
+  assert.equal(preview.children[0].className, "notice error setup-version-panel");
+  versionPolicy.value = "pinned";
+  await refresh();
+  assert.equal(next.disabled, true);
+  assert.equal(preview.children[0].className, "notice warning setup-version-panel");
+  assert.equal(preview.children[0].children[0].textContent, "Specific");
+  assert.match(preview.children[0].children[1].textContent, /Enter a Minecraft version/);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("version notices: %v\n%s", err, output)
 	}
 }

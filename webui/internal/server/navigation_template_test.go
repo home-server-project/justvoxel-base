@@ -283,7 +283,8 @@ func TestQuickLookNetworkFitsSingleTileWithoutTruncatingAddresses(t *testing.T) 
 	for _, want := range []string{
 		".quick-look-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr))",
 		"@media(max-width:900px){.quick-look-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}",
-		".quick-look-network-tile{gap:.15rem;justify-content:center;height:auto",
+		".quick-look-network-tile{gap:.13rem;justify-content:center;height:auto",
+		".quick-look-network-tile .network-overlay-list{gap:.13rem;margin-top:0}",
 		".quick-look-network-row,.network-overlay-list>span{display:grid!important;grid-template-columns:4.25rem minmax(0,1fr);align-items:baseline;gap:.5rem",
 		".quick-look-network-row>strong,.network-overlay-list>span>strong{min-width:0;overflow-wrap:anywhere",
 	} {

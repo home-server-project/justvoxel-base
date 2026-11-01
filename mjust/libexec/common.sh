@@ -546,7 +546,7 @@ validate_java_server_selection() {
 pufferfish_build_version() {
     local branch="$1"
     [[ ${branch} =~ ^[0-9]+[.][0-9]+$ ]] || return 1
-    curl --connect-timeout 3 --max-time 12 -fsSL \
+    curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
         "https://ci.pufferfish.host/job/Pufferfish-${branch}/lastSuccessfulBuild/api/json" |
         jq -er '
             select(.result == "SUCCESS" and
@@ -566,18 +566,22 @@ pufferfish_build_version() {
 leaf_build_metadata() {
     local version="$1" metadata build
     [[ ${version} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || return 1
-    metadata="$(curl --connect-timeout 3 --max-time 12 -fsSL \
+    metadata="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
         "https://api.leafmc.one/v2/projects/leaf/versions/${version}")" || return 1
     build="$(jq -er --arg version "${version}" '
         select(.project_id == "leaf" and .version == $version) |
         .builds | select(type == "array" and length > 0 and
             all(.[]; type == "number" and . > 0 and floor == .)) | max' <<< "${metadata}")" || return 1
-    curl --connect-timeout 3 --max-time 12 -fsSL \
+    curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
         "https://api.leafmc.one/v2/projects/leaf/versions/${version}/builds/${build}" |
         jq -e --arg version "${version}" --argjson build "${build}" '
             select(.project_id == "leaf" and .version == $version and .build == $build and
-                .downloads.application.name == ("leaf-" + $version + "-" + ($build | tostring) + ".jar") and
-                (.downloads.application.sha256 | type == "string" and test("^[a-fA-F0-9]{64}$")))'
+                (.channel == "default" or .channel == "stable" or .channel == "experimental")) |
+            . as $metadata |
+            .downloads | select(type == "object") | to_entries |
+            map(.value | select(.name == ("leaf-" + $version + "-" + ($build | tostring) + ".jar"))) |
+            select(length == 1 and (.[0].sha256 | type == "string" and test("^[a-fA-F0-9]{64}$"))) |
+            $metadata'
 }
 
 # Verify the artifact that the runtime will actually select. Paper compatibility
@@ -695,11 +699,14 @@ resolve_setup_java_runtime() {
     else
         case "${software}" in
             pufferfish)
-                # Discover job branches from official releases, but select the
-                # archived artifact identity rather than guessing a game patch.
-                branches="$(vanilla_metadata | jq -er '[.versions[] | select(.type == "release") |
-                    .id | select(test("^[0-9]+[.][0-9]+([.][0-9]+)?$")) |
-                    split(".")[0:2] | join(".")] | unique | sort_by(split(".") | map(tonumber)) | reverse[]')" || return 1
+                # Ask Jenkins which jobs actually exist. Probing every Mojang
+                # release branch can exhaust the preview deadline on absent jobs.
+                branches="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+                    'https://ci.pufferfish.host/api/json?tree=jobs%5Bname%5D' |
+                    jq -er '[.jobs[] | .name | select(type == "string") |
+                        select(test("^Pufferfish-[0-9]+[.][0-9]+$")) |
+                        ltrimstr("Pufferfish-")] | unique |
+                        sort_by(split(".") | map(tonumber)) | reverse | .[0:4][]')" || return 1
                 releases=''
                 while IFS= read -r branch; do
                     discovered="$(pufferfish_build_version "${branch}")" || continue
@@ -710,7 +717,7 @@ resolve_setup_java_runtime() {
                 done <<< "${branches}"
                 ;;
             leaf)
-                releases="$(curl --connect-timeout 3 --max-time 12 -fsSL https://api.leafmc.one/v2/projects/leaf |
+                releases="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" https://api.leafmc.one/v2/projects/leaf |
                     jq -er 'select(.project_id == "leaf") | .versions |
                         map(select(type == "string" and test("^[0-9]+[.][0-9]+([.][0-9]+)?$"))) |
                         unique | sort_by(split(".") | map(tonumber)) | reverse[]')" || return 1

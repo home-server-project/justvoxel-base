@@ -180,7 +180,7 @@ if (versionPolicy && versionInput && specificVersionField) {
     }
     preview.replaceChildren(summary);
     if (status.selected_candidate && status.reason) {
-      preview.append(make("p", "notice warning setup-version-explanation", status.reason));
+      preview.append(make("div", "notice warning setup-version-panel setup-version-explanation", status.reason));
     }
     const compatibility = make("div", "notice " + (!status.crossplay_enabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
     compatibility.append(make("p", "", !status.crossplay_enabled ? (javaOnly ? "This software supports Java only." : form.querySelector("[data-bedrock-toggle]")?.disabled ? (status.reason || "Managed cross-play is unavailable for this selection. Java setup is available.") : "Bedrock cross-play is disabled.") : status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
@@ -189,19 +189,31 @@ if (versionPolicy && versionInput && specificVersionField) {
     preview.append(compatibility);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
   };
+  const showNotice = (message, severity = "") => {
+    const panel = document.createElement("div");
+    panel.className = "notice " + severity + " setup-version-panel";
+    const title = document.createElement("span");
+    title.className = "setup-version-kicker";
+    title.textContent = versionPolicy.value === "recommended" ? "Recommended" : versionPolicy.value === "latest" ? "Latest" : "Specific";
+    const explanation = document.createElement("p");
+    explanation.className = "setup-version-explanation";
+    explanation.textContent = message;
+    panel.append(title, explanation);
+    preview.replaceChildren(panel);
+  };
   const refresh = async () => {
     const ticket = ++sequence;
     next.disabled = true;
-    preview.textContent = "Checking available versions…";
+    showNotice("Checking available versions…");
     const policy = versionPolicy.value;
     const version = policy === "pinned" ? versionInput.value.trim() : "";
-    if (policy === "pinned" && !version) { preview.textContent = "Enter a Minecraft version to check availability."; return; }
+    if (policy === "pinned" && !version) { showNotice("Enter a Minecraft version to check availability.", "warning"); return; }
     try {
       const response = await fetch((form?.dataset.versionPreviewUrl || "/setup/version-preview") + "?" + new URLSearchParams({ policy, version, bedrock_enabled: form?.querySelector("[data-bedrock-toggle]")?.checked ? "on" : "off" }), { credentials: "same-origin", cache: "no-store" });
       if (!response.ok) throw new Error();
       const status = await response.json();
       if (ticket === sequence) show(status, policy);
-    } catch (_) { if (ticket === sequence) preview.textContent = "Version information is unavailable. Try again before continuing."; }
+    } catch (_) { if (ticket === sequence) showNotice("Version information is unavailable. Try again before continuing.", "error"); }
   };
   const updateVersionHelp = () => {
     const specific = versionPolicy.value === "pinned";
@@ -213,7 +225,7 @@ if (versionPolicy && versionInput && specificVersionField) {
   };
   form?.querySelector("[data-bedrock-toggle]")?.addEventListener("change", refresh);
   versionPolicy.addEventListener("change", updateVersionHelp);
-  versionInput.addEventListener("input", () => { clearTimeout(timer); ++sequence; next.disabled = true; preview.textContent = "Checking available versions…"; timer = setTimeout(refresh, 300); });
+  versionInput.addEventListener("input", () => { clearTimeout(timer); ++sequence; next.disabled = true; showNotice("Checking available versions…"); timer = setTimeout(refresh, 300); });
   form?.addEventListener("submit", (event) => { if (event.submitter?.value === "next" && next.disabled) event.preventDefault(); });
   updateVersionHelp();
 }
