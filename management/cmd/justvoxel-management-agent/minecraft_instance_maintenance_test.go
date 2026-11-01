@@ -118,6 +118,34 @@ func TestInstanceJavaPlayerConsumers(t *testing.T) {
 	}
 }
 
+func TestInstanceZeroPlayerStopUsesCallerContext(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	f.activateBoth()
+	id := f.configs[0].ID
+	f.states[id], f.containers[id] = "active", "running"
+	f.players = "There are 0 of a max of 20 players online:"
+	stopCalled, stoppedObserved := false, false
+	base := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "systemctl" && reflect.DeepEqual(args, []string{"stop", "--", "minecraft-" + id + ".service"}) {
+			stopCalled = true
+			if deadline, ok := ctx.Deadline(); ok {
+				t.Fatalf("lifecycle added a stop deadline: %v", deadline)
+			}
+		}
+		if stopCalled && command == "systemctl" && reflect.DeepEqual(args, []string{"show", "--property=LoadState,ActiveState,SubState", "--", "minecraft-" + id + ".service"}) {
+			stoppedObserved = true
+		}
+		return base(ctx, command, args...)
+	}
+	if err := f.backend.actionWithWarnings(context.Background(), id, "stop", false); err != nil {
+		t.Fatal(err)
+	}
+	if !stopCalled || !stoppedObserved || f.states[id] != "inactive" || f.containers[id] != "exited" {
+		t.Fatal("graceful stop and stopped-state verification did not complete")
+	}
+}
+
 func TestInstanceAdministratorCountdownIsolation(t *testing.T) {
 	for _, action := range []string{"stop", "restart"} {
 		t.Run(action, func(t *testing.T) {
