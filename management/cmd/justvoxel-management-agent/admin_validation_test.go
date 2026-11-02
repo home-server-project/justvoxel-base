@@ -317,7 +317,7 @@ func TestApplianceValidationZeroOneManyAndStoppedSibling(t *testing.T) {
 }
 
 func TestApplianceValidationProblemsContinueWithSafeSibling(t *testing.T) {
-	for _, problem := range []string{"missing runtime", "hash", "permission", "pending", "commit gate", "storage", "context", "firewall", "failed service", "transitional", "live stack", "backup timer", "backup failed", "backup interrupted", "backup restart", "backup destination", "orphan Quadlet", "unregistered runtime", "duplicate registry", "mismatched registry"} {
+	for _, problem := range []string{"missing runtime", "hash", "permission", "pending", "commit gate", "storage", "context", "firewall", "failed service", "transitional", "live stack", "backup timer", "backup failed", "backup interrupted", "backup restart", "backup status malformed", "backup restart unresolved", "backup destination", "backup inventory malformed", "orphan Quadlet", "unregistered runtime", "duplicate registry", "mismatched registry"} {
 		t.Run(problem, func(t *testing.T) {
 			f := validationFixture(t, 2)
 			id := "jv-a1b2c3"
@@ -354,8 +354,21 @@ func TestApplianceValidationProblemsContinueWithSafeSibling(t *testing.T) {
 					status.RestartRequired = true
 				}
 				must(f.backend.writeJSON(f.backend.backupPath(id, "status"), status, false))
+				original := instanceBackupStorageCommand
+				instanceBackupStorageCommand = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+					out, err := original(ctx, cmd, args...)
+					if err == nil && args[len(args)-1] == id {
+						return json.Marshal([]instanceBackupMetadata{{ID: id, Archive: "backup.tar.gz"}})
+					}
+					return out, err
+				}
 			case "backup timer":
 				must(f.backend.writeJSON(f.backend.backupPath(id, "settings"), instanceBackupSettings{Enabled: true, Time: "04:00", Retention: 7}, false))
+			case "backup status malformed":
+				must(os.WriteFile(f.backend.backupPath(id, "status"), []byte(`{"state":`), 0600))
+			case "backup restart unresolved":
+				f.states[id], f.containers[id] = "inactive", "exited"
+				must(f.backend.writeJSON(f.backend.backupPath(id, "status"), instanceBackupStatus{State: "failed", RestartRequired: true}, false))
 			case "orphan Quadlet":
 				must(os.WriteFile(filepath.Join(f.backend.quadlets, "minecraft-jv-orphan1.container"), []byte("foreign"), 0600))
 			case "unregistered runtime":
@@ -364,10 +377,13 @@ func TestApplianceValidationProblemsContinueWithSafeSibling(t *testing.T) {
 				must(os.WriteFile(filepath.Join(f.backend.store.directory, "duplicate.json"), []byte(`{"id":"jv-a1b2c3"}`), 0600))
 			case "mismatched registry":
 				must(os.WriteFile(filepath.Join(f.backend.store.directory, id+".json"), []byte(`{"id":"jv-foreign1"}`), 0600))
-			case "backup destination":
+			case "backup destination", "backup inventory malformed":
 				original := instanceBackupStorageCommand
 				instanceBackupStorageCommand = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
 					if args[len(args)-1] == id {
+						if problem == "backup inventory malformed" {
+							return []byte("["), nil
+						}
 						return nil, errors.New("secret destination detail")
 					}
 					return original(ctx, cmd, args...)
@@ -391,6 +407,121 @@ func TestApplianceValidationProblemsContinueWithSafeSibling(t *testing.T) {
 			// must leave the safe sibling fully checked, including live verification.
 			if problem != "duplicate registry" && problem != "mismatched registry" && !strings.Contains(strings.Join(f.calls, "\n"), "verify-minecraft-stack --instance jv-d4e5f6 LATEST") {
 				t.Fatal("safe sibling silently skipped")
+			}
+		})
+	}
+}
+
+func TestApplianceValidationBackupInventoryAndStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		status         *instanceBackupStatus
+		statusProblem  string
+		inventory      string
+		inventoryError bool
+		stopped        bool
+		stackFailed    bool
+		stateError     bool
+		wantOK         bool
+		wantNoBackups  bool
+		wantStatusFail bool
+		wantInventory  bool
+	}{
+		{name: "empty default idle", inventory: "[]", wantOK: true, wantNoBackups: true, wantInventory: true},
+		{name: "empty deliberately stopped", inventory: "[]", stopped: true, wantOK: true, wantNoBackups: true, wantInventory: true},
+		{name: "empty failed preflight", status: &instanceBackupStatus{State: "failed", Stage: "preflight"}, inventory: "[]", wantOK: true, wantNoBackups: true, wantInventory: true},
+		{name: "empty interrupted", status: &instanceBackupStatus{State: "interrupted"}, inventory: "[]", wantOK: true, wantNoBackups: true, wantInventory: true},
+		{name: "empty failed shutdown already running", status: &instanceBackupStatus{State: "failed", Stage: "shutdown", OriginallyRunning: true, RestartRequired: true, ArchivePublished: false}, inventory: "[]", wantOK: true, wantNoBackups: true, wantInventory: true},
+		{name: "empty restart unresolved stopped", status: &instanceBackupStatus{State: "failed", Stage: "shutdown", OriginallyRunning: true, RestartRequired: true}, inventory: "[]", stopped: true, wantNoBackups: true, wantStatusFail: true, wantInventory: true},
+		{name: "empty restart live stack unhealthy", status: &instanceBackupStatus{State: "failed", RestartRequired: true}, inventory: "[]", stackFailed: true, wantNoBackups: true, wantStatusFail: true, wantInventory: true},
+		{name: "empty restart state unavailable", status: &instanceBackupStatus{State: "failed", RestartRequired: true}, inventory: "[]", stateError: true, wantNoBackups: true, wantStatusFail: true, wantInventory: true},
+		{name: "archive succeeded", status: &instanceBackupStatus{State: "succeeded", Stage: "complete", ArchivePublished: true}, wantOK: true, wantInventory: true},
+		{name: "archive failed", status: &instanceBackupStatus{State: "failed"}, wantStatusFail: true, wantInventory: true},
+		{name: "archive interrupted", status: &instanceBackupStatus{State: "interrupted"}, wantStatusFail: true, wantInventory: true},
+		{name: "archive restart required while running", status: &instanceBackupStatus{State: "succeeded", RestartRequired: true}, wantStatusFail: true, wantInventory: true},
+		{name: "inventory lookup failure", inventoryError: true},
+		{name: "inventory malformed", inventory: "["},
+		{name: "inventory wrong shape", inventory: "{}"},
+		{name: "inventory null", inventory: "null"},
+		{name: "inventory wrong field type", inventory: `[{"size":"invalid"}]`},
+		{name: "empty malformed status", statusProblem: "malformed", inventory: "[]", wantNoBackups: true, wantStatusFail: true, wantInventory: true},
+		{name: "empty unreadable status", statusProblem: "unreadable", inventory: "[]", wantNoBackups: true, wantStatusFail: true, wantInventory: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := validationFixture(t, 1)
+			id := f.configs[0].ID
+			statusPath := f.backend.backupPath(id, "status")
+			if tc.status != nil {
+				if err := f.backend.writeJSON(statusPath, tc.status, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch tc.statusProblem {
+			case "malformed":
+				if err := os.WriteFile(statusPath, []byte(`{"state":`), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "unreadable":
+				// A directory deterministically fails the private regular-file read,
+				// including when the tests are run as root.
+				if err := os.Mkdir(statusPath, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, beforeErr := f.backend.readPrivate(statusPath)
+			if tc.stopped {
+				f.states[id], f.containers[id] = "inactive", "exited"
+			}
+			command := f.backend.command
+			f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+				if tc.stackFailed && strings.HasSuffix(cmd, "/verify-minecraft-stack") {
+					return nil, instanceTestExit{}
+				}
+				if tc.stateError && cmd == "systemctl" && len(args) > 0 && args[0] == "show" {
+					return nil, errors.New("private state error")
+				}
+				return command(ctx, cmd, args...)
+			}
+			inventoryCalls := 0
+			original := instanceBackupStorageCommand
+			instanceBackupStorageCommand = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+				out, err := original(ctx, cmd, args...)
+				if err != nil {
+					return out, err
+				}
+				inventoryCalls++
+				if tc.inventoryError {
+					return nil, errors.New("private inventory error")
+				}
+				if tc.inventory != "" {
+					return []byte(tc.inventory), nil
+				}
+				return json.Marshal([]instanceBackupMetadata{{ID: id, Archive: "backup.tar.gz"}})
+			}
+			result := validationRequest(t, tc.wantOK)
+			if inventoryCalls != 1 {
+				t.Fatalf("inventory called %d times, want once", inventoryCalls)
+			}
+			if strings.Contains(result.Output, "PASS: No backups yet") != tc.wantNoBackups {
+				t.Fatalf("unexpected empty-library report: %s", result.Output)
+			}
+			if strings.Contains(result.Output, "FAIL: Instance backup status") != tc.wantStatusFail {
+				t.Fatalf("unexpected backup status failure: %s", result.Output)
+			}
+			wantStatusPass := !tc.wantNoBackups && !tc.wantStatusFail
+			if strings.Contains(result.Output, "PASS: Instance backup status") != wantStatusPass {
+				t.Fatalf("unexpected backup status pass: %s", result.Output)
+			}
+			inventoryLabel := "FAIL: Instance backup destination inventory"
+			if tc.wantInventory {
+				inventoryLabel = "PASS: Instance backup destination inventory"
+			}
+			if !strings.Contains(result.Output, inventoryLabel) || strings.Contains(result.Output, "private") {
+				t.Fatalf("inventory result missing or private error leaked: %s", result.Output)
+			}
+			after, afterErr := f.backend.readPrivate(statusPath)
+			if string(before) != string(after) || (beforeErr == nil) != (afterErr == nil) || errors.Is(beforeErr, os.ErrNotExist) != errors.Is(afterErr, os.ErrNotExist) {
+				t.Fatal("validation modified persistent backup status")
 			}
 		})
 	}

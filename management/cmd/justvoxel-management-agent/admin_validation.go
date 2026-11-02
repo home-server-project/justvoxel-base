@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -192,12 +193,14 @@ func (b *instanceRuntimeBackend) validateApplianceInstance(ctx context.Context, 
 		check(firewallOK[key], "Owned firewall rule "+key)
 	}
 	check(stateErr == nil && (state.State == "running" || state.State == "stopped"), "Instance service and container state")
+	runningVerified := false
 	if stateErr == nil && state.State == "running" {
 		_, err := b.command(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, record.Runtime.Version)
 		if err != nil && !instanceExitOne(err) {
 			return err
 		}
 		check(err == nil, "Running instance Minecraft stack")
+		runningVerified = err == nil
 	} else if stateErr == nil && state.State == "stopped" {
 		check(true, "Stopped intentionally; live stack verification skipped")
 	}
@@ -206,8 +209,24 @@ func (b *instanceRuntimeBackend) validateApplianceInstance(ctx context.Context, 
 	enabled, active, timerErr := b.backupTimerState(ctx, id)
 	check(timerErr == nil && settingsErr == nil && ((!settings.Enabled && !enabled && !active) || (settings.Enabled && enabled && active)), "Instance backup timer matches settings")
 	status, statusErr := b.backupStatus(id)
-	check(statusErr == nil && status.State != "failed" && status.State != "interrupted" && !status.RestartRequired, "Instance backup status")
-	_, backupErr := b.backupStorage(ctx, "inventory", id)
+	backupOutput, backupErr := b.backupStorage(ctx, "inventory", id)
+	var inventory []instanceBackupMetadata
+	if backupErr == nil {
+		backupErr = json.Unmarshal(backupOutput, &inventory)
+		if backupErr == nil && inventory == nil {
+			backupErr = errors.New("backup inventory is not an array")
+		}
+	}
+	if backupErr == nil && len(inventory) == 0 {
+		check(true, "No backups yet")
+		// Historical failures do not make an empty library unhealthy. Retain
+		// unreadable status and unresolved running intent as health failures.
+		if statusErr != nil || (status.RestartRequired && !runningVerified) {
+			check(false, "Instance backup status")
+		}
+	} else {
+		check(statusErr == nil && status.State != "failed" && status.State != "interrupted" && !status.RestartRequired, "Instance backup status")
+	}
 	check(backupErr == nil, "Instance backup destination inventory")
 	return nil
 }
