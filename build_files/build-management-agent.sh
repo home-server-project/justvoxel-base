@@ -2,7 +2,10 @@
 # Run inside the Home Server Base 10 validation container, with /repo and /out mounted.
 set -euo pipefail
 
-dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
+# Local reusable builders already contain these dependencies; CI installs them by default.
+if [[ ${JUSTVOXEL_MANAGEMENT_SKIP_DNF:-0} != 1 ]]; then
+    dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
+fi
 mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
 cp -a /repo/management /repo/templates /repo/mjust /repo/system_files /repo/build_files /repo/runtime /work/
 cd /work/management
