@@ -8,13 +8,53 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
-	backupDeleteIDPattern          = regexp.MustCompile(`^(?:jv-[a-z0-9]{6,12}/)?minecraft-(?:[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}|[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?)\.tar\.gz$`)
+	backupDeleteLegacyPattern      = regexp.MustCompile(`^minecraft-(?:[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}|[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?)\.tar\.gz$`)
+	backupDeleteInstancePattern    = regexp.MustCompile(`^jv-[a-z0-9]{6,12}$`)
+	backupDeleteModernPattern      = regexp.MustCompile(`^(.{1,64})-backup-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?\.tar\.gz$`)
 	backupDeleteFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
+
+// Match the archive reference contract in mjust/libexec/backup-common.sh.
+func validBackupDeleteID(id string) bool {
+	if backupDeleteLegacyPattern.MatchString(id) {
+		return true
+	}
+	instance, archive, found := strings.Cut(id, "/")
+	if !found || !backupDeleteInstancePattern.MatchString(instance) || archive == "" || strings.Contains(archive, "/") {
+		return false
+	}
+	if backupDeleteLegacyPattern.MatchString(archive) {
+		return true
+	}
+	return validBackupDeleteModernArchive(archive)
+}
+
+func validBackupDeleteModernArchive(archive string) bool {
+	if len(archive) > 245 || !utf8.ValidString(archive) {
+		return false
+	}
+	match := backupDeleteModernPattern.FindStringSubmatch(archive)
+	if match == nil {
+		return false
+	}
+	name := match[1]
+	if name != strings.TrimSpace(name) || name == "." || name == ".." {
+		return false
+	}
+	for _, char := range name {
+		if !unicode.IsLetter(char) && !unicode.IsNumber(char) && !unicode.IsMark(char) && !strings.ContainsRune(" ._-'()", char) {
+			return false
+		}
+	}
+	return true
+}
 
 const (
 	adminBackupDeletePlanPath  = "/v1/admin/backups/delete/plan"
@@ -63,7 +103,7 @@ func (c *Client) adminBackupDeleteChange(ctx context.Context, path, session stri
 		return out, errors.New("invalid backup delete selection")
 	}
 	for _, id := range request.BackupIDs {
-		if !backupDeleteIDPattern.MatchString(id) {
+		if !validBackupDeleteID(id) {
 			return out, errors.New("invalid backup id")
 		}
 	}
