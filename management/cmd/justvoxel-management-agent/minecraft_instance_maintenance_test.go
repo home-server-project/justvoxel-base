@@ -124,10 +124,23 @@ func TestInstanceZeroPlayerStopUsesCallerContext(t *testing.T) {
 	id := f.configs[0].ID
 	f.states[id], f.containers[id] = "active", "running"
 	f.players = "There are 0 of a max of 20 players online:"
-	stopCalled, stoppedObserved := false, false
+	stopCalled, stoppedObserved, signaled := false, false, false
+	f.backend.pause = func(context.Context, time.Duration) error {
+		t.Fatal("empty server received a warning sleep")
+		return nil
+	}
 	base := f.backend.command
 	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-		if command == "systemctl" && reflect.DeepEqual(args, []string{"stop", "--", "minecraft-" + id + ".service"}) {
+		if command == "podman" && reflect.DeepEqual(args, []string{"kill", "--signal", "SIGUSR1", "minecraft-" + id}) {
+			signaled = true
+		}
+		if command == "podman" && len(args) == 4 && strings.HasPrefix(args[3], "say ") {
+			t.Fatal("empty server received a warning")
+		}
+		if command == "systemctl" && reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) {
+			if !signaled {
+				t.Fatal("service stop entered the image announcement path")
+			}
 			stopCalled = true
 			if deadline, ok := ctx.Deadline(); ok {
 				t.Fatalf("lifecycle added a stop deadline: %v", deadline)
@@ -143,6 +156,83 @@ func TestInstanceZeroPlayerStopUsesCallerContext(t *testing.T) {
 	}
 	if !stopCalled || !stoppedObserved || f.states[id] != "inactive" || f.containers[id] != "exited" {
 		t.Fatal("graceful stop and stopped-state verification did not complete")
+	}
+}
+
+// Retained, activated bundles still contain the image's 60-second delay.
+// Lifecycle must bypass it without publishing new files or changing hashes.
+func TestForgeActivatedShutdownBypassesImageAnnouncement(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	id := f.configs[0].ID
+	record, err := f.backend.readRecord(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Runtime.Software, record.Runtime.LoaderVersion = "forge", "54.1.0"
+	record.Runtime.VersionPolicy, record.Runtime.Version, record.Runtime.ImageTag = "pinned", "1.21.4", "java21"
+	dir, envPath, quadletPath := f.backend.paths(id)
+	if err = f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+		t.Fatal(err)
+	}
+	f.activateBoth()
+	record, err = f.backend.readRecord(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := os.ReadFile(envPath)
+	if err != nil || !strings.Contains(string(env), "STOP_SERVER_ANNOUNCE_DELAY=60") {
+		t.Fatal("fixture does not represent an existing activated instance", err)
+	}
+	quadlet, err := os.ReadFile(quadletPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.states[id], f.containers[id] = "active", "running"
+	f.players = "There are 1 of a max of 20 players online: Alex\n\x1b[0m\n"
+	elapsed, warnings, signaled := time.Duration(0), 0, false
+	base := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "podman" && len(args) == 7 && args[0] == "exec" && args[2] == "timeout" && strings.HasPrefix(args[6], "say ") {
+			if signaled || f.states[id] != "active" {
+				t.Fatal("Forge warning occurred after shutdown began")
+			}
+			warnings++
+			if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > instanceShutdownAnnouncementWindow {
+				t.Fatal("unbounded Forge warning")
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		if command == "podman" && len(args) == 4 && args[0] == "kill" {
+			if elapsed != time.Minute || warnings != 9 || args[2] != "SIGUSR1" {
+				t.Fatal("Forge did not receive the complete warning before graceful bypass")
+			}
+			signaled = true
+		}
+		if command == "systemctl" && args[0] == "--no-block" && args[1] == "stop" && !signaled {
+			t.Fatal("Forge depends on the blocking image-internal announcement")
+		}
+		return base(ctx, command, args...)
+	}
+	f.backend.pause = func(_ context.Context, d time.Duration) error {
+		elapsed += d
+		return nil
+	}
+	if err = f.backend.actionWithWarnings(context.Background(), id, "stop", true); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.backend.readRecord(id)
+	if err != nil || !reflect.DeepEqual(record, after) || f.backend.verifyLive(after) != nil {
+		t.Fatal("existing committed record changed", err)
+	}
+	for path, before := range map[string][]byte{envPath: env, quadletPath: quadlet} {
+		data, err := os.ReadFile(path)
+		if err != nil || string(data) != string(before) {
+			t.Fatal("shutdown rewrote an existing runtime file", path, err)
+		}
+	}
+	if !signaled || f.states[id] != "inactive" || f.containers[id] != "exited" {
+		t.Fatal("Forge graceful stop was not confirmed")
 	}
 }
 
@@ -169,21 +259,21 @@ func TestInstanceAdministratorCountdownIsolation(t *testing.T) {
 					warnings = append(warnings, args[3])
 					return nil, nil
 				}
-				if command == "systemctl" && len(args) == 4 && args[0] == "--no-block" && args[1] == "stop" {
-					if args[3] != "minecraft-"+a+".service" {
-						t.Fatal("stop escaped target")
+				if command == "podman" && len(args) == 4 && args[0] == "kill" {
+					if elapsed != time.Minute || len(warnings) != 9 || f.states[a] != "active" || args[2] != "SIGUSR1" || args[3] != "minecraft-"+a {
+						t.Fatal("graceful signal preceded countdown completion", elapsed, warnings, args)
 					}
-					f.states[a] = "deactivating"
-					return nil, nil
+				}
+				if command == "systemctl" && args[0] == "--no-block" && args[1] == "stop" && (elapsed != time.Minute || args[len(args)-1] != "minecraft-"+a+".service") {
+					t.Fatal("service stop preceded countdown completion or escaped target", elapsed, args)
 				}
 				return base(ctx, command, args...)
 			}
 			f.backend.pause = func(context.Context, time.Duration) error { return nil }
 			f.backend.pause = func(_ context.Context, d time.Duration) error {
 				elapsed += d
-				if elapsed >= 60*time.Second {
-					f.states[a] = "inactive"
-					f.containers[a] = "exited"
+				if f.states[a] != "active" || f.containers[a] != "running" {
+					t.Fatal("occupied server stopped during countdown")
 				}
 				return nil
 			}
@@ -204,13 +294,36 @@ func TestInstanceAdministratorCountdownIsolation(t *testing.T) {
 				t.Fatal("incorrect selected final state")
 			}
 			for _, call := range f.calls {
-				if strings.Contains(call, "kill") || strings.Contains(call, "minecraft.service") {
+				if strings.Contains(call, "minecraft.service") || (strings.Contains(call, "kill") && call != "podman kill --signal SIGUSR1 minecraft-"+a) {
 					t.Fatal("unsafe or legacy action", call)
 				}
 			}
 		})
 	}
 }
+func TestInstanceGracefulSignalFailureDoesNotStopOrRestart(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	f.activateBoth()
+	id := f.configs[0].ID
+	f.states[id], f.containers[id] = "active", "running"
+	base := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "podman" && len(args) == 4 && args[0] == "kill" {
+			return nil, errors.New("signal unavailable")
+		}
+		if command == "systemctl" && args[0] != "show" {
+			t.Fatal("signal failure entered ordinary stop or restarted", args)
+		}
+		return base(ctx, command, args...)
+	}
+	if err := f.backend.actionWithWarnings(context.Background(), id, "stop", false); err == nil {
+		t.Fatal("graceful bypass failure was ignored")
+	}
+	if f.states[id] != "active" || f.containers[id] != "running" {
+		t.Fatal("signal failure changed the running instance")
+	}
+}
+
 func TestInstanceCountdownFailureDoesNotRestart(t *testing.T) {
 	f := newInstanceActivationFixture(t)
 	f.activateBoth()
@@ -751,11 +864,11 @@ func TestJavaInterruptionConsoleReadiness(t *testing.T) {
 						}
 						if args[0] == "stop" || args[1] == "stop" {
 							stops++
-							if readinessPauses != tc.pauses || len(countdown) != 0 {
+							if readinessPauses != tc.pauses || (tc.name == "starting_occupied" && elapsed != time.Minute) || (tc.name != "starting_occupied" && len(countdown) != 0) {
 								t.Fatal("stop delayed after player query", readinessPauses, countdown)
 							}
 							if args[0] == "--no-block" {
-								f.states[id] = "deactivating"
+								f.states[id], f.containers[id] = "inactive", "exited"
 								return nil, nil
 							}
 						} else {
@@ -785,8 +898,8 @@ func TestJavaInterruptionConsoleReadiness(t *testing.T) {
 					}
 					countdown = append(countdown, d)
 					elapsed += d
-					if elapsed == time.Minute {
-						f.states[id], f.containers[id] = "inactive", "exited"
+					if stops != 0 || f.states[id] != "active" {
+						t.Fatal("occupied instance stopped before countdown completed")
 					}
 					return nil
 				}
@@ -896,5 +1009,120 @@ func TestJavaInterruptionReadinessContextErrors(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+type instanceShutdownWarningExit int
+
+func (e instanceShutdownWarningExit) Error() string { return "shutdown warning exit" }
+func (e instanceShutdownWarningExit) ExitCode() int { return int(e) }
+
+func TestShutdownAnnouncementTransportScope(t *testing.T) {
+	for _, software := range []string{"forge", "neoforge", "paper"} {
+		for _, outcome := range []string{"success", "failure", "tool_missing", "inner_timeout", "cleanup_timeout", "timeout", "parent_cancel"} {
+			t.Run(software+"/"+outcome, func(t *testing.T) {
+				f := newInstanceActivationFixture(t)
+				id := f.configs[0].ID
+				record, err := f.backend.readRecord(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record.Runtime.Software = software
+				record.Runtime.VersionPolicy, record.Runtime.Version, record.Runtime.ImageTag = "pinned", "1.21.4", "java21"
+				if software == "forge" {
+					record.Runtime.LoaderVersion = "54.1.0"
+				}
+				if software == "neoforge" {
+					record.Runtime.LoaderVersion = "21.4.137"
+				}
+				dir, _, _ := f.backend.paths(id)
+				if err = f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+					t.Fatal(err)
+				}
+				parent, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+					expected := []string{"exec", "minecraft-" + id, "rcon-cli", "say Server shutting down in 1 second"}
+					if software != "paper" {
+						expected = []string{"exec", "minecraft-" + id, "timeout", "--kill-after=0.1s", "0.25s", "rcon-cli", "say Server shutting down in 1 second"}
+					}
+					if command != "podman" || !reflect.DeepEqual(args, expected) {
+						t.Fatal("unexpected warning transport", command, args)
+					}
+					deadline, ok := ctx.Deadline()
+					window := instanceShutdownAnnouncementWindow
+					if software == "paper" {
+						window = 5 * time.Second
+					}
+					if !ok || time.Until(deadline) > window {
+						t.Fatal("incorrect warning deadline")
+					}
+					switch outcome {
+					case "failure":
+						return nil, errors.New("connect/authentication failure")
+					case "tool_missing":
+						return nil, instanceShutdownWarningExit(127)
+					case "inner_timeout":
+						return nil, instanceShutdownWarningExit(124)
+					case "cleanup_timeout":
+						return nil, instanceShutdownWarningExit(137)
+					case "timeout":
+						// Ordinary RCON must still reject a response timeout; avoid a five-second wait.
+						if software == "paper" {
+							return nil, context.DeadlineExceeded
+						}
+						<-ctx.Done()
+						return nil, ctx.Err()
+					case "parent_cancel":
+						cancel()
+						return nil, context.Canceled
+					}
+					return nil, nil
+				}
+				err = f.backend.shutdownAnnouncement(parent, id, 1)
+				wantFailure := outcome == "failure" || outcome == "tool_missing" || outcome == "parent_cancel" || (software == "paper" && (outcome == "timeout" || outcome == "inner_timeout" || outcome == "cleanup_timeout"))
+				if (err != nil) != wantFailure {
+					t.Fatal("incorrect warning result", err)
+				}
+			})
+		}
+	}
+}
+
+func TestGracefulStopWaitsWithCallerContext(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	f.activateBoth()
+	id := f.configs[0].ID
+	f.states[id], f.containers[id] = "active", "running"
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	base := f.backend.command
+	requested, observed := false, false
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "systemctl" && reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) {
+			if ctx != parent {
+				t.Fatal("stop did not use caller context")
+			}
+			requested = true
+			f.states[id] = "deactivating"
+			return nil, nil
+		}
+		if requested && command == "systemctl" && args[0] == "show" {
+			observed = true
+		}
+		return base(ctx, command, args...)
+	}
+	f.backend.pause = func(ctx context.Context, d time.Duration) error {
+		if !requested || !observed || ctx != parent || d != time.Second {
+			t.Fatal("unconfirmed stop escaped observation")
+		}
+		cancel()
+		return ctx.Err()
+	}
+	if err := f.backend.stopGracefully(parent, id); !errors.Is(err, context.Canceled) {
+		t.Fatal("caller cancellation lost", err)
+	}
+	if !observed {
+		t.Fatal("stopped state was not observed")
 	}
 }

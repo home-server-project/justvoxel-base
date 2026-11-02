@@ -346,9 +346,8 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 					return err
 				}
 			} else {
-				_, err = b.command(ctx, "systemctl", "stop", "--", unit)
-				if err != nil {
-					return instanceRuntimeFailure("Instance graceful stop failed or exceeded the safety timeout; normal graceful shutdown continues.")
+				if err = b.stopGracefully(ctx, id); err != nil {
+					return err
 				}
 			}
 			stopped, err := b.observeRaw(ctx, id)

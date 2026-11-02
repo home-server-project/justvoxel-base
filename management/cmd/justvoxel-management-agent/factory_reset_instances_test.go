@@ -160,7 +160,7 @@ func TestFactoryResetAllManagedInstances(t *testing.T) {
 				}
 				count := 0
 				for _, call := range x.calls {
-					if call == "systemctl stop -- minecraft-"+id+".service" {
+					if call == "systemctl --no-block stop -- minecraft-"+id+".service" {
 						count++
 					}
 					if call == "systemctl start -- minecraft-"+id+".service" {

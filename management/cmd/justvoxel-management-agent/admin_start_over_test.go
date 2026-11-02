@@ -433,6 +433,13 @@ func TestStartOverConfirmedPlayersExactGracefulStop(t *testing.T) {
 	if !strings.Contains(calls, "minecraft-"+id+" rcon-cli say Server shutting down in 60 seconds") || !strings.Contains(calls, "systemctl --no-block stop -- minecraft-"+id+".service") {
 		t.Fatal("exact instance graceful warning missing", calls)
 	}
+	warning := strings.Index(calls, "say Server shutting down in 1 second")
+	signal := strings.Index(calls, "podman kill --signal SIGUSR1 minecraft-"+id)
+	stop := strings.Index(calls, "systemctl --no-block stop -- minecraft-"+id+".service")
+	if warning < 0 || signal <= warning || stop <= signal {
+		t.Fatal("start over stop preceded full countdown", calls)
+	}
+
 }
 func TestStartOverJournalPolicyAndExactRetry(t *testing.T) {
 	for _, policy := range []string{"", "delete", "preserve", "start_over"} {

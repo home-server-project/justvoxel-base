@@ -57,6 +57,13 @@ Graceful stop is software-aware and coordinated per instance. Host actions stop
 all running instances in one bounded window; ordinary selected-instance
 maintenance affects only that server. Online players receive the reviewed warning
 path, and uncertain player state fails closed for disruptive operations.
+Host update/reboot rechecks the authoritative snapshot and starts empty-instance
+stops immediately. Only occupied instances receive the selected 60-second or
+quick 10-second countdown; their stops begin afterward. Reboot waits for every
+intended running instance to stop. An all-empty appliance has no countdown.
+The repair is in lifecycle code and the host helper, so existing activated
+instances retain their committed environment/Quadlet files and hashes; no
+reactivation or persistent-state migration is required.
 
 Persistent data is mounted only at `/data` with a private SELinux `:Z` label. No
 upstream Minecraft server binary, world, EULA acceptance, private console
@@ -241,8 +248,10 @@ service. All mutation requests use the existing authenticated API and strict
 JSON decoder. Selected-instance Stop and Restart refuse failed/unparseable
 RCON responses or uncertain service/container evidence. Phase 3B administrators
 may interrupt online players with a mandatory warning/countdown; operators
-continue to require an empty server. There is no force stop. The ordinary
-itzg shutdown delay, Podman stop timeout, and systemd stop timeout remain intact.
+continue to require an empty server. There is no force stop. JustVoxel owns
+player-warning timing. Java uses itzg's graceful SIGUSR1 delay bypass afterward;
+native Bedrock uses its console `stop` command.
+Podman StopTimeout=180 and systemd TimeoutStopSec=240 remain unchanged.
 
 Full settings applies require the selected instance to be stopped, or failed
 with actual evidence that no live container remains. Changing
@@ -332,12 +341,22 @@ are accepted.
 
 Administrator Stop/Restart holds the Phase 3A appliance locks and shared
 Minecraft maintenance lock across player checking, graceful stop, verification
-and any subsequent start request. Occupied instances receive a 60-second announcement,
-then the existing 30/15/10/5/4/3/2/1-second warning sequence while systemd uses
-the ordinary itzg graceful shutdown. The countdown and stop confirmation share
-a 150-second safety deadline. Failed announcements or timeout return failure
-without a force stop or restart fallback. Empty instances still use the normal
-container stop delay, protecting players who join after the check. Operators
+and any subsequent start request. Occupied instances remain running for the
+60/30/15/10/5/4/3/2/1-second warning sequence. Only after the countdown does
+JustVoxel request Java graceful shutdown with SIGUSR1, followed by a nonblocking
+service stop and stopped-state verification. SIGUSR1 bypasses the Java image's
+synchronous RCON announcement and additional delay while retaining world saving.
+Empty instances begin that graceful shutdown immediately, without warning sleeps. The stop uses
+the caller's context rather than a separate 150-second lifecycle deadline.
+Failed announcements return failure before interruption, without a force stop or
+restart fallback. Only internally generated Forge/NeoForge shutdown warnings
+use a 250 ms in-container timeout (100 ms cleanup allowance) and a dedicated
+one-second host execution window: a response timeout is accepted because
+these servers deliver the message before hanging on the reply. Immediate command
+failures and caller cancellation still fail; ordinary RCON remains unchanged.
+Native Bedrock uses `send-command` for warnings and `send-command stop` for native
+shutdown, immediately followed by nonblocking service stop to prevent restart,
+then stopped-state verification. Bedrock never receives Java SIGUSR1. Operators
 retain Phase 3A's empty-server restriction, shared allowance, cooldown and
 audit accounting. Other instances are never stopped or restarted.
 

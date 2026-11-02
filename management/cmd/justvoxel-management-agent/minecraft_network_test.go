@@ -715,15 +715,17 @@ func TestMinecraftNetworkLaterEnrollmentImportsExactlyOnce(t *testing.T) {
 type networkLifecycleFixture struct {
 	mu                     sync.Mutex
 	queued                 map[string]bool
+	signaled               map[string]bool
 	lastWarning            map[string]bool
 	warnings               map[string][]string
+	events                 map[string][]string
 	stops, starts          []string
 	published              bool
 	failPrepare, failStart bool
 }
 
 func networkLifecycleControls(f *instanceActivationFixture) *networkLifecycleFixture {
-	h := &networkLifecycleFixture{queued: map[string]bool{}, lastWarning: map[string]bool{}, warnings: map[string][]string{}}
+	h := &networkLifecycleFixture{queued: map[string]bool{}, signaled: map[string]bool{}, lastWarning: map[string]bool{}, warnings: map[string][]string{}, events: map[string][]string{}}
 	original := f.backend.command
 	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 		h.mu.Lock()
@@ -738,30 +740,63 @@ func networkLifecycleControls(f *instanceActivationFixture) *networkLifecycleFix
 		}
 		if command == "podman" && len(args) == 4 && args[0] == "exec" && strings.HasPrefix(args[3], "say ") {
 			id := strings.TrimPrefix(args[1], "minecraft-")
+			if h.signaled[id] || h.queued[id] {
+				f.t.Fatal("warning after graceful shutdown began", id, args)
+			}
 			h.warnings[id] = append(h.warnings[id], args[3])
+			h.events[id] = append(h.events[id], args[3])
 			if args[3] == "say Server shutting down in 1 second" {
 				h.lastWarning[id] = true
 			}
 			return nil, nil
 		}
+		if command == "podman" && len(args) > 0 && args[0] == "kill" {
+			if len(args) != 4 || args[1] != "--signal" || args[2] != "SIGUSR1" || !strings.HasPrefix(args[3], "minecraft-") {
+				f.t.Fatal("unexpected Java graceful signal", args)
+			}
+			id := strings.TrimPrefix(args[3], "minecraft-")
+			if !instanceIDPattern.MatchString(id) || (len(h.warnings[id]) > 0 && !h.lastWarning[id]) || h.signaled[id] || h.queued[id] {
+				f.t.Fatal("invalid or premature Java graceful signal", id, args)
+			}
+			// The underlying fixture also verifies the selected managed Java runtime.
+			output, err := original(ctx, command, args...)
+			if err == nil {
+				h.signaled[id] = true
+				h.events[id] = append(h.events[id], "SIGUSR1")
+			}
+			return output, err
+		}
 		if command == "systemctl" {
 			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
 			if instanceIDPattern.MatchString(id) {
-				if args[0] == "show" && h.queued[id] && h.lastWarning[id] {
+				if args[0] == "show" && h.queued[id] && (f.states[id] != "inactive" || f.containers[id] != "exited") {
 					f.states[id], f.containers[id] = "inactive", "exited"
+					h.events[id] = append(h.events[id], "inactive")
 				}
 				if args[0] == "stop" {
 					h.stops = append(h.stops, id)
 				}
 				if len(args) > 1 && args[0] == "--no-block" {
 					if args[1] == "stop" {
-						h.stops = append(h.stops, id)
+						if !reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) || !h.signaled[id] || (len(h.warnings[id]) > 0 && !h.lastWarning[id]) {
+							f.t.Fatal("service stop before selected Java graceful signal or final warning", id, args)
+						}
+						if !h.queued[id] {
+							h.stops = append(h.stops, id)
+							h.events[id] = append(h.events[id], "stop")
+						}
 						h.queued[id] = true
-						return nil, nil // Stay running until the final normal warning.
+						return nil, nil // Complete on the next authoritative observation.
 					}
 					if args[1] == "start" {
+						if h.queued[id] && (f.states[id] != "inactive" || f.containers[id] != "exited") {
+							f.t.Fatal("restart before stopped confirmation", id)
+						}
 						h.starts = append(h.starts, id)
+						h.events[id] = append(h.events[id], "start")
 						delete(h.queued, id)
+						delete(h.signaled, id)
+						delete(h.lastWarning, id)
 						if h.failStart {
 							return nil, errors.New("mock start failure")
 						}
@@ -787,6 +822,9 @@ func TestMinecraftNetworkZeroPlayersImmediateStopAndRestart(t *testing.T) {
 	}
 	if !reflect.DeepEqual(h.stops, []string{id}) || !reflect.DeepEqual(h.starts, []string{id}) || len(h.warnings[id]) != 0 {
 		t.Fatal("zero-player lifecycle or unrelated isolation changed", h.stops, h.starts, h.warnings)
+	}
+	if !reflect.DeepEqual(h.events, map[string][]string{id: {"SIGUSR1", "stop", "inactive", "start"}}) {
+		t.Fatal("zero-player graceful lifecycle order or unrelated isolation changed", h.events)
 	}
 	if f.states[id] != "active" || f.states[unrelated] != "active" {
 		t.Fatal("running state not preserved")
@@ -814,6 +852,10 @@ func TestMinecraftNetworkOccupiedNormalCountdownAndRestart(t *testing.T) {
 	}
 	if !reflect.DeepEqual(h.warnings[id], want) || paused != time.Minute || !reflect.DeepEqual(h.starts, []string{id}) {
 		t.Fatal("normal countdown changed", h.warnings, paused, h.starts)
+	}
+	want = append(want, "SIGUSR1", "stop", "inactive", "start")
+	if !reflect.DeepEqual(h.events, map[string][]string{id: want}) || !reflect.DeepEqual(h.stops, []string{id}) {
+		t.Fatal("occupied graceful lifecycle order changed", h.events, h.stops)
 	}
 }
 

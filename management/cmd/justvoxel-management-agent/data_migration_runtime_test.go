@@ -95,6 +95,12 @@ func physicalMigrationTestFixture(t *testing.T, n int) *physicalMigrationFixture
 					active = "active"
 				}
 				return []byte("LoadState=loaded\nActiveState=" + active + "\nSubState=mock\n"), nil
+			case "--no-block":
+				if !reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) {
+					return nil, errors.New("unexpected systemd request")
+				}
+				x.states[id] = "stopped"
+				return nil, nil
 			case "stop":
 				x.states[id] = "stopped"
 				return nil, nil
@@ -104,6 +110,13 @@ func physicalMigrationTestFixture(t *testing.T, n int) *physicalMigrationFixture
 			}
 		}
 		if command == "podman" {
+			if len(args) == 4 && args[0] == "kill" && args[1] == "--signal" && args[2] == "SIGUSR1" && strings.HasPrefix(args[3], "minecraft-") && instanceIDPattern.MatchString(strings.TrimPrefix(args[3], "minecraft-")) {
+				id := strings.TrimPrefix(args[3], "minecraft-")
+				if _, ok := x.states[id]; !ok {
+					return nil, errors.New("foreign signal target")
+				}
+				return nil, nil
+			}
 			switch args[0] {
 			case "ps":
 				filter := args[3]

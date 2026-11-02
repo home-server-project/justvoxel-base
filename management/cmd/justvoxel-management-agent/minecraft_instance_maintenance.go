@@ -105,38 +105,66 @@ func (b *instanceRuntimeBackend) waitMaintenance(ctx context.Context, d time.Dur
 	}
 	return instancePause(ctx, d)
 }
-func (b *instanceRuntimeBackend) stopWithWarnings(ctx context.Context, id string) error {
+
+// Only internally generated Forge/NeoForge shutdown warnings tolerate a response
+// timeout: these servers deliver say before their RCON response hangs. The
+// command remains synchronous and context-bound; ordinary RCON is unchanged.
+const instanceShutdownAnnouncementWindow = time.Second
+
+func (b *instanceRuntimeBackend) shutdownAnnouncement(ctx context.Context, id string, seconds int) error {
+	record, err := b.readRuntimeConfig(id)
+	if err != nil {
+		return err
+	}
+	unit := "seconds"
+	if seconds == 1 {
+		unit = "second"
+	}
+	command := "say Server shutting down in " + strconv.Itoa(seconds) + " " + unit
+	if record.Runtime.Software != "forge" && record.Runtime.Software != "neoforge" {
+		_, err = b.rcon(ctx, id, command)
+		return err
+	}
+	warningCtx, cancel := context.WithTimeout(ctx, instanceShutdownAnnouncementWindow)
+	defer cancel()
+	// Bound rcon-cli inside the container too: canceling podman exec alone
+	// can leave the exec process alive. TERM is followed by bounded cleanup.
+	_, err = b.command(warningCtx, "podman", "exec", "minecraft-"+id,
+		"timeout", "--kill-after=0.1s", "0.25s", "rcon-cli", command)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	var exit interface{ ExitCode() int }
+	responseTimeout := errors.As(err, &exit) && (exit.ExitCode() == 124 || exit.ExitCode() == 137)
+	if err != nil && !responseTimeout && warningCtx.Err() != context.DeadlineExceeded {
+		return instanceRuntimeFailure("Instance shutdown announcement is unavailable.")
+	}
+	return nil
+}
+
+// Request the selected software's graceful save/stop before systemd can send
+// SIGTERM. Existing committed environment/Quadlet files remain unchanged.
+func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) error {
+	if !instanceIDPattern.MatchString(id) {
+		return errInstanceID
+	}
 	record, err := b.readRuntimeConfig(id)
 	if err != nil {
 		return err
 	}
 	if record.Runtime.Software == "bedrock" {
-		// The image announces and waits 60 seconds, then sends BDS stop and saves.
-		_, err = b.command(ctx, "systemctl", "stop", "--", "minecraft-"+id+".service")
-		return err
-	}
-	// Match interrupt-safety.sh: itzg's normal 60-second delay plus the same
-	// announcement points. Never bypass that delay for an occupied instance.
-	ctx, cancel := context.WithTimeout(ctx, 150*time.Second)
-	defer cancel()
-	announce := func(seconds int) error {
-		unit := "seconds"
-		if seconds == 1 {
-			unit = "second"
+		if _, err = b.rcon(ctx, id, "stop"); err != nil {
+			return err
 		}
-		_, err := b.rcon(ctx, id, "say Server shutting down in "+strconv.Itoa(seconds)+" "+unit)
-		return err
+	} else if _, err = b.command(ctx, "podman", "kill", "--signal", "SIGUSR1", "minecraft-"+id); err != nil {
+		return instanceRuntimeFailure("Instance graceful stop signal failed.")
 	}
-	if err := announce(60); err != nil {
-		return instanceRuntimeFailure("Shutdown warning failed; the instance was not interrupted.")
-	}
-	if _, err := b.command(ctx, "systemctl", "--no-block", "stop", "--", "minecraft-"+id+".service"); err != nil {
+	if _, err = b.command(ctx, "systemctl", "--no-block", "stop", "--", "minecraft-"+id+".service"); err != nil {
 		return instanceRuntimeFailure("Instance graceful stop request failed.")
 	}
-	previous := 60
-	for _, seconds := range []int{30, 15, 10, 5, 4, 3, 2, 1, 0} {
-		if b.waitMaintenance(ctx, time.Duration(previous-seconds)*time.Second) != nil {
-			return instanceRuntimeFailure("Safe shutdown countdown could not complete.")
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		state, err := b.observeRaw(ctx, id)
 		if err != nil {
@@ -145,25 +173,32 @@ func (b *instanceRuntimeBackend) stopWithWarnings(ctx context.Context, id string
 		if state.State == "stopped" {
 			return nil
 		}
+		if err = b.waitMaintenance(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+func (b *instanceRuntimeBackend) stopWithWarnings(ctx context.Context, id string) error {
+	previous := 60
+	for _, seconds := range []int{60, 30, 15, 10, 5, 4, 3, 2, 1, 0} {
+		if previous != seconds {
+			if err := b.waitMaintenance(ctx, time.Duration(previous-seconds)*time.Second); err != nil {
+				return instanceRuntimeFailure("Safe shutdown countdown could not complete; the instance was not interrupted.")
+			}
+		}
+		state, err := b.observeRaw(ctx, id)
+		if err != nil || state.State != "running" {
+			return instanceRuntimeFailure("Shutdown countdown state is unavailable; the instance was not interrupted.")
+		}
 		if seconds > 0 {
-			if err = announce(seconds); err != nil {
-				return instanceRuntimeFailure("Shutdown countdown announcement failed; normal graceful shutdown continues.")
+			if err = b.shutdownAnnouncement(ctx, id, seconds); err != nil {
+				return instanceRuntimeFailure("Shutdown countdown announcement failed; the instance was not interrupted.")
 			}
 		}
 		previous = seconds
 	}
-	for {
-		state, err := b.observeRaw(ctx, id)
-		if err != nil {
-			return instanceRuntimeFailure("Graceful shutdown state is unavailable.")
-		}
-		if state.State == "stopped" {
-			return nil
-		}
-		if b.waitMaintenance(ctx, time.Second) != nil {
-			return instanceRuntimeFailure("Instance did not finish graceful shutdown before the safety timeout.")
-		}
-	}
+	return b.stopGracefully(ctx, id)
 }
 
 func registerInstanceMaintenanceRoutes(mux *http.ServeMux, s *server) {

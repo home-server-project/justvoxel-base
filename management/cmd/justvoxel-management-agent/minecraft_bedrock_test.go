@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -176,15 +177,30 @@ func TestNativeBedrockLifecycleUsesSelectedInstanceAndGracefulStop(t *testing.T)
 	}
 	f.configs[0] = c
 	online := "0"
-	queries, stops := 0, 0
-	f.backend.pause = func(context.Context, time.Duration) error {
-		t.Error("ready Bedrock must not use a Java readiness wait or countdown")
+	queries, stops, warnings, nativeStops := 0, 0, 0, 0
+	elapsed := time.Duration(0)
+	f.backend.pause = func(_ context.Context, d time.Duration) error {
+		if online == "0" {
+			t.Fatal("empty Bedrock received an artificial countdown")
+		}
+		elapsed += d
 		return nil
 	}
 	base := f.backend.command
 	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 		if command == "podman" && len(args) >= 4 && args[0] == "exec" && args[2] == "send-command" {
-			queries++
+			if args[3] == "list" {
+				queries++
+			} else if strings.HasPrefix(args[3], "say ") {
+				warnings++
+			} else if args[3] == "stop" {
+				if online == "1" && (elapsed != time.Minute || warnings != 9) {
+					t.Fatal("native stop before countdown")
+				}
+				nativeStops++
+			} else {
+				t.Fatal("unexpected Bedrock console command", args)
+			}
 			return nil, nil
 		}
 		if command == "podman" && len(args) > 0 && args[0] == "logs" {
@@ -193,7 +209,13 @@ func TestNativeBedrockLifecycleUsesSelectedInstanceAndGracefulStop(t *testing.T)
 		if command == "podman" && len(args) == 4 && args[2] == "rcon-cli" {
 			t.Fatal("Bedrock used Java RCON")
 		}
-		if command == "systemctl" && args[0] == "stop" {
+		if command == "podman" && len(args) > 0 && args[0] == "kill" {
+			t.Fatal("Bedrock received Java signal", args)
+		}
+		if command == "systemctl" && args[0] == "--no-block" && args[1] == "stop" {
+			if nativeStops != stops+1 {
+				t.Fatal("service stopped before native stop")
+			}
 			stops++
 		}
 		return base(ctx, command, args...)
@@ -207,7 +229,7 @@ func TestNativeBedrockLifecycleUsesSelectedInstanceAndGracefulStop(t *testing.T)
 			t.Fatal(action, err)
 		}
 	}
-	// Occupied Bedrock still delegates warnings and timing to its image-managed stop.
+	// Occupied Bedrock uses its native console for JustVoxel warnings before graceful stop.
 	if err = f.backend.actionWithWarnings(context.Background(), c.ID, "start", true); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +238,7 @@ func TestNativeBedrockLifecycleUsesSelectedInstanceAndGracefulStop(t *testing.T)
 	if err = f.backend.actionWithWarnings(context.Background(), c.ID, "stop", true); err != nil {
 		t.Fatal(err)
 	}
-	if queries != beforeQueries+1 || stops != beforeStops+1 {
+	if queries != beforeQueries+1 || stops != beforeStops+1 || warnings != 9 || elapsed != time.Minute {
 		t.Fatal("Bedrock occupied stop path changed", queries, stops)
 	}
 	state, err := f.backend.observe(context.Background(), c.ID)
@@ -300,5 +322,30 @@ func TestNativeBedrockChecksLastUDPPortBeforeReservation(t *testing.T) {
 	defer occupied.Close()
 	if _, _, _, err = allocateNativeBedrock(nil, 4, tcp, start, end); err == nil {
 		t.Fatal("occupied final UDP port was ignored")
+	}
+}
+
+func TestNativeBedrockStopFailureDoesNotStopService(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	id := f.configs[0].ID
+	record, err := f.backend.readRecord(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Runtime = nativeBedrockFixture(f.configs[0])
+	dir, _, _ := f.backend.paths(id)
+	if err = f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	f.backend.command = func(_ context.Context, command string, args ...string) ([]byte, error) {
+		if command != "podman" || !reflect.DeepEqual(args, []string{"exec", "minecraft-" + id, "send-command", "stop"}) {
+			t.Fatal("native failure entered service stop or Java signal", command, args)
+		}
+		called = true
+		return nil, instanceRuntimeFailure("native console unavailable")
+	}
+	if err = f.backend.stopGracefully(context.Background(), id); err == nil || !called {
+		t.Fatal("native stop failure ignored", err)
 	}
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/bash
 set -u
 # One bounded window for all independent instances; no maintenance lock while
-# systemd drains services. Failed checks simply preserve the normal stop delay.
+# systemd drains services. Guard failures preserve the normal stop delay;
+# explicit operations fail closed and their callers restore running intent.
 # Guard mode keeps its original short, non-blocking safety window. Explicit
 # requests use the same discovery and player parser, with bounded graceful stops.
 mode="${1:-guard}"
@@ -34,7 +35,7 @@ def read(path):
         raise ValueError('size')
     return data
 
-def run(*args):
+def run(*args, execution_window=None):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise ValueError('deadline')
@@ -42,7 +43,7 @@ def run(*args):
     import tempfile
     with tempfile.TemporaryFile() as output:
         subprocess.run(args, check=True, stdout=output, stderr=subprocess.DEVNULL,
-                       timeout=min(2 if mode in ('guard', 'status', 'check') else 10, remaining))
+                       timeout=min(execution_window if execution_window is not None else (2 if mode in ('guard', 'status', 'check') else 10), remaining))
         output.seek(0)
         data = output.read(8193)
     if len(data) > 8192:
@@ -65,6 +66,33 @@ def validate(instance):
 
 def native_bedrock(instance):
     return json.loads(read(root + '/' + instance + '/config.json'))['runtime'].get('software','paper') == 'bedrock'
+
+def graceful_request(instance):
+    if native_bedrock(instance):
+        run('podman', 'exec', 'minecraft-' + instance, 'send-command', 'stop')
+    else:
+        # Java mc-server-runner's graceful announcement-delay bypass.
+        run('podman', 'kill', '--signal', 'SIGUSR1', 'minecraft-' + instance)
+
+def shutdown_announcement(instance, point):
+    software = json.loads(read(root + '/' + instance + '/config.json'))['runtime'].get('software', 'paper')
+    args = ('podman', 'exec', 'minecraft-' + instance,
+            'send-command' if software == 'bedrock' else 'rcon-cli',
+            'say Server shutting down in ' + str(point) + (' second' if point == 1 else ' seconds'))
+    if software in ('forge', 'neoforge'):
+        try:
+            # Bound the process inside the container as well as podman exec.
+            bounded = args[:3] + ('timeout', '--kill-after=0.1s', '0.25s') + args[3:]
+            run(*bounded, execution_window=1)
+        except subprocess.CalledProcessError as error:
+            if error.returncode not in (124, 137):
+                raise
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                raise ValueError('deadline')
+            # say is delivered before these servers hang waiting for a reply.
+    else:
+        run(*args)
 
 def player_state(instance):
     if native_bedrock(instance):
@@ -100,10 +128,7 @@ def prepare(instance):
         online, names = player_state(instance)
         if online:
             return True
-        if native_bedrock(instance):
-            return True  # Preserve the Bedrock image's graceful announce/save path.
-        # SIGUSR1 is itzg's graceful announcement-delay bypass, not a force kill.
-        run('podman', 'kill', '--signal', 'SIGUSR1', container)
+        graceful_request(instance)
         return True
     except Exception:
         return False
@@ -198,37 +223,27 @@ def stop(saved):
     if warning not in (10, 60):
         raise ValueError('warning')
     active = [s for s in current['instances'] if s['running']]
-    # Issue every stop before waiting, so siblings share the warning window.
-    for state in active:
+    empty = [s for s in active if not s['online']]
+    occupied = [s for s in active if s['online']]
+    def begin_stop(state):
+        graceful_request(state['id'])
         run('systemctl', '--no-block', 'stop', 'minecraft-' + state['id'] + '.service')
-    def bypass(state):
-        try:
-            run('podman', 'kill', '--signal', 'SIGUSR1', 'minecraft-' + state['id'])
-        except Exception:
-            print('WARNING: Instance delay bypass unavailable; preserving normal graceful stop.', file=sys.stderr)
-    for state in active:
-        if not state['online']:
-            bypass(state)
-    if current['online']:
+    for state in empty:
+        begin_stop(state)
+    if occupied:
         previous = warning
-        points = ([30, 15, 10] if warning == 60 else []) + [5, 4, 3, 2, 1]
-        if warning == 10:
-            points.insert(0, 10)
+        points = ([60, 30, 15, 10] if warning == 60 else [10]) + [5, 4, 3, 2, 1, 0]
         for point in points:
-            time.sleep(previous - point)
-            for state in active:
-                if state['online']:
-                    try:
-                        run('podman', 'exec', 'minecraft-' + state['id'], 'send-command' if native_bedrock(state['id']) else 'rcon-cli',
-                            'say Server shutting down in ' + str(point) + (' second' if point == 1 else ' seconds'))
-                    except Exception:
-                        pass  # A server may already have completed its graceful stop.
+            if previous != point:
+                time.sleep(previous - point)
+            for state in occupied:
+                if not running(state['id']):
+                    raise ValueError('countdown runtime changed')
+                if point:
+                    shutdown_announcement(state['id'], point)
             previous = point
-        time.sleep(1)
-        if warning == 10:
-            for state in active:
-                if state['online']:
-                    bypass(state)
+        for state in occupied:
+            begin_stop(state)
     while any(running(state['id'], draining=True) for state in active):
         if time.monotonic() >= deadline:
             raise ValueError('stop timeout')

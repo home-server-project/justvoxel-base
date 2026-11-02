@@ -484,57 +484,138 @@ func TestInstanceBackupNowSelectedTargetAndAccounting(t *testing.T) {
 }
 
 func TestInstanceBackupOccupiedShutdownAndTimeout(t *testing.T) {
-	for _, timeout := range []bool{false, true} {
-		t.Run(map[bool]string{false: "occupied", true: "timeout"}[timeout], func(t *testing.T) {
+	for _, scenario := range []string{"occupied-success", "countdown-timeout", "stop-confirmation-timeout"} {
+		t.Run(scenario, func(t *testing.T) {
 			f := newInstanceBackupFixture(t)
-			id := f.configs[0].ID
+			id, other := f.configs[0].ID, f.configs[1].ID
+			otherState, otherContainer := f.states[other], f.containers[other]
 			f.states[id] = "active"
 			f.containers[id] = "running"
 			f.players = "There are 1 of a max of 20 players online: Alex"
 			base := f.backend.command
-			warnings := 0
+			wantWarnings := []string{
+				"say Server shutting down in 60 seconds",
+				"say Server shutting down in 30 seconds",
+				"say Server shutting down in 15 seconds",
+				"say Server shutting down in 10 seconds",
+				"say Server shutting down in 5 seconds",
+				"say Server shutting down in 4 seconds",
+				"say Server shutting down in 3 seconds",
+				"say Server shutting down in 2 seconds",
+				"say Server shutting down in 1 second",
+			}
+			var events []string
 			elapsed := time.Duration(0)
+			signaled, stopRequested, stoppedObserved, stopWaitTimedOut := false, false, false, false
 			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-				if command == "podman" && len(args) == 4 && strings.HasPrefix(args[3], "say ") {
-					if args[1] != "minecraft-"+id {
-						t.Fatal("warning escaped target")
+				for _, arg := range args {
+					if strings.Contains(arg, other) {
+						t.Fatal("command escaped selected instance", command, args)
 					}
-					warnings++
+				}
+				if command == "podman" && len(args) == 4 && strings.HasPrefix(args[3], "say ") {
+					if args[0] != "exec" || args[1] != "minecraft-"+id || args[2] != "rcon-cli" || signaled || stopRequested {
+						t.Fatal("invalid warning target or order", args)
+					}
+					events = append(events, args[3])
 					return nil, nil
 				}
-				if command == "systemctl" && reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) {
-					f.states[id] = "deactivating"
+				if command == "podman" && len(args) > 0 && args[0] == "kill" {
+					if !reflect.DeepEqual(args, []string{"kill", "--signal", "SIGUSR1", "minecraft-" + id}) || elapsed != time.Minute || !reflect.DeepEqual(events, wantWarnings) {
+						t.Fatal("graceful signal before complete warning sequence or wrong target", args, elapsed, events)
+					}
+					signaled = true
+					events = append(events, "SIGUSR1")
 					return nil, nil
 				}
-				return base(ctx, command, args...)
+				if command == "systemctl" && (args[0] == "stop" || (len(args) > 1 && args[1] == "stop")) {
+					if !reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) || !signaled || stopRequested {
+						t.Fatal("invalid service stop target or order", args)
+					}
+					stopRequested = true
+					events = append(events, "stop")
+					if scenario == "stop-confirmation-timeout" {
+						f.states[id], f.containers[id] = "deactivating", "running"
+					} else {
+						f.states[id], f.containers[id] = "inactive", "exited"
+					}
+					return nil, nil
+				}
+				if command == "nsenter" && len(args) == 6 && args[2] == instanceBackupHelper && args[3] == "create" && !stoppedObserved {
+					t.Fatal("archive before stopped-state confirmation")
+				}
+				out, err := base(ctx, command, args...)
+				if err == nil && stopRequested && command == "podman" && reflect.DeepEqual(args, []string{"inspect", "--type", "container", "--format", "{{.State.Status}} {{.State.ExitCode}}", "minecraft-" + id}) && f.states[id] == "inactive" && f.containers[id] == "exited" {
+					stoppedObserved = true
+				}
+				return out, err
 			}
 			f.backend.pause = func(_ context.Context, d time.Duration) error {
-				elapsed += d
-				if timeout && elapsed >= 60*time.Second {
+				if stopRequested {
+					if scenario != "stop-confirmation-timeout" || d != time.Second || f.states[id] != "deactivating" || f.containers[id] != "running" {
+						t.Fatal("unexpected stopped-state observation wait")
+					}
+					stopWaitTimedOut = true
 					return context.DeadlineExceeded
 				}
-				if elapsed >= 60*time.Second {
-					f.states[id] = "inactive"
-					f.containers[id] = "exited"
+				if f.states[id] != "active" || f.containers[id] != "running" || signaled {
+					t.Fatal("server interrupted during countdown")
+				}
+				elapsed += d
+				if scenario == "countdown-timeout" && elapsed >= time.Minute {
+					return context.DeadlineExceeded
 				}
 				return nil
 			}
 			err := f.server.runInstanceBackup(context.Background(), id)
-			if (err != nil) != timeout || warnings == 0 {
-				t.Fatal(err, warnings)
+			failed := scenario != "occupied-success"
+			if (err != nil) != failed || elapsed != time.Minute {
+				t.Fatal(err, elapsed)
 			}
-			status, _ := f.backend.backupStatus(id)
-			if timeout {
-				if !status.RestartRequired || status.ArchivePublished {
+			wantEvents := append([]string(nil), wantWarnings...)
+			if scenario != "countdown-timeout" {
+				wantEvents = append(wantEvents, "SIGUSR1", "stop")
+			} else if signaled || stopRequested {
+				t.Fatal("countdown failure interrupted server")
+			}
+			if !reflect.DeepEqual(events, wantEvents) {
+				t.Fatal("shutdown warning/signal/stop order", events)
+			}
+			status, statusErr := f.backend.backupStatus(id)
+			if statusErr != nil {
+				t.Fatal(statusErr)
+			}
+			if !status.OriginallyRunning || status.RestartRequired != (scenario == "stop-confirmation-timeout") || status.ArchivePublished != !failed {
+				t.Fatal(status)
+			}
+			created := false
+			for _, call := range f.storage {
+				if !strings.HasSuffix(call, ":"+id) {
+					t.Fatal("storage escaped selected instance", call)
+				}
+				if strings.HasPrefix(call, "create:") {
+					created = true
+				}
+			}
+			if created != !failed {
+				t.Fatal("unexpected archive creation", f.storage)
+			}
+			if failed {
+				if status.State != "failed" || status.Stage != "shutdown" {
 					t.Fatal(status)
 				}
-				for _, call := range f.storage {
-					if strings.HasPrefix(call, "create:") {
-						t.Fatal("archive during unverified shutdown")
-					}
+			} else if status.State != "succeeded" || status.Stage != "complete" || !stoppedObserved {
+				t.Fatal(status, stoppedObserved)
+			}
+			if scenario == "stop-confirmation-timeout" {
+				if !stopWaitTimedOut || stoppedObserved || f.states[id] != "deactivating" || f.containers[id] != "running" {
+					t.Fatal("post-interruption timeout did not retain unverified shutdown state")
 				}
-			} else if status.State != "succeeded" || f.states[id] != "active" {
-				t.Fatal(status)
+			} else if f.states[id] != "active" || f.containers[id] != "running" {
+				t.Fatal("original running state lost")
+			}
+			if f.states[other] != otherState || f.containers[other] != otherContainer {
+				t.Fatal("other instance touched")
 			}
 		})
 	}

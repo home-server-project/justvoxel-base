@@ -224,9 +224,24 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 		return nil, nil
 	}
 	runtime := instanceRuntimes.command
+	gracefulSignalRequested := false
 	instanceRuntimes.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 		selected := "jv-a1b2c3"
 		unit := "minecraft-" + selected + ".service"
+		if command == "systemctl" && slices.Equal(args, []string{"--no-block", "stop", "--", unit}) {
+			if !gracefulSignalRequested {
+				t.Fatal("Java service stopped without the selected instance's SIGUSR1 request")
+			}
+			gracefulSignalRequested = false
+			f.commands = append(f.commands, command+" "+strings.Join(args, " "))
+			_, err := pluginInstallCommand(ctx, "systemctl", "stop", unit)
+			state, stateErr := instanceRuntimes.command(ctx, "systemctl", "show", "--property=LoadState,ActiveState,SubState", unit)
+			container, containerErr := instanceRuntimes.command(ctx, "podman", "inspect", "--type", "container", "--format", "{{.State.Status}} {{.State.ExitCode}}", "minecraft-"+selected)
+			if f.active || stateErr != nil || !strings.Contains(string(state), "ActiveState=inactive\n") || containerErr != nil || string(container) != "exited 0" {
+				t.Fatalf("Java shutdown did not leave the selected runtime inactive/exited: active=%t service=%q (%v) container=%q (%v)", f.active, state, stateErr, container, containerErr)
+			}
+			return nil, err
+		}
 		if command == "systemctl" && len(args) > 0 && args[len(args)-1] == unit {
 			if args[0] == "show" && args[1] == "--property=LoadState,ActiveState,SubState" {
 				state := "inactive"
@@ -241,6 +256,14 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 			}
 		}
 		if command == "podman" {
+			if len(args) > 0 && args[0] == "kill" {
+				if !slices.Equal(args, []string{"kill", "--signal", "SIGUSR1", "minecraft-" + selected}) {
+					t.Fatalf("unexpected Java shutdown signal or target: %s %v", command, args)
+				}
+				f.commands = append(f.commands, command+" "+strings.Join(args, " "))
+				gracefulSignalRequested = true
+				return nil, nil
+			}
 			if len(args) > 0 && args[0] == "ps" {
 				return []byte("minecraft-" + selected), nil
 			}
@@ -664,6 +687,9 @@ func TestPluginInstallSuccessAndOriginalServiceState(t *testing.T) {
 			assertPluginStaging(t, f, journal, false)
 			if journal.State != operationSucceeded || f.active != running || !f.backup {
 				t.Fatalf("state %s active %v: %s", journal.State, f.active, journal.Status)
+			}
+			if running && (!slices.Contains(f.commands, "podman kill --signal SIGUSR1 minecraft-jv-a1b2c3") || !slices.Contains(f.commands, "systemctl --no-block stop -- minecraft-jv-a1b2c3.service")) {
+				t.Fatalf("missing selected-instance Java graceful shutdown: %v", f.commands)
 			}
 			if !running && !strings.Contains(journal.Status, "stopped state") {
 				t.Fatal("incorrect completion")

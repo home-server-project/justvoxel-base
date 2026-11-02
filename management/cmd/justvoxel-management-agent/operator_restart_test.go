@@ -155,7 +155,10 @@ func TestOperatorConfirmedRestartConsumesAllowanceOnce(t *testing.T) {
 			if args[3] != "minecraft-"+id+".service" {
 				return nil, fmt.Errorf("wrong stop target")
 			}
-			f.states[id] = "deactivating"
+			if elapsed != time.Minute || announcements != 9 {
+				t.Fatal("stop before complete warning")
+			}
+			f.states[id], f.containers[id] = "inactive", "exited"
 			return nil, nil
 		}
 		return base(ctx, command, args...)
@@ -164,9 +167,8 @@ func TestOperatorConfirmedRestartConsumesAllowanceOnce(t *testing.T) {
 	// Model elapsed countdown time without altering production timing.
 	f.backend.pause = func(_ context.Context, duration time.Duration) error {
 		elapsed += duration
-		if elapsed >= 60*time.Second {
-			f.states[id] = "inactive"
-			f.containers[id] = "exited"
+		if f.states[id] != "active" {
+			t.Fatal("server stopped during countdown")
 		}
 		return nil
 	}

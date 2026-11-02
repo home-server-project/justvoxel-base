@@ -50,12 +50,24 @@ elif tool=='podman':
         identity=a[2][16:-1]
         if identity in d['running']: print('minecraft-'+identity)
     elif a[0]=='inspect': print('true' if a[-1][10:] in d['running'] else 'false')
+    elif a[0]=='logs': print('[INFO] There are '+str(d.get('native_online',{}).get(a[-1][10:],0))+'/20 players online')
     elif a[0]=='exec':
+        bounded = a[2:5]==['timeout','--kill-after=0.1s','0.25s']
+        if bounded: a=a[:2]+a[5:]
+        if a[3].startswith('say ') and d.get('warning_fail'): sys.exit(1)
+        if a[3]=='stop' and d.get('native_stop_fail'): sys.exit(1)
+        if a[3].startswith('say ') and d.get('warning_hang'):
+            import time
+            time.sleep(0.25 if bounded else 120)
+            if bounded: sys.exit(124)
         if a[3]=='list':
             value=d['players'].get(a[1][10:], 'There are 0 of a max of 20 players online:')
             if value is None: sys.exit(1)
             print(value)
-    elif a[:3]!=['kill','--signal','SIGUSR1']: sys.exit(2)
+    elif len(a)==4 and a[:3]==['kill','--signal','SIGUSR1']:
+        record=json.loads((r/'instances'/a[3][10:]/'config.json').read_text())
+        if record['runtime'].get('software')=='bedrock': sys.exit(2)
+    else: sys.exit(2)
 elif tool=='systemd-run': sys.exit(1 if d['queue_fail'] else 0)
 elif tool=='management-agent':
     if a[0]=='system-update-activate':
@@ -92,7 +104,7 @@ else: sys.exit(2)
             source = source.replace('info.st_uid != 0 or info.st_gid != 0',
                                     'info.st_uid != os.getuid() or info.st_gid != os.getgid()')
             source = source.replace('time.sleep(', 'fixture_sleep(')
-            source = source.replace("root = '", "def fixture_sleep(seconds):\n    with open(os.environ['FIXTURE'] + '/sleeps', 'a') as output:\n        output.write(str(seconds) + '\\n')\n\nroot = '", 1)
+            source = source.replace("root = '", "def fixture_sleep(seconds):\n    with open(os.environ['FIXTURE'] + '/sleeps', 'a') as output:\n        output.write(str(seconds) + '\\n')\n    with open(os.environ['FIXTURE'] + '/calls', 'a') as output:\n        output.write(json.dumps(['sleep', seconds]) + '\\n')\n\nroot = '", 1)
             source = source.replace('[[ -d /sys/firmware/efi ]]', '[[ -d ' + str(self.root) + ' ]]')
             source = source.replace('busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanRebootToFirmwareSetup', "printf 's \\\"yes\\\"'")
             self.write(self.root / 'helpers' / Path(relative).name, source, 0o700)
@@ -322,6 +334,128 @@ else: sys.exit(2)
         self.assertIn(['podman', 'kill', '--signal', 'SIGUSR1', 'minecraft-'+IDS[0]], self.calls())
         self.assertEqual(self.changed('stop'), ['minecraft-'+IDS[0]+'.service'])
         self.assert_running([])
+
+    def test_empty_reboot_has_no_countdown_in_either_mode(self):
+        self.instances(IDS[:2])
+        path = self.root / 'instances' / IDS[1] / 'config.json'
+        record = json.loads(path.read_text())
+        record['runtime']['software'] = 'bedrock'
+        self.write(path, json.dumps(record), 0o600)
+        for warning in ('10', '60'):
+            with self.subTest(warning=warning):
+                self.data['running'] = IDS[:2]
+                self.save()
+                (self.root / 'calls').unlink(missing_ok=True)
+                (self.root / 'sleeps').unlink(missing_ok=True)
+                self.run_helper('system-update-reboot-worker', JV_UPDATE_REBOOT_WARNING_SECONDS=warning)
+                self.assertEqual(self.changed('stop'), ['minecraft-'+i+'.service' for i in IDS[:2]])
+                self.assertFalse((self.root / 'sleeps').exists())
+                self.assertFalse(any(c[0]=='podman' and c[1]=='exec' and c[-1].startswith('say ') for c in self.calls()))
+                for identity in IDS[:2]:
+                    signal = (['podman','exec','minecraft-'+identity,'send-command','stop'] if identity == IDS[1]
+                              else ['podman','kill','--signal','SIGUSR1','minecraft-'+identity])
+                    stop = ['systemctl','--no-block','stop','minecraft-'+identity+'.service']
+                    self.assertLess(self.calls().index(signal), self.calls().index(stop))
+                self.assert_running([])
+                self.assertIn(['systemctl','reboot'], self.calls())
+
+    def test_mixed_reboot_stops_empty_before_countdown_and_occupied_after(self):
+        self.instances(IDS, {IDS[1]: 'There are 1 of a max of 20 players online: Alex\n\x1b[0m\n'})
+        path = self.root / 'instances' / IDS[2] / 'config.json'
+        record = json.loads(path.read_text())
+        record['runtime']['software'] = 'bedrock'
+        self.write(path, json.dumps(record), 0o600)
+        for warning, points in (('10', [10,5,4,3,2,1]), ('60', [60,30,15,10,5,4,3,2,1])):
+            with self.subTest(warning=warning):
+                self.data['running'] = IDS[:]
+                self.save()
+                (self.root / 'calls').unlink(missing_ok=True)
+                (self.root / 'sleeps').unlink(missing_ok=True)
+                self.run_helper('system-update-reboot-worker', JV_UPDATE_REBOOT_WARNING_SECONDS=warning)
+                calls = self.calls()
+                sleeps = [i for i,c in enumerate(calls) if c[0]=='sleep']
+                warnings = [c for c in calls if c[0]=='podman' and c[1]=='exec' and c[-1].startswith('say ')]
+                self.assertEqual([c[-1] for c in warnings], [
+                    'say Server shutting down in '+str(point)+(' second' if point==1 else ' seconds') for point in points])
+                self.assertTrue(all(c[2]=='minecraft-'+IDS[1] for c in warnings))
+                self.assertEqual(sum(c[1] for c in calls if c[0]=='sleep'), int(warning))
+                for identity in (IDS[0], IDS[2]):
+                    stop = ['systemctl','--no-block','stop','minecraft-'+identity+'.service']
+                    self.assertLess(calls.index(stop), sleeps[0])
+                    self.assertLess(calls.index(stop), calls.index(warnings[0]))
+                signal = ['podman','kill','--signal','SIGUSR1','minecraft-'+IDS[1]]
+                stop = ['systemctl','--no-block','stop','minecraft-'+IDS[1]+'.service']
+                self.assertGreater(calls.index(signal), sleeps[-1])
+                self.assertGreater(calls.index(stop), calls.index(signal))
+                self.assertGreater(calls.index(['systemctl','reboot']), calls.index(stop))
+                self.assert_running([])
+
+    def test_native_bedrock_empty_and_occupied_shutdown(self):
+        self.instances([IDS[0]])
+        path = self.root / 'instances' / IDS[0] / 'config.json'
+        record = json.loads(path.read_text())
+        record['runtime']['software'] = 'bedrock'
+        self.write(path, json.dumps(record), 0o600)
+        for online in (0, 1):
+            with self.subTest(online=online):
+                self.data.update(running=[IDS[0]], native_online={IDS[0]: online})
+                self.save()
+                (self.root / 'calls').unlink(missing_ok=True)
+                (self.root / 'sleeps').unlink(missing_ok=True)
+                self.run_helper('system-update-reboot-worker')
+                calls = self.calls()
+                warnings = [c for c in calls if c[0]=='podman' and c[1]=='exec' and c[-1].startswith('say ')]
+                self.assertEqual(len(warnings), 6 if online else 0)
+                self.assertTrue(all(c[3]=='send-command' for c in warnings))
+                self.assertFalse(any(c[0]=='podman' and 'rcon-cli' in c for c in calls))
+                self.assertEqual(sum(c[1] for c in calls if c[0]=='sleep'), 10 if online else 0)
+                self.assertFalse(any(c[0]=='podman' and c[1]=='kill' for c in calls))
+                native_stop = ['podman','exec','minecraft-'+IDS[0],'send-command','stop']
+                service_stop = ['systemctl','--no-block','stop','minecraft-'+IDS[0]+'.service']
+                self.assertLess(calls.index(native_stop), calls.index(service_stop))
+                if online:
+                    self.assertGreater(calls.index(native_stop), max(i for i,c in enumerate(calls) if c[0]=='sleep'))
+                else:
+                    self.assertFalse((self.root / 'sleeps').exists())
+                self.assert_running([])
+
+    def test_native_stop_failure_cancels_reboot(self):
+        self.instances([IDS[0]])
+        path = self.root / 'instances' / IDS[0] / 'config.json'
+        record = json.loads(path.read_text())
+        record['runtime']['software'] = 'bedrock'
+        self.write(path, json.dumps(record), 0o600)
+        self.data['native_stop_fail'] = True
+        self.save()
+        self.run_helper('system-update-reboot-worker', rc=4)
+        self.assertNotIn(['systemctl','reboot'], self.calls())
+        self.assertEqual(self.changed('stop'), [])
+
+    def test_forge_and_neoforge_warning_response_hang_is_bounded(self):
+        self.instances([IDS[0]], {IDS[0]: 'There are 1 of a max of 20 players online: Alex'})
+        path = self.root / 'instances' / IDS[0] / 'config.json'
+        for software in ('forge', 'neoforge'):
+            with self.subTest(software=software):
+                record = json.loads(path.read_text())
+                record['runtime']['software'] = software
+                self.write(path, json.dumps(record), 0o600)
+                self.data.update(running=[IDS[0]], warning_hang=True)
+                self.save()
+                (self.root / 'calls').unlink(missing_ok=True)
+                self.run_helper('system-update-reboot-worker')
+                calls = self.calls()
+                self.assertEqual(len([c for c in calls if c[0]=='podman' and c[-1].startswith('say ')]), 6)
+                self.assertIn(['systemctl','reboot'], calls)
+                self.assert_running([])
+
+    def test_warning_failure_cancels_reboot_and_restores_empty_siblings(self):
+        self.instances(IDS[:2], {IDS[1]: 'There are 1 of a max of 20 players online: Alex'})
+        self.data['warning_fail'] = True
+        self.save()
+        self.run_helper('system-update-reboot-worker', rc=4)
+        self.assertEqual(self.changed('stop'), ['minecraft-'+IDS[0]+'.service'])
+        self.assertNotIn(['systemctl','reboot'], self.calls())
+        self.assert_running(IDS[:2])
 
     def test_partial_stop_failure_restores_running_set(self):
         self.instances(IDS[:2])

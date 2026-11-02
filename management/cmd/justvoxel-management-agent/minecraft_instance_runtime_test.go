@@ -64,6 +64,22 @@ func TestInstanceRuntimeDistinctAndDeterministic(t *testing.T) {
 				t.Fatalf("%s missing %s", c.ID, want)
 			}
 		}
+		// Do not hide conflicting timeout assignments behind substring checks.
+		for _, contract := range []string{"StopTimeout=180", "TimeoutStopSec=240"} {
+			key := strings.SplitN(contract, "=", 2)[0] + "="
+			assignments := 0
+			for _, line := range strings.Split(string(f.Quadlet), "\n") {
+				if strings.HasPrefix(line, key) {
+					assignments++
+					if line != contract {
+						t.Fatal("shutdown timeout contract changed", line)
+					}
+				}
+			}
+			if assignments != 1 {
+				t.Fatal("ambiguous shutdown timeout contract", contract, assignments)
+			}
+		}
 		for _, forbidden := range []string{"managed-crossplay-start", "/validate-data-mount ", "systemctl", "19132/udp", "JV Paper", "JV Vanilla", c.RCONPassword} {
 			if strings.Contains(string(f.Quadlet), forbidden) {
 				t.Fatalf("unsafe Quadlet content: %s", forbidden)

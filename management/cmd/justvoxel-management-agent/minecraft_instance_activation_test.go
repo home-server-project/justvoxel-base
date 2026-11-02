@@ -231,7 +231,7 @@ func (f *instanceActivationFixture) command(ctx context.Context, command string,
 			}
 			return []byte("LoadState=" + load + "\nActiveState=" + state + "\nSubState=mock\n"), nil
 		}
-		if reflect.DeepEqual(args, []string{"stop", "--", "minecraft-" + id + ".service"}) {
+		if reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) || reflect.DeepEqual(args, []string{"stop", "--", "minecraft-" + id + ".service"}) {
 			f.states[id] = "inactive"
 			f.containers[id] = "exited"
 			return nil, nil
@@ -262,6 +262,13 @@ func (f *instanceActivationFixture) command(ctx context.Context, command string,
 			return nil, nil
 		}
 	case "podman":
+		if len(args) == 4 && args[0] == "kill" && args[1] == "--signal" && args[2] == "SIGUSR1" && strings.HasPrefix(args[3], "minecraft-") && instanceIDPattern.MatchString(strings.TrimPrefix(args[3], "minecraft-")) {
+			record, err := f.backend.readRuntimeConfig(strings.TrimPrefix(args[3], "minecraft-"))
+			if err != nil || record.Runtime.Software == "bedrock" {
+				f.t.Fatal("invalid Java graceful signal", args, err)
+			}
+			return nil, nil
+		}
 		if len(args) == 6 && args[0] == "inspect" && args[1] == "--type" && args[2] == "container" && args[3] == "--format" {
 			id := strings.TrimPrefix(args[len(args)-1], "minecraft-")
 			return []byte(f.containers[id] + " 0"), nil

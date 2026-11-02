@@ -512,13 +512,12 @@ func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *te
 					}
 					return nil
 				}
-				if mode != "players-online" || !stopped {
+				if mode != "players-online" || stopped {
 					t.Fatal("unexpected recovery countdown")
 				}
 				elapsed += duration
-				if elapsed >= 60*time.Second {
-					f.states[id] = "inactive"
-					f.containers[id] = "exited"
+				if f.states[id] != "active" {
+					t.Fatal("recovery stopped during countdown")
 				}
 				return nil
 			}
@@ -533,12 +532,11 @@ func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *te
 					}
 				}
 				if command == "systemctl" && reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) {
-					if mode != "players-online" || len(warnings) != 1 || warnings[0] != "say Server shutting down in 60 seconds" {
+					if mode == "players-online" && (elapsed != time.Minute || len(warnings) != 9) {
 						t.Fatal("shutdown requested without initial player warning")
 					}
 					stopped = true
-					f.states[id] = "deactivating"
-					return nil, nil
+					return base(ctx, command, args...)
 				}
 				if command == "systemctl" && reflect.DeepEqual(args, []string{"stop", "--", "minecraft-" + id + ".service"}) {
 					if mode == "players-online" || mode == "players-unknown" {
