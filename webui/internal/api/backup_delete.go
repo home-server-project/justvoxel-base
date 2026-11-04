@@ -15,29 +15,22 @@ import (
 )
 
 var (
-	backupDeleteLegacyPattern      = regexp.MustCompile(`^minecraft-(?:[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}|[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?)\.tar\.gz$`)
 	backupDeleteInstancePattern    = regexp.MustCompile(`^jv-[a-z0-9]{6,12}$`)
 	backupDeleteModernPattern      = regexp.MustCompile(`^(.{1,64})-backup-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?\.tar\.gz$`)
 	backupDeleteFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
-// Match the archive reference contract in mjust/libexec/backup-common.sh.
+// Match the modern per-instance contract in admin-backup-delete-common.sh.
 func validBackupDeleteID(id string) bool {
-	if backupDeleteLegacyPattern.MatchString(id) {
-		return true
-	}
 	instance, archive, found := strings.Cut(id, "/")
 	if !found || !backupDeleteInstancePattern.MatchString(instance) || archive == "" || strings.Contains(archive, "/") {
 		return false
-	}
-	if backupDeleteLegacyPattern.MatchString(archive) {
-		return true
 	}
 	return validBackupDeleteModernArchive(archive)
 }
 
 func validBackupDeleteModernArchive(archive string) bool {
-	if len(archive) > 245 || !utf8.ValidString(archive) {
+	if strings.HasPrefix(archive, "instance-backup-") || len(archive) > 245 || !utf8.ValidString(archive) {
 		return false
 	}
 	match := backupDeleteModernPattern.FindStringSubmatch(archive)

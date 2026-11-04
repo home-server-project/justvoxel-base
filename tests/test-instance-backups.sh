@@ -32,23 +32,7 @@ class InstanceBackups(unittest.TestCase):
         self.private(self.helpers/'common.sh', 'JV_CONFIG=/nonexistent-fixture-config\njv_exact_mount_identity() { printf "%s\\n" "${FIXTURE_MOUNT_ID:-expected}"; }\n')
         common = (REPO/'mjust/libexec/backup-common.sh').read_text().replace('/etc/justvoxel/instances',str(self.configs)).replace('/etc/justvoxel/minecraft-backup.env',str(self.root/'backup.env'))
         (self.helpers/'backup-common.sh').write_text(common)
-        # jq is used only for trusted source arguments; deterministic mock avoids
-        # installing dependencies or querying any actual appliance config.
-        self.tool(self.bin/'jq', '''#!/usr/bin/env python3
-import json,sys
-r=json.load(open(sys.argv[-1]));s=r['storage'];c=r['runtime'];query=sys.argv[-2]
-if query == 'has("backups") | tostring':
-    print("true" if "backups" in r else "false");sys.exit(0)
-if '.backups | keys' in query:
-    b=r.get('backups')
-    valid=isinstance(b,dict) and set(b)=={'type','root','path','mount_point','uuid','source'} and all(isinstance(v,str) for v in b.values()) and b['path']==b['root']+'/'+c['id']
-    sys.exit(0 if valid else 1)
-if '.backups.type' in query:
-    b=r['backups']
-    for value in (b['type'],b['root'],b['mount_point'],b['uuid'],b['source'],s['data_path']):print(value)
-else:
-    for value in (c['id'],s['root'],s['data_path'],s['mount_point'],s['uuid'],s['source'],c['uid'],c['gid']):print(value)
-''')
+        # Use real jq for placement resolution and the production delete JSON path.
         self.source = (REPO/'mjust/libexec/instance-backup').read_text()
         self.source = self.source.replace('/usr/libexec/justvoxel/mjust/',str(self.helpers)+'/')
         self.source = self.source.replace('/etc/justvoxel/instances',str(self.configs))
@@ -119,7 +103,7 @@ else:
 
     def delete_metadata(self, ref):
         source=(REPO/'mjust/libexec/admin-backup-delete-common.sh').read_text()
-        function=source[source.index('backup_delete_instance_metadata() {'):source.index('backup_delete_archive_path() {')]
+        function=source[source.index('backup_delete_instance_metadata() {'):source.index('backup_delete_archive_path() (')]
         function=function.replace('/etc/justvoxel/instances',str(self.configs))
         return subprocess.run(['bash','-c',function+'\nbackup_delete_instance_metadata "$1" "$2"','fixture',str(self.backups),ref],capture_output=True).returncode == 0
 
@@ -150,7 +134,140 @@ else:
         old='instance-backup-paper-2026-10-28-0831.tar.gz'
         archive.rename(folder/old);meta.unlink();item['archive']=old
         self.private(folder/(old+'.meta.json'),json.dumps(item))
-        self.assertTrue(self.delete_metadata('jv-aaaaaa/'+old))
+        self.assertFalse(self.delete_metadata('jv-aaaaaa/'+old))
+
+    def delete(self, action, refs, plan=None):
+        for name in ('admin-backup-delete-common.sh','admin-backup-delete-apply.sh','admin-backup-delete-json'):
+            source=(REPO/'mjust/libexec'/name).read_text()
+            source=source.replace('/usr/libexec/justvoxel/mjust/',str(self.helpers)+'/')
+            source=source.replace('/etc/justvoxel/instances',str(self.configs))
+            self.tool(self.helpers/name,source)
+        # Only the appliance root gate and lock location are fixture boundaries.
+        with (self.helpers/'common.sh').open('a') as f:
+            f.write('require_root() { [[ $EUID == 0 ]]; }\nJV_MAINTENANCE_LOCK='+shlex.quote(str(self.root/'maintenance.lock'))+'\n')
+        request=dict(backup_ids=refs)
+        if plan:
+            request.update(fingerprint=plan['fingerprint'],confirmation=plan['confirmation'])
+        result=subprocess.run(['bash',str(self.helpers/'admin-backup-delete-json'),action],
+                              input=json.dumps(request),env=self.env,capture_output=True,text=True,timeout=20)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertNotIn('private-runtime-secret',result.stdout+result.stderr)
+        self.assertNotIn(str(self.configs),result.stdout)
+        return json.loads(result.stdout)
+
+    def modern_backup(self, identity='jv-aaaaaa', software='paper'):
+        root=self.root/('committed-'+identity)
+        self.pin_backup(identity,root)
+        config=self.configs/identity/'config.json'
+        record=json.loads(config.read_text())
+        record['runtime']['software']=software
+        if software in ('forge','neoforge','fabric','quilt'):
+            record['runtime']['loader_version']='47.4.10'
+        self.private(config,json.dumps(record))
+        self.run_helper('create',identity)
+        item=self.inventory(identity)[-1]
+        archive=root/identity/item['archive']
+        return identity+'/'+item['archive'],archive,Path(str(archive)+'.meta.json')
+
+    def test_modern_delete_production_plan_apply_uses_committed_placement(self):
+        for software in ('paper','spigot','forge','vanilla'):
+            with self.subTest(software=software):
+                ref,archive,meta=self.modern_backup(software=software)
+                _,other,other_meta=self.modern_backup('jv-bbbbbb')
+                before=(other.read_bytes(),other_meta.read_bytes())
+                # The stale global target contains decoys with identical refs.
+                decoy=self.backups/ref;decoy.parent.mkdir(exist_ok=True)
+                self.private(decoy,'leave stale target alone')
+                self.config(network=True)
+                self.env['FIXTURE_MOUNT_ID']='wrong-global-mount'
+                plan=self.delete('plan',[ref])
+                self.assertTrue(plan['ok'],plan)
+                applied=self.delete('apply',[ref],plan['proposed'])
+                self.assertTrue(applied['ok'],applied)
+                self.assertFalse(archive.exists());self.assertFalse(meta.exists())
+                self.assertEqual((other.read_bytes(),other_meta.read_bytes()),before)
+                self.assertEqual(decoy.read_text(),'leave stale target alone')
+
+    def test_modern_delete_without_legacy_config_and_multi_selection(self):
+        a,archive,meta=self.modern_backup()
+        b,other,other_meta=self.modern_backup('jv-bbbbbb')
+        (self.root/'backup.env').unlink()
+        plan=self.delete('plan',[a,b]);self.assertTrue(plan['ok'],plan)
+        # No partially applied selection when a later reference becomes unsafe.
+        original=other_meta.read_text();other_meta.write_text('{}')
+        rejected=self.delete('apply',[a,b],plan['proposed'])
+        self.assertFalse(rejected['ok']);self.assertTrue(archive.exists());self.assertTrue(meta.exists())
+        other_meta.write_text(original)
+        plan=self.delete('plan',[a,b]);self.assertTrue(plan['ok'],plan)
+        result=self.delete('apply',[a,b],plan['proposed'])
+        self.assertTrue(result['ok'],result);self.assertEqual(result['deleted'],2)
+        for path in (archive,meta,other,other_meta):self.assertFalse(path.exists())
+
+    def test_modern_delete_rejects_unsafe_selection(self):
+        ref,archive,meta=self.modern_backup()
+        original=meta.read_bytes()
+        def rejected():
+            self.assertFalse(self.delete('plan',[ref])['ok'])
+            self.assertTrue(archive.exists());self.assertTrue(meta.exists())
+        item=json.loads(original)
+        for updates in (dict(id='jv-bbbbbb'),dict(archive='Other-backup-paper-2026-11-04-0930.tar.gz'),
+                        dict(name='Other'),dict(configuration_sha256='bad'),dict(sha256='0'*64),dict(schema=2)):
+            self.private(meta,json.dumps(dict(item,**updates)));rejected()
+        meta.write_text('{damaged');rejected()
+        meta.write_bytes(original)
+        for path in (archive,meta):
+            saved=Path(str(path)+'.saved');path.rename(saved);path.symlink_to(saved)
+            rejected();path.unlink();saved.rename(path)
+        # Missing sidecar, hard links, and symlink instance directories fail closed.
+        meta.unlink();self.assertFalse(self.delete('plan',[ref])['ok']);meta.write_bytes(original)
+        for path in (archive,meta):
+            link=Path(str(path)+'.link');os.link(path,link);rejected();link.unlink()
+        folder=archive.parent;saved=folder.with_name('saved-instance');folder.rename(saved);folder.symlink_to(saved)
+        rejected();folder.unlink();saved.rename(folder)
+        journal=self.configs/'jv-aaaaaa/restore-journal.json'
+        self.private(journal,json.dumps(dict(schema=1,id='jv-aaaaaa',archive=archive.name,stage='recovery_required')))
+        rejected();journal.unlink()
+        for bad in ('../'+ref,ref+'/nested','jv-aaaaaa/../'+archive.name,ref+'\n'+ref,ref+'\x00',
+                    'minecraft-paper-2026-11-04-0930.tar.gz','jv-aaaaaa/instance-backup-paper-2026-11-04-0930.tar.gz'):
+            self.assertFalse(self.delete('plan',[bad])['ok'])
+        config=self.configs/'jv-aaaaaa/config.json';record=json.loads(config.read_text())
+        wrong=json.loads(json.dumps(record));wrong['runtime']['id']='jv-bbbbbb'
+        self.private(config,json.dumps(wrong));rejected()
+        wrong=json.loads(json.dumps(record));wrong['backups']['path']=str(archive.parent.parent/'jv-bbbbbb')
+        self.private(config,json.dumps(wrong));rejected()
+        self.private(config,json.dumps(record))
+        saved=config.with_suffix('.saved');config.rename(saved);config.symlink_to(saved)
+        rejected();config.unlink();saved.rename(config)
+        # Missing committed placement must not fall back to the valid global file.
+        del record['backups'];self.private(config,json.dumps(record));rejected()
+
+    def test_modern_delete_review_changes_and_mount_identity(self):
+        ref,archive,meta=self.modern_backup()
+        for path in (archive,meta):
+            plan=self.delete('plan',[ref]);self.assertTrue(plan['ok'],plan)
+            original=path.read_bytes()
+            # Equal-size content and preserved mtime still invalidate Review.
+            info=path.stat()
+            if path==archive:
+                changed=bytes([original[0]^1])+original[1:]
+            else:
+                changed=original.replace(b'1.21.4',b'1.21.5')
+            path.write_bytes(changed);os.utime(path,ns=(info.st_atime_ns,info.st_mtime_ns))
+            self.assertFalse(self.delete('apply',[ref],plan['proposed'])['ok'])
+            self.assertTrue(archive.exists());self.assertTrue(meta.exists())
+            path.write_bytes(original)
+        plan=self.delete('plan',[ref])
+        wrong=dict(plan['proposed'],confirmation='DELETE something else')
+        self.assertFalse(self.delete('apply',[ref],wrong)['ok'])
+        with (self.root/'maintenance.lock').open('w') as lock:
+            import fcntl
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            self.assertFalse(self.delete('apply',[ref],plan['proposed'])['ok'])
+        self.pin_backup('jv-aaaaaa',archive.parent.parent,'nas:/selected')
+        self.env['FIXTURE_MOUNT_ID']='nas:/wrong'
+        self.assertFalse(self.delete('plan',[ref])['ok'])
+        self.assertFalse(self.delete('apply',[ref],plan['proposed'])['ok'])
+        self.assertTrue(archive.exists());self.assertTrue(meta.exists())
 
     def test_java_server_backup_identity_and_loader_pin(self):
         path=self.configs/'jv-aaaaaa/config.json'

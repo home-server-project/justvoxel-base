@@ -5,23 +5,22 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/backup-common.sh
 
 require_root
-require_config
-jv_backup_load_config
-jv_backup_require_read_target
 
 backup_delete_json_error() {
     jq -n --arg error "$1" '{ok:false,error:$error,warnings:[],applied:false}'
 }
 
 backup_delete_validate_id() {
-    jv_backup_valid_archive_ref "$1"
+    local ref="$1"
+    [[ ${ref} =~ ^jv-[a-z0-9]{6,12}/([^/]+)$ ]] || return 1
+    [[ ${BASH_REMATCH[1]} != instance-backup-* ]] || return 1
+    jv_instance_backup_valid_archive_id "${ref#*/}"
 }
 
 # Current instance archives are owned only with matching bounded metadata.
-# Legacy root/folder archives retain their existing contract.
 backup_delete_instance_metadata() {
     python3 - "$1" "$2" <<'PYMETA'
-import datetime, json, os, re, stat, sys
+import datetime, hashlib, json, os, re, stat, sys
 root, ref = sys.argv[1:]
 identity, filename = ref.split('/')
 fd = None
@@ -52,7 +51,7 @@ try:
     if not isinstance(m['name'], str) or len(m['name']) > 64 or any(ord(c) < 32 for c in m['name']):
         raise ValueError('name')
     match = re.fullmatch(r"(.{1,64})-backup-([a-z][a-z0-9-]{0,70})-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz", filename)
-    if not match or match[2] != software or (match[1] != 'instance' and match[1] != m['name']):
+    if not match or match[2] != software or match[1] != m['name']:
         raise ValueError('archive binding')
     if not isinstance(m['created'], str) or len(m['created']) != 20:
         raise ValueError('created')
@@ -63,6 +62,14 @@ try:
     info = os.stat(filename, dir_fd=fd, follow_symlinks=False)
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or type(m['size']) != int or m['size'] <= 0 or info.st_size != m['size']:
         raise ValueError('archive')
+    f = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    with os.fdopen(f, 'rb') as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1 or opened.st_ino != info.st_ino or opened.st_dev != info.st_dev:
+            raise ValueError('archive identity')
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if digest != m['sha256']:
+            raise ValueError('archive hash')
     # Preserve a Restore selection after process death until safe recovery.
     config = '/etc/justvoxel/instances/' + identity
     if os.path.lexists(config + '/restore-journal.json'):
@@ -83,28 +90,34 @@ finally:
 PYMETA
 }
 
-backup_delete_archive_path() {
-    local id="$1" root archive real
+# Resolution is isolated: placement variables must never leak between selections.
+backup_delete_archive_path() (
+    local id="$1" root archive real instance config path
     backup_delete_validate_id "${id}" || return 1
-    root="$(readlink -f -- "${minecraft_backup_path}" 2>/dev/null || true)"
+    instance="${id%%/*}"
+    config="/etc/justvoxel/instances/${instance}/config.json"
+    for path in /etc/justvoxel/instances "/etc/justvoxel/instances/${instance}"; do
+        [[ -d ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" && $(stat -c '%u:%g:%a' -- "${path}") == 0:0:700 ]] || return 1
+    done
+    [[ -f ${config} && ! -L ${config} && $(stat -c '%u:%g:%a:%h' -- "${config}") == 0:0:600:1 ]] || return 1
+    # Require committed placement so the shared resolver cannot take its legacy fallback.
+    jq -e '.backups | type == "object"' "${config}" >/dev/null 2>&1 || return 1
+    jv_instance_backup_load_target "${instance}" >/dev/null 2>&1 || return 1
+    root="${JV_INSTANCE_BACKUP_ROOT}"
     archive="${minecraft_backup_path}/${id}"
     [[ -n ${root} && -f ${archive} && ! -L ${archive} ]] || return 1
     real="$(readlink -f -- "${archive}" 2>/dev/null || true)"
     [[ -n ${real} && ${real} == "${root}/${id}" ]] || return 1
-    if [[ ${id} == */* ]] && jv_instance_backup_valid_archive_id "${id#*/}"; then
-        backup_delete_instance_metadata "${root}" "${id}" || return 1
-    fi
+    backup_delete_instance_metadata "${root}" "${id}" || return 1
     printf '%s\n' "${real}"
-}
+)
 
 backup_delete_metadata_path() {
-    local archive="$1" metadata root real
+    local archive="$1" metadata real
     metadata="${archive}.meta.json"
-    [[ -e ${metadata} || -L ${metadata} ]] || return 0
     [[ -f ${metadata} && ! -L ${metadata} ]] || return 1
-    root="$(readlink -f -- "${minecraft_backup_path}" 2>/dev/null || true)"
     real="$(readlink -f -- "${metadata}" 2>/dev/null || true)"
-    [[ -n ${root} && -n ${real} && ${real} == "${archive}.meta.json" ]] || return 1
+    [[ -n ${real} && ${real} == "${archive}.meta.json" ]] || return 1
     printf '%s\n' "${real}"
 }
 
@@ -112,9 +125,10 @@ backup_delete_collect_plan() {
     local request ids_json id archive metadata size total=0 count=0
     local records='[]' fingerprint_input='' confirmation
 
+    BACKUP_DELETE_ARCHIVES=() BACKUP_DELETE_METADATA=()
     request="$(cat)"
     BACKUP_DELETE_REQUEST_JSON="${request}"
-    jq -e 'type == "object" and (.backup_ids | type == "array") and (.backup_ids | length >= 1 and length <= 100) and all(.backup_ids[]; type == "string")' >/dev/null 2>&1 <<< "${request}" || {
+    jq -e 'type == "object" and (.backup_ids | type == "array") and (.backup_ids | length >= 1 and length <= 100) and all(.backup_ids[]; type == "string" and (explode | all(. >= 32 and . != 127)))' >/dev/null 2>&1 <<< "${request}" || {
         backup_delete_json_error 'Choose between 1 and 100 backups to delete.'
         return 1
     }
@@ -132,7 +146,7 @@ backup_delete_collect_plan() {
             return 1
         }
         metadata="$(backup_delete_metadata_path "${archive}" || true)"
-        if [[ ( -e ${archive}.meta.json || -L ${archive}.meta.json ) && -z ${metadata} ]]; then
+        if [[ -z ${metadata} ]]; then
             backup_delete_json_error "Metadata for backup '${id}' is unsafe to delete."
             return 1
         fi
@@ -141,11 +155,13 @@ backup_delete_collect_plan() {
             backup_delete_json_error "Backup '${id}' could not be inspected safely."
             return 1
         }
+        BACKUP_DELETE_ARCHIVES+=("${archive}")
+        BACKUP_DELETE_METADATA+=("${metadata}")
         total=$((total + size))
         count=$((count + 1))
-        fingerprint_input+="${id}|$(stat -Lc '%s|%Y|%Z|%i' -- "${archive}")"$'\n'
+        fingerprint_input+="${id}|${archive}|$(stat -Lc '%s|%y|%z|%d|%i' -- "${archive}")|$(sha256sum -- "${archive}" | cut -d' ' -f1)"$'\n'
         if [[ -n ${metadata} ]]; then
-            fingerprint_input+="$(basename -- "${metadata}")|$(stat -Lc '%s|%Y|%Z|%i' -- "${metadata}")|$(sha256sum -- "${metadata}" | cut -d' ' -f1)"$'\n'
+            fingerprint_input+="$(basename -- "${metadata}")|$(stat -Lc '%s|%y|%z|%d|%i' -- "${metadata}")|$(sha256sum -- "${metadata}" | cut -d' ' -f1)"$'\n'
         fi
         records="$(jq -cn --argjson records "${records}" --arg id "${id}" --argjson size_bytes "${size}" '$records + [{id:$id,size_bytes:$size_bytes}]')"
     done < <(jq -r '.[]' <<< "${ids_json}")

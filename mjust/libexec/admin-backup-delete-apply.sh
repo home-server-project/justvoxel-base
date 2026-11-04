@@ -3,7 +3,7 @@ set -euo pipefail
 
 backup_delete_apply() {
     local request submitted_fingerprint submitted_confirmation current_fingerprint expected_confirmation
-    local id archive metadata deleted=0
+    local archive metadata index deleted=0
 
     request="$(cat)"
 
@@ -12,11 +12,6 @@ backup_delete_apply() {
         backup_delete_json_error 'Another JustVoxel maintenance operation is running. Nothing was deleted.'
         return 0
     fi
-
-    [[ -w ${minecraft_backup_path} ]] || {
-        backup_delete_json_error 'The configured backup directory is not writable. Nothing was deleted.'
-        return 0
-    }
 
     backup_delete_collect_plan <<< "${request}" || return 0
 
@@ -34,19 +29,21 @@ backup_delete_apply() {
         return 0
     fi
 
-    while IFS= read -r id; do
-        archive="$(backup_delete_archive_path "${id}" || true)"
-        [[ -n ${archive} ]] || {
-            backup_delete_json_error "Backup '${id}' changed before deletion. Nothing further was deleted."
+    # Validate every selected directory before the first removal. These exact
+    # paths were independently resolved and fingerprinted under the lock above.
+    for archive in "${BACKUP_DELETE_ARCHIVES[@]}"; do
+        [[ -w ${archive%/*} && -x ${archive%/*} ]] || {
+            backup_delete_json_error 'A selected backup directory is not writable. Nothing was deleted.'
             return 0
         }
-        metadata="$(backup_delete_metadata_path "${archive}" || true)"
+    done
+    for index in "${!BACKUP_DELETE_ARCHIVES[@]}"; do
+        archive="${BACKUP_DELETE_ARCHIVES[index]}"
+        metadata="${BACKUP_DELETE_METADATA[index]}"
         rm -f -- "${archive}"
-        if [[ -n ${metadata} ]]; then
-            rm -f -- "${metadata}"
-        fi
+        rm -f -- "${metadata}"
         deleted=$((deleted + 1))
-    done < <(jq -r '.backups[].id' <<< "${BACKUP_DELETE_PLAN_JSON}")
+    done
 
     jq -n \
         --argjson proposed "${BACKUP_DELETE_PLAN_JSON}" \

@@ -10,7 +10,7 @@ for script in "${common}" "${apply}" "${entry}"; do
     bash -n "${script}"
 done
 
-grep -Fq 'jv_backup_valid_archive_ref "$1"' "${common}" || {
+grep -Fq 'jv_instance_backup_valid_archive_id "${ref#*/}"' "${common}" || {
     echo 'ERROR: backup deletion lost strict JustVoxel archive naming.' >&2
     exit 1
 }
@@ -27,6 +27,19 @@ done
 for id in '/jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/../Paper1-backup-paper-2026-10-28-0831.tar.gz' 'other/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz/extra' 'jv-abc123/bad!name-backup-paper-2026-10-28-0831.tar.gz' jv-abc123/../minecraft-paper-2026-10-09-1506.tar.gz other/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/nested/minecraft-paper-2026-10-09-1506.tar.gz; do
     if jv_backup_valid_archive_ref "${id}"; then echo "ERROR: unsafe backup ref accepted: ${id}" >&2; exit 1; fi
 done
+# Test deletion's narrower contract, leaving shared inventory/restore naming alone.
+source <(sed -n '/^backup_delete_validate_id() {/,/^}/p' "${common}")
+for id in 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Family Server-backup-spigot-2026-10-28-0831-2.tar.gz' 'jv-abc123/家族-backup-forge-2026-10-28-0831.tar.gz' 'jv-abc123/Vanilla-backup-vanilla-2026-10-28-0831.tar.gz'; do
+    backup_delete_validate_id "${id}" || { echo "ERROR: modern delete ref rejected: ${id}" >&2; exit 1; }
+done
+for id in minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/instance-backup-paper-2026-10-28-0831.tar.gz '/jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/../Paper1-backup-paper-2026-10-28-0831.tar.gz' 'other/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz/extra' 'jv-abc123/bad!name-backup-paper-2026-10-28-0831.tar.gz'; do
+    if backup_delete_validate_id "${id}"; then echo "ERROR: unsafe/legacy delete ref accepted: ${id}" >&2; exit 1; fi
+done
+if grep -Eq 'require_config|jv_backup_load_config|minecraft-backup.env' "${common}" "${apply}"; then
+    echo 'ERROR: deletion depends on global backup configuration.' >&2
+    exit 1
+fi
+grep -Fq 'jv_instance_backup_load_target "${instance}"' "${common}"
 [[ "$(MINECRAFT_SERVER_TYPE=purpur jv_archive_server_label)" == minecraft-purpur ]] || { echo 'ERROR: configured Minecraft type missing from archive label' >&2; exit 1; }
 
 grep -Fq '! -L ${archive}' "${common}" || {
