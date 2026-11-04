@@ -10,7 +10,7 @@ require_root() { :; }
 require_config() { :; }
 resolve_latest_stable_paper_version() { printf '%s' "${STABLE_VERSION}"; }
 resolve_latest_available_paper_version() { printf '%s' "${NEWEST_VERSION}"; }
-resolve_geyser_supported_java_version() { printf '%s' "${STABLE_VERSION}"; }
+resolve_geyser_supported_java_version() { printf '%s' "${GEYSER_VERSION-${STABLE_VERSION}}"; }
 paper_version_has_stable_build() { [[ $1 == "${STABLE_VERSION}" ]]; }
 paper_version_build_channel() {
     case "$1" in
@@ -185,6 +185,7 @@ resolve_setup_java_runtime() {
     case "$1" in
         fabric) printf '%s' '{"game":"26.3","loader":"0.19.5","image":"java25"}' ;;
         neoforge) printf '%s' '{"game":"26.3","loader":"26.3.0.99","image":"java25"}' ;;
+        spigot|pufferfish) printf '%s' '{"game":"26.3","loader":"","image":"java25"}' ;;
         leaf) printf '%s' '{"game":"26.3","loader":"","image":"java25","reason":"Leaf labels this build Experimental. It is available for setup."}' ;;
         *) return 1 ;;
     esac
@@ -199,16 +200,53 @@ for software in fabric neoforge; do
     case "${software}" in fabric) loader=0.19.5 ;; neoforge) loader=26.3.0.99 ;; esac
     for policy in recommended pinned; do
         preview="$(bash "${fixture_dir}/status" --server-type "${software}" "${policy}" 26.3 no)"
-        jq -e --arg loader "${loader}" '.selected_candidate == "26.3" and .loader_version == $loader and .image_tag == "java25" and .server_supported and (.crossplay_enabled | not) and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
+        jq -e --arg loader "${loader}" '.selected_candidate == "26.3" and .loader_version == $loader and .image_tag == "java25" and .geyser_supported_version == "26.2" and .server_supported and (.crossplay_enabled | not) and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
         [[ ! -e ${DATA_PATH}.crossplay-checks ]]
     done
 done
 for software in fabric neoforge; do
-    preview="$(bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
+    preview="$(GEYSER_VERSION=26.3 bash "${fixture_dir}/status" --server-type "${software}" recommended '' no)"
+    jq -e '.server_supported and .selected_candidate == "26.3" and .geyser_supported_version == "26.3" and (.crossplay_enabled | not)' <<< "${preview}" >/dev/null
+    [[ ! -e ${DATA_PATH}.crossplay-checks ]]
+    preview="$(GEYSER_VERSION=26.3 bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
     jq -e '.crossplay_enabled and (.crossplay_compatible | not) and (.managed_crossplay_available | not) and (.reason | contains("could not be proven"))' <<< "${preview}" >/dev/null
     [[ -s ${DATA_PATH}.crossplay-checks ]]
-    preview="$(CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
+    preview="$(GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
     jq -e '.crossplay_enabled and .crossplay_compatible and .managed_crossplay_available' <<< "${preview}" >/dev/null
+    case "${software}" in fabric) loader=0.19.5 ;; neoforge) loader=26.3.0.99 ;; esac
+    [[ $(cat "${DATA_PATH}.crossplay-checks") == "${software} 26.3 ${loader}"$'\n'"${software} 26.3 ${loader}" ]]
+    rm "${DATA_PATH}.crossplay-checks"
 done
 preview="$(bash "${fixture_dir}/status" --server-type leaf recommended '' no)"
 jq -e '.selected_candidate == "26.3" and .candidate_channel == "RELEASE" and .server_supported and (.reason | contains("Experimental"))' <<< "${preview}" >/dev/null
+
+# Discovery never rewrites a selected runtime or invokes artifact proof for a
+# mismatch or missing Geyser metadata, even with cross-play explicitly requested.
+rm -f "${DATA_PATH}.crossplay-checks"
+for software in fabric neoforge spigot pufferfish leaf; do
+    for geyser in 26.2 ''; do
+        for enabled in no yes; do
+            preview="$(GEYSER_VERSION="${geyser}" bash "${fixture_dir}/status" --server-type "${software}" pinned 26.3 "${enabled}")"
+            jq -e --arg geyser "${geyser}" '.selected_candidate == "26.3" and .server_supported and .geyser_supported_version == $geyser and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
+            [[ ! -e ${DATA_PATH}.crossplay-checks ]]
+        done
+    done
+done
+# Reuse the policy wrappers and stub only Purpur publisher discovery.
+cat >> "${fixture_dir}/common.sh" <<'STUB'
+purpur_metadata() { printf '%s' '{"metadata":{"current":"26.2"},"versions":["26.2","26.3"]}'; }
+STUB
+for software in paper purpur; do
+    preview="$(bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
+    jq -e '.selected_candidate == "26.2" and .crossplay_compatible' <<< "${preview}" >/dev/null
+    for policy in latest pinned; do
+        preview="$(bash "${fixture_dir}/status" --server-type "${software}" "${policy}" 26.3 no)"
+        jq -e '.selected_candidate == "26.3" and .geyser_supported_version == "26.2" and .server_supported' <<< "${preview}" >/dev/null
+    done
+    preview="$(GEYSER_VERSION='' bash "${fixture_dir}/status" --server-type "${software}" pinned 26.3 no)"
+    jq -e '.selected_candidate == "26.3" and .geyser_supported_version == "" and .server_supported' <<< "${preview}" >/dev/null
+done
+
+# Spigot continues supporting older Java releases through managed ViaVersion.
+preview="$(GEYSER_VERSION=26.4 bash "${fixture_dir}/status" --server-type spigot pinned 26.3 yes)"
+jq -e '.selected_candidate == "26.3" and .geyser_supported_version == "26.4" and .crossplay_compatible' <<< "${preview}" >/dev/null

@@ -166,10 +166,7 @@ if (versionPolicy && versionInput && specificVersionField) {
     const software = form.dataset?.serverType;
     const javaOnly = ["vanilla", "forge", "quilt"].includes(software);
     if (javaOnly && toggle) { toggle.disabled = true; toggle.checked = false; status.crossplay_enabled = false; }
-    if (toggle && (software === "fabric" || software === "neoforge")) {
-      toggle.disabled = !status.managed_crossplay_available;
-      if (toggle.disabled) { toggle.checked = false; status.crossplay_enabled = false; }
-    }
+    if (toggle && !javaOnly) toggle.disabled = false;
     const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");
     summary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? "Latest" : "Specific"));
     if (status.selected_candidate) {
@@ -179,13 +176,32 @@ if (versionPolicy && versionInput && specificVersionField) {
       summary.append(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
     }
     preview.replaceChildren(summary);
-    if (status.selected_candidate && status.reason) {
+    if (status.selected_candidate && status.reason && (!status.crossplay_enabled || status.crossplay_compatible)) {
       preview.append(make("div", "notice warning setup-version-panel setup-version-explanation", status.reason));
     }
     const compatibility = make("div", "notice " + (!status.crossplay_enabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
-    compatibility.append(make("p", "", !status.crossplay_enabled ? (javaOnly ? "This software supports Java only." : form.querySelector("[data-bedrock-toggle]")?.disabled ? (status.reason || "Managed cross-play is unavailable for this selection. Java setup is available.") : "Bedrock cross-play is disabled.") : status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
+    const supported = status.geyser_supported_version;
+    const selected = status.selected_candidate;
+    let message;
+    if (javaOnly) {
+      message = "This software supports Java only.";
+    } else if (status.crossplay_enabled && status.crossplay_compatible) {
+      message = `Bedrock cross-play is supported for Minecraft ${selected}.`;
+    } else if (!supported) {
+      message = "Current managed cross-play Minecraft version could not be verified. Java setup is available.";
+    } else {
+      message = `Managed cross-play currently supports Minecraft ${supported}.`;
+      if (selected && selected !== supported) {
+        message += ` Selected Minecraft ${selected} is available as Java-only.`;
+      } else if (!status.crossplay_enabled) {
+        const runtime = software === "fabric" ? "Fabric" : software === "neoforge" ? "NeoForge" : "";
+        message += runtime ? ` Enable Bedrock cross-play to verify this exact ${runtime} runtime.` : " Enable Bedrock cross-play if wanted.";
+      } else {
+        message += " " + (status.reason || "Managed cross-play compatibility could not be proven for this exact runtime.");
+      }
+    }
+    compatibility.append(make("p", "", message));
     if (status.crossplay_enabled && !status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
-    if (status.crossplay_enabled && status.geyser_supported_version) compatibility.append(make("p", "", `Current supported Minecraft version: ${status.geyser_supported_version}.`));
     preview.append(compatibility);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
   };

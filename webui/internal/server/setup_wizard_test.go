@@ -36,7 +36,7 @@ func assertSetupApplicationLogo(t *testing.T, body string) {
 }
 
 func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
-	for _, serverType := range []string{"paper", "purpur", "vanilla", "forge", "quilt"} {
+	for _, serverType := range []string{"paper", "purpur", "spigot", "pufferfish", "leaf", "fabric", "neoforge", "vanilla", "forge", "quilt"} {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/enabled=%t", serverType, enabled), func(t *testing.T) {
 				client := setupWizardClient()
@@ -77,13 +77,15 @@ func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
 				if strings.Contains(control, "disabled") != vanilla {
 					t.Fatalf("incorrect disabled state: %s", control)
 				}
-				if strings.Contains(control, "checked") != (enabled && !vanilla) {
+				if strings.Contains(control, "checked") != (enabled && !vanilla && !setupNeedsExactRuntime(serverType)) {
 					t.Fatalf("incorrect default checked state: %s", control)
 				}
 				if strings.Contains(body, vanillaBedrockHelp) != vanilla || strings.Contains(body, `<p class="notice error">`) {
 					t.Fatal("Vanilla needs inline guidance without a compatibility warning")
 				}
-				if !vanilla {
+				// Exact-runtime software clears the default cross-play choice on software
+				// selection; its explicit proof path is covered by preview behavior tests.
+				if !vanilla && !setupNeedsExactRuntime(serverType) {
 					connections := validConnectionValues()
 					connections.Set("bedrock_enabled", "on")
 					if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusSeeOther {
@@ -756,8 +758,8 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 		`"setup-version-explanation"`, `const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");`,
 		`status.crossplay_compatible ? "success" : "warning"`,
 		`preview.replaceChildren(summary);`,
-		`Bedrock cross-play is supported.`, `Bedrock cross-play is not supported.`,
-		`Current supported Minecraft version: ${status.geyser_supported_version}`,
+		`Bedrock cross-play is supported for Minecraft`, `Selected Minecraft ${selected} is available as Java-only.`,
+		`Managed cross-play currently supports Minecraft ${supported}`,
 		`next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);`,
 		`if (policy === "pinned" && !version)`,
 	} {

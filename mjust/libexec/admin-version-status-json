@@ -74,26 +74,33 @@ if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${
     image="$(jq -r '.image // empty' <<< "${resolved}")"
     compatible=false
     available=false
+    geyser=''
+    case "${target_type}" in
+        spigot|pufferfish|leaf|fabric|neoforge) geyser="$(resolve_geyser_supported_java_version || true)" ;;
+    esac
     reason="$(jq -r '.reason // empty' <<< "${resolved}")"
     if [[ -n ${candidate} ]]; then
         if [[ ${target_type} == spigot || ${target_type} == pufferfish || ${target_type} == leaf ]]; then
             available=true
-            geyser="$(resolve_geyser_supported_java_version || true)"
             if [[ -n ${geyser} ]] && server_crossplay_version_compatible "${candidate}" "${geyser}"; then compatible=true; fi
         elif [[ ${target_type} == fabric || ${target_type} == neoforge ]]; then
             # A Java preview must never download managed cross-play artifacts.
             # Only an explicit cross-play request proves that independent capability.
             if [[ $3 == yes ]]; then
-                if jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${loader}"; then
+                if [[ -z ${geyser} ]]; then
+                    reason='Current managed cross-play Minecraft version could not be verified. Java setup is available.'
+                elif [[ ${candidate} != "${geyser}" ]]; then
+                    reason="Managed cross-play currently supports Minecraft ${geyser}. Selected Minecraft ${candidate} is available as Java-only."
+                elif jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${loader}"; then
                     available=true
                     compatible=true
                 else reason='Managed cross-play compatibility could not be proven for this exact Minecraft and loader version. Java setup is available.'; fi
             fi
         fi
     else reason='An exact stable Minecraft release and compatible runtime could not be verified. Try again or choose a supported Specific version.'; fi
-    jq -n --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" \
+    jq -n --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg geyser "${geyser}" --arg reason "${reason}" \
         --argjson compatible "${compatible}" --argjson available "${available}" --argjson enabled "$([[ $3 == yes ]] && printf true || printf false)" \
-        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:"RELEASE",loader_version:$loader,image_tag:$image,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled}'
+        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:"RELEASE",loader_version:$loader,image_tag:$image,geyser_supported_version:$geyser,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled}'
     exit 0
 fi
 available="$(resolve_latest_server_version || true)"
@@ -107,10 +114,14 @@ bedrock="${3:-${BEDROCK_ENABLED:-no}}"
 candidate_channel=''
 server_supported=false
 geyser_version=''
+# Setup discovery is informational even when cross-play is off.
+if (( $# == 3 )) && [[ ${target_type} == paper || ${target_type} == purpur ]]; then
+    geyser_version="$(resolve_geyser_supported_java_version || true)"
+fi
 crossplay_compatible=false
 reason=''
 if [[ ${bedrock} == yes ]]; then
-    geyser_version="$(resolve_geyser_supported_java_version || true)"
+    if (( $# != 3 )); then geyser_version="$(resolve_geyser_supported_java_version || true)"; fi
     if [[ -n ${geyser_version} ]] && server_version_recommended_available "${geyser_version}"; then
         recommended="${geyser_version}"
     else
