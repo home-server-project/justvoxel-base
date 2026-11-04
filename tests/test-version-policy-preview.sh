@@ -121,7 +121,7 @@ validate_memory() { [[ $1 =~ ^[1-9][0-9]*G$ ]]; }
 memory_to_mib() { printf '%s' "$((${1%G} * 1024))"; }
 validate_port() { [[ $1 -ge 1 && $1 -le 65535 ]]; }
 validate_minecraft_image_tag() { :; }
-resolve_geyser_supported_java_version() { printf '26.2'; }
+resolve_geyser_supported_java_version() { printf '%s' "${GEYSER_VERSION:-26.2}"; }
 resolve_latest_stable_paper_version() { printf '26.2'; }
 resolve_latest_available_paper_version() { printf '%s' "${PLANNER_LATEST_VERSION:-26.3}"; }
 paper_version_has_stable_build() { [[ $1 == 26.2 ]]; }
@@ -133,8 +133,15 @@ EOF
 sed -n '/^server_crossplay_version_compatible() {/,/^}/p' "${repo_root}/mjust/libexec/common.sh" >> "${fixture_dir}/planner-common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
 touch "${fixture_dir}/planner-storage.sh"
+cat > "${fixture_dir}/planner-crossplay.sh" <<'STUB'
+jv_crossplay_mod_compatible() {
+    printf '%s\n' "$*" >> "${DATA_PATH}.planner-crossplay-checks"
+    [[ ${CROSSPLAY_VERIFIED:-no} == yes ]]
+}
+STUB
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/planner-common.sh|" \
     -e "s|^source /usr/libexec/justvoxel/mjust/storage-common-base.sh$|source ${fixture_dir}/planner-storage.sh|" \
+    -e "s|source /usr/libexec/justvoxel/mjust/managed-crossplay.sh|source ${fixture_dir}/planner-crossplay.sh|" \
     -e '/^request="$(cat)"$/i system_memory_mib() { printf 8192; }\nport_in_use() { return 1; }' \
     "${repo_root}/mjust/libexec/admin-setup-plan-json" > "${fixture_dir}/planner"
 planner_request='{"server":{"motd":"Family","max_players":10,"bedrock_enabled":true,"timezone":"America/Toronto"},"minecraft":{"java_memory":"2G","container_memory":"3G","java_port":49165,"bedrock_port":49166,"image_tag":"stable","version_policy":"recommended","version":"","game_mode":"survival"},"storage":{"type":"system","path":"/var/lib/justvoxel/minecraft","device":"","mount_point":""},"backups":{"automatic":true,"daily_time":"04:30","keep":7,"type":"system","path":"/var/lib/justvoxel/backups","device":"","mount_point":"","source":"","username":"","domain":""}}'
@@ -167,13 +174,49 @@ for software in paper purpur vanilla; do
         fi
     done
 done
-request="$(jq -c '.minecraft.server_type="fabric"' <<< "${planner_request}")"
-result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
-jq -e '.ok == false and .code == "invalid_minecraft"' <<< "${result}" >/dev/null
+for software in fabric neoforge; do
+    request="$(jq -c --arg software "${software}" '.minecraft.server_type=$software' <<< "${planner_request}")"
+    result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
+    jq -e '.ok == false and .code == "invalid_minecraft"' <<< "${result}" >/dev/null
+done
 for invalid in false null '""' '"PAPER"'; do
     request="$(jq -c --argjson invalid "${invalid}" '.minecraft.server_type=$invalid' <<< "${planner_request}")"
     result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
     jq -e '.ok == false and .code == "schema_error"' <<< "${result}" >/dev/null
+done
+
+# The WebUI sends a pinned resolved game, loader, and image. Keep the real
+# selection validators and exact publisher metadata checks; stub only responses.
+cat >> "${fixture_dir}/planner-common.sh" <<'STUB'
+curl() {
+    case "${*: -1}" in
+        */version_manifest_v2.json) printf '{"versions":[{"id":"26.3","type":"release"}]}' ;;
+        https://meta.fabricmc.net/v2/versions/loader/26.3/0.19.5/server/json)
+            printf '{"inheritsFrom":"26.3","mainClass":"net.fabricmc.loader.impl.launch.knot.KnotServer","libraries":[{"name":"net.fabricmc:fabric-loader:0.19.5"}]}' ;;
+        https://maven.neoforged.net/releases/net/neoforged/neoforge/26.3.0.99/neoforge-26.3.0.99-installer.jar.sha1)
+            printf '%040d' 1 ;;
+        *) echo 'Unexpected planner metadata request' >&2; return 1 ;;
+    esac
+}
+STUB
+for software in fabric neoforge; do
+    case "${software}" in fabric) loader=0.19.5 ;; neoforge) loader=26.3.0.99 ;; esac
+    resolved_request="$(jq -c --arg software "${software}" --arg loader "${loader}" '.minecraft += {server_type:$software,version_policy:"pinned",version:"26.3",loader_version:$loader,image_tag:"java25"}' <<< "${planner_request}")"
+    for proof in yes no; do
+        rm -f "${DATA_PATH}.planner-crossplay-checks"
+        result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED="${proof}" bash "${fixture_dir}/planner" <<< "${resolved_request}")"
+        if [[ ${proof} == yes ]]; then
+            jq -e --arg software "${software}" --arg loader "${loader}" '.ok and .normalized.server.bedrock_enabled and .normalized.minecraft.server_type == $software and .normalized.minecraft.version_policy == "pinned" and .normalized.minecraft.version == "26.3" and .normalized.minecraft.loader_version == $loader and .normalized.minecraft.image_tag == "java25"' <<< "${result}" >/dev/null
+        else
+            jq -e '.ok == false and .code == "bedrock_version_unsupported"' <<< "${result}" >/dev/null
+        fi
+        [[ $(cat "${DATA_PATH}.planner-crossplay-checks") == "${software} 26.3 ${loader}" ]]
+    done
+    rm "${DATA_PATH}.planner-crossplay-checks"
+    java_request="$(jq -c '.server.bedrock_enabled=false' <<< "${resolved_request}")"
+    result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=no bash "${fixture_dir}/planner" <<< "${java_request}")"
+    jq -e --arg software "${software}" --arg loader "${loader}" '.ok and (.normalized.server.bedrock_enabled | not) and .normalized.minecraft.server_type == $software and .normalized.minecraft.version_policy == "pinned" and .normalized.minecraft.version == "26.3" and .normalized.minecraft.loader_version == $loader and .normalized.minecraft.image_tag == "java25"' <<< "${result}" >/dev/null
+    [[ ! -e ${DATA_PATH}.planner-crossplay-checks ]]
 done
 
 # New-software Java previews resolve independently of managed cross-play JARs.
@@ -181,10 +224,13 @@ done
 # and test-paper-fork-versions.sh; this fixture isolates the preview boundary.
 cat >> "${fixture_dir}/common.sh" <<'STUB'
 resolve_setup_java_runtime() {
-    [[ $2 == recommended || ( $2 == pinned && $3 == 26.3 ) ]] || return 1
+    [[ $2 == recommended || $2 == latest || ( $2 == pinned && ( $3 == 26.3 || $3 == 26.4 ) ) ]] || return 1
+    local game=26.3
+    [[ $2 != latest ]] || game=26.4
+    [[ $2 != pinned ]] || game=$3
     case "$1" in
-        fabric) printf '%s' '{"game":"26.3","loader":"0.19.5","image":"java25"}' ;;
-        neoforge) printf '%s' '{"game":"26.3","loader":"26.3.0.99","image":"java25"}' ;;
+        fabric) jq -cn --arg game "${game}" '{game:$game,loader:"0.19.5",image:"java25"}' ;;
+        neoforge) jq -cn --arg game "${game}" --arg loader "${game}.0.99" '{game:$game,loader:$loader,image:"java25"}' ;;
         spigot|pufferfish) printf '%s' '{"game":"26.3","loader":"","image":"java25"}' ;;
         leaf) printf '%s' '{"game":"26.3","loader":"","image":"java25","reason":"Leaf labels this build Experimental. It is available for setup."}' ;;
         *) return 1 ;;
@@ -209,13 +255,27 @@ for software in fabric neoforge; do
     jq -e '.server_supported and .selected_candidate == "26.3" and .geyser_supported_version == "26.3" and (.crossplay_enabled | not)' <<< "${preview}" >/dev/null
     [[ ! -e ${DATA_PATH}.crossplay-checks ]]
     preview="$(GEYSER_VERSION=26.3 bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
-    jq -e '.crossplay_enabled and (.crossplay_compatible | not) and (.managed_crossplay_available | not) and (.reason | contains("could not be proven"))' <<< "${preview}" >/dev/null
+    jq -e '.selected_candidate == "26.3" and .server_supported and .crossplay_enabled and (.crossplay_compatible | not) and (.managed_crossplay_available | not) and (.reason | contains("could not be proven"))' <<< "${preview}" >/dev/null
     [[ -s ${DATA_PATH}.crossplay-checks ]]
     preview="$(GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
-    jq -e '.crossplay_enabled and .crossplay_compatible and .managed_crossplay_available' <<< "${preview}" >/dev/null
+    jq -e '.selected_candidate == "26.3" and .server_supported and .crossplay_enabled and .crossplay_compatible and .managed_crossplay_available' <<< "${preview}" >/dev/null
     case "${software}" in fabric) loader=0.19.5 ;; neoforge) loader=26.3.0.99 ;; esac
     [[ $(cat "${DATA_PATH}.crossplay-checks") == "${software} 26.3 ${loader}"$'\n'"${software} 26.3 ${loader}" ]]
     rm "${DATA_PATH}.crossplay-checks"
+done
+# Specific and Latest retain a newer Java-valid release, with no artifact
+# proof attempted against artifacts for the publisher's older supported game.
+for software in fabric neoforge; do
+    for policy in pinned latest; do
+        for enabled in yes no; do
+            preview="$(GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" "${policy}" 26.4 "${enabled}")"
+            jq -e '.selected_candidate == "26.4" and .server_supported and .geyser_supported_version == "26.3" and (.crossplay_compatible | not) and (.managed_crossplay_available | not)' <<< "${preview}" >/dev/null
+            if [[ ${enabled} == yes ]]; then
+                jq -e '.reason | contains("Managed cross-play currently supports Minecraft 26.3.") and contains("Selected Minecraft 26.4 is available as Java-only.")' <<< "${preview}" >/dev/null
+            fi
+            [[ ! -e ${DATA_PATH}.crossplay-checks ]]
+        done
+    done
 done
 preview="$(bash "${fixture_dir}/status" --server-type leaf recommended '' no)"
 jq -e '.selected_candidate == "26.3" and .candidate_channel == "RELEASE" and .server_supported and (.reason | contains("Experimental"))' <<< "${preview}" >/dev/null

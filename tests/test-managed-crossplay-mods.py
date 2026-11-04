@@ -29,6 +29,7 @@ class ManagedModPreparation(unittest.TestCase):
         self.ns = {}
         with patch.object(sys, 'argv', ['helper', 'fabric', '26.3', '0.19.5', self.temp.name]):
             exec(compile(definitions, 'managed-crossplay-mods', 'exec'), self.ns)
+        self.builds = {'geyser':123, 'floodgate':123}
         self.artifacts = {}
         for project, identity in [('geyser', 'geyser-fabric'), ('floodgate', 'floodgate'), ('fabric-api', 'fabric-api')]:
             self.artifacts[project] = jar('fabric.mod.json', json.dumps({'id':identity, 'depends':{'minecraft':'~26.3', 'fabricloader':'>=0.19.5'}}))
@@ -47,13 +48,13 @@ class ManagedModPreparation(unittest.TestCase):
             return self.releases
         for project in ['geyser', 'floodgate']:
             if f'/projects/{project}/' in url:
-                return {'project_id':project, 'version':'2.12.0', 'build':123, 'channel':'default', 'downloads':{self.ns['platform']:{'sha256':hashlib.sha256(self.artifacts[project]).hexdigest()}}}
+                return {'project_id':project, 'version':'2.12.0', 'build':self.builds[project], 'channel':'default', 'downloads':{self.ns['platform']:{'sha256':hashlib.sha256(self.artifacts[project]).hexdigest()}}}
         self.fail('Unexpected metadata endpoint: ' + url)
 
     def fetch(self, url, limit):
         for project in ['geyser', 'floodgate']:
             if f'/projects/{project}/' in url:
-                self.assertEqual(url, self.ns['BASE'] + project + '/versions/2.12.0/builds/123/downloads/' + self.ns['platform'])
+                self.assertEqual(url, self.ns['BASE'] + project + '/versions/2.12.0/builds/' + str(self.builds[project]) + '/downloads/' + self.ns['platform'])
                 return self.artifacts[project]
         self.assertIn('/versions/exact/', url)
         return self.artifacts['fabric-api']
@@ -64,6 +65,77 @@ class ManagedModPreparation(unittest.TestCase):
             self.assertEqual((pathlib.Path(self.temp.name) / (project + '.jar')).read_bytes(), self.artifacts[project])
         metadata = json.loads((pathlib.Path(self.temp.name) / 'fabric-api.json').read_text())
         self.assertEqual(metadata['version'], 'exact')
+
+    def use_neoforge(self):
+        self.ns['platform'], self.ns['loader'] = 'neoforge', '26.3.0.5'
+        for project, identity in [('geyser', 'geyser_neoforge'), ('floodgate', 'floodgate')]:
+            self.artifacts[project] = jar('META-INF/neoforge.mods.toml', f'[[mods]]\nmodId="{identity}"\n[[dependencies.{identity}]]\nmodId="minecraft"\nversionRange="[26.3,26.4)"\n[[dependencies.{identity}]]\nmodId="neoforge"\nversionRange="[26.3.0.0,26.4.0.0)"\n')
+
+    def test_official_floodgate_build_identity_for_both_platforms(self):
+        for platform in ['fabric', 'neoforge']:
+            if platform == 'neoforge':
+                self.use_neoforge()
+            for build in [0, 1, -1, '0', 0.0, None, True, False]:
+                with self.subTest(platform=platform, build=build):
+                    with tempfile.TemporaryDirectory() as staging:
+                        self.ns['staging'] = staging
+                        self.builds['floodgate'] = build
+                        if type(build) is int and build >= 0:
+                            self.ns['prepare']()
+                            result = json.loads((pathlib.Path(staging) / 'floodgate.json').read_text())
+                            self.assertEqual(result['build'], build)
+                            self.assertEqual(result['platform'], platform)
+                            self.assertEqual((pathlib.Path(staging) / 'floodgate.jar').read_bytes(), self.artifacts['floodgate'])
+                        else:
+                            with self.assertRaisesRegex(ValueError, 'Invalid official build identity'):
+                                self.ns['prepare']()
+                            self.assertFalse((pathlib.Path(staging) / 'floodgate.jar').exists())
+
+    def test_build_zero_preserves_official_publisher_checks(self):
+        for platform in ['fabric', 'neoforge']:
+            if platform == 'neoforge':
+                self.use_neoforge()
+            self.builds['floodgate'] = 0
+            for field, value in [('project_id', 'other'), ('version', 'latest'), ('channel', 'other'), ('sha256', '0' * 64)]:
+                with self.subTest(platform=platform, field=field):
+                    def invalid_metadata(url):
+                        result = self.metadata(url)
+                        if '/projects/floodgate/' in url:
+                            if field == 'sha256':
+                                result['downloads'][platform]['sha256'] = value
+                            else:
+                                result[field] = value
+                        return result
+                    self.ns['metadata'] = invalid_metadata
+                    with tempfile.TemporaryDirectory() as staging:
+                        self.ns['staging'] = staging
+                        with self.assertRaises(ValueError):
+                            self.ns['prepare']()
+                        self.assertFalse((pathlib.Path(staging) / 'floodgate.jar').exists())
+
+    def test_fabric_trailing_prerelease_bound_descriptors(self):
+        for project, identity in [('geyser', 'geyser-fabric'), ('floodgate', 'floodgate'), ('fabric-api', 'fabric-api')]:
+            self.artifacts[project] = jar('fabric.mod.json', json.dumps({'id':identity, 'depends':{'minecraft':'~26.3-', 'fabricloader':'>=0.19.5', 'fabric-api':'*', 'java':'>=25'}}))
+        self.releases = [self.api_release('26.3', 'exact')]
+        self.ns['prepare']()
+        for project in self.artifacts:
+            path = pathlib.Path(self.temp.name) / (project + '.jar')
+            for game in ['26.2', '26.4']:
+                with self.subTest(project=project, game=game):
+                    self.ns['game'] = game
+                    with self.assertRaises(ValueError):
+                        self.ns['verify_mod'](path, project)
+
+    def test_fabric_narrow_trailing_prerelease_bound(self):
+        for value in ['26.3', '26.3-alpha', '26.3-alpha.1', '26.3-beta-2', '26.3-rc.1', '26.3.1']:
+            with self.subTest(value=value):
+                self.assertTrue(self.ns['accepts']('~26.3-', value))
+        for value in ['26.2', '26.2-rc.1', '26.4', '26.4-alpha']:
+            self.assertFalse(self.ns['accepts']('~26.3-', value))
+        for rule in ['~26-', '~26.3--', '~26.3-*', '~26.3- || 26.4']:
+            self.assertFalse(self.ns['accepts'](rule, '26.3'))
+        for rule in ['26.3', '=26.3', '~26.3', '[26.3,26.4)', '>=26.3 <26.4']:
+            self.assertTrue(self.ns['accepts'](rule, '26.3'))
 
     def test_fabric_api_never_guesses_other_game_release(self):
         self.releases = [self.api_release('26.2', 'wrong-but-newer')]

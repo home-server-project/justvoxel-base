@@ -41,6 +41,11 @@ def accepts(rule, value):
         return True
     if rule == '~' + value:
         return True
+    # Fabric's trailing '-' includes every prerelease of this major.minor
+    # series. Keep this narrow; other tilde ranges still fail closed.
+    match = re.fullmatch(r'~([0-9]+)\.([0-9]+)-', rule)
+    if match:
+        return numeric(value)[:2] == (int(match[1]), int(match[2]))
     if re.fullmatch(r'\[[0-9.]+\]', rule):
         return rule == '[' + value + ']'
     match = re.fullmatch(r'\[([0-9.]+(?:-(?:alpha|beta|rc)(?:[.-][0-9]+)?)?),([0-9.]+(?:-(?:alpha|beta|rc)(?:[.-][0-9]+)?)?)?\)', rule)
@@ -94,7 +99,7 @@ def prepare():
     for project in ['geyser', 'floodgate']:
         release = metadata(BASE + project + '/versions/latest/builds/latest')
         version, build = release.get('version'), release.get('build')
-        if release.get('project_id') != project or release.get('channel') != 'default' or not isinstance(version, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*(?:-SNAPSHOT)?', version) or type(build) is not int or build <= 0:
+        if release.get('project_id') != project or release.get('channel') != 'default' or not isinstance(version, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*(?:-SNAPSHOT)?', version) or type(build) is not int or build < 0:
             raise ValueError('Invalid official build identity')
         artifact = release.get('downloads', {}).get(platform, {})
         digest = artifact.get('sha256', '')
