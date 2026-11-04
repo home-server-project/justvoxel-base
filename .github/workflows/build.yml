@@ -28,8 +28,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: "1.26.x"
-          check-latest: true
+          go-version-file: ".go-version"
           cache: false
 
       - name: Install PAM source-test dependencies
@@ -92,8 +91,7 @@ jobs:
       - name: Set up Go for local WebUI build
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: "1.26.x"
-          check-latest: true
+          go-version-file: ".go-version"
           cache: false
 
       - name: Install build dependencies
@@ -145,29 +143,7 @@ jobs:
             -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
             -v "${PWD}/build_artifacts/management:/out" \
             "${HOME_SERVER_BASE_IMAGE}" \
-            /bin/bash -c '
-              set -euo pipefail
-              dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
-              mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
-              cp -a /repo/management /repo/templates /repo/mjust /repo/system_files /repo/build_files /work/
-              cd /work/management
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off go mod tidy
-              dirty=0
-              diff -u /repo/management/go.mod /work/management/go.mod || dirty=1
-              diff -u /repo/management/go.sum /work/management/go.sum || dirty=1
-              if (( dirty != 0 )); then
-                echo "ERROR: AlmaLinux Go requires module metadata changes shown above." >&2
-                exit 1
-              fi
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go test -mod=readonly ./...
-              # Adapt the runner working directory without changing the source script.
-              HOME=/tmp/go-home \
-              GOCACHE=/tmp/go-build-cache \
-              GOPATH=/tmp/go-path \
-              GOENV=off \
-              bash <(sed "s|^cd /work$|cd /work/management|" /run-pam-integration-alma.sh)
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
-            '
+            /bin/bash /repo/build_files/build-management-agent.sh
           sudo chmod 0755 build_artifacts/management/management-agent
 
       - name: Build JustVoxel Base

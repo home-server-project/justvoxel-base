@@ -2,6 +2,25 @@
 
 JustVoxel Base follows the Home Server Project's shared Home Server Base 10 bootc composition model.
 
+## Go build toolchain
+
+The root `.go-version` selects one exact stable Go patch release for local builds,
+standalone WebUI builds, Management Agent builds, and GitHub Actions. Update that
+file to change the compiler; the `go 1.25.0` module directives remain the minimum
+module requirement.
+
+Development hosts need a modern bootstrap `go` command with native toolchain
+switching support. The distro package does not need to match `.go-version`.
+Build scripts override inherited `GOTOOLCHAIN` for their process, verify the
+selected compiler, and let Go download/cache it when necessary. They do not
+modify global Go configuration. Toolchain downloads require network access and
+a writable Go cache.
+
+The Management Agent uses AlmaLinux's `golang` package as its bootstrap inside
+Home Server Base, then builds and validates through
+`build_files/build-management-agent.sh`. Local and testing CI Management Agent
+cache identities include `.go-version`, so changing it invalidates cached binaries.
+
 ## Parent image
 
 JustVoxel Base consumes [Home Server Base 10](https://github.com/home-server-project/home-server-base-10) directly from the signed moving channel:

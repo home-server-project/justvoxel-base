@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# Human-run Fedora dev-vm build. Never deploys to or modifies the JustVoxel VM.
+# Human-run dev-vm build. Never deploys to or modifies the JustVoxel VM.
 # Keep build/validation commands aligned with .github/workflows/build-testing.yml.
 set -euo pipefail
 
@@ -20,7 +20,13 @@ stage 'Check local build prerequisites'
 for command in git go node python3 rg podman skopeo jq cosign curl sudo flock sha256sum; do
     command -v "${command}" >/dev/null || fail "Missing required tool: ${command} (no packages are installed by this script)."
 done
-[[ "$(go env GOVERSION)" == go1.26.* ]] || fail 'Use Go 1.26.x, as in testing CI.'
+[[ -f "${repo_root}/.go-version" && -r "${repo_root}/.go-version" ]] || fail 'Missing readable .go-version file.'
+repo_go="$(tr -d '[:space:]' < "${repo_root}/.go-version")"
+[[ ${repo_go} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '.go-version must contain an exact stable Go version (major.minor.patch).'
+export GOTOOLCHAIN="go${repo_go}"
+go_version="$(go env GOVERSION)" || fail "Cannot use Go toolchain ${GOTOOLCHAIN}; a modern bootstrap Go command and access to its toolchain cache/download are required."
+[[ ${go_version} == "${GOTOOLCHAIN}" ]] || fail "Go selected ${go_version}; expected ${GOTOOLCHAIN}."
+printf 'Go toolchain: %s (.go-version)\n' "${go_version}"
 for file in cosign.pub "${config_dir}/cosign.key" "${config_dir}/cosign.pub" "${config_dir}/ManagementAgentBuilder.Containerfile"; do
     [[ -r "${file}" ]] || fail "Missing readable prerequisite: ${file}"
 done
@@ -158,7 +164,7 @@ import stat
 import subprocess
 import sys
 
-paths = ["management", "templates", "mjust", "system_files",
+paths = [".go-version", "management", "templates", "mjust", "system_files",
          "runtime/system-update-reboot-worker", "build_files/build-common.sh",
          "build_files/build-management-agent.sh",
          "build_files/management-agent-package.Containerfile",

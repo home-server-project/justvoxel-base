@@ -27,8 +27,26 @@ else
     build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
 
-go_version="$(go version | awk '{print $3}')"
-[[ -n ${go_version} ]] || { echo 'ERROR: Go version could not be determined.' >&2; exit 1; }
+toolchain_file="${repo_root}/.go-version"
+[[ -f ${toolchain_file} && -r ${toolchain_file} ]] || {
+    echo 'ERROR: missing readable .go-version file.' >&2
+    exit 1
+}
+repo_go="$(tr -d '[:space:]' < "${toolchain_file}")"
+[[ ${repo_go} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo 'ERROR: .go-version must contain an exact stable Go version (major.minor.patch).' >&2
+    exit 1
+}
+export GOTOOLCHAIN="go${repo_go}"
+go_version="$(go env GOVERSION)" || {
+    echo "ERROR: cannot use Go toolchain ${GOTOOLCHAIN}; a modern bootstrap Go command and access to its toolchain cache/download are required." >&2
+    exit 1
+}
+[[ ${go_version} == "${GOTOOLCHAIN}" ]] || {
+    echo "ERROR: Go selected ${go_version}; expected ${GOTOOLCHAIN}." >&2
+    exit 1
+}
+printf 'Go toolchain: %s (.go-version)\n' "${go_version}"
 
 rm -rf -- "${output_dir}"
 install -d -m0755 "${output_dir}"
