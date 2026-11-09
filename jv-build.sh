@@ -33,7 +33,29 @@ done
 mkdir -p "${cache_dir}"
 exec 9>"${cache_dir}/build.lock"
 flock -n 9 || fail 'Another local JustVoxel build is running.'
-sudo -v
+if ! IFS= read -r -s -p 'Local build password: ' build_password; then
+    printf '\n' >&2
+    unset build_password
+    fail 'Could not read the local build password.'
+fi
+printf '\n' >&2
+if [[ -z "${build_password}" ]]; then
+    unset build_password
+    fail 'Local build password must not be empty.'
+fi
+if ! printf '%s\n' "${build_password}" | sudo -S -k -p '' -v; then
+    unset build_password
+    fail 'Local build password failed sudo authentication.'
+fi
+if ! derived_public_key="$(COSIGN_PASSWORD="${build_password}" cosign public-key --key "${config_dir}/cosign.key")"; then
+    unset build_password
+    fail 'Local build password could not decrypt the local Cosign private key.'
+fi
+if [[ "${derived_public_key}" != "$(cat "${config_dir}/cosign.pub")" ]]; then
+    unset build_password
+    fail 'Local Cosign private key does not match the configured public key.'
+fi
+unset derived_public_key
 work_dir="$(mktemp -d "${cache_dir}/build.XXXXXX")"
 cleanup() { sudo rm -rf -- "${work_dir}"; }
 trap cleanup EXIT
@@ -286,10 +308,11 @@ sudo podman push --tls-verify=false --digestfile "${work_dir}/digest" \
     localhost/justvoxel-base:local-dev "docker://${repository}:${immutable_tag}"
 digest="$(cat "${work_dir}/digest")"
 [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
-cosign sign -y --allow-http-registry --new-bundle-format=false --use-signing-config=false \
+COSIGN_PASSWORD="${build_password}" cosign sign -y --allow-http-registry --new-bundle-format=false --use-signing-config=false \
     --tlog-upload=false --key "${config_dir}/cosign.key" "${repository}@${digest}"
 cosign verify --allow-http-registry --new-bundle-format=false --insecure-ignore-tlog=true \
     --key "${config_dir}/cosign.pub" "${repository}@${digest}" >/dev/null
+unset build_password
 
 stage 'Publish verified image as :dev'
 # Copy the signed remote digest verbatim; moving :dev cannot trigger conversion.
