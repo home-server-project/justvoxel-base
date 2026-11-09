@@ -10,6 +10,7 @@ MAX_JAR = 64 * 1024 * 1024
 VERSION_URL = 'https://raw.githubusercontent.com/GeyserMC/GeyserWebsite/refs/heads/master/src/data/versions.json'
 BASE = 'https://download.geysermc.org/v2/projects/'
 FABRIC_API = 'P7dR8mSH'
+FLOODGATE_MOD = 'bWrNNfkb'
 
 def fetch(url, limit):
     request = urllib.request.Request(url, headers={'User-Agent': 'JustVoxel managed cross-play'})
@@ -92,14 +93,80 @@ def verify_mod(path, project):
             if len(matches) != 1 or not accepts(matches[0].get('versionRange'), selected):
                 raise ValueError('Game/loader compatibility not proven by publisher descriptor')
 
+def prepare_floodgate():
+    query = urllib.parse.urlencode({'loaders':json.dumps([platform]), 'game_versions':json.dumps([game]), 'include_changelog':'false'})
+    versions = metadata('https://api.modrinth.com/v2/project/' + FLOODGATE_MOD + '/version?' + query)
+    if not isinstance(versions, list) or len(versions) > 1000:
+        raise ValueError('Invalid Floodgate release metadata')
+    releases = []
+    for release in versions:
+        if not isinstance(release, dict):
+            raise ValueError('Invalid Floodgate release metadata')
+        if (release.get('project_id') != FLOODGATE_MOD or release.get('version_type') != 'release'
+                or release.get('status', 'listed') != 'listed'
+                or not isinstance(release.get('game_versions'), list) or not all(isinstance(v, str) for v in release['game_versions'])
+                or game not in release['game_versions']
+                or not isinstance(release.get('loaders'), list) or not all(isinstance(v, str) for v in release['loaders'])
+                or platform not in release['loaders']):
+            continue
+        identity, version = release.get('id'), release.get('version_number')
+        if (not isinstance(release.get('date_published'), str)
+                or not isinstance(identity, str) or not re.fullmatch(r'[A-Za-z0-9]{1,64}', identity)
+                or not isinstance(version, str) or not 1 <= len(version) <= 128 or not version.strip()):
+            raise ValueError('Invalid Floodgate release identity')
+        releases.append(release)
+    if not releases:
+        raise ValueError('No exact Floodgate release for selected game and platform')
+    release = sorted(releases, key=lambda v:(v['date_published'], v['id']), reverse=True)[0]
+    files = release.get('files')
+    if not isinstance(files, list) or not files or len(files) > 1000 or not all(isinstance(f, dict) for f in files):
+        raise ValueError('Invalid Floodgate files')
+    if any('primary' in f and type(f['primary']) is not bool for f in files):
+        raise ValueError('Invalid Floodgate primary marker')
+    primary = [f for f in files if f.get('primary') is True]
+    if not primary:
+        primary = [f for f in files if isinstance(f.get('filename'), str) and f['filename'].endswith('.jar') and f.get('file_type') is None]
+    if len(primary) != 1:
+        raise ValueError('Ambiguous Floodgate primary artifact')
+    artifact = primary[0]
+    filename = artifact.get('filename')
+    name = 'Fabric' if platform == 'fabric' else 'Neoforge'
+    if (not isinstance(filename, str) or len(filename) > 255
+            or not re.fullmatch(r'Floodgate-' + name + r'-[A-Za-z0-9_+.-]+\.jar', filename)
+            or '..' in filename or artifact.get('file_type') is not None):
+        raise ValueError('Invalid Floodgate filename')
+    address = artifact.get('url')
+    if not isinstance(address, str):
+        raise ValueError('Invalid Floodgate URL')
+    url = urllib.parse.urlsplit(address)
+    expected = '/data/' + FLOODGATE_MOD + '/versions/' + release['id'] + '/' + filename
+    if url.scheme != 'https' or url.netloc != 'cdn.modrinth.com' or url.query or url.fragment or '?' in address or '#' in address or url.path != expected:
+        raise ValueError('Floodgate artifact identity mismatch')
+    hashes = artifact.get('hashes')
+    digest = hashes.get('sha512') if isinstance(hashes, dict) else None
+    if not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{128}', digest):
+        raise ValueError('Missing Floodgate SHA-512')
+    data = fetch(address, MAX_JAR)
+    if hashlib.sha512(data).hexdigest() != digest:
+        raise ValueError('Floodgate hash mismatch')
+    path = os.path.join(staging, 'floodgate.jar')
+    with open(path, 'xb') as stream:
+        stream.write(data)
+    verify_mod(path, 'floodgate')
+    with open(os.path.join(staging, 'floodgate.json'), 'x') as stream:
+        json.dump({'project':'floodgate', 'publisher':'modrinth', 'project_id':FLOODGATE_MOD,
+                   'version':release['version_number'], 'version_id':release['id'],
+                   'sha256':hashlib.sha256(data).hexdigest(), 'sha512':digest,
+                   'platform':platform, 'game':game, 'loader':loader}, stream)
+
 def prepare():
     # The current platform artifact AND publisher's current game release must agree.
     if metadata(VERSION_URL).get('java', {}).get('supported') != game:
         raise ValueError('Current Geyser game version does not match selected release')
-    for project in ['geyser', 'floodgate']:
+    for project in ['geyser']:
         release = metadata(BASE + project + '/versions/latest/builds/latest')
         version, build = release.get('version'), release.get('build')
-        if release.get('project_id') != project or release.get('channel') != 'default' or not isinstance(version, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*(?:-SNAPSHOT)?', version) or type(build) is not int or build < 0:
+        if release.get('project_id') != project or release.get('channel') != 'default' or not isinstance(version, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*(?:-SNAPSHOT)?', version) or type(build) is not int or build <= 0:
             raise ValueError('Invalid official build identity')
         artifact = release.get('downloads', {}).get(platform, {})
         digest = artifact.get('sha256', '')
@@ -114,6 +181,7 @@ def prepare():
         verify_mod(path, project)
         with open(os.path.join(staging, project + '.json'), 'x') as stream:
             json.dump({'project':project, 'version':version, 'build':build, 'sha256':digest, 'platform':platform, 'game':game, 'loader':loader}, stream)
+    prepare_floodgate()
     if platform == 'fabric':
         query = urllib.parse.urlencode({'loaders':json.dumps(['fabric']), 'game_versions':json.dumps([game])})
         versions = metadata('https://api.modrinth.com/v2/project/' + FABRIC_API + '/version?' + query)

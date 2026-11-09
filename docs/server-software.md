@@ -55,8 +55,11 @@ only proves Paper compatibility. Modrinth releases must explicitly include
 `spigot` or `bukkit` and the exact Minecraft version; installation also requires
 a usable Bukkit `plugin.yml` descriptor.
 
-Fabric and NeoForge platform downloads come only from the fixed official
-GeyserMC download API. Their SHA-256 hashes are checked before replacement.
+Geyser-Fabric and Geyser-NeoForge downloads come only from the fixed official
+GeyserMC download API. Their publisher SHA-256 hashes are checked before replacement.
+Floodgate for both loaders comes only from Modrinth project `bWrNNfkb`, selecting
+the newest listed release for the exact game and loader. Its publisher SHA-512
+is verified before recording a local SHA-256 for installed-file ownership checks.
 Compatibility requires agreement between Geyser's published current Java release
 and dependency metadata inside the verified platform artifacts, including the
 selected loader pin. Missing, unsupported or contradictory evidence blocks
@@ -87,6 +90,8 @@ Publisher references used by this implementation:
 - [Geyser supported versions](https://geysermc.org/wiki/geyser/supported-versions/)
 - [Geyser setup, platform configuration and TCP/UDP requirements](https://geysermc.org/wiki/geyser/setup/)
 - [Official Geyser download API](https://geysermc.org/wiki/api/downloads.geysermc.org/build-latest/)
+- [Floodgate-Modded publisher project](https://modrinth.com/mod/floodgate)
+- [Modrinth project-version API](https://docs.modrinth.com/api/operations/getprojectversions/)
 - [Fabric API publisher project](https://modrinth.com/mod/fabric-api)
 
 ## Native Bedrock
