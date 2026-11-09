@@ -8,11 +8,40 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
+
+func TestPluginsWorkspaceProviderLogoAssets(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vector := regexp.MustCompile(`<path\b[^>]*\bd\s*=\s*["']\s*[^"'\s][^"']*["']`)
+	placeholder := regexp.MustCompile(`(?i)<(?:text|rect)\b|>\s*(?:M|H|CF)\s*<`)
+	for _, provider := range []string{"modrinth", "hangar", "curseforge"} {
+		path := "static/providers/" + provider + ".svg"
+		logo, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if len(bytes.TrimSpace(logo)) == 0 || !vector.Match(logo) {
+			t.Errorf("%s must contain non-empty vector artwork", path)
+		}
+		if placeholder.Match(logo) {
+			t.Errorf("%s contains placeholder rectangle or text artwork", path)
+		}
+		if !strings.Contains(string(header), `src="/`+path+`"`) {
+			t.Errorf("header must reference /%s", path)
+		}
+	}
+	if regexp.MustCompile(`(?i)<img\b[^>]*\bsrc\s*=\s*["']https?://`).Match(header) {
+		t.Error("header must load provider logos from local static assets")
+	}
+}
 
 type fakePluginsWorkspaceAPI struct {
 	fakeDiscoveryAPI
