@@ -50,6 +50,11 @@ type adminVersionStatus struct {
 var versionInputPattern = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)
 var imageTagInputPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
+// Keep helper diagnostics separate from the JSON protocol on stdout.
+func versionCommandOutput(ctx context.Context, executable string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, executable, args...).Output()
+}
+
 var runAdminVersionStatus = func(ctx context.Context, policy, version, serverType, imageTag string) ([]byte, error) {
 	args := []string{policy, version}
 	if imageTag != "" {
@@ -61,14 +66,14 @@ var runAdminVersionStatus = func(ctx context.Context, policy, version, serverTyp
 	if id, ok := ctx.Value(instanceVersionKey{}).(string); ok {
 		args = append([]string{"--instance", id}, args...)
 	}
-	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", args...).CombinedOutput()
+	return versionCommandOutput(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", args...)
 }
 var runSetupVersionPreview = func(ctx context.Context, policy, version, bedrock, serverType string) ([]byte, error) {
 	args := []string{policy, version, bedrock}
 	if serverType != "" {
 		args = append([]string{"--server-type", serverType}, args...)
 	}
-	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", args...).CombinedOutput()
+	return versionCommandOutput(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", args...)
 }
 
 func registerAdminVersionStatusRoutes(mux *http.ServeMux, s *server) {
