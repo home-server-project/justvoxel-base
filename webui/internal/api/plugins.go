@@ -272,7 +272,7 @@ func (c *Client) AdminPluginSourceIcon(ctx context.Context, session, source, pro
 }
 func (c *Client) adminPluginIcon(ctx context.Context, session, source, projectID string, iconURL ...string) (PluginIcon, error) {
 	var out PluginIcon
-	if !ValidPluginIdentity(source, projectID) || (source == "Hangar" && len(iconURL) > 0) {
+	if !ValidPluginIdentity(source, projectID) || ((source == "Hangar" || source == "CurseForge") && len(iconURL) > 0) {
 		return out, errors.New("Invalid plugin provider identity")
 	}
 	query := url.Values{"source": {source}, "project_id": {projectID}}
@@ -408,7 +408,7 @@ func ValidatePluginIconQuery(query url.Values) error {
 			return errors.New("Invalid plugin icon request")
 		}
 	}
-	if query.Get("source") == "CurseForge" || !ValidPluginIdentity(query.Get("source"), query.Get("project_id")) || (query.Get("source") == "Hangar" && len(query["icon_url"]) != 0) {
+	if !ValidPluginIdentity(query.Get("source"), query.Get("project_id")) || ((query.Get("source") == "Hangar" || query.Get("source") == "CurseForge") && len(query["icon_url"]) != 0) {
 		return errors.New("Invalid plugin icon request")
 	}
 	return nil

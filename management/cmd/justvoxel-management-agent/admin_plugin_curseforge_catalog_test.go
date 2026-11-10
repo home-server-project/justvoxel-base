@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -152,5 +154,237 @@ func TestCurseForgeArtifactSafety(t *testing.T) {
 	want := sha512.Sum512([]byte("bad"))
 	if err != nil || got != hex.EncodeToString(want[:]) {
 		t.Fatal("durable SHA-512", got, err)
+	}
+}
+
+// Keep context/key setup from the catalog fixture, but model raw search positions
+// independently from the release filtering performed by Discover.
+func curseForgeDiscoverFixture(t *testing.T, projects []curseForgeProject, rejected map[int64]bool, pagination func(*curseForgePagination)) (pluginServerContext, *[]int, *[]int64) {
+	t.Helper()
+	_, server := curseForgeCatalogFixture(t, "paper")
+	base := curseForgeClient.Transport
+	searches, inspected := []int{}, []int64{}
+	curseForgeClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.curseforge.com" || r.Header.Get("x-api-key") != "private-fixture-key" {
+			t.Fatalf("unexpected catalog origin or credentials: %s", r.URL)
+		}
+		var payload any
+		if r.URL.Path == "/v1/mods/search" {
+			index, err := strconv.Atoi(r.URL.Query().Get("index"))
+			if err != nil || index < 0 || index > len(projects) {
+				t.Fatal("invalid index", index)
+			}
+			limit, err := strconv.Atoi(r.URL.Query().Get("pageSize"))
+			if err != nil || limit <= 0 {
+				t.Fatal("invalid limit", limit)
+			}
+			searches = append(searches, index)
+			end := min(index+limit, len(projects))
+			page := curseForgePagination{index, limit, end - index, len(projects)}
+			if pagination != nil {
+				pagination(&page)
+			}
+			payload = map[string]any{"data": projects[index:end], "pagination": page}
+		} else if strings.HasPrefix(r.URL.Path, "/v1/mods/") {
+			parts := strings.Split(r.URL.Path, "/")
+			if len(parts) < 5 || parts[4] != "files" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			id, err := strconv.ParseInt(parts[3], 10, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := curseForgeFile{ID: 20, ModID: id, Game: 1, Available: true, Status: 4, Release: 1, Filename: "root.jar", DisplayName: "1", Size: 3, URL: "https://edge.forgecdn.net/files/123/456/root.jar", GameVersions: []string{"1.21.8"}}
+			file.Hashes = append(file.Hashes, struct {
+				Value string `json:"value"`
+				Algo  int    `json:"algo"`
+			}{strings.Repeat("a", 40), 1})
+			if rejected[id] {
+				// Odd rejected projects have only a beta; even ones have an
+				// incompatible release. Both are real file-level rejections.
+				if id%2 == 1 {
+					file.Release = 2
+				} else {
+					file.GameVersions = []string{"1.20.1"}
+				}
+			}
+			if len(parts) == 5 {
+				inspected = append(inspected, id)
+				payload = map[string]any{"data": []curseForgeFile{file}, "pagination": curseForgePagination{0, 25, 1, 1}}
+			} else if len(parts) == 6 && parts[5] == "20" {
+				payload = map[string]any{"data": file}
+			} else {
+				t.Fatalf("unexpected file path: %s", r.URL.Path)
+			}
+		} else {
+			return base.RoundTrip(r)
+		}
+		body, err := json.Marshal(payload)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, err
+	})
+	return server, &searches, &inspected
+}
+
+func curseForgeRawProjects(count int) []curseForgeProject {
+	projects := make([]curseForgeProject, count)
+	for i := range projects {
+		projects[i] = curseForgeProject{ID: int64(i + 1), Game: 1, Class: 5, Name: "Example", Slug: "example"}
+	}
+	return projects
+}
+
+func TestCurseForgeDiscoverFillsVisiblePageAndResumesRawCursor(t *testing.T) {
+	server, searches, inspected := curseForgeDiscoverFixture(t, curseForgeRawProjects(30), map[int64]bool{1: true, 4: true}, nil)
+	q := pluginDiscoverQuery{Limit: 12, Compatible: true, Release: true}
+	page, err := discoverCurseForgePlugins(context.Background(), server, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPositions := []int{2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
+	if len(page.Projects) != 12 || !reflect.DeepEqual(page.Positions, wantPositions) || page.End != 14 || page.NextOffset != 14 {
+		t.Fatalf("raw cursor lost across top-up: %#v", page)
+	}
+	if !reflect.DeepEqual(*searches, []int{0, 12}) || len(*inspected) != 14 {
+		t.Fatal("unexpected inspection", *searches, *inspected)
+	}
+	seen := map[string]bool{}
+	for i, project := range page.Projects {
+		if project.ID != strconv.Itoa(wantPositions[i]) {
+			t.Fatal("accepted project/raw position mismatch", project, page.Positions)
+		}
+		seen[project.ID] = true
+	}
+	q.Cursor.CurseForgeOffset = page.NextOffset
+	next, err := discoverCurseForgePlugins(context.Background(), server, q)
+	if err != nil || len(next.Projects) != 12 {
+		t.Fatal(next, err)
+	}
+	if next.Offset != 14 || next.Projects[0].ID != "15" || next.Positions[0] != 15 || next.End != 26 || next.NextOffset != 26 {
+		t.Fatal("first uninspected project skipped", next)
+	}
+	for i, project := range next.Projects {
+		if seen[project.ID] || project.ID != strconv.Itoa(15+i) || next.Positions[i] != 15+i {
+			t.Fatal("duplicate or skipped raw project", project, next.Positions)
+		}
+	}
+}
+
+func TestCurseForgeDiscoverExhaustionAndInspectionBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name                                          string
+		total, rejected, accepted, end, next, batches int
+	}{
+		{"exhausted", 7, 2, 5, 7, -1, 1},
+		{"bounded", 120, 96, 0, 96, 96, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rejected := map[int64]bool{}
+			for id := 1; id <= tc.rejected; id++ {
+				rejected[int64(id)] = true
+			}
+			server, searches, inspected := curseForgeDiscoverFixture(t, curseForgeRawProjects(tc.total), rejected, nil)
+			page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 12, Compatible: true, Release: true})
+			if err != nil || len(page.Projects) != tc.accepted || page.End != tc.end || page.NextOffset != tc.next || len(*inspected) != tc.end || len(*searches) != tc.batches {
+				t.Fatal(page, *searches, *inspected, err)
+			}
+			if len(*inspected) > 8*12 {
+				t.Fatal("inspection budget exceeded")
+			}
+		})
+	}
+}
+
+func TestCurseForgeDiscoverMalformedPaginationFailsClosed(t *testing.T) {
+	for _, field := range []string{"index", "pageSize", "resultCount", "totalCount"} {
+		t.Run(field, func(t *testing.T) {
+			server, searches, inspected := curseForgeDiscoverFixture(t, curseForgeRawProjects(24), nil, func(p *curseForgePagination) {
+				switch field {
+				case "index":
+					p.Index++
+				case "pageSize":
+					p.PageSize++
+				case "resultCount":
+					p.ResultCount--
+				case "totalCount":
+					p.TotalCount = 0
+				}
+			})
+			page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 12, Compatible: true, Release: true})
+			if !errors.Is(err, errCurseForgeCatalog) || len(page.Projects) != 0 || len(*inspected) != 0 || len(*searches) != 1 || page.End != 0 || page.NextOffset != -1 {
+				t.Fatal("malformed pagination accepted", page, err)
+			}
+		})
+	}
+}
+
+func TestSafeCurseForgeLogoURL(t *testing.T) {
+	const full = "https://media.forgecdn.net/avatars/123/456/638123456789012345."
+	const thumb = "https://media.forgecdn.net/avatars/thumbnails/123/456/64/64/638123456789012345."
+	for _, ext := range []string{"png", "jpg", "jpeg", "gif", "webp"} {
+		for _, prefix := range []string{full, thumb} {
+			if !safeCurseForgeLogoURL(prefix + ext) {
+				t.Error("operational logo rejected", prefix+ext)
+			}
+		}
+	}
+	for _, raw := range []string{
+		"http://media.forgecdn.net/avatars/123/456/icon.png",
+		"https://example.com/avatars/123/456/icon.png",
+		"https://edge.forgecdn.net/avatars/123/456/icon.png",
+		"https://mediafilez.forgecdn.net/avatars/123/456/icon.png",
+		"https://evil.media.forgecdn.net/avatars/123/456/icon.png",
+		"https://user@media.forgecdn.net/avatars/123/456/icon.png",
+		full + "png?x=1", full + "png?", full + "png#x", full + "png#",
+		"https://media.forgecdn.net/avatars/%31%32%33/456/icon.png",
+		"https://media.forgecdn.net/avatars/123/456/%69con.png",
+		"https://media.forgecdn.net/avatars/123/456/icon%2epng",
+		"https://media.forgecdn.net/avatars/123/456/icon\\x.png",
+		"https://media.forgecdn.net/avatars/123/../icon.png",
+		"https://media.forgecdn.net/avatars/no/456/icon.png",
+		"https://media.forgecdn.net/avatars/123/-456/icon.png",
+		"https://media.forgecdn.net/avatars//456/icon.png",
+		"https://media.forgecdn.net/avatars/123/12345678901234567890/icon.png",
+		"https://media.forgecdn.net/avatars/thumbnails/123/456/0/64/icon.png",
+		"https://media.forgecdn.net/avatars/thumbnails/123/456/64/0/icon.png",
+		"https://media.forgecdn.net/avatars/thumbnails/123/456/2049/64/icon.png",
+		"https://media.forgecdn.net/avatars/thumbnails/123/456/64/2049/icon.png",
+		"https://media.forgecdn.net/avatars/thumbnails/123/456/x/64/icon.png",
+		full + "svg", full + "exe", full + "unknown",
+		"https://media.forgecdn.net/avatars/123/456/.hidden.png",
+		"https://media.forgecdn.net/avatars/123/456/icon name.png",
+		"https://media.forgecdn.net/avatars/123/456/icon.png.exe",
+	} {
+		if safeCurseForgeLogoURL(raw) {
+			t.Error("unsafe logo accepted", raw)
+		}
+	}
+}
+
+func TestCurseForgeCatalogLogoNeverFiltersValidProjects(t *testing.T) {
+	const full = "https://media.forgecdn.net/avatars/123/456/icon.png"
+	const thumb = "https://media.forgecdn.net/avatars/thumbnails/123/456/64/64/icon.png"
+	for _, tc := range []struct {
+		name string
+		logo *curseForgeAsset
+		want string
+	}{
+		{"thumbnail", &curseForgeAsset{ID: 1, ModID: 1, ThumbnailURL: thumb, URL: full}, thumb},
+		{"full fallback", &curseForgeAsset{ID: 1, ModID: 1, ThumbnailURL: "https://evil.example/icon.png", URL: full}, full},
+		{"missing", nil, ""},
+		{"wrong owner", &curseForgeAsset{ID: 1, ModID: 2, ThumbnailURL: thumb, URL: full}, ""},
+		{"unsafe", &curseForgeAsset{ID: 1, ModID: 1, URL: "https://evil.example/icon.png"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projects := curseForgeRawProjects(1)
+			projects[0].Logo = tc.logo
+			if got := curseForgeProjectLogo(projects[0], 1); got != tc.want {
+				t.Fatalf("logo = %q, want %q", got, tc.want)
+			}
+			server, _, _ := curseForgeDiscoverFixture(t, projects, nil, nil)
+			page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 12, Compatible: true, Release: true})
+			if err != nil || len(page.Projects) != 1 || page.Projects[0].ID != "1" || page.Projects[0].Version == nil || !page.Projects[0].InstallAvailable || page.Projects[0].IconURL != tc.want {
+				t.Fatal("logo changed catalog membership", page, err)
+			}
+		})
 	}
 }

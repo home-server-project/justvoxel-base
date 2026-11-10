@@ -634,7 +634,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 		t.Fatal("identity helper missing")
 	}
 	helper := behavior[start : start+end]
-	for _, want := range []string{`(name, projectID, iconURL, source = "Modrinth")`, `"plugins-icon-tile"`, `tile.dataset.tone`, `typeof projectID === "string"`, `/^[A-Za-z0-9]{1,64}$/`, `document.createElement("img")`, `image.alt = ""`, `image.hidden = true`, `const query = new URLSearchParams({ source, project_id: projectID })`, `query.set("icon_url", iconURL)`, `image.src = ` + "`/api/plugins/workspace/icon?${query}`", `image.addEventListener("error"`, `image.remove()`, `tile.classList.remove("has-logo")`, `tile.append(image)`} {
+	for _, want := range []string{`(name, projectID, iconURL, source = "Modrinth")`, `"plugins-icon-tile"`, `tile.dataset.tone`, `typeof projectID === "string"`, `/^[A-Za-z0-9]{1,64}$/`, `document.createElement("img")`, `image.alt = ""`, `image.hidden = true`, `const query = new URLSearchParams({ source, project_id: projectID })`, `if (source === "Modrinth" && typeof iconURL === "string" && iconURL) query.set("icon_url", iconURL);`, `image.src = ` + "`/api/plugins/workspace/icon?${query}`", `image.addEventListener("error"`, `image.remove()`, `tile.classList.remove("has-logo")`, `tile.append(image)`} {
 		if !strings.Contains(helper, want) {
 			t.Fatalf("shared icon contract missing %s", want)
 		}
@@ -1692,6 +1692,34 @@ assert.equal(fallback.classList.contains("has-logo"),true); assert.equal(retried
 const hangarTile=identityTile("Hangar","123","https://evil.example/icon.png","Hangar"), hangarImage=hangarTile.image;
 const hangarURL=new URL(hangarImage.src,"https://appliance.example");assert.equal(hangarURL.searchParams.get("source"),"Hangar");assert.equal(hangarURL.searchParams.get("project_id"),"123");assert(!hangarURL.searchParams.has("icon_url"));
 hangarImage.emit("error");assert.equal(hangarImage.removed,true);assert.equal(hangarTile.textContent,"HA");assert.equal(hangarImage.requests.length,1);assert(!hangarTile.classList.contains("has-logo"));
+
+const curseForgeTile = identityTile("CurseForge example", "123", "https://media.forgecdn.net/avatars/123/456/icon.png", "CurseForge");
+const curseForgeImage = curseForgeTile.image;
+assert(curseForgeImage, "CurseForge catalog logo must create an image");
+assert.equal(curseForgeTile.textContent, "CU");
+assert.equal(curseForgeImage.hidden, true);
+assert.equal(curseForgeImage.requests.length, 1);
+const curseForgeURL = new URL(curseForgeImage.src, "https://appliance.example");
+assert.equal(curseForgeURL.origin, "https://appliance.example");
+assert.equal(curseForgeURL.pathname, "/api/plugins/workspace/icon");
+assert.equal(curseForgeURL.searchParams.get("source"), "CurseForge");
+assert.equal(curseForgeURL.searchParams.get("project_id"), "123");
+assert.equal(curseForgeURL.searchParams.has("icon_url"), false);
+assert.equal([...curseForgeURL.searchParams].length, 2);
+curseForgeImage.emit("error");
+assert.equal(curseForgeImage.removed, true);
+assert.equal(curseForgeImage.hidden, true);
+assert.equal(curseForgeTile.textContent, "CU");
+assert.equal(curseForgeTile.classList.contains("has-logo"), false);
+curseForgeImage.emit("error");
+assert.equal(curseForgeImage.requests.length, 1, "source-only failure must not retry");
+for (const missingLogo of ["", undefined]) {
+ const tile = identityTile("CurseForge example", "123", missingLogo, "CurseForge");
+ assert.equal(tile.textContent, "CU");
+ assert.equal(tile.image, undefined, "missing catalog logo must not request an image");
+ assert.equal(tile.classList.contains("has-logo"), false);
+}
+
 assert.equal(identityTile("Manual",undefined).image,undefined);
 `
 	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
@@ -2232,5 +2260,58 @@ func TestPluginsSelectedServerRequests(t *testing.T) {
 		if rr.Code != tc.status || client.selectedSeen != tc.want {
 			t.Fatal(tc, rr.Code, client.selectedSeen, rr.Body.String())
 		}
+	}
+}
+
+// Separate entry-point counters ensure source-resolved icons cannot silently
+// fall back to the Modrinth/catalog-URL API method.
+type pluginIconRoutingAPI struct {
+	fakePluginsWorkspaceAPI
+	sourceCalls                 int
+	catalogIconCalls            int
+	routedSource, routedProject string
+}
+
+func (f *pluginIconRoutingAPI) AdminPluginSourceIcon(_ context.Context, session, source, project string) (api.PluginIcon, error) {
+	f.sourceCalls++
+	f.routedSource, f.routedProject = source, project
+	if session != "session-token" {
+		return api.PluginIcon{}, api.ErrUnauthorized
+	}
+	return api.PluginIcon{ContentType: "image/png", Data: []byte("\x89PNG\r\n\x1a\nfixture")}, nil
+}
+
+func (f *pluginIconRoutingAPI) AdminPluginIcon(_ context.Context, session, project string, iconURL ...string) (api.PluginIcon, error) {
+	f.catalogIconCalls++
+	f.routedProject = project
+	if session != "session-token" {
+		return api.PluginIcon{}, api.ErrUnauthorized
+	}
+	return api.PluginIcon{ContentType: "image/png", Data: []byte("\x89PNG\r\n\x1a\nfixture")}, nil
+}
+
+func TestPluginsWorkspaceIconRoutesByAuthoritativeSource(t *testing.T) {
+	for _, source := range []string{"CurseForge", "Hangar", "Modrinth"} {
+		t.Run(source, func(t *testing.T) {
+			client := &pluginIconRoutingAPI{}
+			client.role = "administrator"
+			app, err := New(client, Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			query := url.Values{"source": {source}, "project_id": {"123"}}
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/plugins/workspace/icon?"+query.Encode(), ""))
+			if rr.Code != 200 || client.routedProject != "123" {
+				t.Fatal("icon routing failed", rr.Code, client.routedProject)
+			}
+			if source == "Modrinth" {
+				if client.catalogIconCalls != 1 || client.sourceCalls != 0 {
+					t.Fatal("Modrinth route changed")
+				}
+			} else if client.sourceCalls != 1 || client.catalogIconCalls != 0 || client.routedSource != source {
+				t.Fatal("source icon used catalog API", client.sourceCalls, client.catalogIconCalls, client.routedSource)
+			}
+		})
 	}
 }

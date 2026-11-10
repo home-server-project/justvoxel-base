@@ -1141,6 +1141,22 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "No custom plugin icon.", http.StatusNotFound)
 			return
 		}
+	} else if source == "CurseForge" {
+		project, lookupErr := curseForgeIconProject(ctx, projectID)
+		if lookupErr != nil {
+			http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+			return
+		}
+		logo := curseForgeProjectLogo(project, project.ID)
+		if logo == "" {
+			http.Error(w, "Plugin icon unavailable.", http.StatusNotFound)
+			return
+		}
+		icon, err = url.Parse(logo)
+		if err != nil {
+			http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+			return
+		}
 	} else if supplied {
 		icon, err = pluginIconURL(rawIcon[0], projectID)
 		if err != nil {

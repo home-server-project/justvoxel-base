@@ -6991,7 +6991,7 @@ if (pluginsDialog && pluginsOpen) {
     tile.setAttribute("aria-hidden", "true");
     tile.dataset.tone = String(Array.from(name || "?").reduce((sum, char) => sum + char.codePointAt(0), 0) & 3);
     // Search logos get one metadata retry; absent search logos start with metadata.
-    if (source !== "CurseForge" && typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID)) {
+    if ((source !== "CurseForge" || (typeof iconURL === "string" && iconURL)) && typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID)) {
       const image = document.createElement("img");
       image.alt = "";
       image.decoding = "async";

@@ -142,3 +142,28 @@ func TestPluginCatalogSearchIconContract(t *testing.T) {
 		t.Fatal("absent icon must remain optional", err)
 	}
 }
+
+func TestAdminPluginSourceIconCurseForgeUsesOnlySourceAndProject(t *testing.T) {
+	calls := 0
+	data := []byte("\x89PNG\r\n\x1a\nfixture")
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		want := url.Values{"source": {"CurseForge"}, "project_id": {"123"}}
+		if r.Method != http.MethodGet || r.URL.Host != "unix" || r.URL.Path != "/v1/admin/plugins/icon" || !reflect.DeepEqual(r.URL.Query(), want) || r.URL.Query().Has("icon_url") || r.Header.Get("Authorization") != "Bearer session-token" {
+			t.Fatalf("unexpected Agent request: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
+	})}}
+	icon, err := client.AdminPluginSourceIcon(context.Background(), "session-token", "CurseForge", "123")
+	if err != nil || calls != 1 || icon.ContentType != "image/png" || !bytes.Equal(icon.Data, data) {
+		t.Fatal(icon, calls, err)
+	}
+	query := url.Values{"source": {"CurseForge"}, "project_id": {"123"}}
+	if err := ValidatePluginIconQuery(query); err != nil {
+		t.Fatal("source-only query rejected", err)
+	}
+	query.Set("icon_url", "https://anything.example/icon.png")
+	if ValidatePluginIconQuery(query) == nil {
+		t.Fatal("caller-supplied CurseForge icon URL accepted")
+	}
+}

@@ -420,7 +420,7 @@ func validPluginIconQuery(query url.Values) bool {
 	if !validPluginIdentity(source, query.Get("project_id")) {
 		return false
 	}
-	return source != "CurseForge" && (source != "Hangar" || len(query["icon_url"]) == 0)
+	return source == "Modrinth" || (source == "Hangar" || source == "CurseForge") && len(query["icon_url"]) == 0
 }
 
 type hangarFileInfo struct {

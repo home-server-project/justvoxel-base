@@ -166,13 +166,21 @@ func curseForgeLoader(server pluginServerContext) (int, string) {
 	return 0, ""
 }
 
+type curseForgeAsset struct {
+	ID           int64  `json:"id"`
+	ModID        int64  `json:"modId"`
+	ThumbnailURL string `json:"thumbnailUrl"`
+	URL          string `json:"url"`
+}
+
 type curseForgeProject struct {
-	ID      int64  `json:"id"`
-	Game    int64  `json:"gameId"`
-	Class   int64  `json:"classId"`
-	Name    string `json:"name"`
-	Slug    string `json:"slug"`
-	Summary string `json:"summary"`
+	Logo    *curseForgeAsset `json:"logo"`
+	ID      int64            `json:"id"`
+	Game    int64            `json:"gameId"`
+	Class   int64            `json:"classId"`
+	Name    string           `json:"name"`
+	Slug    string           `json:"slug"`
+	Summary string           `json:"summary"`
 }
 type curseForgeDependency struct {
 	ModID    int64 `json:"modId"`
@@ -231,6 +239,69 @@ func safeCurseForgeArtifactURL(raw string) bool {
 	parts := strings.Split(u.Path, "/")
 	return len(parts) == 5 && parts[0] == "" && parts[1] == "files" && positiveCurseForgeID(parts[2]) && strings.Trim(parts[3], "0123456789") == "" && parts[3] != "" && len(parts[3]) <= 19 && safePluginFilename(parts[4])
 }
+
+// Current operational avatar allowlist, independent of artifact download URLs.
+// A future CDN change leaves initials visible until this allowlist is reviewed.
+var curseForgeLogoFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|gif|webp)$`)
+
+func safeCurseForgeLogoURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Host != "media.forgecdn.net" || u.User != nil || u.Fragment != "" || strings.ContainsAny(raw, "#%\\") || u.RawPath != "" || u.ForceQuery || u.RawQuery != "" {
+		return false
+	}
+	decimal := func(value string) bool {
+		return len(value) > 0 && len(value) <= 19 && strings.Trim(value, "0123456789") == ""
+	}
+	parts := strings.Split(u.Path, "/")
+	if len(parts) == 5 && parts[0] == "" && parts[1] == "avatars" {
+		return decimal(parts[2]) && decimal(parts[3]) && curseForgeLogoFilename.MatchString(parts[4])
+	}
+	if len(parts) != 8 || parts[0] != "" || parts[1] != "avatars" || parts[2] != "thumbnails" || !decimal(parts[3]) || !decimal(parts[4]) || !curseForgeLogoFilename.MatchString(parts[7]) {
+		return false
+	}
+	for _, dimension := range parts[5:7] {
+		if !decimal(dimension) {
+			return false
+		}
+		n, err := strconv.ParseUint(dimension, 10, 64)
+		if err != nil || n == 0 || n > 2048 {
+			return false
+		}
+	}
+	return true
+}
+
+func curseForgeProjectLogo(project curseForgeProject, expectedID int64) string {
+	if project.Logo == nil || project.Logo.ID <= 0 || expectedID <= 0 || project.Logo.ModID != expectedID {
+		return ""
+	}
+	if safeCurseForgeLogoURL(project.Logo.ThumbnailURL) {
+		return project.Logo.ThumbnailURL
+	}
+	if safeCurseForgeLogoURL(project.Logo.URL) {
+		return project.Logo.URL
+	}
+	return ""
+}
+
+// Display-only lookup: icon requests do not need server compatibility scope.
+func curseForgeIconProject(ctx context.Context, id string) (curseForgeProject, error) {
+	var response struct {
+		Data curseForgeProject `json:"data"`
+	}
+	if !positiveCurseForgeID(id) {
+		return response.Data, errCurseForgeCatalog
+	}
+	if err := curseForgeJSON(ctx, "/v1/mods/"+id, nil, &response); err != nil {
+		return response.Data, err
+	}
+	p := response.Data
+	if strconv.FormatInt(p.ID, 10) != id || p.Logo != nil && (p.Logo.ID <= 0 || p.Logo.ModID != p.ID) {
+		return p, errCurseForgeCatalog
+	}
+	return p, nil
+}
+
 func positiveCurseForgeID(id string) bool { return validPluginIdentity("CurseForge", id) }
 func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, server pluginServerContext, scope curseForgeContext) (pluginInstallArtifact, error) {
 	a := pluginInstallArtifact{Target: javaServerContentKind(server.ServerType), Source: "CurseForge", ProjectID: project, VersionID: strconv.FormatInt(f.ID, 10), VersionNumber: f.DisplayName, Filename: f.Filename, Size: f.Size, URL: f.URL, RequiredBy: []string{}}
@@ -348,54 +419,72 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 			query.Set("modLoaderType", strconv.Itoa(loader))
 		}
 	}
-	var page struct {
-		Data       []curseForgeProject  `json:"data"`
-		Pagination curseForgePagination `json:"pagination"`
-	}
-	if err := curseForgeJSON(ctx, "/v1/mods/search", query, &page); err != nil {
-		return out, err
-	}
-	if page.Data == nil || !page.Pagination.valid(offset, q.Limit, len(page.Data)) {
-		return out, errCurseForgeCatalog
-	}
-	out.Total = page.Pagination.TotalCount
-	for _, p := range page.Data {
-		if out.End >= 10000 {
+	inspectionBudget := 8 * q.Limit
+	cursor, scanned := offset, 0
+	upstreamEnd := false
+	for len(out.Projects) < q.Limit && scanned < inspectionBudget && cursor < 10000 {
+		batchLimit := min(q.Limit, inspectionBudget-scanned)
+		query.Set("index", strconv.Itoa(cursor))
+		query.Set("pageSize", strconv.Itoa(batchLimit))
+		var page struct {
+			Data       []curseForgeProject  `json:"data"`
+			Pagination curseForgePagination `json:"pagination"`
+		}
+		if err := curseForgeJSON(ctx, "/v1/mods/search", query, &page); err != nil {
+			return out, err
+		}
+		if page.Data == nil || !page.Pagination.valid(cursor, batchLimit, len(page.Data)) {
+			return out, errCurseForgeCatalog
+		}
+		out.Total = page.Pagination.TotalCount
+		if len(page.Data) == 0 {
+			upstreamEnd = true
 			break
 		}
-		out.End++
-		id := strconv.FormatInt(p.ID, 10)
-		if !positiveCurseForgeID(id) || p.Game != scope.Game || p.Class != scope.Class || p.Name == "" || len(p.Name) > 256 || len(p.Summary) > 4096 {
-			continue
+		for _, p := range page.Data {
+			if len(out.Projects) == q.Limit || cursor >= out.Total || cursor >= 10000 {
+				break
+			}
+			cursor++
+			scanned++
+			id := strconv.FormatInt(p.ID, 10)
+			if !positiveCurseForgeID(id) || p.Game != scope.Game || p.Class != scope.Class || p.Name == "" || len(p.Name) > 256 || len(p.Summary) > 4096 {
+				continue
+			}
+			project := pluginCatalogProject{ID: id, Source: "CurseForge", Name: p.Name, Slug: p.Slug, Description: p.Summary, Compatibility: "Compatibility unknown", IconURL: curseForgeProjectLogo(p, p.ID)}
+			f, err := selectCurseForgeFile(ctx, id, server, q.Compatible, q.Release)
+			if err != nil {
+				project.MetadataError = "Release metadata unavailable"
+			} else if f == nil {
+				continue
+			} else {
+				loaders := []string{}
+				if _, loader := curseForgeLoader(server); loader != "" {
+					loaders = append(loaders, loader)
+				}
+				project.Version = &pluginCatalogVersion{ID: strconv.FormatInt(f.ID, 10), ProjectID: id, Number: f.DisplayName, Type: curseForgeRelease(f.Release), Published: f.Published, GameVersions: f.GameVersions, Loaders: loaders, Dependencies: []pluginDependency{}}
+				for _, d := range f.Dependencies {
+					project.Version.Dependencies = append(project.Version.Dependencies, pluginDependency{Source: "CurseForge", ProjectID: strconv.FormatInt(d.ModID, 10), Type: curseForgeRelation(d.Relation)})
+				}
+				project.Compatible = curseForgeCompatible(*f, server)
+				project.Compatibility = "Not listed as compatible according to publisher metadata"
+				if project.Compatible {
+					project.Compatibility = "Compatible according to publisher metadata"
+				}
+				_, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope)
+				project.InstallAvailable = artifactErr == nil && server.Supported
+			}
+			out.Projects = append(out.Projects, project)
+			out.Positions = append(out.Positions, cursor)
 		}
-		project := pluginCatalogProject{ID: id, Source: "CurseForge", Name: p.Name, Slug: p.Slug, Description: p.Summary, Compatibility: "Compatibility unknown"}
-		f, err := selectCurseForgeFile(ctx, id, server, q.Compatible, q.Release)
-		if err != nil {
-			project.MetadataError = "Release metadata unavailable"
-		} else if f == nil {
-			continue
-		} else {
-			loaders := []string{}
-			if _, loader := curseForgeLoader(server); loader != "" {
-				loaders = append(loaders, loader)
-			}
-			project.Version = &pluginCatalogVersion{ID: strconv.FormatInt(f.ID, 10), ProjectID: id, Number: f.DisplayName, Type: curseForgeRelease(f.Release), Published: f.Published, GameVersions: f.GameVersions, Loaders: loaders, Dependencies: []pluginDependency{}}
-			for _, d := range f.Dependencies {
-				project.Version.Dependencies = append(project.Version.Dependencies, pluginDependency{Source: "CurseForge", ProjectID: strconv.FormatInt(d.ModID, 10), Type: curseForgeRelation(d.Relation)})
-			}
-			project.Compatible = curseForgeCompatible(*f, server)
-			project.Compatibility = "Not listed as compatible according to publisher metadata"
-			if project.Compatible {
-				project.Compatibility = "Compatible according to publisher metadata"
-			}
-			_, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope)
-			project.InstallAvailable = artifactErr == nil && server.Supported
+		if cursor >= out.Total {
+			upstreamEnd = true
+			break
 		}
-		out.Projects = append(out.Projects, project)
-		out.Positions = append(out.Positions, out.End)
 	}
-	if out.End < out.Total && out.End < 10000 && len(page.Data) > 0 {
-		out.NextOffset = out.End
+	out.End = cursor
+	if !upstreamEnd && cursor < out.Total && cursor < 10000 {
+		out.NextOffset = cursor
 	}
 	return out, nil
 }

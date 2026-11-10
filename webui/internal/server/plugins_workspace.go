@@ -280,15 +280,8 @@ func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	client, ok := a.api.(interface {
-		AdminPluginIcon(context.Context, string, string, ...string) (api.PluginIcon, error)
-	})
-	if !ok {
-		http.Error(w, "Plugin icon unavailable.", http.StatusServiceUnavailable)
-		return
-	}
 	var icon api.PluginIcon
-	if query.Get("source") == "Hangar" {
+	if query.Get("source") == "Hangar" || query.Get("source") == "CurseForge" {
 		sourceClient, ok := a.api.(interface {
 			AdminPluginSourceIcon(context.Context, string, string, string) (api.PluginIcon, error)
 		})
@@ -296,8 +289,15 @@ func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Plugin icon unavailable.", 503)
 			return
 		}
-		icon, err = sourceClient.AdminPluginSourceIcon(r.Context(), session, "Hangar", projectID)
+		icon, err = sourceClient.AdminPluginSourceIcon(r.Context(), session, query.Get("source"), projectID)
 	} else {
+		client, ok := a.api.(interface {
+			AdminPluginIcon(context.Context, string, string, ...string) (api.PluginIcon, error)
+		})
+		if !ok {
+			http.Error(w, "Plugin icon unavailable.", http.StatusServiceUnavailable)
+			return
+		}
 		icon, err = client.AdminPluginIcon(r.Context(), session, projectID, iconURL...)
 	}
 	if err != nil {

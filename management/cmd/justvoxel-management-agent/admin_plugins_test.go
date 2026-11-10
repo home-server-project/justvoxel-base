@@ -1847,3 +1847,103 @@ func TestPluginDiscoverBothSourcesOffNeverRequestsCatalog(t *testing.T) {
 		t.Fatalf("disabled sources: %d %+v %v", rr.Code, catalog, err)
 	}
 }
+
+func TestCurseForgeIconAuthoritativeMetadataAndBoundedImage(t *testing.T) {
+	const logoURL = "https://media.forgecdn.net/avatars/123/456/638123456789012345.png"
+	for _, tc := range []struct {
+		name                            string
+		want, metadataCalls, imageCalls int
+	}{
+		{"valid", 200, 1, 1},
+		{"caller URL", 400, 0, 0},
+		{"missing logo", 404, 1, 0},
+		{"invalid logo URL", 404, 1, 0},
+		{"project mismatch", 502, 1, 0},
+		{"logo owner mismatch", 502, 1, 0},
+		{"redirect", 502, 1, 1},
+		{"oversized declared", 502, 1, 1},
+		{"oversized streamed", 502, 1, 1},
+		{"invalid MIME", 502, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldImages := pluginCatalogClient
+			curseForgeCatalogFixture(t, "paper")
+			t.Cleanup(func() { pluginCatalogClient = oldImages })
+			metadataCalls, imageCalls := 0, 0
+			data := pluginIconImage(t, "image/png")
+			metadataClient := *curseForgeClient
+			metadataClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				metadataCalls++
+				if metadataCalls != 1 || r.Method != http.MethodGet || r.URL.Scheme != "https" || r.URL.Host != "api.curseforge.com" || r.URL.Path != "/v1/mods/123" || r.URL.RawQuery != "" || r.Header.Get("x-api-key") != "private-fixture-key" {
+					t.Fatalf("unexpected authoritative metadata request: %s", r.URL)
+				}
+				if _, ok := r.Context().Deadline(); !ok {
+					t.Fatal("metadata request has no deadline")
+				}
+				project := curseForgeProject{ID: 123, Logo: &curseForgeAsset{ID: 1, ModID: 123, URL: logoURL}}
+				switch tc.name {
+				case "missing logo":
+					project.Logo = nil
+				case "invalid logo URL":
+					project.Logo.URL = "https://evil.example/icon.png"
+				case "project mismatch":
+					project.ID = 124
+					project.Logo.ModID = 124
+				case "logo owner mismatch":
+					project.Logo.ModID = 124
+				}
+				body, err := json.Marshal(map[string]any{"data": project})
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, err
+			})
+			curseForgeClient = &metadataClient
+			images := *oldImages // Preserve the production no-redirect policy.
+			images.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				imageCalls++
+				if imageCalls != 1 || metadataCalls != 1 || r.Method != http.MethodGet || r.URL.String() != logoURL {
+					t.Fatalf("unexpected image request (or followed redirect): %s", r.URL)
+				}
+				if r.Header.Get("x-api-key") != "" {
+					t.Fatal("CurseForge API key leaked to media.forgecdn.net")
+				}
+				if _, ok := r.Context().Deadline(); !ok {
+					t.Fatal("image request has no deadline")
+				}
+				body, kind, status, length := data, "image/png", 200, int64(-1)
+				switch tc.name {
+				case "redirect":
+					status = 302
+				case "oversized declared":
+					length = pluginIconLimit + 1
+				case "oversized streamed":
+					body = bytes.Repeat([]byte("x"), pluginIconLimit+1)
+				case "invalid MIME":
+					body, kind = []byte("<html>private upstream body</html>"), "text/html"
+				}
+				return &http.Response{StatusCode: status, ContentLength: length, Header: http.Header{"Content-Type": {kind}, "Location": {"https://media.forgecdn.net/avatars/123/456/redirect.png"}}, Body: io.NopCloser(bytes.NewReader(body))}, nil
+			})
+			pluginCatalogClient = &images
+			s := surfaceTestServer(t, roleAdministrator)
+			mux := http.NewServeMux()
+			registerAdminPluginRoutes(mux, s)
+			query := url.Values{"source": {"CurseForge"}, "project_id": {"123"}}
+			if tc.name == "caller URL" {
+				query.Set("icon_url", logoURL)
+			}
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, pluginTestRequest(http.MethodGet, "/v1/admin/plugins/icon?"+query.Encode(), ""))
+			if rr.Code != tc.want || metadataCalls != tc.metadataCalls || imageCalls != tc.imageCalls {
+				t.Fatalf("status %d, metadata %d, images %d: %s", rr.Code, metadataCalls, imageCalls, rr.Body.String())
+			}
+			if rr.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatal("missing nosniff")
+			}
+			if tc.want == 200 {
+				if rr.Header().Get("Content-Type") != "image/png" || !bytes.Equal(rr.Body.Bytes(), data) {
+					t.Fatal("verified image bytes lost")
+				}
+			} else if strings.Contains(rr.Body.String(), "private-fixture-key") || strings.Contains(rr.Body.String(), "private upstream body") || strings.Contains(rr.Body.String(), "https://") {
+				t.Fatal("upstream details escaped failure response")
+			}
+		})
+	}
+}
