@@ -594,6 +594,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 		return rollback(err)
 	}
 	if err = lock.start(ctx, pluginInstanceID(ctx)); err != nil {
+		recordPluginStartFailure(s.operations, id, p.DataPath, []string{p.Entry.PluginName}, err)
 		return rollback(errors.New("Minecraft could not start"))
 	}
 	if _, err = s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and managed plugin state."); err != nil {

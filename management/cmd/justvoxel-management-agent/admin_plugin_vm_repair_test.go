@@ -5,17 +5,24 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type pluginArtifactReadFailure struct{ err error }
+
+func (r pluginArtifactReadFailure) Read([]byte) (int, error) { return 0, r.err }
 
 func TestCurseForgeAuthenticatedArtifactBoundary(t *testing.T) {
 	for _, tc := range []struct {
@@ -25,6 +32,12 @@ func TestCurseForgeAuthenticatedArtifactBoundary(t *testing.T) {
 		wantRequest, wantKey, wantOK bool
 	}{
 		{"verified", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, true, true, true},
+		{"incorrect Content-Length", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, true, true, true},
+		{"incorrect Content-Length EOF", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, true, true, true},
+		{"transport read failure", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, true, true, false},
+		{"short Content-Length", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, true, true, true},
+		{"absent Content-Length", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, true, true, true},
+		{"non-success", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 503, true, true, false},
 		{"sha1 mismatch", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", strings.Repeat("0", 40), 3, 200, true, true, false},
 		{"stream oversized", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, true, true, false},
 		{"stream short", "CurseForge", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, true, true, false},
@@ -37,12 +50,23 @@ func TestCurseForgeAuthenticatedArtifactBoundary(t *testing.T) {
 		{"modrinth api", "CurseForge", "https://api.modrinth.com/files/123/456/x.jar", "", 3, 200, false, false, false},
 		{"wrong provider", "Modrinth", "https://edge.forgecdn.net/files/123/456/x.jar", "", 3, 200, false, false, false},
 		{"modrinth", "Modrinth", "https://cdn.modrinth.com/data/root/versions/release/x.jar", "", 3, 200, true, false, true},
+		{"modrinth hash mismatch", "Modrinth", "https://cdn.modrinth.com/data/root/versions/release/x.jar", "", 3, 200, true, false, false},
+		{"hangar", "Hangar", "https://hangarcdn.papermc.io/plugins/Author/Project/versions/1/PAPER/x.jar", "", 3, 200, true, false, true},
+		{"hangar hash mismatch", "Hangar", "https://hangarcdn.papermc.io/plugins/Author/Project/versions/1/PAPER/x.jar", "", 3, 200, true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, _ := curseForgeCatalogFixture(t, "paper")
 			sum := sha1.Sum([]byte("jar"))
 			hash := sha512.Sum512([]byte("jar"))
 			a := pluginInstallArtifact{Source: tc.source, Filename: "x.jar", URL: tc.url, Size: tc.size, SHA1: hex.EncodeToString(sum[:]), SHA512: hex.EncodeToString(hash[:])}
+			h256 := sha256.Sum256([]byte("jar"))
+			a.SHA256 = hex.EncodeToString(h256[:])
+			if tc.name == "hangar hash mismatch" {
+				a.SHA256 = strings.Repeat("0", 64)
+			}
+			if tc.name == "modrinth hash mismatch" {
+				a.SHA512 = strings.Repeat("0", 128)
+			}
 			if tc.sha1 != "" {
 				a.SHA1 = tc.sha1
 			}
@@ -57,6 +81,15 @@ func TestCurseForgeAuthenticatedArtifactBoundary(t *testing.T) {
 					t.Fatal("artifact credential boundary violated")
 				}
 				body, length := "jar", int64(3)
+				if tc.name == "incorrect Content-Length" {
+					length = 999
+				}
+				if tc.name == "short Content-Length" {
+					length = 1
+				}
+				if tc.name == "absent Content-Length" {
+					length = -1
+				}
 				if tc.name == "stream oversized" {
 					body, length = "jars", -1
 				}
@@ -66,7 +99,15 @@ func TestCurseForgeAuthenticatedArtifactBoundary(t *testing.T) {
 				if tc.status == 401 || tc.status == 403 {
 					body = "private-response private-fixture-key"
 				}
-				return &http.Response{StatusCode: tc.status, ContentLength: length, Header: http.Header{"Location": {"https://attacker.invalid/stolen"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+				var reader io.Reader = strings.NewReader(body)
+				if tc.name == "incorrect Content-Length EOF" {
+					length = 999
+					reader = io.MultiReader(reader, pluginArtifactReadFailure{io.ErrUnexpectedEOF})
+				}
+				if tc.name == "transport read failure" {
+					reader = io.MultiReader(reader, pluginArtifactReadFailure{errors.New("private transport failure")})
+				}
+				return &http.Response{StatusCode: tc.status, ContentLength: length, Header: http.Header{"Location": {"https://attacker.invalid/stolen"}}, Body: io.NopCloser(reader)}, nil
 			})}
 			_, err := downloadVerifiedPluginArtifact(context.Background(), a, t.TempDir())
 			if (err == nil) != tc.wantOK || (calls == 1) != tc.wantRequest || calls > 1 {
@@ -78,6 +119,13 @@ func TestCurseForgeAuthenticatedArtifactBoundary(t *testing.T) {
 				}
 				if (tc.status == 401 || tc.status == 403) && !strings.Contains(err.Error(), "authentication rejected") {
 					t.Fatal(err)
+				}
+				var diagnostic *pluginProviderDiagnosticError
+				if !errors.As(err, &diagnostic) {
+					t.Fatal("missing safe provider evidence", err)
+				}
+				if tc.wantRequest && diagnostic.values["http_status"] != fmt.Sprint(tc.status) {
+					t.Fatal("missing HTTP status", diagnostic.values)
 				}
 				j, _, e := f.s.operations.beginMinecraftMaintenance("sha256:"+strings.Repeat("a", 64), operationTypePluginInstall, "jv-a1b2c3")
 				if e != nil {
@@ -151,7 +199,7 @@ func TestCurseForgeDiscoveryAndPlanRejectUnverifiableFiles(t *testing.T) {
 				return response, nil
 			})
 			page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
-			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable || !strings.Contains(page.Projects[0].Compatibility, "verifiable downloadable JAR") {
+			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable || !strings.Contains(page.Projects[0].Compatibility, "CurseForge") {
 				t.Fatal(page, err)
 			}
 			if _, err := resolveCurseForgeInstallPlan(context.Background(), server, f.data, "10", "20"); err == nil {
@@ -449,6 +497,105 @@ func TestVerifierDiagnosticConfiguredKeyAndBoundaryRedaction(t *testing.T) {
 	for _, secret := range []string{"private-fixture-key", "boundary-sensitive", "Authorization"} {
 		if strings.Contains(string(log), secret) {
 			t.Fatal("private verifier detail leaked", secret)
+		}
+	}
+}
+
+func TestPluginReviewFailureDiagnosticWithoutMaintenance(t *testing.T) {
+	for _, status := range []int{302, 503} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			f, _ := curseForgeCatalogFixture(t, "fabric")
+			pluginDownloadClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				if r.Header.Get("x-api-key") != "private-fixture-key" {
+					t.Fatal("missing authenticated download")
+				}
+				return &http.Response{StatusCode: status, ContentLength: 999, Header: http.Header{"Location": {"https://attacker.invalid/?key=private-fixture-key"}}, Body: io.NopCloser(strings.NewReader("private-fixture-key response-secret"))}, nil
+			})}
+			rr := httptest.NewRecorder()
+			f.s.adminPluginInstallPlan(rr, pluginTestRequest(http.MethodPost, "/", `{"source":"CurseForge","project_id":"10","version_id":"20"}`))
+			var payload struct {
+				Error string `json:"error"`
+				ID    string `json:"diagnostic_id"`
+			}
+			if json.Unmarshal(rr.Body.Bytes(), &payload) != nil || rr.Code != 409 || !validOperationID(payload.ID) {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(payload.Error, fmt.Sprint(status)) {
+				t.Fatal("concise HTTP reason missing", payload.Error)
+			}
+			if len(f.s.operations.operations) != 0 {
+				t.Fatal("review created a maintenance operation")
+			}
+			if current, err := f.s.operations.currentPluginInstall(); err != nil || current != nil {
+				t.Fatal("review reserved maintenance", current, err)
+			}
+			logs, err := f.s.operations.listDiagnosticLogs()
+			if err != nil || len(logs) != 1 || logs[0].Category != "plugins" || logs[0].LogID != payload.ID || logs[0].OperationID != "" {
+				t.Fatal(logs, err)
+			}
+			data, err := f.s.operations.readDiagnosticLog("plugins", payload.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, expected := range []string{"http_status=\"" + fmt.Sprint(status) + "\"", "project_id=\"10\"", "release_id=\"20\"", "http_content_length=\"999\"", "hash_algorithm=\"SHA-1\""} {
+				if !strings.Contains(string(data), expected) {
+					t.Fatal("missing diagnostic evidence", expected, string(data))
+				}
+			}
+			for _, secret := range []string{"private-fixture-key", "response-secret", "attacker.invalid", "x-api-key"} {
+				if strings.Contains(string(data)+rr.Body.String(), secret) {
+					t.Fatal("diagnostic leak", secret)
+				}
+			}
+			info, err := os.Stat(filepath.Join(f.s.operations.logsDir, "plugins-logs", payload.ID+".log"))
+			if err != nil || info.Mode().Perm() != 0600 {
+				t.Fatal("private log permissions", err)
+			}
+			read := httptest.NewRecorder()
+			request := surfaceRequest(http.MethodGet, "/?download=1", "")
+			request.SetPathValue("category", "plugins")
+			request.SetPathValue("id", payload.ID)
+			f.s.adminDiagnosticLogRead(read, request)
+			if read.Code != 200 || read.Body.String() != string(data) || !strings.Contains(read.Header().Get("Content-Disposition"), payload.ID) {
+				t.Fatal("normal download path unavailable", read.Code)
+			}
+		})
+	}
+}
+
+func TestPluginStartFailureEvidenceBoundsAndRedaction(t *testing.T) {
+	f, _ := curseForgeCatalogFixture(t, "paper")
+	f.s.operations.diagnosticHostname = "private-appliance"
+	journal, _, err := f.s.operations.beginMinecraftMaintenance("sha256:"+strings.Repeat("a", 64), operationTypePluginInstall, "jv-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePluginStartup(t, f.data, pluginFixtureStartup+"[Root] startup diagnostic\n")
+	calls := 0
+	pluginInstallCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		calls++
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("diagnostic command without deadline")
+		}
+		if !strings.Contains(strings.Join(args, " "), "minecraft-jv-a1b2c3.service") {
+			t.Fatal("wrong service", args)
+		}
+		return []byte("Result=exit-code\nprivate-fixture-key\nhttps://user:private-pass@example.invalid/?key=private-query\n"), errors.New("evidence command failed")
+	}
+	output := "useful start reason on private-appliance 10.20.30.40\nprivate-fixture-key\n" + strings.Repeat("x", 2040) + "Authorization: Bearer boundary-value\n" + strings.Repeat("bounded detail\n", 10000)
+	recordPluginStartFailure(f.s.operations, journal.OperationID, f.data, []string{"Root"}, &pluginStartError{cause: errors.New("exit status 1"), output: output})
+	data, err := f.s.operations.readDiagnosticLog("plugins", journal.OperationID)
+	if err != nil || calls != 2 || len(data) > operationDiagnosticLimit {
+		t.Fatal("evidence bounds", calls, len(data), err)
+	}
+	for _, want := range []string{"useful start reason", "Result=exit-code", "startup diagnostic", "Startup evidence command unavailable"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatal("missing startup evidence", want)
+		}
+	}
+	for _, secret := range []string{"private-appliance", "10.20.30.40", "private-fixture-key", "private-pass", "private-query", "boundary-value"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatal("start diagnostic leak", secret)
 		}
 	}
 }

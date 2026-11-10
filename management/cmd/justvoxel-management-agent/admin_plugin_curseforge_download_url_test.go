@@ -104,7 +104,7 @@ func TestCurseForgeOfficialDownloadURLResolution(t *testing.T) {
 			if tc.wantOK && page.Projects[0].Compatibility != "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review." {
 				t.Fatal("dedicated-server compatibility wording changed")
 			}
-			if !tc.wantOK && tc.invalid != "project" && tc.invalid != "file" && page.Projects[0].Compatibility != "CurseForge does not expose a verifiable downloadable JAR for this release." {
+			if !tc.wantOK && tc.invalid != "project" && tc.invalid != "file" && !strings.Contains(page.Projects[0].Compatibility, "CurseForge") {
 				t.Fatal("missing unavailable artifact explanation")
 			}
 			wantCalls := 0

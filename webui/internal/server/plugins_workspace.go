@@ -132,7 +132,7 @@ func (a *App) pluginsWorkspaceInstallPlan(w http.ResponseWriter, r *http.Request
 	}
 	out, err := client.AdminPluginInstallPlan(r.Context(), session, api.PluginInstallRequest{Source: r.FormValue("source"), ProjectID: r.FormValue("project_id"), VersionID: r.FormValue("version_id")})
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Plugin plan could not be prepared.")
+		a.writePluginWorkspaceAPIError(w, err, "Plugin plan could not be prepared.")
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, out)
@@ -152,7 +152,7 @@ func (a *App) pluginsWorkspaceInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := client.AdminPluginInstall(r.Context(), session, api.PluginInstallApplyRequest{Source: r.FormValue("source"), ProjectID: r.FormValue("project_id"), VersionID: r.FormValue("version_id"), PlanFingerprint: r.FormValue("plan_fingerprint"), ConfirmPlayers: r.FormValue("confirm_players") == "true"})
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Plugin installation could not start; review again.")
+		a.writePluginWorkspaceAPIError(w, err, "Plugin installation could not start; review again.")
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, http.StatusAccepted, out)
@@ -460,4 +460,17 @@ func (a *App) selectedPluginRequest(next http.HandlerFunc) http.HandlerFunc {
 		copy.URL.RawQuery = query.Encode()
 		next(w, copy)
 	}
+}
+
+func (a *App) writePluginWorkspaceAPIError(w http.ResponseWriter, err error, fallback string) {
+	var response *api.ResponseError
+	if !errors.Is(err, api.ErrUnauthorized) && !errors.Is(err, api.ErrPasswordChangeRequired) && errors.As(err, &response) && response.StatusCode >= 400 && response.StatusCode <= 599 && validWorkspaceLogID("plugins", response.DiagnosticID) {
+		message := response.Message
+		if message == "" {
+			message = fallback
+		}
+		writeMinecraftWorkspaceJSON(w, response.StatusCode, map[string]any{"ok": false, "error": message, "diagnostic_id": response.DiagnosticID})
+		return
+	}
+	a.writeMinecraftWorkspaceAPIError(w, err, fallback)
 }

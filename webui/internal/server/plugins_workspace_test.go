@@ -2316,41 +2316,98 @@ func TestPluginsWorkspaceIconRoutesByAuthoritativeSource(t *testing.T) {
 	}
 }
 
-func TestPluginPreOperationErrorsDoNotClaimDiagnosticLog(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+func TestPluginDiagnosticLinksUseExactLogWithoutReload(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	link := pluginScriptSection(t, script, "  const pluginDiagnosticLink =", "  const panelError =")
+	panel := pluginScriptSection(t, script, "  const panelError =", "  const showAddonOperation =")
+	operation := pluginScriptSection(t, script, "  const showOperation =", "  const pollOperation =")
+	request := pluginScriptSection(t, script, "  const pluginRequest =", "  const pluginDiagnosticLink =")
+	if !strings.Contains(panel, "pluginDiagnosticLink(error.diagnosticID)") || !strings.Contains(operation, "pluginDiagnosticLink(operation.operation_id)") {
+		t.Fatal("exact diagnostic ID missing from a failure path")
+	}
+	if strings.Contains(link, "load()") || strings.Contains(link, "closePanel()") || !strings.Contains(link, "workspaceWindow?.close()") {
+		t.Fatal("diagnostic link must close the workspace without reloading Plugins")
+	}
+	css, err := assets.ReadFile("static/app.css")
+	if err != nil || !strings.Contains(string(css), ".plugins-diagnostic-link{display:flex;align-items:center;gap:.5rem}") {
+		t.Fatal("diagnostic sentence and action must share a line", err)
+	}
+	full, err := assets.ReadFile("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(raw)
-	start := strings.Index(script, "  const panelError =")
-	if start < 0 {
-		t.Fatal("error panel missing")
-	}
-	end := strings.Index(script[start:], "  const showAddonOperation =")
-	if end < 0 {
-		t.Fatal("error panel boundary missing")
-	}
-	panel := script[start : start+end]
-	if !strings.Contains(panel, "error.message") {
-		t.Fatal("actionable pre-operation message lost")
-	}
-	for _, forbidden := range []string{"See System -> Logs -> Plugins", "Open Plugins logs", "openPluginLogs"} {
-		if strings.Contains(panel, forbidden) {
-			t.Fatal("pre-operation failure advertises nonexistent log", forbidden)
+	for _, want := range []string{`requestedMigrationLog = { group: "Plugins", id };`, `await window.JustVoxelSystem.openTab("logs")`, `entry.category === requestedMigrationLog.group.toLowerCase() && entry.log_id === requestedMigrationLog.id`, `if (entry === requestedEntry)`, `button.click();`, `documentText.textContent = data;`, `if (sequence !== loadSequence || selectedFile !== identity || selectedGroup !== clickedGroup) return;`} {
+		if !strings.Contains(string(full), want) {
+			t.Fatal("System exact-log selection or stale-view protection missing", want)
 		}
 	}
-	start = strings.Index(script, "  const showOperation =")
-	if start < 0 {
-		t.Fatal("operation view missing")
+	program := `
+const assert = require("node:assert/strict");
+class Node {
+ constructor(tag="div", value="", className="") { this.tag=tag; this.textContent=value; this.className=className; this.children=[]; this.classList={add(){}}; }
+ append(...nodes){this.children.push(...nodes);} setAttribute(){} querySelector(){return null;}
+}
+let events=[], opened=[], operationViewID=null, operationIdentity=null;
+const panel={hidden:true}, panelBody=new Node(), pluginsDialog={};
+const showPanel=()=>{panelBody.children=[];};
+const text=(tag,value,className)=>new Node(tag,value,className);
+const panelAction=(label,click)=>Object.assign(new Node("button",label),{click});
+const overlayActions=(...buttons)=>{const node=new Node();node.append(...buttons);panelBody.append(node);return node;};
+const overlayHeader=()=>{}, closePanel=()=>{throw Error("overlay-only close");}, load=()=>{throw Error("Plugins reload");};
+const workspaceWindow={close(){events.push("close-plugins");panel.hidden=true;}};
+const window={JustVoxelSystem:{openPluginLogs(id){events.push("open-system-plugins");opened.push(id);}},location:{assign(){throw Error("unexpected authentication redirect");}}};
+const document={querySelector(){return null;},createElement:tag=>new Node(tag)};
+globalThis.justVoxelSelectionGeneration={plugins:1};
+globalThis.justVoxelSelectedURL=value=>value;
+globalThis.justVoxelStaleSelection=()=>Object.assign(new Error("stale"),{staleSelection:true});
+const contentSingular=()=>"plugin";
+const id="12345678-1234-4234-8234-123456789abc";
+let status=409, payload={error:"Downloaded artifact size did not match CurseForge metadata",diagnostic_id:id};
+const fetch=async()=>({ok:false,status,json:async()=>payload});
+` + request + link + panel + operation + `
+function followExactLink(){
+ const row=panelBody.children.find(node=>node.className==="plugins-diagnostic-link");
+ assert(row); assert.equal(row.tag,"p");
+ assert.equal(row.textContent,"See System -> Logs -> Plugins for diagnostic details. ");
+ assert.equal(row.children.length,1);assert.equal(row.children[0].textContent,"Open Plugins logs");
+ events=[];row.children[0].click();assert.deepEqual(events,["close-plugins","open-system-plugins"]);assert.equal(opened.at(-1),id);
+}
+(async()=>{
+ for(const state of ["failed","rolled_back","needs_attention"]){
+  showOperation({operation_type:"plugin_install",operation_id:id,state,status:"Installation did not complete"});followExactLink();
+ }
+ let failure;
+ try{await pluginRequest("install/plan",{source:"CurseForge",project_id:"10",version_id:"20"});}catch(error){failure=error;}
+ assert.equal(failure.diagnosticID,id);panelError(failure);followExactLink();
+ panelError(new Error("No recorded diagnostic"));assert(!panelBody.children.some(node=>node.className==="plugins-diagnostic-link"));
+ payload={error:"Bad metadata",diagnostic_id:"../unsafe"};
+ try{await pluginRequest("install/plan",{});}catch(error){assert.equal(error.diagnosticID,undefined);}
+})().catch(error=>{console.error(error);process.exitCode=1;});
+`
+	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+		t.Fatalf("exact diagnostic navigation: %v\n%s", err, output)
 	}
-	end = strings.Index(script[start:], "  const pollOperation =")
-	if end < 0 {
-		t.Fatal("operation poll missing")
-	}
-	operation := script[start : start+end]
-	for _, want := range []string{"operation.state === \"rolled_back\"", "operation.state === \"failed\"", "See System -> Logs -> Plugins", "Open Plugins logs", "openPluginLogs(operation.operation_id)"} {
-		if !strings.Contains(operation, want) {
-			t.Fatal("persistent-operation diagnostic path lost", want)
+}
+
+func TestPluginWorkspaceDiagnosticErrorPayload(t *testing.T) {
+	app := &App{}
+	id := "12345678-1234-4234-8234-123456789abc"
+	for _, candidate := range []string{id, "../unsafe", ""} {
+		rr := httptest.NewRecorder()
+		app.writePluginWorkspaceAPIError(rr, &api.ResponseError{StatusCode: 409, Message: "CurseForge artifact download returned HTTP 503", DiagnosticID: candidate}, "Review failed")
+		var payload struct {
+			Error string `json:"error"`
+			ID    string `json:"diagnostic_id"`
+		}
+		if json.Unmarshal(rr.Body.Bytes(), &payload) != nil || rr.Code != 409 || !strings.Contains(payload.Error, "HTTP 503") {
+			t.Fatal(rr.Code, rr.Body.String())
+		}
+		want := ""
+		if candidate == id {
+			want = id
+		}
+		if payload.ID != want {
+			t.Fatal("unsafe or missing diagnostic identity", rr.Body.String())
 		}
 	}
 }

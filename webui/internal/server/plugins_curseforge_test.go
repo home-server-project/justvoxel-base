@@ -122,7 +122,7 @@ func TestCurseForgeWorkspaceMarkupAndSecretBoundary(t *testing.T) {
 		}
 		last = index
 	}
-	for _, want := range []string{"data-plugins-curseforge", "data-plugins-curseforge-section", `data-curseforge-notice-dismiss aria-label="Dismiss CurseForge notice">×</button>`, "CurseForge API", "Apply for CurseForge API key", `rel="noopener noreferrer"`, "••••••••••••••••", `data-curseforge-key-form`, `type="password" data-curseforge-key data-password-ui="off" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="1024" required`, `data-curseforge-save>Save API key`, `data-curseforge-status`, `data-curseforge-mask hidden>Stored API key:`, `data-curseforge-remove hidden`} {
+	for _, want := range []string{"data-plugins-curseforge", "data-plugins-curseforge-section", `data-curseforge-notice-dismiss aria-label="Dismiss CurseForge notice">×</button>`, "CurseForge API", "Open CurseForge API Console", `rel="noopener noreferrer"`, "••••••••••••••••", `data-curseforge-key-form`, `type="password" data-curseforge-key data-password-ui="off" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="1024" required`, `data-curseforge-save>Save API key`, `data-curseforge-status`, `data-curseforge-mask hidden>Stored API key:`, `data-curseforge-remove hidden`} {
 		if !strings.Contains(markup, want) {
 			t.Fatal("missing markup", want)
 		}

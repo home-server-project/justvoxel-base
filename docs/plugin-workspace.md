@@ -781,10 +781,12 @@ existing Plugins ownership schema, runtime targets or SELinux policy.
 
 Plugins & Mods includes **CurseForge API** following
 Discover, Installed and Add-ons. Administrators can configure, replace or remove
-an approved third-party API key there. The tab contains the password field
-directly and links to
-[CurseForge's official application help](https://support.curseforge.com/support/solutions/articles/9000208346-about-the-curseforge-api-and-how-to-apply-for-a-key);
-approval is required, and saving a key does not validate it against CurseForge.
+a CurseForge API key there to enable CurseForge plugin and mod discovery and
+installation. Sign in or create a CurseForge for Studios account, then open
+API keys and generate an API key if you do not already have one. The tab contains
+the password field directly and links to the
+[CurseForge API Console](https://console.curseforge.com/).
+Saving a key does not validate it against CurseForge.
 
 The Discover CurseForge switch defaults on for a supported server when a key is
 configured. Without a key it stays off and attempts to enable it show the existing
@@ -826,3 +828,18 @@ and when the workspace closes. Replacements require a complete key. The UI displ
 The key is never returned, logged, included in diagnostic contents, placed in
 browser storage or URLs, or passed to Minecraft. Removing it turns the switch
 off without changing installed plugins or manifests.
+
+JustVoxel directly installs official Modrinth, Hangar, or CurseForge artifacts into
+the administrator’s selected Minecraft server. Provider policies concerning
+third-party redistribution, mirroring, marketplace publication, or separate
+downloads are not installation eligibility gates because JustVoxel does not
+redistribute those artifacts. Eligibility uses technical identity, compatibility,
+official artifact availability, bounded actual byte counts, provider hashes, JAR
+inspection, and runtime verification. HTTP Content-Length is advisory; exact
+provider size and hash verification remain mandatory.
+
+Failed provider review/download and runtime-start attempts produce sanitized,
+downloadable diagnostic logs under **System -> Logs -> Plugins**. When a log was
+recorded, **Open Plugins logs** opens that exact file. Start failures retain bounded
+start-command output, selected service state, the exact instance service’s recent
+journal, and available Minecraft startup evidence before rollback.

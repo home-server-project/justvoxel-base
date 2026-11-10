@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -205,6 +206,8 @@ func TestPluginOperationsLockHandoff(t *testing.T) {
 				}
 				base := pluginInstallCommand
 				starts, stopsAfterLoss := 0, 0
+				evidenceCalls := 0
+				f.s.operations.diagnosticHostname = "private-appliance"
 				var rival *os.File
 				defer func() {
 					if rival != nil {
@@ -212,6 +215,26 @@ func TestPluginOperationsLockHandoff(t *testing.T) {
 					}
 				}()
 				pluginInstallCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+					if command == "journalctl" || command == "systemctl" && args[0] == "show" {
+						if starts != 1 || outcome == "success" {
+							t.Fatal("evidence collected outside failed start before rollback")
+						}
+						if _, ok := ctx.Deadline(); !ok {
+							t.Fatal("unbounded evidence collection")
+						}
+						evidenceCalls++
+						want := "show minecraft-jv-a1b2c3.service --no-pager --property=ActiveState,SubState,Result,ExecMainCode,ExecMainStatus"
+						if command == "journalctl" {
+							want = "-b -u minecraft-jv-a1b2c3.service --no-pager -n 80 -o short-iso"
+						}
+						if strings.Join(args, " ") != want {
+							t.Fatal("unrestricted evidence command", command, args)
+						}
+						if command == "journalctl" {
+							return []byte("startup journal reason on private-appliance\nAuthorization: Bearer journal-secret\n"), errors.New("collection unavailable")
+						}
+						return []byte("ActiveState=failed\nSubState=failed\nResult=exit-code\nExecMainCode=exited\nExecMainStatus=125\n"), nil
+					}
 					if command == "systemctl" && args[0] == "start" {
 						starts++
 						if len(args) != 2 || args[1] != "minecraft-jv-a1b2c3.service" {
@@ -222,7 +245,7 @@ func TestPluginOperationsLockHandoff(t *testing.T) {
 							t.Fatal("self-deadlocked startup", err)
 						}
 						if starts == 1 && outcome == "start failure" {
-							return nil, errors.New("startup failed")
+							return []byte("start command reason on private-appliance\nCookie: start-secret\n"), errors.New("startup failed")
 						}
 						out, startErr := base(ctx, command, args...)
 						if starts == 1 && outcome == "reacquire failure" {
@@ -251,8 +274,24 @@ func TestPluginOperationsLockHandoff(t *testing.T) {
 				if j.State != want || starts == 0 {
 					t.Fatal("unexpected result", starts, j.State, j.Status)
 				}
-				if outcome == "start failure" && starts < 2 {
-					t.Fatal("rollback did not exercise restart")
+				if outcome == "start failure" {
+					if starts < 2 || !f.active || evidenceCalls != 2 {
+						t.Fatal("rollback did not restore running state after evidence", starts, f.active, evidenceCalls)
+					}
+					data, err := f.s.operations.readDiagnosticLog("plugins", j.OperationID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, want := range []string{"startup failed", "start command reason", "ActiveState=failed", "ExecMainStatus=125", "startup journal reason"} {
+						if !strings.Contains(string(data), want) {
+							t.Fatal("missing pre-rollback evidence", want, string(data))
+						}
+					}
+					for _, secret := range []string{"private-appliance", "journal-secret", "start-secret"} {
+						if strings.Contains(string(data), secret) {
+							t.Fatal("start evidence leaked", secret)
+						}
+					}
 				}
 				if outcome == "reacquire failure" {
 					if starts != 1 || stopsAfterLoss != 0 {

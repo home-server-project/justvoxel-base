@@ -1,16 +1,20 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const operationDiagnosticLimit = 4 * 1024 * 1024
@@ -126,6 +130,10 @@ func (s *operationStore) appendOperationDiagnostic(id, operationType, category, 
 	}
 	var line strings.Builder
 	fmt.Fprintf(&line, "[%s] %s %s", s.now().UTC().Format("2006-01-02T15:04:05.999999999Z07:00"), sanitizeSetupDiagnosticText(category, s.diagnosticHostname), sanitizeSetupDiagnosticText(message, s.diagnosticHostname))
+	privateKey := ""
+	if diagnosticCategoryForOperationType(operationType) == "plugins" {
+		privateKey, _ = readCurseForgeKey()
+	}
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)
@@ -136,6 +144,9 @@ func (s *operationStore) appendOperationDiagnostic(id, operationType, category, 
 			continue
 		}
 		value := values[key]
+		if privateKey != "" {
+			value = strings.ReplaceAll(value, privateKey, "<REDACTED>")
+		}
 		if operationDiagnosticSensitivePattern.MatchString(value) {
 			value = "<sensitive diagnostic detail redacted>"
 		}
@@ -172,7 +183,7 @@ func (s *operationStore) appendOperationDiagnostic(id, operationType, category, 
 
 func validDiagnosticOperationType(value string) bool {
 	switch value {
-	case operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
+	case pluginReviewDiagnosticType, operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
 		return true
 	}
 	return false
@@ -194,7 +205,7 @@ func diagnosticCategoryForOperationType(value string) string {
 		return "migration"
 	case operationTypeRestore:
 		return "restore"
-	case operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
+	case pluginReviewDiagnosticType, operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
 		return "plugins"
 	case operationTypeMinecraftReset, operationTypeFactoryReset:
 		return "reset"
@@ -364,6 +375,10 @@ func recordPluginFailure(store *operationStore, id, stage string, cause error) {
 		return
 	}
 	_ = store.appendOperationDiagnostic(id, journal.OperationType, stage, "Plugin operation failed", map[string]string{"reason": cause.Error()})
+	var provider *pluginProviderDiagnosticError
+	if errors.As(cause, &provider) {
+		_ = store.appendOperationDiagnostic(id, journal.OperationType, stage, "Provider artifact verification evidence", provider.values)
+	}
 	var verification *pluginRuntimeVerificationError
 	if !errors.As(cause, &verification) {
 		return
@@ -395,5 +410,123 @@ func recordPluginFailure(store *operationStore, id, stage string, cause error) {
 func recordPluginRollbackResult(store *operationStore, id string) {
 	if journal, err := store.get(id); err == nil {
 		_ = store.appendOperationDiagnostic(id, journal.OperationType, "rollback_result", "Plugin rollback result", map[string]string{"state": string(journal.State), "result": journal.Status})
+	}
+}
+
+// A diagnostic category identity only: never a maintenance transaction or journal.
+const pluginReviewDiagnosticType = "plugin_review"
+
+type pluginProviderDiagnosticError struct {
+	reason string
+	values map[string]string
+}
+
+func (e *pluginProviderDiagnosticError) Error() string { return e.reason }
+
+func pluginArtifactDiagnostic(a pluginInstallArtifact, stage string) map[string]string {
+	algorithm := "SHA-512"
+	switch pluginSource(a.Source) {
+	case "CurseForge":
+		algorithm = "SHA-1"
+	case "Hangar":
+		algorithm = "SHA-256"
+	}
+	values := map[string]string{"provider": pluginSource(a.Source), "project_id": a.ProjectID, "release_id": a.VersionID, "stage": stage, "expected_bytes": strconv.FormatInt(a.Size, 10), "hash_algorithm": algorithm, "hash_result": "not checked"}
+	if safePluginFilename(a.Filename) {
+		values["filename"] = a.Filename
+	}
+	// Never retain userinfo, query strings, response headers or body. Only an
+	// already validated official artifact location reaches the normal sanitizer.
+	if validPluginDownloadMetadata(a) {
+		if u, err := url.Parse(a.URL); err == nil {
+			values["artifact_location"] = u.Host + u.EscapedPath()
+		}
+	}
+	return values
+}
+
+func (s *server) writePluginReviewFailure(w http.ResponseWriter, source, project, release, stage string, cause error) {
+	values := map[string]string{"provider": pluginSource(source), "project_id": project, "release_id": release, "stage": stage, "reason": cause.Error()}
+	var provider *pluginProviderDiagnosticError
+	if errors.As(cause, &provider) {
+		for key, value := range provider.values {
+			values[key] = value
+		}
+	}
+	id := ""
+	if s.operations != nil {
+		if candidate, err := newOperationID(); err == nil {
+			if err := s.operations.appendOperationDiagnostic(candidate, pluginReviewDiagnosticType, stage, "Plugin provider review failed; Minecraft was not changed", values); err == nil {
+				id = candidate
+			}
+		}
+	}
+	payload := map[string]any{"error": cause.Error()}
+	if id != "" {
+		payload["diagnostic_id"] = id
+	}
+	writeJSON(w, http.StatusConflict, payload)
+}
+
+// Keep command errors and output private, while preserving errors.Is semantics.
+type pluginStartError struct {
+	cause  error
+	output string
+}
+
+func (*pluginStartError) Error() string   { return "Minecraft could not start" }
+func (e *pluginStartError) Unwrap() error { return e.cause }
+
+func recordPluginStartFailure(store *operationStore, id, path string, names []string, cause error) {
+	if store == nil {
+		return
+	}
+	journal, err := store.get(id)
+	if err != nil || !isPluginOperationType(journal.OperationType) || validatePluginInstance(journal.InstanceID, "") != nil {
+		return
+	}
+	recordPluginFailure(store, id, "start_failure", cause)
+	var start *pluginStartError
+	if errors.As(cause, &start) {
+		recordPluginCommandEvidence(store, id, journal.OperationType, "systemctl_start", []byte(start.cause.Error()+"\n"+start.output))
+	}
+	// Independent bounded context so cancellation of the operation does not
+	// erase evidence. Collection is best effort and cannot veto rollback.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	unit := "minecraft-" + journal.InstanceID + ".service"
+	for _, command := range []struct {
+		name, stage string
+		args        []string
+	}{
+		{"systemctl", "service_state", []string{"show", unit, "--no-pager", "--property=ActiveState,SubState,Result,ExecMainCode,ExecMainStatus"}},
+		{"journalctl", "service_journal", []string{"-b", "-u", unit, "--no-pager", "-n", "80", "-o", "short-iso"}},
+	} {
+		output, err := pluginInstallCommand(ctx, command.name, command.args...)
+		if err != nil {
+			_ = store.appendOperationDiagnostic(id, journal.OperationType, command.stage, "Startup evidence command unavailable", nil)
+		}
+		recordPluginCommandEvidence(store, id, journal.OperationType, command.stage, output)
+	}
+	recordPluginStartupEvidence(store, id, path, names)
+}
+
+func recordPluginCommandEvidence(store *operationStore, id, operationType, stage string, raw []byte) {
+	output := string(raw[:min(len(raw), 64<<10)])
+	if key, err := readCurseForgeKey(); err == nil && key != "" {
+		output = strings.ReplaceAll(output, key, "<REDACTED>")
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if pluginDiagnosticSensitivePattern.MatchString(line) || strings.Contains(strings.ToLower(line), "csrf") || strings.Contains(line, "://") || strings.ContainsAny(line, "?@\\") {
+			line = "<sensitive diagnostic detail redacted>"
+		}
+		// Sanitize before splitting, so a secret or hostname cannot escape
+		// redaction by crossing the per-value length boundary.
+		line = sanitizeSetupDiagnosticValue("detail", line, store.diagnosticHostname)
+		for line != "" {
+			part := line[:min(len(line), 2048)]
+			line = line[len(part):]
+			_ = store.appendOperationDiagnostic(id, operationType, stage, "Minecraft start failure evidence", map[string]string{"detail": part})
+		}
 	}
 }

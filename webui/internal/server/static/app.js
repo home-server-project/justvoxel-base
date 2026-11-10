@@ -7526,16 +7526,30 @@ if (pluginsDialog && pluginsOpen) {
       if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
       if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
       if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error("Change your password first."); }
-      if (!response.ok) throw new Error(payload.error || payload.message || "Plugin installation is unavailable; review again.");
+      if (!response.ok) {
+        const error = new Error(payload.error || payload.message || "Plugin installation is unavailable; review again.");
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(payload.diagnostic_id || "")) error.diagnosticID = payload.diagnostic_id;
+        throw error;
+      }
       return payload;
     } catch (error) {
       if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
       throw error;
     }
   };
+  const pluginDiagnosticLink = (id) => {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id || "")) return;
+    const row = text("p", "See System -> Logs -> Plugins for diagnostic details. ", "plugins-diagnostic-link");
+    if (window.JustVoxelSystem?.openPluginLogs) row.append(panelAction("Open Plugins logs", () => {
+      workspaceWindow?.close();
+      window.JustVoxelSystem.openPluginLogs(id);
+    }, true));
+    panelBody.append(row);
+  };
   const panelError = (error) => {
     showPanel();
     panelBody.append(text("h3", "Plugin operation could not continue"), text("p", error.message || "Status is unavailable. Reopen Plugins to check the persistent operation."));
+    pluginDiagnosticLink(error.diagnosticID);
     overlayActions(panelAction("Done", closePanel, true));
   };
   const showAddonOperation = (operation) => {
@@ -7590,8 +7604,7 @@ if (pluginsDialog && pluginsOpen) {
     status.setAttribute("role", "status");
     panelBody.append(status);
     if (attention || operation.state === "rolled_back" || operation.state === "failed") {
-      panelBody.append(text("p", "See System -> Logs -> Plugins for diagnostic details."));
-      if (window.JustVoxelSystem?.openPluginLogs) panelBody.append(panelAction("Open Plugins logs", () => { closePanel(); load(); window.JustVoxelSystem.openPluginLogs(operation.operation_id); }, true));
+      pluginDiagnosticLink(operation.operation_id);
     }
     if (success) {
       const actions = overlayActions(panelAction("View in Installed", () => {

@@ -212,11 +212,11 @@ func (s *server) adminPluginInstallPlan(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 	plan, err := s.resolvePluginInstall(w, r.WithContext(ctx), request.ProjectID, request.VersionID, request.Source)
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "resolve", err)
 		return
 	}
 	if err := reviewRootPluginArtifact(ctx, plan); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "review", err)
 		return
 	}
 	online, names, err := pluginInstallPlayers(ctx, pluginInstanceID(ctx))
@@ -259,7 +259,7 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	plan, err := s.resolvePluginInstall(w, r.WithContext(ctx), request.ProjectID, request.VersionID, request.Source)
 	if err != nil {
-		writeError(w, 409, err.Error())
+		s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "resolve", err)
 		return
 	}
 	if plan.Fingerprint != request.PlanFingerprint {
@@ -270,7 +270,7 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 	// creating persistent operations. Staging independently rechecks it.
 	if javaServerContentKind(plan.Server.ServerType) == "mods" {
 		if err := reviewRootPluginArtifact(ctx, plan); err != nil {
-			writeError(w, http.StatusConflict, err.Error())
+			s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "review", err)
 			return
 		}
 	}
@@ -973,7 +973,14 @@ func downloadPluginArtifact(ctx context.Context, a pluginInstallArtifact, direct
 	_, err := downloadVerifiedPluginArtifact(ctx, a, directory)
 	return err
 }
-func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact, directory string) (string, error) {
+func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact, directory string) (hash string, failure error) {
+	evidence := pluginArtifactDiagnostic(a, "download")
+	defer func() {
+		if failure != nil {
+			evidence["reason"] = failure.Error()
+			failure = &pluginProviderDiagnosticError{reason: failure.Error(), values: evidence}
+		}
+	}()
 	if !validPluginDownloadMetadata(a) {
 		return "", errors.New("Unsafe artifact metadata")
 	}
@@ -999,11 +1006,15 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 		return "", errors.New("Plugin download failed")
 	}
 	defer response.Body.Close()
+	evidence["http_status"] = strconv.Itoa(response.StatusCode)
+	if response.ContentLength >= 0 {
+		evidence["http_content_length"] = strconv.FormatInt(response.ContentLength, 10)
+	}
 	if pluginSource(a.Source) == "CurseForge" && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
 		return "", errors.New("CurseForge download authentication rejected; check the configured API key")
 	}
-	if response.StatusCode != http.StatusOK || (response.ContentLength >= 0 && response.ContentLength != a.Size) {
-		return "", errors.New("Plugin download size or response mismatch")
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("%s artifact download returned HTTP %d", pluginSource(a.Source), response.StatusCode)
 	}
 	f, err := os.OpenFile(filepath.Join(directory, a.Filename), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
@@ -1014,9 +1025,22 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	h256 := sha256.New()
 	h1 := sha1.New()
 	n, err := io.Copy(io.MultiWriter(f, h, h256, h1), io.LimitReader(response.Body, a.Size+1))
-	if err != nil || n != a.Size || (pluginSource(a.Source) == "CurseForge" && hex.EncodeToString(h1.Sum(nil)) != a.SHA1) || (pluginSource(a.Source) == "Modrinth" && hex.EncodeToString(h.Sum(nil)) != a.SHA512) || (pluginSource(a.Source) == "Hangar" && hex.EncodeToString(h256.Sum(nil)) != a.SHA256) {
-		return "", errors.New("Plugin download hash or size verification failed")
+	evidence["actual_bytes"] = strconv.FormatInt(n, 10)
+	if n != a.Size {
+		return "", fmt.Errorf("Downloaded artifact size did not match %s metadata", pluginSource(a.Source))
 	}
+	// A prematurely ended HTTP body can reflect an incorrect Content-Length.
+	// Exact provider bytes and hashes remain authoritative; other read/write
+	// failures must still fail closed.
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return "", errors.New("Plugin artifact could not be read or staged")
+	}
+	matches := (pluginSource(a.Source) == "CurseForge" && hex.EncodeToString(h1.Sum(nil)) == a.SHA1) || (pluginSource(a.Source) == "Modrinth" && hex.EncodeToString(h.Sum(nil)) == a.SHA512) || (pluginSource(a.Source) == "Hangar" && hex.EncodeToString(h256.Sum(nil)) == a.SHA256)
+	evidence["hash_result"] = "mismatch"
+	if !matches {
+		return "", fmt.Errorf("Downloaded artifact %s did not match %s metadata", evidence["hash_algorithm"], pluginSource(a.Source))
+	}
+	evidence["hash_result"] = "verified"
 	if err := f.Sync(); err != nil {
 		return "", err
 	}
@@ -1135,7 +1159,10 @@ func pluginService(ctx context.Context, id, action string) error {
 	if err := validatePluginInstance(id, ""); err != nil {
 		return err
 	}
-	_, err := pluginInstallCommand(ctx, "systemctl", action, "minecraft-"+id+".service")
+	output, err := pluginInstallCommand(ctx, "systemctl", action, "minecraft-"+id+".service")
+	if err != nil && action == "start" {
+		return &pluginStartError{cause: err, output: string(output)}
+	}
 	return err
 }
 func verifyPluginRuntime(ctx context.Context, id, version string) error {
@@ -1721,6 +1748,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		return rollback(err)
 	}
 	if err := lock.start(ctx, pluginInstanceID(ctx)); err != nil {
+		recordPluginStartFailure(s.operations, id, plan.DataPath, pluginInstallExpectedNames(plan), err)
 		return rollback(errors.New("Minecraft could not start"))
 	}
 	if _, err := s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and installed plugin runtime state."); err != nil {

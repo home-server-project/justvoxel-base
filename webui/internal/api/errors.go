@@ -10,8 +10,9 @@ import (
 )
 
 type ResponseError struct {
-	StatusCode int
-	Message    string
+	StatusCode   int
+	Message      string
+	DiagnosticID string
 }
 
 func (e *ResponseError) Error() string {
@@ -32,10 +33,15 @@ func ErrorMessage(err error) (string, bool) {
 func readResponseError(resp *http.Response) error {
 	limited, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	var payload struct {
-		Error string `json:"error"`
+		Error        string `json:"error"`
+		DiagnosticID string `json:"diagnostic_id"`
 	}
 	if json.Unmarshal(limited, &payload) == nil && strings.TrimSpace(payload.Error) != "" {
-		return &ResponseError{StatusCode: resp.StatusCode, Message: payload.Error}
+		id := ""
+		if persistentOperationIDPattern.MatchString(payload.DiagnosticID) {
+			id = payload.DiagnosticID
+		}
+		return &ResponseError{StatusCode: resp.StatusCode, Message: payload.Error, DiagnosticID: id}
 	}
 	return &ResponseError{StatusCode: resp.StatusCode}
 }

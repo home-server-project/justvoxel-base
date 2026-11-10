@@ -23,7 +23,7 @@ import (
 )
 
 // Fixed origin, bounded body/time and no redirects. Credentials are never sent
-// by the artifact client or returned in errors, plans, journals or catalog JSON.
+// to other providers or icons, or returned in errors, plans, journals or catalog JSON.
 var curseForgeClient = &http.Client{
 	Timeout:       6 * time.Second,
 	Transport:     &http.Transport{DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext, TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 4 * time.Second},
@@ -51,7 +51,7 @@ func curseForgeJSON(ctx context.Context, path string, q url.Values, out any) err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return errCurseForgeCatalog
+		return &pluginProviderDiagnosticError{reason: "CurseForge API returned HTTP " + strconv.Itoa(response.StatusCode), values: map[string]string{"provider": "CurseForge", "stage": "provider_metadata", "http_status": strconv.Itoa(response.StatusCode), "api_path": path, "reason": "Official metadata request was not successful"}}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 2<<20+1))
 	if err != nil || len(raw) > 2<<20 {
@@ -303,8 +303,22 @@ func curseForgeIconProject(ctx context.Context, id string) (curseForgeProject, e
 }
 
 func positiveCurseForgeID(id string) bool { return validPluginIdentity("CurseForge", id) }
-func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, server pluginServerContext, scope curseForgeContext) (pluginInstallArtifact, error) {
-	a := pluginInstallArtifact{Target: javaServerContentKind(server.ServerType), Source: "CurseForge", ProjectID: project, VersionID: strconv.FormatInt(f.ID, 10), VersionNumber: f.DisplayName, Filename: f.Filename, Size: f.Size, URL: f.URL, RequiredBy: []string{}}
+func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, server pluginServerContext, scope curseForgeContext) (a pluginInstallArtifact, failure error) {
+	defer func() {
+		if failure == nil {
+			return
+		}
+		values := pluginArtifactDiagnostic(a, "artifact_metadata")
+		var provider *pluginProviderDiagnosticError
+		if errors.As(failure, &provider) {
+			for key, value := range provider.values {
+				values[key] = value
+			}
+		}
+		values["reason"] = failure.Error()
+		failure = &pluginProviderDiagnosticError{reason: failure.Error(), values: values}
+	}()
+	a = pluginInstallArtifact{Target: javaServerContentKind(server.ServerType), Source: "CurseForge", ProjectID: project, VersionID: strconv.FormatInt(f.ID, 10), VersionNumber: f.DisplayName, Filename: f.Filename, Size: f.Size, URL: f.URL, RequiredBy: []string{}}
 	if a.VersionNumber == "" {
 		a.VersionNumber = f.Filename
 	}
@@ -321,7 +335,7 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 	}
 	// Verify exact file evidence before asking the authenticated API for a URL.
 	if !safePluginFilename(a.Filename) || a.Size <= 0 || a.Size > pluginMaxJar || !curseForgeSHA1.MatchString(a.SHA1) {
-		return a, errors.New("CurseForge file lacks a safe official JAR download and SHA-1")
+		return a, errors.New("CurseForge file metadata is incomplete or unsafe")
 	}
 	if a.URL == "" {
 		var result struct {
@@ -332,8 +346,11 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 		}
 		a.URL = result.Data
 	}
+	if a.URL == "" {
+		return a, errors.New("CurseForge did not provide an official artifact URL for this release")
+	}
 	if !validPluginDownloadMetadata(a) {
-		return a, errors.New("CurseForge file lacks a safe official JAR download and SHA-1")
+		return a, errors.New("CurseForge file metadata is incomplete or unsafe")
 	}
 	return a, nil
 }
@@ -346,7 +363,10 @@ func exactCurseForgeProject(ctx context.Context, id string, scope curseForgeCont
 	}
 	err := curseForgeJSON(ctx, "/v1/mods/"+id, nil, &response)
 	p := response.Data
-	if err != nil || strconv.FormatInt(p.ID, 10) != id || p.Game != scope.Game || p.Class != scope.Class || p.Name == "" || len(p.Name) > 256 || len(p.Summary) > 4096 {
+	if err != nil {
+		return p, err
+	}
+	if strconv.FormatInt(p.ID, 10) != id || p.Game != scope.Game || p.Class != scope.Class || p.Name == "" || len(p.Name) > 256 || len(p.Summary) > 4096 {
 		return p, errCurseForgeCatalog
 	}
 	return p, nil
@@ -478,7 +498,7 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 				_, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope)
 				project.InstallAvailable = artifactErr == nil && server.Supported
 				if artifactErr != nil {
-					project.Compatibility = "CurseForge does not expose a verifiable downloadable JAR for this release."
+					project.Compatibility = artifactErr.Error()
 				}
 			}
 			out.Projects = append(out.Projects, project)

@@ -460,6 +460,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 			return
 		}
 		if err = lock.start(ctx, pluginInstanceID(ctx)); err != nil {
+			recordPluginStartFailure(s.operations, id, p.DataPath, nil, err)
 			fail(err)
 			return
 		}

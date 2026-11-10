@@ -56,6 +56,14 @@ func curseForgeCatalogFixture(t *testing.T, loader string) (*pluginInstallFixtur
 		Algo  int    `json:"algo"`
 	}{hex.EncodeToString(sum[:]), 1})
 	project := curseForgeProject{ID: 10, Game: 1, Class: class, Name: "Example", Slug: "example"}
+	// Direct installation does not redistribute artifacts. This provider-only
+	// field must be ignored without adding it to production project structs.
+	projectRaw, _ := json.Marshal(project)
+	var projectJSON map[string]any
+	if err := json.Unmarshal(projectRaw, &projectJSON); err != nil {
+		t.Fatal(err)
+	}
+	projectJSON["allowModDistribution"] = false
 	curseForgeClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Scheme != "https" || r.URL.Host != "api.curseforge.com" || r.Header.Get("x-api-key") != "private-fixture-key" {
 			t.Fatal("credential origin", r.URL.Host)
@@ -67,7 +75,7 @@ func curseForgeCatalogFixture(t *testing.T, loader string) (*pluginInstallFixtur
 		case "/v1/categories":
 			payload = map[string]any{"data": []any{map[string]any{"id": 5, "gameId": 1, "slug": "bukkit-plugins", "isClass": true}, map[string]any{"id": 6, "gameId": 1, "slug": "mc-mods", "isClass": true}}}
 		case "/v1/mods/10":
-			payload = map[string]any{"data": project}
+			payload = map[string]any{"data": projectJSON}
 		case "/v1/mods/10/files/20":
 			payload = map[string]any{"data": file}
 		case "/v1/mods/10/files":
@@ -76,7 +84,7 @@ func curseForgeCatalogFixture(t *testing.T, loader string) (*pluginInstallFixtur
 			if r.URL.Query().Get("gameId") != "1" {
 				t.Fatal("missing resolved game")
 			}
-			payload = map[string]any{"data": []curseForgeProject{project}, "pagination": curseForgePagination{0, 8, 1, 1}}
+			payload = map[string]any{"data": []any{projectJSON}, "pagination": curseForgePagination{0, 8, 1, 1}}
 		default:
 			return nil, errors.New("unexpected catalog path")
 		}
@@ -387,5 +395,25 @@ func TestCurseForgeCatalogLogoNeverFiltersValidProjects(t *testing.T) {
 				t.Fatal("logo changed catalog membership", page, err)
 			}
 		})
+	}
+}
+
+func TestCurseForgeDirectInstallIgnoresRedistributionField(t *testing.T) {
+	f, server := curseForgeCatalogFixture(t, "fabric")
+	// The shared fixture supplies allowModDistribution=false for discovery and
+	// exact project JSON; the real resolver, review and install must all work.
+	page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
+	if err != nil || len(page.Projects) != 1 || !page.Projects[0].InstallAvailable {
+		t.Fatal(page, err)
+	}
+	plan, err := resolveCurseForgeInstallPlan(context.Background(), server, f.data, "10", "20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reviewRootPluginArtifact(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if journal := f.execute(t, plan, false); journal.State != operationSucceeded {
+		t.Fatal(journal)
 	}
 }
