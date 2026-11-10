@@ -236,7 +236,7 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 			if r.URL.Query().Get("game_versions") != `["1.21.8"]` || !strings.Contains(r.URL.Query().Get("loaders"), "paper") {
 				t.Fatal("version filters missing")
 			}
-			body = `[{"id":"beta","version_number":"2","version_type":"beta","date_published":"2026-02-01","game_versions":["1.21.8"],"loaders":["paper"]},{"id":"release","version_number":"1","version_type":"release","date_published":"2026-01-01","game_versions":["1.21.8"],"loaders":["paper"],"dependencies":[{"project_id":"required1","dependency_type":"required"},{"project_id":"optional1","dependency_type":"optional"},{"project_id":"conflict1","dependency_type":"incompatible"}]}]`
+			body = `[{"id":"beta","version_number":"2","environment":"server_only","version_type":"beta","date_published":"2026-02-01","game_versions":["1.21.8"],"loaders":["paper"]},{"id":"release","version_number":"1","environment":"server_only","version_type":"release","date_published":"2026-01-01","game_versions":["1.21.8"],"loaders":["paper"],"dependencies":[{"project_id":"required1","dependency_type":"required"},{"project_id":"optional1","dependency_type":"optional"},{"project_id":"conflict1","dependency_type":"incompatible"}]}]`
 		default:
 			t.Fatalf("unexpected endpoint %s", r.URL)
 		}
@@ -711,7 +711,7 @@ func TestPluginDiscoverBoundedTopUpRawCursor(t *testing.T) {
 					id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v2/project/"), "/version")
 					versions := []pluginCatalogVersion{}
 					if !exhausted && id != "project0" {
-						versions = append(versions, pluginCatalogVersion{ID: "release" + id, ProjectID: id, Number: "1", Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"26.2"}})
+						versions = append(versions, pluginCatalogVersion{Environment: "server_only", ID: "release" + id, ProjectID: id, Number: "1", Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"26.2"}})
 					}
 					payload = versions
 				}
@@ -1285,7 +1285,7 @@ func TestPluginDiscoverProviderIsolationAndCompositePagination(t *testing.T) {
 			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v2/project/"), "/version")
 			versions := []pluginCatalogVersion{}
 			if id != "2" {
-				versions = append(versions, pluginCatalogVersion{ID: "v" + id, ProjectID: id, Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"1.21.8"}})
+				versions = append(versions, pluginCatalogVersion{Environment: "server_only", ID: "v" + id, ProjectID: id, Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"1.21.8"}})
 			}
 			payload = versions
 		case r.URL.Host == "hangar.papermc.io" && r.URL.Path == "/api/v1/projects":
@@ -1653,7 +1653,7 @@ func TestModrinthDiscoveryReleasePageFillAndLargeTotal(t *testing.T) {
 					inspected++
 					id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v2/project/"), "/version")
 					n, _ := strconv.Atoi(strings.TrimPrefix(id, "project"))
-					v := pluginCatalogVersion{ID: "release" + id, ProjectID: id, Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"1.21.8"}}
+					v := pluginCatalogVersion{Environment: "server_only", ID: "release" + id, ProjectID: id, Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"1.21.8"}}
 					// Only ten releases occur within the old 3*limit window.
 					if rejectAll || (n > 10 && n <= 36) {
 						v.Type = "beta"
@@ -1813,7 +1813,7 @@ func TestPluginDiscoverResponseIncludesAuthoritativeOwnership(t *testing.T) {
 		return []byte(`{"minecraft":{"server_type":"paper","version":"1.21.8"}}`), nil
 	}
 	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
-		body := `[{"id":"999","project_id":"123","version_number":"new-release","version_type":"release","loaders":["paper"],"game_versions":["1.21.8"]}]`
+		body := `[{"id":"999","project_id":"123","version_number":"new-release","environment":"server_only","version_type":"release","loaders":["paper"],"game_versions":["1.21.8"]}]`
 		if r.URL.Path == "/v2/search" {
 			body = `{"hits":[{"project_id":"123","slug":"example","title":"Example","description":"Plugin","versions":["1.21.8"]}],"total_hits":1}`
 		}

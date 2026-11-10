@@ -600,10 +600,12 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 		return rollback(err)
 	}
 	if err = verifyPluginRuntime(ctx, pluginInstanceID(ctx), p.Server.MinecraftVersion); err != nil {
+		recordPluginFailure(s.operations, id, "verification", err)
 		recordPluginStartupEvidence(s.operations, id, p.DataPath, []string{p.Entry.PluginName})
 		return rollback(errors.New("Minecraft stack verification failed"))
 	}
 	if err = verifyPluginLifecycleStartupFresh(p.DataPath, previousStartup); err != nil {
+		recordPluginFailure(s.operations, id, "verification", err)
 		recordPluginStartupEvidence(s.operations, id, p.DataPath, []string{p.Entry.PluginName})
 		return rollback(err)
 	}
@@ -613,6 +615,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 		err = verifyPluginAbsent(p.DataPath, p.Entry.PluginName)
 	}
 	if err != nil {
+		recordPluginFailure(s.operations, id, "verification", err)
 		recordPluginStartupEvidence(s.operations, id, p.DataPath, []string{p.Entry.PluginName})
 		return rollback(err)
 	}
@@ -781,6 +784,7 @@ func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction,
 	return nil
 }
 func rollbackPluginManage(s *server, id string, tx pluginManageTransaction, cause error, lock *pluginMaintenanceLock) error {
+	defer recordPluginRollbackResult(s.operations, id)
 	_ = s.operations.appendOperationDiagnostic(id, "plugin_"+tx.Action, "failure", "Managed plugin action failed", map[string]string{"reason": cause.Error()})
 	if !lock.protected() {
 		_, err := s.operations.transition(id, operationNeedsAttention, "rollback", "Minecraft maintenance ownership unavailable. Durable evidence is preserved.")
@@ -803,6 +807,7 @@ func rollbackPluginManage(s *server, id string, tx pluginManageTransaction, caus
 		err = restorePluginManageRuntime(ctx, tx, lock)
 	}
 	if err != nil {
+		recordPluginFailure(s.operations, id, "rollback_result", err)
 		_, _ = s.operations.transition(id, operationNeedsAttention, "rollback", "Plugin recovery could not be proven. Durable evidence is preserved. See System -> Logs -> Plugins.")
 		return errors.Join(cause, err)
 	}

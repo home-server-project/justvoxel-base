@@ -259,7 +259,20 @@ displayed only. External downloads and external-only required dependencies are n
 followed. Numeric project/release IDs remain separate from Modrinth identities. Hangar uses the existing no-redirect,
 bounded-timeout client with a 2 MiB JSON body cap and needs no API key.
 
-Compatibility means **Compatible according to publisher metadata**, never verified
+Exact Modrinth versions, including required dependencies, must declare a
+server-capable `environment`. Client-only and singleplayer-only versions are
+excluded from the dedicated-server catalog regardless of Compatible only.
+Unknown, empty and unrecognized environments cannot be installed.
+
+CurseForge Minecraft/loader compatibility does not establish server eligibility.
+Exact Review downloads verified artifacts and checks bounded declarative metadata
+before any operation or downtime: Fabric `environment="client"` and Forge
+file-level `clientSideOnly=true` are rejected. Fabric defaults to `"*"` when the
+field is absent; malformed environment evidence fails closed. No side field is
+invented for Quilt or NeoForge. Unknown side evidence retains final runtime
+verification. Hangar retains its authoritative server-platform checks.
+
+Compatibility means publisher Minecraft/loader compatibility, never verified
 third-party runtime compatibility. With Compatible only OFF, other Paper versions
 can be browsed without claiming compatibility. Unknown active Minecraft versions
 require that filter OFF. Upstream failures are reported as unavailable, not as
@@ -646,7 +659,12 @@ its diagnostic framing; control corruption is rejected, sensitive lines are
 redacted, and URLs, connection strings and stack frames are excluded. Host
 identity uses existing diagnostic sanitation. The full server log is never
 exposed and raw Minecraft logs remain untouched. Read-only catalog compatibility
-rejections do not create persistent operations or logs.
+rejections do not create persistent operations or logs. Plan and Review failures
+show their actionable error without directing users to a nonexistent Plugins log.
+Operation failures retain log guidance. Stack-verifier failures record the generic
+reason and up to the existing 64 KiB command-output bound through the private
+diagnostic sanitizer; full verifier output is never returned to the browser.
+Install failures also record rollback causes and results.
 
 ### Reset Minecraft cleanup
 
@@ -774,7 +792,11 @@ inline configuration notice. The catalog resolves the official Minecraft game
 and content class, filters exact game/loader compatibility, and uses bounded
 pagination and dependency resolution. API requests use a fixed HTTPS origin,
 private authentication header, bounded responses and timeouts, and no redirects.
-Artifacts use only validated official CDN hosts without the API credential.
+Verified CurseForge artifacts use only validated official CDN JAR URLs and receive
+the configured key in the `x-api-key` request header. Redirects are refused;
+icons and other providers never receive that key. Exact publisher size and SHA-1
+remain mandatory. Discover disables installation when any of this file evidence
+is missing or ambiguous; the planner independently enforces the same checks.
 Search and install failures return a retryable provider error without exposing
 keys. Configuration removal takes effect for subsequent requests; failed lookups
 do not poison later retries. Provider cursors preserve unconsumed positions and

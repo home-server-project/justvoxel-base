@@ -312,3 +312,150 @@ func validModDescriptor(raw []byte, loader string) bool {
 	}
 	return modIDPattern.MatchString(descriptor.ID)
 }
+
+// Side fields follow the official Fabric loader metadata and Forge mod-file
+// contracts: https://docs.fabricmc.net/develop/loader/fabric-mod-json
+// https://docs.minecraftforge.net/en/latest/gettingstarted/modfiles/
+// Side inspection is confined to exact verified artifacts during Review and
+// staging. Read-only inventory and deployed recovery identity remain unchanged.
+func inspectDedicatedModSide(file *os.File, loader string) error {
+	if loader != "fabric" && loader != "forge" {
+		return nil // No authoritative side field supported for these loaders.
+	}
+	stat, err := file.Stat()
+	if err != nil || stat.Size() <= 0 || stat.Size() > pluginMaxJar || !pluginZipDirectoryBounded(file, stat.Size()) {
+		return errors.New("Malformed or oversized mod JAR")
+	}
+	archive, err := zip.NewReader(file, stat.Size())
+	if err != nil {
+		return errors.New("Malformed mod JAR")
+	}
+	var raw []byte
+	count := 0
+	for _, entry := range archive.File {
+		if entry.Name != modDescriptor(loader) {
+			continue
+		}
+		count++
+		if count > 1 || entry.UncompressedSize64 == 0 || entry.UncompressedSize64 > pluginMetadataLimit || !entry.Mode().IsRegular() {
+			return errors.New("Ambiguous or oversized loader descriptor")
+		}
+		stream, err := entry.Open()
+		if err != nil {
+			return errors.New("Unreadable loader descriptor")
+		}
+		raw, err = io.ReadAll(io.LimitReader(stream, pluginMetadataLimit+1))
+		closeErr := stream.Close()
+		if err != nil || closeErr != nil || len(raw) > pluginMetadataLimit {
+			return errors.New("Unreadable loader descriptor")
+		}
+	}
+	if count != 1 {
+		return errors.New("JAR lacks the descriptor required by the selected mod loader")
+	}
+	return dedicatedModDescriptorSide(raw, loader)
+}
+
+const clientOnlyModRejection = "This mod is client-only and cannot be installed on a dedicated server."
+
+func dedicatedModDescriptorSide(raw []byte, loader string) error {
+	if len(raw) == 0 || len(raw) > pluginMetadataLimit {
+		return errors.New("Malformed or oversized loader descriptor")
+	}
+	if loader == "fabric" {
+		// Decode top-level fields explicitly so duplicate environment evidence
+		// cannot be hidden by encoding/json's last-value-wins behavior.
+		decoder := json.NewDecoder(strings.NewReader(string(raw)))
+		token, err := decoder.Token()
+		if err != nil || token != json.Delim('{') {
+			return errors.New("Malformed Fabric descriptor")
+		}
+		environment, seen := "*", false
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				return errors.New("Malformed Fabric descriptor")
+			}
+			var value json.RawMessage
+			if decoder.Decode(&value) != nil {
+				return errors.New("Malformed Fabric descriptor")
+			}
+			if key == "environment" {
+				if seen || string(value) == "null" || json.Unmarshal(value, &environment) != nil {
+					return errors.New("Invalid Fabric environment metadata")
+				}
+				seen = true
+			}
+		}
+		if _, err := decoder.Token(); err != nil || decoder.Decode(new(any)) != io.EOF {
+			return errors.New("Malformed Fabric descriptor")
+		}
+		switch environment {
+		case "client":
+			return errors.New(clientOnlyModRejection)
+		case "*", "server":
+			return nil
+		default:
+			return errors.New("Invalid Fabric environment metadata")
+		}
+	}
+	if loader == "forge" {
+		// Forge's clientSideOnly is a file-level boolean, before any tables.
+		// Ignore comments and multiline string contents; never interpret
+		// dependency-side fields or strings as a client-only declaration.
+		multiline := ""
+		seen := false
+		for _, line := range strings.Split(string(raw), "\n") {
+			line = strings.TrimSpace(line)
+			if multiline != "" {
+				if forgeMultilineClosed(line, multiline) {
+					multiline = ""
+				}
+				continue
+			}
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if strings.HasPrefix(line, "[") {
+				break
+			}
+			key, value, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+			if key == "clientSideOnly" || key == "'clientSideOnly'" || key == "\"clientSideOnly\"" {
+				value, _, _ = strings.Cut(value, "#")
+				value = strings.TrimSpace(value)
+				if seen || (value != "true" && value != "false") {
+					return errors.New("Invalid Forge clientSideOnly metadata")
+				}
+				seen = true
+				if value == "true" {
+					return errors.New(clientOnlyModRejection)
+				}
+			}
+			for _, delimiter := range []string{"\"\"\"", "'''"} {
+				if strings.HasPrefix(value, delimiter) && !forgeMultilineClosed(value[len(delimiter):], delimiter) {
+					multiline = delimiter
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// Basic TOML multiline strings honor escapes; literal multiline strings do not.
+// This only locates the end of a string, never interprets code or dependency side.
+func forgeMultilineClosed(value, delimiter string) bool {
+	for i := 0; i < len(value); i++ {
+		if delimiter == "\"\"\"" && value[i] == '\\' {
+			i++
+			continue
+		}
+		if strings.HasPrefix(value[i:], delimiter) {
+			return true
+		}
+	}
+	return false
+}

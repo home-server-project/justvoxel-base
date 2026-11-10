@@ -2315,3 +2315,42 @@ func TestPluginsWorkspaceIconRoutesByAuthoritativeSource(t *testing.T) {
 		})
 	}
 }
+
+func TestPluginPreOperationErrorsDoNotClaimDiagnosticLog(t *testing.T) {
+	raw, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	start := strings.Index(script, "  const panelError =")
+	if start < 0 {
+		t.Fatal("error panel missing")
+	}
+	end := strings.Index(script[start:], "  const showAddonOperation =")
+	if end < 0 {
+		t.Fatal("error panel boundary missing")
+	}
+	panel := script[start : start+end]
+	if !strings.Contains(panel, "error.message") {
+		t.Fatal("actionable pre-operation message lost")
+	}
+	for _, forbidden := range []string{"See System -> Logs -> Plugins", "Open Plugins logs", "openPluginLogs"} {
+		if strings.Contains(panel, forbidden) {
+			t.Fatal("pre-operation failure advertises nonexistent log", forbidden)
+		}
+	}
+	start = strings.Index(script, "  const showOperation =")
+	if start < 0 {
+		t.Fatal("operation view missing")
+	}
+	end = strings.Index(script[start:], "  const pollOperation =")
+	if end < 0 {
+		t.Fatal("operation poll missing")
+	}
+	operation := script[start : start+end]
+	for _, want := range []string{"operation.state === \"rolled_back\"", "operation.state === \"failed\"", "See System -> Logs -> Plugins", "Open Plugins logs", "openPluginLogs(operation.operation_id)"} {
+		if !strings.Contains(operation, want) {
+			t.Fatal("persistent-operation diagnostic path lost", want)
+		}
+	}
+}

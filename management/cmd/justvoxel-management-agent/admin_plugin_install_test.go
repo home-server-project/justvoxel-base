@@ -294,7 +294,7 @@ func (f *pluginInstallFixture) addJar(t *testing.T, project, version, filename, 
 	sum := sha512.Sum512(raw)
 	file := pluginArtifactFile{URL: "https://cdn.modrinth.com/data/" + project + "/versions/" + version + "/" + filename, Filename: filename, Primary: true, Size: int64(len(raw))}
 	file.Hashes.SHA512 = hex.EncodeToString(sum[:])
-	f.versions[version] = pluginCatalogVersion{ID: version, ProjectID: project, Number: "1.0", Type: "release", Published: "2026-01-01T00:00:00Z", GameVersions: []string{"1.21.8"}, Loaders: []string{"paper"}, Files: []pluginArtifactFile{file}}
+	f.versions[version] = pluginCatalogVersion{Environment: "server_only", ID: version, ProjectID: project, Number: "1.0", Type: "release", Published: "2026-01-01T00:00:00Z", GameVersions: []string{"1.21.8"}, Loaders: []string{"paper"}, Files: []pluginArtifactFile{file}}
 	f.jars[filename] = raw
 }
 func (f *pluginInstallFixture) plan(t *testing.T) pluginInstallPlan {

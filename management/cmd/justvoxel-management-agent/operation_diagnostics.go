@@ -347,3 +347,53 @@ func (s *operationStore) diagnosticCategoryDirectory(category string) string {
 	}
 	return filepath.Join(s.logsDir, category+"-logs")
 }
+
+// The error text is browser-safe; command output is private diagnostic evidence.
+type pluginRuntimeVerificationError struct{ output string }
+
+func (*pluginRuntimeVerificationError) Error() string {
+	return "Existing Minecraft stack verification failed"
+}
+
+func recordPluginFailure(store *operationStore, id, stage string, cause error) {
+	if store == nil || cause == nil {
+		return
+	}
+	journal, err := store.get(id)
+	if err != nil {
+		return
+	}
+	_ = store.appendOperationDiagnostic(id, journal.OperationType, stage, "Plugin operation failed", map[string]string{"reason": cause.Error()})
+	var verification *pluginRuntimeVerificationError
+	if !errors.As(cause, &verification) {
+		return
+	}
+	// Preserve the existing 64 KiB command bound, split into bounded entries
+	// before the existing per-value sanitizer/redactor and 4 MiB log cap.
+	output := verification.output[:min(len(verification.output), 64<<10)]
+	if key, err := readCurseForgeKey(); err == nil && key != "" {
+		output = strings.ReplaceAll(output, key, "<REDACTED>")
+	}
+	var sanitized strings.Builder
+	for _, line := range strings.Split(output, "\n") {
+		if operationDiagnosticSensitivePattern.MatchString(line) {
+			line = "<sensitive diagnostic detail redacted>"
+		}
+		line = sanitizeSetupDiagnosticValue("detail", line, store.diagnosticHostname)
+		sanitized.WriteString(line)
+		sanitized.WriteByte('\n')
+	}
+	output = sanitized.String()
+	output = output[:min(len(output), 64<<10)]
+	for output != "" {
+		part := output[:min(len(output), 2048)]
+		output = output[len(part):]
+		_ = store.appendOperationDiagnostic(id, journal.OperationType, stage, "Stack verification output", map[string]string{"detail": part})
+	}
+}
+
+func recordPluginRollbackResult(store *operationStore, id string) {
+	if journal, err := store.get(id); err == nil {
+		_ = store.appendOperationDiagnostic(id, journal.OperationType, "rollback_result", "Plugin rollback result", map[string]string{"state": string(journal.State), "result": journal.Status})
+	}
+}

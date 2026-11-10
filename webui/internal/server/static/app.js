@@ -7536,7 +7536,6 @@ if (pluginsDialog && pluginsOpen) {
   const panelError = (error) => {
     showPanel();
     panelBody.append(text("h3", "Plugin operation could not continue"), text("p", error.message || "Status is unavailable. Reopen Plugins to check the persistent operation."));
-    panelBody.append(text("p", "See System -> Logs -> Plugins for diagnostic details."));
     overlayActions(panelAction("Done", closePanel, true));
   };
   const showAddonOperation = (operation) => {

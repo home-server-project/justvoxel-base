@@ -266,6 +266,14 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "Plugin plan changed; review again")
 		return
 	}
+	// Exact mod side metadata must also be checked on a direct Apply before
+	// creating persistent operations. Staging independently rechecks it.
+	if javaServerContentKind(plan.Server.ServerType) == "mods" {
+		if err := reviewRootPluginArtifact(ctx, plan); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
 	// Repeated requests return the existing worker, even if player state has changed.
 	current, err = s.operations.currentPluginInstall()
 	if err != nil {
@@ -312,7 +320,7 @@ func (s *server) adminPluginInstallCurrent(w http.ResponseWriter, r *http.Reques
 }
 
 func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerContext, dataPath, projectID, versionID string) (pluginInstallPlan, error) {
-	plan := pluginInstallPlan{Source: "Modrinth", ProjectID: projectID, VersionID: versionID, Server: serverContext, DataPath: dataPath, Location: filepath.Join(dataPath, javaServerContentKind(serverContext.ServerType)), RestartRequired: true, Compatibility: "Compatible according to publisher metadata", Artifacts: []pluginInstallArtifact{}, DisplayDependencies: []pluginDependency{}}
+	plan := pluginInstallPlan{Source: "Modrinth", ProjectID: projectID, VersionID: versionID, Server: serverContext, DataPath: dataPath, Location: filepath.Join(dataPath, javaServerContentKind(serverContext.ServerType)), RestartRequired: true, Compatibility: "Compatible Minecraft/loader release. Exact Modrinth version metadata declares dedicated-server eligibility.", Artifacts: []pluginInstallArtifact{}, DisplayDependencies: []pluginDependency{}}
 	if !serverContext.Supported || javaServerContentKind(serverContext.ServerType) == "" || serverContext.MinecraftVersion == "" || !filepath.IsAbs(dataPath) || !modrinthPluginID.MatchString(projectID) || !modrinthPluginID.MatchString(versionID) {
 		return plan, errors.New("A supported server, exact Minecraft version and configured data path are required")
 	}
@@ -343,6 +351,9 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 			}
 			if v.ID != version || !modrinthPluginID.MatchString(v.ProjectID) || (project != "" && v.ProjectID != project) {
 				return errors.New("Modrinth project/version identity mismatch")
+			}
+			if !modrinthServerEnvironment(v.Environment) {
+				return errors.New(modrinthServerEnvironmentRejection)
 			}
 			if parent != "" && !pluginLoaderOverlap(v.Loaders, serverContext.ServerType) {
 				if javaServerContentKind(serverContext.ServerType) == "mods" {
@@ -384,7 +395,7 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 			})
 			found := false
 			for _, candidate := range versions {
-				if candidate.Type == "release" && pluginVersionCompatible(candidate, serverContext) {
+				if candidate.Type == "release" && modrinthServerEnvironment(candidate.Environment) && pluginVersionCompatible(candidate, serverContext) {
 					v = candidate
 					found = true
 					break
@@ -407,6 +418,9 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 			if v.ProjectID != project {
 				return errors.New("Modrinth dependency project/version identity mismatch")
 			}
+		}
+		if !modrinthServerEnvironment(v.Environment) {
+			return errors.New(modrinthServerEnvironmentRejection)
 		}
 		if !modrinthPluginID.MatchString(v.ID) || !modrinthPluginID.MatchString(v.ProjectID) || v.Type != "release" || !pluginVersionCompatible(v, serverContext) || v.Number == "" || len(v.Number) > 256 {
 			return errors.New("Only compatible, identifiable release versions can be installed")
@@ -560,11 +574,12 @@ const pluginBlueMapReviewRejection = "BlueMap native add-on belongs in Plugins -
 
 const pluginDirectReviewRejection = "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory."
 
-// Review only the exact requested artifact. Installation still inspects every
-// staged artifact independently before downtime; review creates no operation.
+// Review the exact requested artifact and every required mod artifact.
+// Installation independently inspects staged artifacts before downtime;
+// Review creates no operation.
 func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error {
 	for _, artifact := range plan.Artifacts {
-		if !artifact.Requested {
+		if !artifact.Requested && javaServerContentKind(plan.Server.ServerType) != "mods" {
 			continue
 		}
 		directory, err := os.MkdirTemp("", "justvoxel-plugin-review-")
@@ -580,6 +595,9 @@ func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error
 			return errors.New("Plugin review artifact unavailable")
 		}
 		identity, inspectErr := inspectServerPlugin(file, artifact.Filename, plan.Server.ServerType)
+		if inspectErr == nil && javaServerContentKind(plan.Server.ServerType) == "mods" {
+			inspectErr = inspectDedicatedModSide(file, plan.Server.ServerType)
+		}
 		closeErr := file.Close()
 		if errors.Is(inspectErr, errPluginLoaderArtifact) {
 			return errors.New(pluginLoaderReviewRejection)
@@ -596,7 +614,15 @@ func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error
 		if pluginSource(artifact.Source) == "Modrinth" && artifact.ProjectID == "99IreA6y" && identity.Main == "de.bluecolored.bluemap.entities.PaperEntrypoint" {
 			return errors.New(pluginBlueMapReviewRejection)
 		}
-		return closeErr
+		if closeErr != nil {
+			return closeErr
+		}
+		if javaServerContentKind(plan.Server.ServerType) != "mods" {
+			return nil
+		}
+	}
+	if javaServerContentKind(plan.Server.ServerType) == "mods" && len(plan.Artifacts) > 0 {
+		return nil
 	}
 	return errors.New("Requested plugin artifact unavailable")
 }
@@ -957,12 +983,25 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	if err != nil {
 		return "", err
 	}
+	// Metadata validation above must precede reading or attaching the private key.
+	if pluginSource(a.Source) == "CurseForge" {
+		key, keyErr := readCurseForgeKey()
+		if keyErr != nil {
+			return "", errors.New("CurseForge download requires a configured API key")
+		}
+		req.Header.Set("x-api-key", key)
+	}
 	req.Header.Set("User-Agent", "JustVoxel/PluginWorkspace-Stage2")
-	response, err := pluginDownloadClient.Do(req)
+	client := *pluginDownloadClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(req)
 	if err != nil {
 		return "", errors.New("Plugin download failed")
 	}
 	defer response.Body.Close()
+	if pluginSource(a.Source) == "CurseForge" && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+		return "", errors.New("CurseForge download authentication rejected; check the configured API key")
+	}
 	if response.StatusCode != http.StatusOK || (response.ContentLength >= 0 && response.ContentLength != a.Size) {
 		return "", errors.New("Plugin download size or response mismatch")
 	}
@@ -1126,8 +1165,11 @@ func verifyPluginRuntime(ctx context.Context, id, version string) error {
 	}
 	verify, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	_, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, version)
-	return err
+	output, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, version)
+	if err != nil {
+		return &pluginRuntimeVerificationError{output: string(output[:min(len(output), 64<<10)])}
+	}
+	return nil
 }
 
 // Startup proof is confined to the last initialization segment in latest.log.
@@ -1472,6 +1514,8 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		}
 	}()
 	failUntouched := func(cause error) error {
+		defer recordPluginRollbackResult(s.operations, id)
+		recordPluginFailure(s.operations, id, "preflight", cause)
 		journal, err := s.operations.get(id)
 		if err != nil {
 			return errors.Join(cause, err)
@@ -1552,6 +1596,9 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 			return failUntouched(errors.New("Staged JAR unavailable"))
 		}
 		identity, err := inspectServerPlugin(f, a.Filename, plan.Server.ServerType)
+		if err == nil && javaServerContentKind(plan.Server.ServerType) == "mods" {
+			err = inspectDedicatedModSide(f, plan.Server.ServerType)
+		}
 		f.Close()
 		if err != nil {
 			return failUntouched(err)
@@ -1680,6 +1727,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		return rollback(err)
 	}
 	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), plan.Server.MinecraftVersion); err != nil {
+		recordPluginFailure(s.operations, id, "stack_verification", err)
 		recordPluginStartupEvidence(s.operations, id, plan.DataPath, pluginInstallExpectedNames(plan))
 		return rollback(errors.New("Existing Minecraft stack verification failed"))
 	}
@@ -1688,6 +1736,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		expected = append(expected, a.PluginName)
 	}
 	if err := verifyContentStartup(plan.DataPath, expected, javaServerContentKind(plan.Server.ServerType)); err != nil {
+		recordPluginFailure(s.operations, id, "startup_verification", err)
 		recordPluginStartupEvidence(s.operations, id, plan.DataPath, expected)
 		return rollback(err)
 	}
@@ -2002,6 +2051,8 @@ func removePluginTransactionArtifact(root *os.File, a pluginInstallArtifact) err
 	return root.Sync()
 }
 func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *os.File, created []pluginInstallArtifact, originallyRunning bool, cause error, lock *pluginMaintenanceLock) error {
+	defer recordPluginRollbackResult(s.operations, id)
+	recordPluginFailure(s.operations, id, "rollback_cause", cause)
 	if !lock.protected() {
 		_, err := s.operations.transition(id, operationNeedsAttention, "rollback", "Minecraft maintenance ownership unavailable. Transaction evidence and cold backup were preserved.")
 		return errors.Join(cause, err, errors.New("Minecraft maintenance ownership unavailable"))
@@ -2037,6 +2088,7 @@ func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *o
 			}
 		}
 		if recoverErr != nil {
+			recordPluginFailure(s.operations, id, "rollback_result", recoverErr)
 			_, err := s.operations.transition(id, operationNeedsAttention, "rollback", "Plugin installation failed before placement. Automatic recovery of the original service state could not be proven; administrator attention is required.")
 			return errors.Join(cause, recoverErr, err)
 		}
@@ -2067,6 +2119,7 @@ func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *o
 		}
 	}
 	if recoverErr != nil {
+		recordPluginFailure(s.operations, id, "rollback_result", recoverErr)
 		_, err := s.operations.transition(id, operationNeedsAttention, "rollback", "Plugin installation failed. Automatic recovery could not be proven; administrator attention is required. Transaction evidence and cold backup were preserved.")
 		return errors.Join(cause, recoverErr, err)
 	}

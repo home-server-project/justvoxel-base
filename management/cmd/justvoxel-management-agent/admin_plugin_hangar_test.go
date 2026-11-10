@@ -59,7 +59,7 @@ func newHangarInstallFixture(t *testing.T, serverType string) *hangarInstallFixt
 	f := &hangarInstallFixture{pluginInstallFixture: newPluginInstallFixtureFor(t, serverType, "1.21.8"), releases: map[string]hangarVersion{}, serverType: serverType}
 	f.add(t, 1, 10, "root.jar", "Root", "example.Root")
 	pluginCatalogClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Scheme != "https" || r.URL.Host != "hangar.papermc.io" || r.Header.Get("Authorization") != "" {
+		if r.URL.Scheme != "https" || r.URL.Host != "hangar.papermc.io" || r.Header.Get("Authorization") != "" || r.Header.Get("x-api-key") != "" {
 			t.Fatal("unsafe Hangar API request", r.URL)
 		}
 		parts := strings.Split(r.URL.Path, "/")
@@ -95,7 +95,7 @@ func newHangarInstallFixture(t *testing.T, serverType string) *hangarInstallFixt
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(raw))}, err
 	})}
 	pluginDownloadClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
-		if !safeHangarArtifactURL(r.URL.String()) {
+		if !safeHangarArtifactURL(r.URL.String()) || r.Header.Get("x-api-key") != "" {
 			t.Fatal("unsafe download", r.URL)
 		}
 		parts := strings.Split(r.URL.Path, "/")

@@ -84,7 +84,7 @@ func curseForgeCatalogFixture(t *testing.T, loader string) (*pluginInstallFixtur
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, err
 	})}
 	pluginDownloadClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
-		if r.Header.Get("x-api-key") != "" || r.URL.Host != "edge.forgecdn.net" {
+		if r.Header.Get("x-api-key") != "private-fixture-key" || r.URL.Host != "edge.forgecdn.net" {
 			t.Fatal("credential reached artifact origin")
 		}
 		return &http.Response{StatusCode: 200, ContentLength: int64(len(raw)), Body: io.NopCloser(bytes.NewReader(raw))}, nil
@@ -127,6 +127,7 @@ func TestCurseForgeCatalogAndInstallPluginsAndMods(t *testing.T) {
 	}
 }
 func TestCurseForgeArtifactSafety(t *testing.T) {
+	curseForgeCatalogFixture(t, "paper")
 	for _, raw := range []string{"http://edge.forgecdn.net/files/123/456/x.jar", "https://edge.forgecdn.net.evil/files/123/456/x.jar", "https://edge.forgecdn.net/files/123/456/x.jar?key=secret", "https://user@edge.forgecdn.net/files/123/456/x.jar", "https://edge.forgecdn.net/files/123/456/../x.jar"} {
 		if safeCurseForgeArtifactURL(raw) {
 			t.Fatal("unsafe artifact origin", raw)

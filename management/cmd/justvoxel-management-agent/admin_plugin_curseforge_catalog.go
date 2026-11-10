@@ -308,7 +308,7 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 	if a.VersionNumber == "" {
 		a.VersionNumber = f.Filename
 	}
-	if strconv.FormatInt(f.ModID, 10) != project || f.Game != scope.Game || !positiveCurseForgeID(a.VersionID) || !f.Available || f.Status != 4 || f.Release != 1 || !curseForgeCompatible(f, server) || len(a.VersionNumber) > 256 || len(f.Dependencies) > 128 || len(f.Hashes) > 8 || len(f.GameVersions) > 256 {
+	if !positiveCurseForgeID(project) || strconv.FormatInt(f.ModID, 10) != project || f.Game != scope.Game || !positiveCurseForgeID(a.VersionID) || !f.Available || f.Status != 4 || f.Release != 1 || !curseForgeCompatible(f, server) || len(a.VersionNumber) > 256 || len(f.Dependencies) > 128 || len(f.Hashes) > 8 || len(f.GameVersions) > 256 {
 		return a, errors.New("CurseForge file identity, availability or exact server compatibility could not be verified")
 	}
 	for _, h := range f.Hashes {
@@ -318,6 +318,10 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 			}
 			a.SHA1 = h.Value
 		}
+	}
+	// Verify exact file evidence before asking the authenticated API for a URL.
+	if !safePluginFilename(a.Filename) || a.Size <= 0 || a.Size > pluginMaxJar || !curseForgeSHA1.MatchString(a.SHA1) {
+		return a, errors.New("CurseForge file lacks a safe official JAR download and SHA-1")
 	}
 	if a.URL == "" {
 		var result struct {
@@ -469,10 +473,13 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 				project.Compatible = curseForgeCompatible(*f, server)
 				project.Compatibility = "Not listed as compatible according to publisher metadata"
 				if project.Compatible {
-					project.Compatibility = "Compatible according to publisher metadata"
+					project.Compatibility = "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review."
 				}
 				_, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope)
 				project.InstallAvailable = artifactErr == nil && server.Supported
+				if artifactErr != nil {
+					project.Compatibility = "CurseForge does not expose a verifiable downloadable JAR for this release."
+				}
 			}
 			out.Projects = append(out.Projects, project)
 			out.Positions = append(out.Positions, cursor)
@@ -508,7 +515,7 @@ func curseForgeRelation(n int) string {
 
 func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContext, dataPath, project, version string) (pluginInstallPlan, error) {
 	target := javaServerContentKind(server.ServerType)
-	plan := pluginInstallPlan{Source: "CurseForge", ProjectID: project, VersionID: version, Server: server, DataPath: dataPath, Location: filepath.Join(dataPath, target), RestartRequired: true, Compatibility: "Compatible according to publisher metadata", Artifacts: []pluginInstallArtifact{}, DisplayDependencies: []pluginDependency{}}
+	plan := pluginInstallPlan{Source: "CurseForge", ProjectID: project, VersionID: version, Server: server, DataPath: dataPath, Location: filepath.Join(dataPath, target), RestartRequired: true, Compatibility: "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review.", Artifacts: []pluginInstallArtifact{}, DisplayDependencies: []pluginDependency{}}
 	if !server.Supported || target == "" || server.MinecraftVersion == "" || !filepath.IsAbs(dataPath) || !positiveCurseForgeID(project) || !positiveCurseForgeID(version) {
 		return plan, errCurseForgeCatalog
 	}

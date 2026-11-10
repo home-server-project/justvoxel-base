@@ -81,6 +81,7 @@ type pluginDependency struct {
 	Type      string `json:"dependency_type"`
 }
 type pluginCatalogVersion struct {
+	Environment  string               `json:"environment,omitempty"`
 	ID           string               `json:"id"`
 	ProjectID    string               `json:"project_id"`
 	Files        []pluginArtifactFile `json:"files,omitempty"`
@@ -547,6 +548,17 @@ func pluginLoaders(serverType string) []string {
 	}
 	return nil
 }
+
+const modrinthServerEnvironmentRejection = "This release does not declare dedicated-server eligibility in its exact Modrinth version metadata."
+
+func modrinthServerEnvironment(environment string) bool {
+	switch environment {
+	case "client_and_server", "client_only_server_optional", "server_only", "server_only_client_optional", "dedicated_server_only", "client_or_server", "client_or_server_prefers_both":
+		return true
+	}
+	return false
+}
+
 func pluginVersionCompatible(v pluginCatalogVersion, server pluginServerContext) bool {
 	if server.MinecraftVersion == "" || !slices.Contains(v.GameVersions, server.MinecraftVersion) {
 		return false
@@ -833,6 +845,9 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 			}
 			sort.SliceStable(versions, func(i, j int) bool { return versions[i].Published > versions[j].Published })
 			for _, v := range versions {
+				if v.Environment == "client_only" || v.Environment == "singleplayer_only" {
+					continue
+				}
 				if release && v.Type != "release" {
 					continue
 				}
@@ -852,7 +867,7 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 					continue
 				}
 				_, fileErr := selectPluginArtifact(v.Files)
-				project.InstallAvailable = matches && server.Supported && v.Type == "release" && v.ProjectID == project.ID && modrinthPluginID.MatchString(v.ID) && fileErr == nil && managedPluginSlug(project.Slug) == ""
+				project.InstallAvailable = modrinthServerEnvironment(v.Environment) && matches && server.Supported && v.Type == "release" && v.ProjectID == project.ID && modrinthPluginID.MatchString(v.ID) && fileErr == nil && managedPluginSlug(project.Slug) == ""
 				v.Files = nil // Artifact URLs never leave the privileged agent.
 				project.Version = &v
 				project.Compatible = matches
@@ -860,6 +875,9 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 					project.Compatibility = "Compatible according to publisher metadata"
 				} else if server.MinecraftVersion != "" {
 					project.Compatibility = "Not listed as compatible according to publisher metadata"
+				}
+				if !modrinthServerEnvironment(v.Environment) {
+					project.Compatibility = modrinthServerEnvironmentRejection
 				}
 				break
 			}
