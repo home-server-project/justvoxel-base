@@ -15,7 +15,15 @@ wait_for_rcon() { [[ ${READY:-yes} == yes ]]; }
 sleep() { printf '%s\n' "$1" >> "${DATA_PATH}/sleeps"; }
 podman() {
     case "${*: -1}" in
-        --json) printf 'probe\n' >> "${DATA_PATH}/monitor-probes"; [[ ${MONITOR_FAIL:-no} != yes ]] || return 1; printf '%s' "${MONITOR_RESPONSE}" ;;
+        --json)
+            printf 'probe\n' >> "${DATA_PATH}/monitor-probes"
+            if [[ ${MINECRAFT_SERVER_TYPE:-paper} =~ ^(forge|neoforge|fabric|quilt)$ ]]; then
+                [[ $* == *'mc-monitor status --timeout 5s --json' ]] || { echo 'Missing bounded mod-loader probe timeout' >&2; return 1; }
+            fi
+            [[ ${MONITOR_FAIL:-no} != yes ]] || return 1
+            (( $(wc -l < "${DATA_PATH}/monitor-probes") > ${MONITOR_FAILURES:-0} )) || return 1
+            printf '%s' "${MONITOR_RESPONSE}"
+            ;;
         list) printf 'There are 0 of a max of 10 players online' ;;
         version) [[ ${VERSION_FAIL:-no} != yes ]] || return 1; [[ ${MINECRAFT_SERVER_TYPE:-paper} != vanilla ]] || { echo 'Unexpected Vanilla version command' >&2; return 1; }; if [[ ${TRANSIENT:-no} == yes ]]; then
             count=$(cat "${DATA_PATH}/probes" 2>/dev/null || printf 0)
@@ -148,6 +156,30 @@ for software in forge neoforge fabric quilt; do
     printf '[main/INFO]: %s\n' "${marker}" > "${DATA_PATH}/logs/latest.log"
     MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${loader}" BEDROCK_ENABLED=no \
         MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' bash "${fixture_dir}/verify" 1.21.1
+    # RCON is already ready, but status can lag behind mod-loader startup.
+    rm -f "${DATA_PATH}/monitor-probes" "${DATA_PATH}/sleeps"
+    READY=yes MONITOR_FAILURES=2 MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${loader}" BEDROCK_ENABLED=no \
+        MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' bash "${fixture_dir}/verify" 1.21.1
+    [[ $(wc -l < "${DATA_PATH}/monitor-probes") == 3 && $(wc -l < "${DATA_PATH}/sleeps") == 2 ]]
+    [[ $(sort -u "${DATA_PATH}/sleeps") == 2 ]]
+    rm -f "${DATA_PATH}/monitor-probes" "${DATA_PATH}/sleeps"
+    if READY=yes MONITOR_FAIL=yes MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${loader}" BEDROCK_ENABLED=no \
+        bash "${fixture_dir}/verify" 1.21.1 2>"${fixture_dir}/status-error"; then
+        echo 'Unavailable mod-loader status accepted' >&2; exit 1
+    fi
+    [[ $(wc -l < "${DATA_PATH}/monitor-probes") == 8 && $(wc -l < "${DATA_PATH}/sleeps") == 7 ]]
+    [[ $(sort -u "${DATA_PATH}/sleeps") == 2 ]]
+    grep -Fxq 'ERROR: Minecraft status probe did not become ready after RCON.' "${fixture_dir}/status-error"
+    # A successful probe still requires a valid version; it is not retried.
+    for response in '{}' 'not JSON' '{"server_info":{"version":{"name":""}}}'; do
+        rm -f "${DATA_PATH}/monitor-probes" "${DATA_PATH}/sleeps"
+        if MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${loader}" BEDROCK_ENABLED=no \
+            MONITOR_RESPONSE="${response}" bash "${fixture_dir}/verify" 1.21.1 2>"${fixture_dir}/status-error"; then
+            echo 'Invalid mod-loader status accepted' >&2; exit 1
+        fi
+        [[ $(wc -l < "${DATA_PATH}/monitor-probes") == 1 && ! -e ${DATA_PATH}/sleeps ]]
+        grep -Fxq 'ERROR: Minecraft status version is invalid or missing.' "${fixture_dir}/status-error"
+    done
     for bad_loader in '' 0.16.1 0.16.11; do
         if MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION="${bad_loader}" BEDROCK_ENABLED=no \
             MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' bash "${fixture_dir}/verify" 1.21.1; then

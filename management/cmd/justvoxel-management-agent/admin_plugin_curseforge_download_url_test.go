@@ -98,21 +98,18 @@ func TestCurseForgeOfficialDownloadURLResolution(t *testing.T) {
 				return response, nil
 			})
 			page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
-			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable || page.Projects[0].ReviewAvailable != tc.wantOK {
+			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable || page.Projects[0].ReviewAvailable != (tc.invalid != "project" && tc.invalid != "file") {
 				t.Fatal("unexpected Discover eligibility")
 			}
-			if tc.wantOK && page.Projects[0].Compatibility != "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review." {
+			if page.Projects[0].ReviewAvailable && page.Projects[0].Compatibility != "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review." {
 				t.Fatal("dedicated-server compatibility wording changed")
-			}
-			if !tc.wantOK && tc.invalid != "project" && tc.invalid != "file" && !strings.Contains(page.Projects[0].Compatibility, "CurseForge") {
-				t.Fatal("missing unavailable artifact explanation")
 			}
 			wantCalls := 0
 			if tc.wantFallback {
 				wantCalls = 1
 			}
-			if calls != wantCalls {
-				t.Fatal("unexpected Discover fallback request count", calls)
+			if calls != 0 {
+				t.Fatal("Discover resolved an install artifact URL", calls)
 			}
 			// Planning must resolve independently of Discover, including direct requests.
 			calls = 0

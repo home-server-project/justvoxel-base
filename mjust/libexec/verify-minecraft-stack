@@ -43,9 +43,25 @@ case "${MINECRAFT_SERVER_TYPE-paper}" in
         if [[ ${BEDROCK_ENABLED} != yes ]]; then exit 0; fi
         ;;
     forge|neoforge|fabric|quilt)
-        [[ ${expected_version} != LATEST && -n ${MINECRAFT_LOADER_VERSION:-} ]] || exit 1
-        status="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json)" || exit 1
-        actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0)' <<< "${status}")" || exit 1
+        [[ ${expected_version} != LATEST && -n ${MINECRAFT_LOADER_VERSION:-} ]] || {
+            echo 'ERROR: the configured mod loader version could not be verified.' >&2; exit 1;
+        }
+        # RCON can be ready before a restarted mod loader serves status. At most
+        # eight five-second probes and seven two-second sleeps (54 seconds).
+        status_ready=no
+        for ((status_attempt=1; status_attempt<=8; status_attempt++)); do
+            if status="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --timeout 5s --json 2>/dev/null)"; then
+                status_ready=yes
+                break
+            fi
+            if (( status_attempt < 8 )); then sleep 2; fi
+        done
+        [[ ${status_ready} == yes ]] || {
+            echo 'ERROR: Minecraft status probe did not become ready after RCON.' >&2; exit 1;
+        }
+        actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0)' <<< "${status}" 2>/dev/null)" || {
+            echo 'ERROR: Minecraft status version is invalid or missing.' >&2; exit 1;
+        }
         case "${actual}" in
             "${expected_version}"|"${expected_version} "*|*" ${expected_version}") ;;
             *) echo 'ERROR: the selected Minecraft game version could not be verified.' >&2; exit 1 ;;
@@ -66,16 +82,30 @@ case "${MINECRAFT_SERVER_TYPE-paper}" in
         ' "${DATA_PATH}/logs/latest.log" || {
             echo 'ERROR: the selected mod loader could not be verified in the current server log.' >&2; exit 1;
         }
-        podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list >/dev/null || exit 1
+        podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list >/dev/null || {
+            echo 'ERROR: Minecraft final RCON check failed.' >&2; exit 1;
+        }
         if [[ ${BEDROCK_ENABLED} == yes ]]; then
-            [[ ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge ]] || exit 1
-            [[ -n ${JV_INSTANCE_ID:-} ]] || exit 1
-            /usr/libexec/justvoxel/mjust/managed-crossplay-mod-ownership verify "${MINECRAFT_SERVER_TYPE}" "${DATA_PATH}" "/etc/justvoxel/instances/${JV_INSTANCE_ID}/crossplay-mods.json" '' || exit 1
-            geyser="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version')" || exit 1
-            [[ ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ]] || exit 1
+            [[ ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge ]] || {
+                echo 'ERROR: managed cross-play mod ownership could not be verified.' >&2; exit 1;
+            }
+            [[ -n ${JV_INSTANCE_ID:-} ]] || {
+                echo 'ERROR: managed cross-play mod ownership could not be verified.' >&2; exit 1;
+            }
+            /usr/libexec/justvoxel/mjust/managed-crossplay-mod-ownership verify "${MINECRAFT_SERVER_TYPE}" "${DATA_PATH}" "/etc/justvoxel/instances/${JV_INSTANCE_ID}/crossplay-mods.json" '' || {
+                echo 'ERROR: managed cross-play mod ownership could not be verified.' >&2; exit 1;
+            }
+            geyser="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version')" || {
+                echo 'ERROR: Geyser version query failed.' >&2; exit 1;
+            }
+            [[ ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ]] || {
+                echo 'ERROR: Geyser version response could not be verified.' >&2; exit 1;
+            }
             platform_name=Geyser-Fabric
             [[ ${MINECRAFT_SERVER_TYPE} != neoforge ]] || platform_name=Geyser-NeoForge
-            grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*(#.*)?$' "${DATA_PATH}/config/${platform_name}/config.yml" || exit 1
+            grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*(#.*)?$' "${DATA_PATH}/config/${platform_name}/config.yml" || {
+                echo 'ERROR: Geyser Floodgate authentication could not be verified.' >&2; exit 1;
+            }
         fi
         printf 'Minecraft version: %s (%s %s)\n' "${expected_version}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_LOADER_VERSION}"
         exit 0

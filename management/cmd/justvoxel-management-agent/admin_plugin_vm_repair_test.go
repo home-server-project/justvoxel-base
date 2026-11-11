@@ -141,7 +141,7 @@ func TestCurseForgeAuthenticatedArtifactBoundary(t *testing.T) {
 	}
 }
 
-func TestCurseForgeDiscoveryAndPlanRejectUnverifiableFiles(t *testing.T) {
+func TestCurseForgeDiscoveryDefersArtifactValidationToPlan(t *testing.T) {
 	for _, kind := range []string{"missing URL", "unsafe URL", "missing SHA1", "duplicate SHA1", "invalid SHA1", "zero size", "oversized"} {
 		t.Run(kind, func(t *testing.T) {
 			f, server := curseForgeCatalogFixture(t, "fabric")
@@ -199,7 +199,7 @@ func TestCurseForgeDiscoveryAndPlanRejectUnverifiableFiles(t *testing.T) {
 				return response, nil
 			})
 			page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
-			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable || !strings.Contains(page.Projects[0].Compatibility, "CurseForge") {
+			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable || !page.Projects[0].ReviewAvailable {
 				t.Fatal(page, err)
 			}
 			if _, err := resolveCurseForgeInstallPlan(context.Background(), server, f.data, "10", "20"); err == nil {

@@ -335,14 +335,20 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 	for _, h := range f.Hashes {
 		if h.Algo == 1 {
 			if a.SHA1 != "" || !curseForgeSHA1.MatchString(h.Value) {
-				return a, errors.New("Invalid CurseForge SHA-1 evidence")
+				return a, errors.New("CurseForge SHA-1 evidence is malformed or duplicated")
 			}
 			a.SHA1 = h.Value
 		}
 	}
 	// Verify exact file evidence before asking the authenticated API for a URL.
-	if !safePluginFilename(a.Filename) || a.Size <= 0 || a.Size > pluginMaxJar || !curseForgeSHA1.MatchString(a.SHA1) {
-		return a, errors.New("CurseForge file metadata is incomplete or unsafe")
+	if !safePluginFilename(a.Filename) {
+		return a, errors.New("CurseForge artifact filename is missing or unsafe")
+	}
+	if a.Size <= 0 || a.Size > pluginMaxJar {
+		return a, errors.New("CurseForge artifact size is missing, invalid or exceeds the safe limit")
+	}
+	if a.SHA1 == "" {
+		return a, errors.New("CurseForge SHA-1 evidence is missing")
 	}
 	if a.URL == "" {
 		var result struct {
@@ -357,7 +363,7 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 		return a, errors.New("CurseForge did not provide an official artifact URL for this release")
 	}
 	if !validPluginDownloadMetadata(a) {
-		return a, errors.New("CurseForge file metadata is incomplete or unsafe")
+		return a, errors.New("CurseForge official artifact URL is unsafe")
 	}
 	return a, nil
 }
@@ -502,13 +508,16 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 				if project.Compatible {
 					project.Compatibility = "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review."
 				}
-				_, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope)
-				project.InstallAvailable = artifactErr == nil && server.Supported
 				if javaServerContentKind(server.ServerType) == "mods" {
-					project.ReviewAvailable, project.InstallAvailable = project.InstallAvailable, false
-				}
-				if artifactErr != nil {
-					project.Compatibility = artifactErr.Error()
+					// Discover establishes candidate identity only. Exact Review
+					// re-fetches and verifies all install-grade artifact evidence.
+					project.ReviewAvailable = server.Supported && project.Compatible && f.Game == scope.Game
+				} else {
+					_, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope)
+					project.InstallAvailable = artifactErr == nil && server.Supported
+					if artifactErr != nil {
+						project.Compatibility = artifactErr.Error()
+					}
 				}
 			}
 			out.Projects = append(out.Projects, project)

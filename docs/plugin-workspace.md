@@ -278,6 +278,9 @@ excluded from the dedicated-server catalog regardless of Compatible only.
 Unknown, empty and unrecognized environments cannot be installed.
 
 CurseForge Minecraft/loader compatibility does not establish server eligibility.
+For mods, Discover needs candidate identity and Minecraft/loader release metadata;
+missing artifact filenames, sizes, hashes or download URLs do not suppress Review.
+Exact Review independently re-fetches the file and requires all artifact evidence.
 Exact Review downloads verified artifacts and checks bounded declarative metadata
 before any operation or downtime: Fabric `environment="client"` and Forge
 file-level `clientSideOnly=true` are rejected. Fabric defaults to `"*"` when the
