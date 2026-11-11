@@ -21,6 +21,7 @@ func TestQuickLookConcealmentAndAlignment(t *testing.T) {
 	css := read("static/app.css")
 	for _, want := range []string{
 		`.quick-look-panel{visibility:hidden;`,
+		`.quick-look{position:fixed;top:40px;`,
 		`.quick-look.is-open>.quick-look-panel{visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}`,
 		`.quick-look{left:4px;right:4px}`,
 		`z-index:70;clip-path:inset(0 -100vmax -100vmax)`,
@@ -29,7 +30,7 @@ func TestQuickLookConcealmentAndAlignment(t *testing.T) {
 			t.Fatalf("drawer visibility or responsive contract missing %q", want)
 		}
 	}
-	for _, selector := range []string{".quick-look-panel{", ".app-header.topbar{height:40px;"} {
+	for _, selector := range []string{".quick-look-panel{", ".app-header.topbar{height:32px;"} {
 		start := strings.Index(css, selector)
 		if start < 0 {
 			t.Fatalf("missing %s", selector)

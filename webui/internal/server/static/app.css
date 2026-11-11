@@ -8,7 +8,7 @@
 /* Compact role-aware Quick Look drawer below the top bar.
    Clip only above the join; leave menus, shadows and the handle room below. */
 .app-header.topbar.quick-look-open{border-bottom-left-radius:0;border-bottom-right-radius:0;box-shadow:none}
-.quick-look{position:fixed;top:48px;left:8px;right:8px;z-index:70;clip-path:inset(0 -100vmax -100vmax);pointer-events:none}
+.quick-look{position:fixed;top:40px;left:8px;right:8px;z-index:70;clip-path:inset(0 -100vmax -100vmax);pointer-events:none}
 .quick-look-panel{visibility:hidden;transform:translateY(-100%);transition:transform .2s ease,visibility 0s .2s;padding:.65rem .75rem .75rem;border:1px solid #303942;border-radius:0 0 12px 12px;border-top:0;background:#151a1ff7;box-shadow:0 16px 40px #0007;backdrop-filter:blur(12px);pointer-events:none}
 .quick-look.is-open>.quick-look-panel{visibility:visible;transform:translateY(0);transition-delay:0s;pointer-events:auto}
 .quick-look-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-auto-rows:minmax(94px,auto);gap:.5rem;width:min(1220px,100%);margin:0 auto}
@@ -62,7 +62,7 @@
 .control-center-icon{color:inherit!important;font-size:1.05rem}
 .control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .control-center-panel{position:absolute;top:calc(100% + var(--jv-panel-gap));right:0;width:min(620px,calc(100vw - 1.5rem));max-height:calc(100vh - 64px);overflow:auto;padding:.8rem;border:1px solid #303942;border-radius:14px;background:#151a1ff7;box-shadow:0 22px 60px #0009;backdrop-filter:blur(12px)}
-.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:40px;min-height:40px;padding:0 .2rem}
+.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:32px;min-height:32px;padding:0 .2rem}
 .control-navigation{display:grid;gap:.7rem;margin-top:.7rem}
 .control-section{padding:.65rem;border:1px solid #293139;border-radius:12px;background:#10161a}
 .control-section-label{display:block;margin:0 0 .5rem;color:#89959e!important;font-size:.68rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
@@ -385,9 +385,9 @@ body.role-operator .control-tile.nav-operator-only{display:flex!important}
 body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-header-button{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3b454e;border-radius:10px;background:#232b31;color:#dce7e0;font-size:1.25rem;line-height:1}
 .system-monitor-header-button:hover,.system-monitor-header-button:focus-visible{background:#303941;border-color:#52616d;color:#fff}
-.workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;padding:0 .75rem;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}
+.workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;min-height:32px;padding:0 .75rem;border-radius:10px;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}
 .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem;line-height:1;font-weight:700;white-space:nowrap}
-.workspace-header-close{flex:none;width:40px;height:40px}
+.workspace-header-close{flex:none;width:32px;height:32px}
 .workspace-header-close svg{display:block;width:19px;height:19px;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .workspace-header-close:hover,.workspace-header-close:focus-visible{box-shadow:0 0 0 2px #78c99d33}
 .system-monitor-profile{padding:.8rem 1.1rem;border-bottom:1px solid #303942;background:#11171b}
@@ -715,11 +715,11 @@ input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggl
 @media(prefers-color-scheme:light){.migration-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.migration-workspace-header,.migration-workspace-tabs{border-color:#d9dfe3}.migration-workspace-tabs{background:#f7f9fa}.migration-workspace-tabs button{color:#56636c}.migration-workspace-tabs button:hover,.migration-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.migration-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}}
 
 
-/* Shared compact workspace chrome. */
-.system-update-dialog-header>div:first-child,.system-monitor-header>div:first-child,.storage-workspace-header>div:first-child,.backups-workspace-header>div:first-child,.minecraft-workspace-header>div:first-child,.system-workspace-header>div:first-child,.migration-workspace-header>div:first-child,.control-center-heading>div{display:flex;align-items:baseline;gap:.38rem;min-width:0}
-.system-update-dialog-header .eyebrow,.system-monitor-header .eyebrow,.storage-workspace-header .eyebrow,.backups-workspace-header .eyebrow,.minecraft-workspace-header .eyebrow,.system-workspace-header .eyebrow,.migration-workspace-header .eyebrow,.control-center-heading .eyebrow{margin:0;white-space:nowrap}
-.system-update-dialog-header .eyebrow::after,.system-monitor-header .eyebrow::after,.storage-workspace-header .eyebrow::after,.backups-workspace-header .eyebrow::after,.minecraft-workspace-header .eyebrow::after,.system-workspace-header .eyebrow::after,.migration-workspace-header .eyebrow::after,.control-center-heading .eyebrow::after{content:" ·"}
-.system-update-dialog-header h2,.system-monitor-header h2,.storage-workspace-header h2,.backups-workspace-header h2,.minecraft-workspace-header h2,.system-workspace-header h2,.migration-workspace-header h2,.control-center-heading h2{margin:0;font-size:1.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Shared compact workspace chrome. Title descendants outrank historical family rules. */
+.system-update-dialog-header>div:first-child,.system-monitor-header>div:first-child,.storage-workspace-header>div:first-child,.backups-workspace-header>div:first-child,.minecraft-workspace-header>div:first-child,.system-workspace-header>div:first-child,.migration-workspace-header>div:first-child,.version-workspace-header>div:first-child,.plugins-workspace-header>div:first-child,.network-workspace-header>div:first-child,.control-center-heading>div:first-child{display:flex;align-items:baseline;gap:.38rem;min-width:0}
+.system-update-dialog-header>div:first-child .eyebrow,.system-monitor-header>div:first-child .eyebrow,.storage-workspace-header>div:first-child .eyebrow,.backups-workspace-header>div:first-child .eyebrow,.minecraft-workspace-header>div:first-child .eyebrow,.system-workspace-header>div:first-child .eyebrow,.migration-workspace-header>div:first-child .eyebrow,.version-workspace-header>div:first-child .eyebrow,.plugins-workspace-header>div:first-child .eyebrow,.network-workspace-header>div:first-child .eyebrow,.control-center-heading>div:first-child .eyebrow{margin:0;white-space:nowrap;color:#78c99d;font-family:inherit;font-size:.72rem;font-weight:400;letter-spacing:.12em;text-transform:uppercase;line-height:normal}
+.system-update-dialog-header>div:first-child .eyebrow::after,.system-monitor-header>div:first-child .eyebrow::after,.storage-workspace-header>div:first-child .eyebrow::after,.backups-workspace-header>div:first-child .eyebrow::after,.minecraft-workspace-header>div:first-child .eyebrow::after,.system-workspace-header>div:first-child .eyebrow::after,.migration-workspace-header>div:first-child .eyebrow::after,.version-workspace-header>div:first-child .eyebrow::after,.plugins-workspace-header>div:first-child .eyebrow::after,.network-workspace-header>div:first-child .eyebrow::after,.control-center-heading>div:first-child .eyebrow::after{content:" ·"}
+.system-update-dialog-header>div:first-child h2,.system-monitor-header>div:first-child h2,.storage-workspace-header>div:first-child h2,.backups-workspace-header>div:first-child h2,.minecraft-workspace-header>div:first-child h2,.system-workspace-header>div:first-child h2,.migration-workspace-header>div:first-child h2,.version-workspace-header>div:first-child h2,.plugins-workspace-header>div:first-child h2,.network-workspace-header>div:first-child h2,.control-center-heading>div:first-child h2{margin:0;font-family:inherit;font-size:1.05rem;font-weight:700;line-height:normal;color:var(--jv-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .system-update-dialog-header .system-monitor-header-button,.system-monitor-header .system-monitor-header-button,.storage-workspace-header .system-monitor-header-button,.backups-workspace-header .system-monitor-header-button,.minecraft-workspace-header .system-monitor-header-button,.system-workspace-header .system-monitor-header-button,.migration-workspace-header .system-monitor-header-button{width:32px;height:32px;border-radius:8px;font-size:1.08rem}
 
 /* Network overlay addresses in the IPv4 tile. */
@@ -730,8 +730,11 @@ input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggl
 /* Password reveal is applied to every password input, including dynamically loaded workspace forms. */
 .password-field-shell{position:relative;display:block;width:100%}
 .password-field-shell>input{padding-right:3rem}
-.password-reveal-button{position:absolute;right:.36rem;top:50%;display:grid;place-items:center;width:34px;height:34px;padding:0;transform:translateY(-42%);border:1px solid transparent;border-radius:7px;background:transparent;color:#9ca7b0}
-.password-reveal-button:hover,.password-reveal-button:focus-visible,.password-reveal-button.is-showing{background:#252e35;border-color:#3d4750;color:#eef1f4}
+.password-reveal-button{position:absolute;right:.36rem;top:50%;display:grid;place-items:center;width:34px;height:34px;padding:0;transform:translateY(-50%);border:1px solid transparent;border-radius:50%;background:transparent;color:#9ca7b0}
+.password-reveal-button:hover,.password-reveal-button:focus-visible,.password-reveal-button.is-showing{color:#eef1f4}
+.password-reveal-button:focus-visible{outline:2px solid #78c99d;outline-offset:0}
+.password-reveal-slash{display:none}
+.password-reveal-button.is-showing .password-reveal-slash{display:block}
 .password-reveal-button svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8}
 .password-strength{display:block;margin:.3rem 0 .15rem;font-size:.8rem;font-weight:700}
 .password-strength.is-unacceptable{color:#e57670}
@@ -769,7 +772,7 @@ input[type=checkbox].destructive-confirm-toggle:checked{border-color:#ff5f56;bac
 
 /* Light-mode shared controls. */
 @media(prefers-color-scheme:light){
-  .password-reveal-button:hover,.password-reveal-button:focus-visible,.password-reveal-button.is-showing{background:#eef2f4;border-color:#cbd4da;color:#26313a}
+  .password-reveal-button:hover,.password-reveal-button:focus-visible,.password-reveal-button.is-showing{color:#26313a}
   .destructive-confirmation{border-color:#e2e7ea}
   .destructive-confirm-slider{background:#f5f7f8;border-color:#c5d0d7}
   .destructive-confirm-slider-text{color:#64747f}
@@ -827,7 +830,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .quick-look-network-row>span,.network-overlay-list>span>span{color:#89959e!important;font-size:.66rem!important;font-weight:800;text-transform:uppercase;letter-spacing:.02em}
 .quick-look-network-row>strong,.network-overlay-list>span>strong{min-width:0;overflow-wrap:anywhere;color:#eef1f4;font-size:.76rem;font-weight:700;white-space:normal}
 .quick-look-network-tile .network-overlay-list{gap:.13rem;margin-top:0}
-#dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 48px)}
+#dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 40px)}
 .dashboard-wallpaper{position:fixed;inset:0;width:100%;height:100dvh;object-fit:cover;object-position:center;z-index:-3;pointer-events:none}
 #dashboard::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:#07100b66}
 #dashboard[data-configured="false"] .dashboard-wallpaper{display:none}
@@ -989,8 +992,8 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .storage-workspace-dialog,.minecraft-workspace-dialog,.system-workspace-dialog{--jv-preferred-height:760px}
 .backups-workspace-dialog{--jv-preferred-height:820px}
 .workspace-window :is(.system-update-dialog-shell,.system-monitor-shell,.storage-workspace-shell,.backups-workspace-shell,.minecraft-workspace-shell,.system-workspace-shell,.migration-workspace-shell,.version-workspace-shell){min-width:0;min-height:0}
-.workspace-window :is(.system-update-dialog-header,.system-monitor-header,.storage-workspace-header,.backups-workspace-header,.minecraft-workspace-header,.system-workspace-header,.migration-workspace-header,.version-workspace-header,.plugins-workspace-header,.network-workspace-header){flex:none;align-items:center;height:48px;min-height:48px;padding:3px var(--jv-workspace-edge);border-color:var(--jv-border)}
-.workspace-window :is(.system-update-header-actions,.system-monitor-header-actions,.storage-workspace-header-actions,.backups-workspace-header-actions,.minecraft-workspace-header-actions,.system-workspace-header-actions,.migration-workspace-header-actions){display:flex;align-items:center;gap:var(--jv-space-xs);flex:none}
+.workspace-window :is(.system-update-dialog-header,.system-monitor-header,.storage-workspace-header,.backups-workspace-header,.minecraft-workspace-header,.system-workspace-header,.migration-workspace-header,.version-workspace-header,.plugins-workspace-header,.network-workspace-header){flex:none;align-items:center;height:32px;min-height:32px;padding:0 var(--jv-workspace-edge);border-color:var(--jv-border)}
+.workspace-window :is(.system-update-header-actions,.system-monitor-header-actions,.storage-workspace-header-actions,.backups-workspace-header-actions,.minecraft-workspace-header-actions,.system-workspace-header-actions,.migration-workspace-header-actions,.network-workspace-header-actions,.selected-server-header-actions){display:flex;align-items:center;gap:var(--jv-space-xs);flex:none;flex-wrap:nowrap;margin-right:calc(0px - var(--jv-workspace-edge) - 1px)}
 .workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs){flex:none;gap:var(--jv-space-xs);padding:.42rem var(--jv-workspace-edge);border-color:var(--jv-border);background:var(--jv-surface-sunken)}
 .workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs,.plugins-workspace-tabs) button{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
 .workspace-window .minecraft-server-arrange-toolbar a{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
@@ -1305,10 +1308,10 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
   .migration-workspace-content .migration-facts,.migration-workspace-content .migration-review-grid,.migration-workspace-content .migration-smb-fields{grid-template-columns:1fr}
 }
 
-.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:40px;min-height:40px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}
+.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}
 .workspace-window .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem}
-.workspace-window .workspace-header-close{width:40px;padding:0;font-size:inherit}
-.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:40px;height:40px;font-size:inherit}
+.workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}
+.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:32px;height:32px;font-size:inherit}
 .workspace-window :is(.workspace-header-refresh,.workspace-header-close):is(:hover,:focus-visible){background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}
 @media(prefers-color-scheme:light){
   .workspace-window :is(.workspace-header-refresh,.workspace-header-close){background:#fff;border-color:#cbd4da;color:#34414a}
@@ -1422,8 +1425,8 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 }
 @media(max-width:430px){.version-selection-row{flex-wrap:wrap}.version-selection-row>label,.version-selection-row>select{flex-basis:100%}}
 
-/* Floating panel: the outer footprint stays 48px; workspaces measure its bottom. */
-.app-header.topbar{height:40px;min-height:40px;margin:4px 8px;padding:2px .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+/* Floating panel: the visible bar is 32px plus 4px top/bottom margins for a 40px outer footprint; workspaces measure its bottom. */
+.app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
 /* Offset desktop padding and border so trigger and panel share the outer edge. */
 @media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}
 .app-header .brand-mark{min-height:32px;padding:1px .35rem}
@@ -1445,13 +1448,13 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .date-time-panel .action-row{margin:0}
 @media(max-width:900px){.system-monitor-profile{grid-template-columns:minmax(0,1fr) max-content}}
 @media(max-width:600px){
-  .app-header.topbar{margin:4px;gap:.2rem;padding:2px .3rem}
+  .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}
   .quick-look{left:4px;right:4px}
   .app-header .control-center-trigger{width:32px;padding:0}
   .topbar-clock{display:grid;gap:0;font-size:.72rem;line-height:1.15}
   .topbar-clock-separator{display:none}
   .topbar-clock-date{font-size:.65rem}
-  .control-center-panel{top:52px}
+  .control-center-panel{top:44px}
   .system-monitor-profile{grid-template-columns:minmax(0,1fr)}
 }
 
@@ -1687,7 +1690,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .workspace-window .selected-server-header-actions{display:flex;align-items:center;gap:var(--jv-space-xs,.45rem);flex:none;flex-wrap:nowrap}
 .server-selector{position:relative;width:max-content;min-width:8rem;max-width:100%;margin:0;color:#eef1f4}
 .server-selector>summary,.server-selector-option{display:flex;align-items:center;gap:.4rem;min-width:0;padding:.4rem .55rem;border:1px solid #303942;border-radius:7px;background:#171d22;color:inherit;font-size:.85rem;line-height:1.2;cursor:pointer;list-style:none}
-.workspace-window .server-selector>summary{height:40px;min-height:40px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;line-height:1.2;cursor:pointer;list-style:none}
+.workspace-window .server-selector>summary{height:32px;min-height:32px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;line-height:1.2;cursor:pointer;list-style:none}
 .workspace-window .server-selector>summary:is(:hover,:focus-visible),.workspace-window .server-selector[open]>summary{background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}
 @media(prefers-color-scheme:light){
   .workspace-window .server-selector>summary{background:#fff;border-color:#cbd4da;color:#34414a}

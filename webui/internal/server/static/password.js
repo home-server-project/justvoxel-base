@@ -8,14 +8,12 @@ document.querySelectorAll('input[type="password"]:not([data-password-ui="off"])'
   button.type = "button";
   button.className = "password-reveal-button";
   button.setAttribute("aria-label", "Show password");
-  button.setAttribute("title", "Show password");
-  button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>';
+  button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.8"></circle><path class="password-reveal-slash" d="M4 4l16 16"></path></svg>';
   button.addEventListener("click", () => {
     const showing = input.type === "text";
     input.type = showing ? "password" : "text";
     button.classList.toggle("is-showing", !showing);
     button.setAttribute("aria-label", showing ? "Show password" : "Hide password");
-    button.setAttribute("title", showing ? "Show password" : "Hide password");
   });
   shell.appendChild(button);
 

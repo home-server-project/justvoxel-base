@@ -129,7 +129,7 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 	}
 
 	setupCSS := read("static/setup.css")
-	for _, want := range []string{"#dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 48px)", ".project-footer{margin-top:auto", ".setup-body{display:flex;flex-direction:column;min-height:100dvh}", ".setup-shell{display:flex;flex:1;flex-direction:column"} {
+	for _, want := range []string{"#dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 40px)", ".project-footer{margin-top:auto", ".setup-body{display:flex;flex-direction:column;min-height:100dvh}", ".setup-shell{display:flex;flex:1;flex-direction:column"} {
 		if !strings.Contains(appCSS+setupCSS, want) {
 			t.Fatalf("Footer page layout missing %q", want)
 		}

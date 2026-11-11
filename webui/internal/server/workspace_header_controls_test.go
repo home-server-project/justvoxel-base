@@ -76,7 +76,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if !strings.Contains(string(css), ".control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor") {
 		t.Error("Control Center gear icon must use currentColor SVG sizing")
 	}
-	settingsRule := ".workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;padding:0 .75rem;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}"
+	settingsRule := ".workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;min-height:32px;padding:0 .75rem;border-radius:10px;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}"
 	if !strings.Contains(string(css), settingsRule) {
 		t.Error("workspace Settings must retain the shared text button geometry")
 	}
@@ -291,9 +291,16 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 	network := read("static/network-workspace.css")
 	rules := regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1)
 	shared := ""
+	actions := ""
 	for _, rule := range rules {
-		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-dialog-header,") && strings.Contains(rule[2], "height:48px") {
+		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-dialog-header,") && strings.Contains(rule[2], "height:32px") {
 			shared = rule[0]
+		}
+		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-header-actions,") {
+			actions = rule[0]
+		}
+		if shared != "" && regexp.MustCompile(`\.(?:[a-z-]+-workspace-header|system-monitor-header|system-update-dialog-header)\b`).MatchString(rule[1]) && !strings.Contains(rule[1], "-header-button") && regexp.MustCompile(`(?:^|;)\s*(?:min-)?height\s*:\s*(?:40|48|52)px`).MatchString(rule[2]) {
+			t.Errorf("later rule re-expands the shared workspace header: %s", rule[0])
 		}
 		if (strings.Contains(rule[1], "workspace-header") || strings.Contains(rule[1], "system-monitor-header") || strings.Contains(rule[1], "system-update-dialog-header")) && !strings.Contains(rule[1], "-header-button") && regexp.MustCompile(`min-height:52px`).MatchString(rule[2]) {
 			t.Errorf("obsolete workspace header geometry: %s", rule[0])
@@ -304,7 +311,7 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 			t.Errorf("%s does not share the workspace lane", name)
 		}
 	}
-	for _, declaration := range []string{"height:48px;min-height:48px", "flex:none", "align-items:center", "padding:3px var(--jv-workspace-edge)"} {
+	for _, declaration := range []string{"height:32px;min-height:32px", "flex:none", "align-items:center", "padding:0 var(--jv-workspace-edge)"} {
 		if !strings.Contains(shared, declaration) {
 			t.Errorf("shared workspace header missing %s", declaration)
 		}
@@ -312,9 +319,19 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 	if strings.Contains(shared, "!important") {
 		t.Error("workspace geometry must use the normal cascade")
 	}
+	for _, name := range []string{"system-update-header-actions", "system-monitor-header-actions", "storage-workspace-header-actions", "backups-workspace-header-actions", "minecraft-workspace-header-actions", "system-workspace-header-actions", "migration-workspace-header-actions", "network-workspace-header-actions", "selected-server-header-actions"} {
+		if !strings.Contains(actions, "."+name) {
+			t.Errorf("%s must share the flush right action lane", name)
+		}
+	}
+	for _, declaration := range []string{"display:flex", "align-items:center", "gap:var(--jv-space-xs)", "flex:none", "flex-wrap:nowrap", "margin-right:calc(0px - var(--jv-workspace-edge) - 1px)"} {
+		if !strings.Contains(actions, declaration) {
+			t.Errorf("shared workspace action lane missing %s", declaration)
+		}
+	}
 	networkRule := regexp.MustCompile(`\.network-workspace-header\{([^}]*)\}`).FindStringSubmatch(network)
 	if len(networkRule) != 2 || !strings.Contains(networkRule[1], "height:40px;min-height:40px;padding:3px") || strings.Contains(networkRule[1], "48px") {
-		t.Fatal("Network stylesheet must preserve its original header contract; app.css owns the live 48px lane")
+		t.Fatal("Network stylesheet must preserve its original header contract; app.css owns the live 32px lane")
 	}
 	for _, name := range []string{"plugins", "version"} {
 		rule := regexp.MustCompile(`\.` + name + `-workspace-header\{([^}]*)\}`).FindStringSubmatch(css)
@@ -323,13 +340,13 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`.app-header.topbar{height:40px;min-height:40px;`,
-		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:40px;min-height:40px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}`,
-		`.workspace-window .workspace-header-close{width:40px;padding:0;font-size:inherit}`,
-		`.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:40px;height:40px;font-size:inherit}`,
+		`.app-header.topbar{height:32px;min-height:32px;`,
+		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}`,
+		`.workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}`,
+		`.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:32px;height:32px;font-size:inherit}`,
 		`.workspace-window .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem}`,
 		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close):is(:hover,:focus-visible){background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}`,
-		`.workspace-window .server-selector>summary{height:40px;min-height:40px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;`,
+		`.workspace-window .server-selector>summary{height:32px;min-height:32px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;`,
 		`.workspace-window .server-selector>summary:is(:hover,:focus-visible),.workspace-window .server-selector[open]>summary{background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}`,
 		`[data-server-selector-compact] .server-selector>summary{padding:.15rem .3rem;font-size:.75rem}`,
 	} {
@@ -367,8 +384,8 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 	}
 	for _, rule := range rules {
 		if strings.Contains(rule[1], "workspace-header-refresh") || strings.Contains(rule[1], "workspace-header-close") || strings.Contains(rule[1], ".workspace-window .server-selector>summary") {
-			if strings.Contains(rule[2], "height:32px") || strings.Contains(rule[2], "width:32px") {
-				t.Errorf("compact workspace control regression: %s", rule[0])
+			if regexp.MustCompile(`(?:^|;)\s*(?:min-|max-)?(?:height|width)\s*:\s*(?:40|48)px`).MatchString(rule[2]) {
+				t.Errorf("oversized workspace control regression: %s", rule[0])
 			}
 		}
 	}
@@ -382,7 +399,7 @@ func TestControlCenterTriggerFitsInsideTopbar(t *testing.T) {
 	css := string(data)
 	for _, want := range []string{
 		`.topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;`,
-		`.app-header.topbar{height:40px;min-height:40px;`,
+		`.app-header.topbar{height:32px;min-height:32px;`,
 		`.app-header .control-center{height:32px}`,
 		`.app-header .control-center-trigger{min-height:32px;height:32px;`,
 		`.app-header .control-center-trigger{width:32px;padding:0}`,
@@ -413,6 +430,79 @@ func TestControlCenterTriggerFitsInsideTopbar(t *testing.T) {
 			}
 			if value >= 40 || value > workspaceHeight {
 				t.Errorf("Control Center must fit inside the topbar and be no taller than workspace controls: %s", rule[0])
+			}
+		}
+	}
+}
+
+func TestWorkspaceHeadersShareControlCenterTypography(t *testing.T) {
+	data, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(data)
+	headers := []string{
+		"system-update-dialog-header", "system-monitor-header", "storage-workspace-header",
+		"backups-workspace-header", "minecraft-workspace-header", "system-workspace-header",
+		"migration-workspace-header", "version-workspace-header", "plugins-workspace-header",
+		"network-workspace-header", "control-center-heading",
+	}
+	contracts := []struct {
+		suffix string
+		body   string
+	}{
+		{">div:first-child", "display:flex;align-items:baseline;gap:.38rem;min-width:0"},
+		{">div:first-child .eyebrow", "margin:0;white-space:nowrap;color:#78c99d;font-family:inherit;font-size:.72rem;font-weight:400;letter-spacing:.12em;text-transform:uppercase;line-height:normal"},
+		{">div:first-child .eyebrow::after", `content:" ·"`},
+		{">div:first-child h2", "margin:0;font-family:inherit;font-size:1.05rem;font-weight:700;line-height:normal;color:var(--jv-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"},
+	}
+	for _, contract := range contracts {
+		var selectors []string
+		for _, header := range headers {
+			selectors = append(selectors, "."+header+contract.suffix)
+		}
+		if !strings.Contains(css, strings.Join(selectors, ",")+"{"+contract.body+"}") {
+			t.Errorf("all workspace families and Control Center must share title contract %s", contract.suffix)
+		}
+	}
+	if !strings.Contains(css, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:32px;min-height:32px;padding:0 .2rem}`) {
+		t.Error("Control Center must center its title in a 32px lane with no vertical padding")
+	}
+
+	// The shared first-child descendants have greater specificity than the old
+	// family-only rules, including Network's dynamically loaded stylesheet.
+	// Keep historical sizes before the shared contract, but reject new competing
+	// title sizes or important overrides in any workspace family.
+	shared := strings.Index(css, ".system-update-dialog-header>div:first-child h2,")
+	if shared < 0 {
+		t.Fatal("shared authoritative workspace title rule missing")
+	}
+	network, err := assets.ReadFile("static/network-workspace.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rulePattern := regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`)
+	sizePattern := regexp.MustCompile(`(?:^|;)\s*font-size\s*:\s*([^;]+)`)
+	for _, source := range []struct {
+		name string
+		css  string
+	}{
+		{"later app.css", css[shared:]},
+		{"network-workspace.css", string(network)},
+	} {
+		for _, rule := range rulePattern.FindAllStringSubmatch(source.css, -1) {
+			for _, header := range headers {
+				if !strings.Contains(rule[1], "."+header) || (!strings.Contains(rule[1], "h2") && !strings.Contains(rule[1], ".eyebrow")) {
+					continue
+				}
+				if strings.Contains(rule[2], "!important") {
+					t.Errorf("%s must not override shared title typography: %s", source.name, rule[0])
+				}
+				if strings.Contains(rule[1], "h2") {
+					if size := sizePattern.FindStringSubmatch(rule[2]); len(size) == 2 && size[1] != "1.05rem" {
+						t.Errorf("%s retains an independent workspace title size: %s", source.name, rule[0])
+					}
+				}
 			}
 		}
 	}

@@ -186,31 +186,41 @@ func TestPasswordScriptOptOutAndRealPasswords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Exercise the complete enhancer with real password-field markup and the
-	// CurseForge opt-out, including reveal and new-password-only strength.
+	// Exercise both enhancers with real password-field markup, preserving the
+	// standalone CurseForge opt-out and dashboard shared enhancement.
 	harness := `
 const assert = require("node:assert/strict");
+const shared = process.argv[2] === "shared";
 const make = () => ({children: [], listeners: {}, attributes: {},
  appendChild(child) {this.children.push(child);},
  insertBefore(child) {this.children.push(child);},
  after(child) {this.afterNode = child;},
  setAttribute(key, value) {this.attributes[key] = value;},
  addEventListener(type, fn) {this.listeners[type] = fn;},
- classList: {toggle() {}}});
+ classList: {
+  states: new Set(),
+  toggle(name, enabled) {if (enabled) this.states.add(name); else this.states.delete(name);},
+  contains(name) {return this.states.has(name);}
+ }});
 const inputs = JSON.parse(process.argv[1]).map(attributes => Object.assign(make(), {
  type: "password", name: attributes.name || "", minLength: 8, value: "", attributes,
+ dataset: {}, autocomplete: attributes.name === "new_password" ? "new-password" : "",
  parentNode: make()
 }));
 const document = {
  createElement: make,
  querySelectorAll(selector) {
-  assert.equal(selector, 'input[type="password"]:not([data-password-ui="off"])');
-  return inputs.filter(input => input.attributes["data-password-ui"] !== "off");
+  assert.equal(selector, shared
+   ? 'input[type="password"]:not([data-password-reveal-ready])'
+   : 'input[type="password"]:not([data-password-ui="off"])');
+  return inputs.filter(input => shared
+   ? input.type === "password" && !input.dataset.passwordRevealReady
+   : input.attributes["data-password-ui"] !== "off");
  }
 };
-` + string(source) + `
+` + "\n__PASSWORD_ENHANCER__\n" + `
 for (const input of inputs) {
- if (input.attributes["data-password-ui"] === "off") {
+ if (!shared && input.attributes["data-password-ui"] === "off") {
   assert.equal(input.parentNode.children.length, 0);
   assert.equal(input.afterNode, undefined);
   assert.deepEqual(input.listeners, {});
@@ -221,8 +231,26 @@ for (const input of inputs) {
  assert.equal(shell.className, "password-field-shell");
  const button = shell.children[1];
  assert.equal(button.className, "password-reveal-button");
+ assert.equal(button.type, "button");
+ assert.equal(input.type, "password");
+ assert.equal(button.attributes["aria-label"], "Show password");
+ assert.equal(button.attributes.title, undefined);
+ assert.equal(button.classList.contains("is-showing"), false);
+ assert.ok(button.innerHTML.includes('<circle cx="12" cy="12" r="2.8"></circle>'));
+ assert.ok(button.innerHTML.includes('<path class="password-reveal-slash" d="M4 4l16 16"></path>'));
  button.listeners.click(); assert.equal(input.type, "text");
+ assert.equal(button.classList.contains("is-showing"), true);
+ assert.equal(button.attributes["aria-label"], "Hide password");
+ assert.equal(button.attributes.title, undefined);
  button.listeners.click(); assert.equal(input.type, "password");
+ assert.equal(button.classList.contains("is-showing"), false);
+ assert.equal(button.attributes["aria-label"], "Show password");
+ assert.equal(button.attributes.title, undefined);
+ if (shared) {
+  enhancePasswordFields(document);
+  assert.equal(input.parentNode.children.length, 1);
+  assert.equal(shell.children.length, 2);
+ }
  if (input.name === "new_password") {
   assert.equal(shell.afterNode.textContent, "Strength: Not acceptable");
   input.value = "SyntheticPassword42!"; input.listeners.input();
@@ -266,7 +294,63 @@ for (const input of inputs) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command(node, "-e", harness, string(encoded)).CombinedOutput(); err != nil {
-		t.Fatalf("password enhancement: %v\n%s", err, out)
+	app, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, enhancer, found := strings.Cut(string(app), "const enhancePasswordFields = ")
+	if !found {
+		t.Fatal("shared password enhancer missing")
+	}
+	enhancer, _, found = strings.Cut(enhancer, "\n};")
+	if !found {
+		t.Fatal("shared password enhancer boundary missing")
+	}
+	shared := "const enhancePasswordFields = " + enhancer + "\n};\nenhancePasswordFields(document);"
+	standaloneIcon := strings.SplitN(strings.SplitN(string(source), "button.innerHTML = ", 2)[1], ";", 2)[0]
+	sharedIcon := strings.SplitN(strings.SplitN(shared, "button.innerHTML = ", 2)[1], ";", 2)[0]
+	if standaloneIcon != sharedIcon {
+		t.Fatal("password enhancers must use the same icon")
+	}
+	for name, script := range map[string]string{"standalone": string(source), "shared": shared} {
+		t.Run(name, func(t *testing.T) {
+			program := strings.Replace(harness, "__PASSWORD_ENHANCER__", script, 1)
+			if out, err := exec.Command(node, "-e", program, string(encoded), name).CombinedOutput(); err != nil {
+				t.Fatalf("password enhancement: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
+func TestPasswordRevealStyleContract(t *testing.T) {
+	source, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(source)
+	for _, want := range []string{
+		"top:50%;", "transform:translateY(-50%);", "border:1px solid transparent;border-radius:50%;background:transparent;",
+		".password-reveal-slash{display:none}",
+		".password-reveal-button.is-showing .password-reveal-slash{display:block}",
+		".password-reveal-button:focus-visible{outline:2px solid #78c99d;outline-offset:0}",
+		".password-reveal-button svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8}",
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("password reveal styling missing %q", want)
+		}
+	}
+	for _, rule := range strings.Split(css, "}") {
+		selector, declarations, found := strings.Cut(rule, "{")
+		if !found || !strings.Contains(selector, ".password-reveal-button") {
+			continue
+		}
+		if strings.Contains(declarations, "translateY(-42%)") {
+			t.Fatal("password reveal retains the old vertical offset")
+		}
+		if strings.Contains(selector, ":hover") || strings.Contains(selector, ":focus-visible") || strings.Contains(selector, ".is-showing") {
+			if strings.Contains(declarations, "background:") || strings.Contains(declarations, "border-color:") {
+				t.Fatal("password reveal state adds a background or border box")
+			}
+		}
 	}
 }

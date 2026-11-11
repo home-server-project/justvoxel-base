@@ -1164,8 +1164,8 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 	}
 	css := string(rawCSS)
 	for _, want := range []string{
-		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:40px;min-height:40px;`,
-		`.workspace-window .workspace-header-close{width:40px;padding:0;font-size:inherit}`,
+		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;`,
+		`.workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}`,
 		`:where(.workspace-window) :is(button,.button-link){padding:.5rem .75rem;border-radius:8px;line-height:1.25}`,
 		`.plugins-overlay-identity h3{flex:1;margin:0;min-width:0}`,
 		`.plugins-install-content .plugins-overlay-identity button{flex:none;margin:0 0 0 auto}`,

@@ -20,11 +20,11 @@ class Element {
   querySelectorAll(tag) { return this.all().filter(node => node.tag === tag); }
 }
 
-test('Control Center centers a 32px trigger inside the 40px topbar and preserves panel anchoring and green frame', () => {
+test('Control Center matches the 32px topbar and preserves panel anchoring and green frame', () => {
   assert.ok(css.includes('@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}'));
-  assert.match(css, /\.app-header\.topbar\{[^}]*padding:2px \.5rem;[^}]*border:1px solid/);
+  assert.match(css, /\.app-header\.topbar\{[^}]*padding:0 \.5rem;[^}]*border:1px solid/);
   const declarations = block => Object.fromEntries(block.split(';').filter(Boolean).map(value => value.trim().split(':')));
-  const topbar = declarations([...css.matchAll(/\.app-header\.topbar\{([^}]*)\}/g)].findLast(match => match[1].includes('height:40px'))[1]);
+  const topbar = declarations([...css.matchAll(/\.app-header\.topbar\{([^}]*)\}/g)].findLast(match => match[1].startsWith('height:'))[1]);
   const desktop = [...css.matchAll(/@media\(min-width:601px\)\{\s*\.app-header \.control-center\{([^}]*)\}\s*\}/g)]
     .find(match => declarations(match[1]).height === '32px');
   assert.ok(desktop, 'panel anchor height must be preserved at desktop widths above 600px');
@@ -35,7 +35,12 @@ test('Control Center centers a 32px trigger inside the 40px topbar and preserves
   assert.ok(css.includes('*{box-sizing:border-box}'));
   assert.match(css, /\.topbar\{display:grid;[^}]*align-items:center;/);
   assert.equal(wrapper.height, '32px', 'preserve the panel containing block height');
-  assert.equal(topbar.height, '40px', 'preserve the topbar outer height');
+  assert.equal(topbar.height, '32px', 'preserve the visible topbar height');
+  assert.equal(topbar['min-height'], '32px');
+  assert.equal(topbar.padding, '0 .5rem');
+  assert.equal(topbar.margin, '4px 8px');
+  assert.equal(parseFloat(topbar.height) + 2 * parseFloat(topbar.margin), 40, 'preserve the outer topbar footprint');
+  assert.ok(css.includes('.quick-look{position:fixed;top:40px;'));
   assert.equal(trigger.height, '32px');
   assert.equal(trigger['min-height'], '32px');
   for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -46,9 +51,9 @@ test('Control Center centers a 32px trigger inside the 40px topbar and preserves
   assert.match(css, /\.control-center\{position:relative;justify-self:end\}/);
   assert.match(css, /\.control-center-panel\{position:absolute;[^}]*right:0;/);
   assert.ok(css.includes('.control-center-panel{position:fixed;top:50px;left:.45rem;right:.45rem;bottom:.45rem;width:auto;'));
-  assert.ok(css.includes('.app-header.topbar{margin:4px;gap:.2rem;padding:2px .3rem}'));
+  assert.ok(css.includes('.app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}'));
   assert.ok(css.includes('.app-header .control-center-trigger{width:32px;padding:0}'));
-  assert.ok(css.includes('.control-center-panel{top:52px}'));
+  assert.ok(css.includes('.control-center-panel{top:44px}'));
   assert.ok(css.includes('.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}'));
   assert.ok(css.includes('.server-software-card.is-selected,'));
   assert.ok(!css.includes('.version-software-choice.is-current'));

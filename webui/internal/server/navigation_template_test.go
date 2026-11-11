@@ -581,13 +581,13 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	for _, want := range []string{
 		".dashboard-wallpaper{position:fixed;inset:0;width:100%;height:100dvh;object-fit:cover;object-position:center",
 		"#dashboard::before{content:\"\";position:fixed;inset:0;",
-		// The 40px floating panel plus its vertical margins still occupies 48px.
-		"min-height:calc(100dvh - 48px)",
+		// The 32px floating panel plus its vertical margins occupies 40px.
+		"min-height:calc(100dvh - 40px)",
 		".app-header.topbar{",
 		".dashboard-setup-area{display:grid;place-items:center",
 		"#dashboard .dashboard-setup-area .minecraft-setup-invitation{width:min(560px",
 		"@media(max-width:900px)",
-		"@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:2px .3rem}",
+		"@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}",
 		"@media(max-width:600px){.dashboard-wallpaper.wallpaper-theme-v2{object-position:78% center}}",
 		"inset:52px .25rem .25rem .25rem!important",
 	} {
@@ -605,7 +605,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 		t.Fatal("authenticated header rule is incomplete")
 	}
 	header := styles[headerStart+len(".app-header.topbar{") : headerStart+headerEnd]
-	for _, want := range []string{"height:40px", "min-height:40px", "margin:4px 8px", "top:4px", "border-radius:12px"} {
+	for _, want := range []string{"height:32px", "min-height:32px", "margin:4px 8px", "padding:0 .5rem", "top:4px", "border-radius:12px"} {
 		if !strings.Contains(";"+header+";", ";"+want+";") {
 			t.Fatalf("authenticated header must retain %s", want)
 		}
@@ -1263,8 +1263,8 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if !strings.Contains(markup, `<a class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
 		t.Fatal("How to connect must reuse shared button styling and retain its destination")
 	}
-	if !strings.Contains(styles, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:40px;min-height:40px;padding:0 .2rem}`) {
-		t.Fatal("Control Center heading must retain the compact 40px rhythm")
+	if !strings.Contains(styles, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:32px;min-height:32px;padding:0 .2rem}`) {
+		t.Fatal("Control Center heading must share the compact 32px workspace rhythm")
 	}
 
 	for _, rule := range regexp.MustCompile(`(?m)^\.control-center-heading\{([^}]*)\}`).FindAllStringSubmatch(styles, -1) {
