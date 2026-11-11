@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,6 +29,7 @@ func TestCurseForgeProviderDomainRedirects(t *testing.T) {
 		{"lookalike", "https://evilforgecdn.net/files/123/456/x.jar", 302, 1, 3, false, false},
 		{"suffix", "https://forgecdn.net.attacker.example/files/123/456/x.jar", 302, 1, 3, false, false},
 		{"external", "https://attacker.example/files/123/456/x.jar", 302, 1, 3, false, false},
+		{"external secrets", "https://user:private-password@attacker.example/files/123/456/x.jar?key=private-query#private-fragment", 302, 1, 3, false, false},
 		{"downgrade", "http://forgecdn.net/files/123/456/x.jar", 302, 1, 3, false, false},
 		{"userinfo", "https://user@forgecdn.net/files/123/456/x.jar", 302, 1, 3, false, false},
 		{"IP", "https://1.2.3.4/files/123/456/x.jar", 302, 1, 3, false, false},
@@ -51,9 +54,10 @@ func TestCurseForgeProviderDomainRedirects(t *testing.T) {
 				if !safeCurseForgeArtifactURL(r.URL.String()) || r.Header.Get("x-api-key") != "private-fixture-key" {
 					t.Fatal("credential sent outside validated CDN or absent on hop")
 				}
-				response := &http.Response{StatusCode: 200, Header: make(http.Header), ContentLength: 999, Body: io.NopCloser(strings.NewReader("jar"))}
+				response := &http.Response{StatusCode: 200, Header: make(http.Header), ContentLength: 777, Body: io.NopCloser(strings.NewReader("jar"))}
 				if calls <= tc.redirects {
 					response.StatusCode = tc.status
+					response.ContentLength = 999
 					destination := tc.destination
 					if tc.redirects > 1 {
 						destination = "/files/123/456/hop" + strings.Repeat("x", calls) + ".jar"
@@ -64,7 +68,8 @@ func TestCurseForgeProviderDomainRedirects(t *testing.T) {
 				}
 				return response, nil
 			})}
-			_, err := downloadVerifiedPluginArtifact(context.Background(), a, t.TempDir())
+			directory := t.TempDir()
+			_, err := downloadVerifiedPluginArtifact(context.Background(), a, directory)
 			if (err == nil) != tc.want {
 				t.Fatal(tc.name, err)
 			}
@@ -74,10 +79,32 @@ func TestCurseForgeProviderDomainRedirects(t *testing.T) {
 			if !tc.want && tc.redirects == 1 && !tc.badHash && tc.size == 3 && calls != 1 {
 				t.Fatal("rejected destination was contacted", calls)
 			}
-			if tc.name == "external" {
+			if strings.HasPrefix(tc.name, "external") {
 				var diagnostic *pluginProviderDiagnosticError
-				if !errors.As(err, &diagnostic) || diagnostic.values["redirect_destination"] != "attacker.example/files/123/456/x.jar" {
+				if !errors.As(err, &diagnostic) || diagnostic.values["redirect_destination"] != "attacker.example/files/123/456/x.jar" || diagnostic.values["http_status"] != "302" || diagnostic.values["http_content_length"] != "999" {
 					t.Fatal("missing sanitized redirect evidence", err)
+				}
+				for _, value := range diagnostic.values {
+					for _, secret := range []string{"private-password", "private-query", "private-fragment", "private-fixture-key", "x-api-key"} {
+						if strings.Contains(value, secret) {
+							t.Fatal("redirect evidence leaked a secret")
+						}
+					}
+				}
+			}
+			if tc.want {
+				raw, readErr := os.ReadFile(filepath.Join(directory, a.Filename))
+				if readErr != nil || string(raw) != "jar" || calls != tc.redirects+1 {
+					t.Fatal("redirect Content-Length interfered with verified download", readErr, calls)
+				}
+			}
+			if tc.badHash || tc.size != 3 {
+				var diagnostic *pluginProviderDiagnosticError
+				if !errors.As(err, &diagnostic) || diagnostic.values["http_status"] != "200" || diagnostic.values["http_content_length"] != "777" || diagnostic.values["actual_bytes"] != "3" {
+					t.Fatal("final response evidence was not authoritative", err)
+				}
+				if tc.badHash && (diagnostic.values["hash_algorithm"] != "SHA-1" || diagnostic.values["hash_result"] != "mismatch") {
+					t.Fatal("actual SHA-1 was not authoritative", diagnostic.values)
 				}
 			}
 		})

@@ -403,12 +403,12 @@ func TestCurseForgeDirectInstallIgnoresRedistributionField(t *testing.T) {
 	// The shared fixture supplies allowModDistribution=false for discovery and
 	// exact project JSON; the real resolver, review and install must all work.
 	page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
-	if err != nil || len(page.Projects) != 1 || !page.Projects[0].InstallAvailable {
+	if err != nil || len(page.Projects) != 1 || page.Projects[0].ID != "10" || page.Projects[0].InstallAvailable || !page.Projects[0].ReviewAvailable {
 		t.Fatal(page, err)
 	}
-	plan, err := resolveCurseForgeInstallPlan(context.Background(), server, f.data, "10", "20")
-	if err != nil {
-		t.Fatal(err)
+	plan, err := resolveProviderPluginInstallPlan(context.Background(), server, f.data, "CurseForge", "10", "20")
+	if err != nil || !plan.InstallAvailable {
+		t.Fatal(plan, err)
 	}
 	if err := reviewRootPluginArtifact(context.Background(), plan); err != nil {
 		t.Fatal(err)

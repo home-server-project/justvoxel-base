@@ -98,7 +98,7 @@ func TestCurseForgeOfficialDownloadURLResolution(t *testing.T) {
 				return response, nil
 			})
 			page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
-			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable != tc.wantOK {
+			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable || page.Projects[0].ReviewAvailable != tc.wantOK {
 				t.Fatal("unexpected Discover eligibility")
 			}
 			if tc.wantOK && page.Projects[0].Compatibility != "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review." {

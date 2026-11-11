@@ -44,6 +44,11 @@ func requestPluginArtifact(ctx context.Context, a pluginInstallArtifact, evidenc
 		if err != nil {
 			return nil, errors.New("Plugin download failed")
 		}
+		evidence["http_status"] = strconv.Itoa(response.StatusCode)
+		delete(evidence, "http_content_length")
+		if response.ContentLength >= 0 {
+			evidence["http_content_length"] = strconv.FormatInt(response.ContentLength, 10)
+		}
 		if pluginSource(a.Source) != "CurseForge" {
 			return response, nil
 		}
@@ -53,7 +58,6 @@ func requestPluginArtifact(ctx context.Context, a pluginInstallArtifact, evidenc
 			return response, nil
 		}
 		response.Body.Close()
-		evidence["http_status"] = strconv.Itoa(response.StatusCode)
 		evidence["redirect_source"] = current.Hostname() + current.EscapedPath()
 		location := response.Header.Get("Location")
 		next, err := url.Parse(location)

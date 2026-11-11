@@ -516,7 +516,11 @@ func TestPluginReviewFailureDiagnosticWithoutMaintenance(t *testing.T) {
 			if json.Unmarshal(rr.Body.Bytes(), &payload) != nil || rr.Code != 409 || !validOperationID(payload.ID) {
 				t.Fatal(rr.Code, rr.Body.String())
 			}
-			if !strings.Contains(payload.Error, fmt.Sprint(status)) {
+			if status == http.StatusFound {
+				if !strings.Contains(payload.Error, "CurseForge artifact redirected outside the trusted CDN domain.") {
+					t.Fatal("concise redirect reason missing", payload.Error)
+				}
+			} else if !strings.Contains(payload.Error, fmt.Sprint(status)) {
 				t.Fatal("concise HTTP reason missing", payload.Error)
 			}
 			if len(f.s.operations.operations) != 0 {
