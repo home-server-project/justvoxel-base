@@ -589,7 +589,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 		"@media(max-width:900px)",
 		"@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}",
 		"@media(max-width:600px){.dashboard-wallpaper.wallpaper-theme-v2{object-position:78% center}}",
-		"inset:52px .25rem .25rem .25rem!important",
+		"inset:var(--jv-workspace-top-inset) .25rem .25rem .25rem!important",
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("compact dashboard styling missing %q", want)
@@ -1263,8 +1263,8 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if !strings.Contains(markup, `<a class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
 		t.Fatal("How to connect must reuse shared button styling and retain its destination")
 	}
-	if !strings.Contains(styles, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:32px;min-height:32px;padding:0 .2rem}`) {
-		t.Fatal("Control Center heading must share the compact 32px workspace rhythm")
+	if !strings.Contains(styles, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:36px;min-height:36px;padding:0 .2rem}`) {
+		t.Fatal("Control Center title lane must share the 36px workspace header rhythm")
 	}
 
 	for _, rule := range regexp.MustCompile(`(?m)^\.control-center-heading\{([^}]*)\}`).FindAllStringSubmatch(styles, -1) {
@@ -1288,7 +1288,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 			t.Fatal("menu tiles must occupy one normal grid cell")
 		}
 	}
-	for _, want := range []string{`:root{--jv-panel-gap:.45rem}`, `top:calc(100% + var(--jv-panel-gap))`} {
+	for _, want := range []string{`:root{--jv-panel-gap:6px}`, `top:calc(100% + var(--jv-panel-gap))`} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("shared Control Center/workspace top gap missing: %s", want)
 		}

@@ -56,10 +56,57 @@ test('Control Center fits inside the 36px topbar and preserves panel anchoring a
   assert.ok(css.includes('.app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}'));
   assert.ok(css.includes('.app-header .control-center-trigger{width:32px;padding:0}'));
   assert.ok(css.includes('.control-center-panel{top:44px}'));
+  assert.ok(css.includes(':root{--jv-panel-gap:6px}'));
+  assert.ok(css.includes('top:calc(100% + var(--jv-panel-gap))'));
+  assert.ok(!css.includes('--jv-panel-gap:.45rem'));
   assert.ok(css.includes('.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}'));
   assert.ok(css.includes('.server-software-card.is-selected,'));
   assert.ok(!css.includes('.version-software-choice.is-current'));
   assert.ok(!css.includes('.server-software-card.is-current'));
+});
+
+test('desktop workspace clearance uses the pixel gap and measured anchor bottom', () => {
+  const start = app.indexOf('const workspaceTopInset =');
+  const end = app.indexOf('const clampWorkspaceWindow =', start);
+  const gap = css.match(/:root\{--jv-panel-gap:([^}]+)\}/)[1];
+  let bottom = 38;
+  let fontSize = '16px';
+  const context = vm.createContext({
+    document: { documentElement: {}, querySelector: () => ({ getBoundingClientRect: () => ({ bottom }) }) },
+    getComputedStyle: () => ({ fontSize, getPropertyValue: name => { assert.equal(name, '--jv-panel-gap'); return gap; } }),
+  });
+  vm.runInContext(app.slice(start, end) + '\nthis.topInset = workspaceTopInset;', context);
+  assert.equal(context.topInset(), 44);
+  fontSize = '20px';
+  assert.equal(context.topInset(), 44, 'pixel clearance is independent of root font size');
+  bottom = 58;
+  assert.equal(context.topInset(), 64, 'desktop positioning continues to follow its anchor');
+});
+
+test('compact workspace families share the 44px top and retain bottom clearance', () => {
+  assert.match(css, /@media\(max-width:700px\)\{\s*:root\{--jv-workspace-top-inset:44px;/);
+  assert.ok(css.includes('--jv-workspace-top-inset:76px;'), 'preserve the separate desktop fallback');
+  const networkCSS = read('webui/internal/server/static/network-workspace.css');
+  for (const source of [css, networkCSS]) {
+    assert.doesNotMatch(source, /inset:(?:52|60)px|calc\(52px \+ \.25rem\)|calc\(100dvh - 52px/);
+  }
+  for (const family of ['system-update', 'system-monitor', 'storage-workspace', 'backups-workspace', 'minecraft-workspace', 'system-workspace', 'migration-workspace', 'version-workspace', 'plugins-workspace', 'network-workspace']) {
+    const source = family === 'network-workspace' ? networkCSS : css;
+    const rule = [...source.matchAll(new RegExp('\\.' + family + '-dialog\\{([^}]+)\\}', 'g'))].find(match => match[1].includes('inset:var(--jv-workspace-top-inset)'));
+    assert.ok(rule, `${family} must use the shared compact inset`);
+    assert.ok(rule[1].includes('inset:var(--jv-workspace-top-inset) .25rem .25rem .25rem!important'));
+    if (['migration-workspace', 'version-workspace', 'plugins-workspace'].includes(family)) {
+      assert.ok(rule[1].includes('height:calc(100dvh - var(--jv-workspace-top-inset) - .25rem)!important'));
+      assert.ok(rule[1].includes('max-height:calc(100dvh - var(--jv-workspace-top-inset) - .25rem)'));
+    }
+  }
+  const live = css.match(/\.live-console-dialog\{(inset:[^}]+)\}/)[1];
+  for (const declaration of [
+    'inset:var(--jv-workspace-top-inset) 8px auto!important',
+    'width:calc(100vw - 16px)!important',
+    'height:min(460px,calc(100dvh - var(--jv-workspace-top-inset) - 16px))!important',
+    'max-height:calc(100dvh - var(--jv-workspace-top-inset) - 16px)',
+  ]) assert.ok(live.includes(declaration), declaration);
 });
 
 const selectedMigrationURL = value => {

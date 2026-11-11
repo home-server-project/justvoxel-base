@@ -118,7 +118,7 @@
   .network-checkpoint-banner{align-items:flex-start;flex-wrap:wrap}
 }
 @media(max-width:700px){
-  .network-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}
+  .network-workspace-dialog{inset:var(--jv-workspace-top-inset) .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}
   .network-workspace-header{cursor:default;touch-action:auto}
 }
 @media(prefers-color-scheme:light){

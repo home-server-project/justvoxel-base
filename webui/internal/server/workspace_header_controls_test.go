@@ -473,8 +473,8 @@ func TestWorkspaceHeadersShareControlCenterTypography(t *testing.T) {
 			t.Errorf("all workspace families and Control Center must share title contract %s", contract.suffix)
 		}
 	}
-	if !strings.Contains(css, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:32px;min-height:32px;padding:0 .2rem}`) {
-		t.Error("Control Center must center its title in a 32px lane with no vertical padding")
+	if !strings.Contains(css, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:36px;min-height:36px;padding:0 .2rem}`) {
+		t.Error("Control Center title lane must share the 36px workspace header rhythm with no vertical padding")
 	}
 
 	// The shared first-child descendants have greater specificity than the old

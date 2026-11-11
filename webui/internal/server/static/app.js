@@ -1839,7 +1839,7 @@ const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
 const workspaceTopInset = () => {
   const anchor = document.querySelector(".control-center") || document.querySelector(".topbar");
   const rootStyle = getComputedStyle(document.documentElement);
-  const gap = parseFloat(rootStyle.getPropertyValue("--jv-panel-gap")) * parseFloat(rootStyle.fontSize);
+  const gap = parseFloat(rootStyle.getPropertyValue("--jv-panel-gap"));
   return Math.max(8, Math.round((anchor?.getBoundingClientRect().bottom || 0) + gap));
 };
 
