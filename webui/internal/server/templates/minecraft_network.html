@@ -6,11 +6,11 @@
   {{if .Network.RecoveryRequired}}<div class="notice warning"><p>Minecraft Network needs recovery before servers can start.</p><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="recover" type="submit">Retry recovery</button></form></div>{{end}}
   <form id="minecraft-network-configure" data-recovery-required="{{.Network.RecoveryRequired}}" method="post" action="/workspace/minecraft-network">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <h2>Network</h2>
     <div class="minecraft-network-lane">
+      <h2 class="minecraft-network-ports-title">Network ports:</h2>
       <div class="minecraft-network-ports">
-        <label>Java port<input name="java_port" type="number" min="1024" max="65535" value="{{.Network.Config.JavaPort}}" required></label>
-        <label>Bedrock port<input name="bedrock_port" type="number" min="1024" max="65535" value="{{.Network.Config.BedrockPort}}" required></label>
+        <label>Java<input name="java_port" type="number" min="1024" max="65535" value="{{.Network.Config.JavaPort}}" required></label>
+        <label>Bedrock<input name="bedrock_port" type="number" min="1024" max="65535" value="{{.Network.Config.BedrockPort}}" required></label>
       </div>
       <label class="minecraft-network-toggle">
         <span class="minecraft-network-status minecraft-network-status-disabled">Disabled</span>
@@ -30,10 +30,12 @@
       </div>
       {{if .UnsupportedServers}}<details class="minecraft-network-unsupported">
         <summary>Standalone / unsupported servers ({{len .UnsupportedServers}})</summary>
+        <div class="minecraft-network-unsupported-grid">
         {{range .UnsupportedServers}}<div class="minecraft-network-server">
           {{if .SoftwareIcon}}<img class="minecraft-network-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}
           <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} · {{.State}}</span><span class="muted minecraft-network-unavailable">Not supported by Minecraft Network</span></span>
         </div>{{end}}
+        </div>
       </details>{{end}}
     </section>
     <section class="minecraft-network-section">

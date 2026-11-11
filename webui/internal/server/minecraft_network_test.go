@@ -85,6 +85,9 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 		f.network.Config.Members = []string{"jv-family1"}
 		f.network.RecoveryRequired = enabled
 		f.network.Servers = append(f.network.Servers, api.MinecraftNetworkServer{ID: "unknown", Software: "https://example.invalid/icon.svg", State: "stopped"})
+		for _, software := range []string{"spigot", "forge", "fabric", "neoforge"} {
+			f.network.Servers = append(f.network.Servers, api.MinecraftNetworkServer{ID: software, Software: software, State: "stopped"})
+		}
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-network", ""))
 		if rr.Code != http.StatusOK {
@@ -112,6 +115,22 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 				t.Errorf("missing compact network presentation %q", want)
 			}
 		}
+		// The native details owns one wrapping lane containing every unsupported card.
+		details := regexp.MustCompile(`(?s)<details class="minecraft-network-unsupported">.*?</details>`).FindString(body)
+		wrapper := regexp.MustCompile(`(?s)^<details class="minecraft-network-unsupported">\s*<summary>Standalone / unsupported servers \(6\)</summary>\s*<div class="minecraft-network-unsupported-grid">(.*?)</div>\s*</details>$`).FindStringSubmatch(details)
+		if len(wrapper) != 2 || strings.Count(body, `class="minecraft-network-unsupported-grid"`) != 1 {
+			t.Fatal("unsupported cards must share one wrapper inside the collapsed native details", details)
+		}
+		cardPattern := regexp.MustCompile(`(?s)<div class="minecraft-network-server">.*?</div>`)
+		cards := cardPattern.FindAllString(wrapper[1], -1)
+		if len(cards) != 6 || strings.TrimSpace(cardPattern.ReplaceAllString(wrapper[1], "")) != "" || strings.Contains(wrapper[1], "<input") {
+			t.Fatal("all unsupported cards must be informational siblings in the wrapping lane", wrapper[1])
+		}
+		for _, card := range cards {
+			if !strings.Contains(card, "Not supported by Minecraft Network") {
+				t.Error("unsupported card lost its explanation", card)
+			}
+		}
 		for _, server := range f.network.Servers {
 			row := regexp.MustCompile(`(?s)name="members" value="` + regexp.QuoteMeta(server.ID) + `".*?</label>`).FindString(body)
 			if !server.Eligible {
@@ -125,6 +144,9 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 						break
 					}
 				}
+			}
+			if row == "" {
+				t.Errorf("server %s is missing its card", server.ID)
 			}
 			icon := serverSoftwareIcon(server.Software)
 			if icon == "" {
@@ -140,8 +162,16 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 				t.Errorf("shared icon is missing: %s: %v", icon, err)
 			}
 		}
-		lane := regexp.MustCompile(`(?s)class="minecraft-network-lane">(.*?)<section class="minecraft-network-section"`).FindString(body)
-		for _, want := range []string{`class="minecraft-network-ports"`, `name="java_port"`, `value="25565"`, `name="bedrock_port"`, `value="19132"`, `class="minecraft-network-toggle"`} {
+		lane := regexp.MustCompile(`(?s)<div class="minecraft-network-lane">\s*<h2[^>]*>.*?</h2>\s*<div class="minecraft-network-ports">.*?</div>\s*<label class="minecraft-network-toggle">.*?</label>\s*</div>`).FindString(body)
+		for _, want := range []string{
+			`<h2 class="minecraft-network-ports-title">Network ports:</h2>`,
+			`class="minecraft-network-ports"`,
+			`<label>Java<input name="java_port" type="number" min="1024" max="65535" value="25565" required></label>`,
+			`<label>Bedrock<input name="bedrock_port" type="number" min="1024" max="65535" value="19132" required></label>`,
+			`class="minecraft-network-toggle"`,
+			`minecraft-network-status-disabled">Disabled</span>`,
+			`minecraft-network-status-enabled">` + enabledLabel + `</span>`,
+		} {
 			if !strings.Contains(lane, want) {
 				t.Errorf("missing port/toggle lane contract %q", want)
 			}
@@ -167,7 +197,7 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 				t.Errorf("whitelist add contract changed: %q", want)
 			}
 		}
-		if strings.Contains(body, `>Add<`) || strings.Contains(body, `<h2>Connection</h2>`) {
+		if strings.Contains(body, `>Add<`) || strings.Contains(body, `<h2>Connection</h2>`) || strings.Contains(body, `<h2>Network</h2>`) {
 			t.Error("old oversized presentation remains")
 		}
 	}
@@ -205,16 +235,20 @@ func TestMinecraftNetworkCompactStylesAreScoped(t *testing.T) {
 	}
 	css := string(source)
 	for selector, properties := range map[string][]string{
-		".minecraft-network .minecraft-network-servers":                                                      {"display:grid", "repeat(auto-fit,minmax(min(100%,16rem),1fr))"},
-		".minecraft-network .minecraft-network-lane":                                                         {"display:flex", "flex-wrap:wrap", "align-items:center"},
-		".minecraft-network .minecraft-network-ports":                                                        {"display:flex", "flex-wrap:wrap"},
-		".minecraft-network .minecraft-network-ports input":                                                  {"width:6.5rem"},
-		".minecraft-network .minecraft-network-toggle":                                                       {"gap:.65rem", "margin:0 0 0 auto", "align-items:center"},
-		".minecraft-network .minecraft-network-status-disabled":                                              {"color:#ffc1b8"},
-		".minecraft-network .minecraft-network-status-enabled":                                               {"color:#8ad4a9", "display:none"},
-		".minecraft-network .minecraft-network-toggle:has(input:checked) .minecraft-network-status-disabled": {"display:none"},
-		".minecraft-network .minecraft-network-toggle:has(input:checked) .minecraft-network-status-enabled":  {"display:inline"},
-		".minecraft-network .minecraft-network-welcome-lane":                                                 {"display:flex", "align-items:center", "flex-wrap:wrap"},
+		".minecraft-network .minecraft-network-servers,.minecraft-network .minecraft-network-unsupported-grid": {"display:flex", "flex-wrap:wrap", "align-items:stretch"},
+		".minecraft-network .minecraft-network-server":                                                         {"flex:0 1 auto", "max-width:100%", "min-width:0"},
+		".minecraft-network .minecraft-network-server-details":                                                 {"min-width:0", "overflow-wrap:anywhere"},
+		".minecraft-network .minecraft-network-panel":                                                          {"container-type:inline-size", "min-width:0"},
+		".minecraft-network .minecraft-network-panel .minecraft-network-ports-title":                           {"flex:none", "margin:0"},
+		".minecraft-network .minecraft-network-lane":                                                           {"display:flex", "flex-wrap:wrap", "align-items:center"},
+		".minecraft-network .minecraft-network-ports":                                                          {"display:flex", "flex-wrap:wrap"},
+		".minecraft-network .minecraft-network-ports input":                                                    {"width:6.5rem", "min-width:0", "max-width:100%"},
+		".minecraft-network .minecraft-network-toggle":                                                         {"gap:.65rem", "margin:0 0 0 auto", "align-items:center"},
+		".minecraft-network .minecraft-network-status-disabled":                                                {"color:#ffc1b8"},
+		".minecraft-network .minecraft-network-status-enabled":                                                 {"color:#8ad4a9", "display:none"},
+		".minecraft-network .minecraft-network-toggle:has(input:checked) .minecraft-network-status-disabled":   {"display:none"},
+		".minecraft-network .minecraft-network-toggle:has(input:checked) .minecraft-network-status-enabled":    {"display:inline"},
+		".minecraft-network .minecraft-network-welcome-lane":                                                   {"display:flex", "align-items:center", "flex-wrap:wrap"},
 	} {
 		rule := regexp.MustCompile(regexp.QuoteMeta(selector) + `\{([^}]+)\}`).FindString(css)
 		for _, property := range properties {
@@ -227,12 +261,30 @@ func TestMinecraftNetworkCompactStylesAreScoped(t *testing.T) {
 	if !ok || !strings.Contains(compact, "@media(max-width:540px)") {
 		t.Fatal("missing scoped responsive styles")
 	}
+	container := regexp.MustCompile(`(?s)@container\(max-width:28rem\)\{(.*?)\n\}`).FindString(css)
+	for _, want := range []string{
+		`.minecraft-network .minecraft-network-ports{flex-basis:100%}`,
+		`.minecraft-network .minecraft-network-toggle{margin-left:0}`,
+	} {
+		if !strings.Contains(container, want) {
+			t.Errorf("missing workspace-based narrow layout: %s", want)
+		}
+	}
 	for _, rule := range regexp.MustCompile(`([^{}]+)\{`).FindAllStringSubmatch(compact, -1) {
 		selector := strings.TrimSpace(rule[1])
-		if strings.HasPrefix(selector, "@media") {
+		if strings.HasPrefix(selector, "@media") || strings.HasPrefix(selector, "@container") {
 			continue
 		}
 		for _, part := range strings.Split(selector, ",") {
+			part = strings.TrimSpace(part)
+			if part == ".minecraft-network .minecraft-network-servers" || part == ".minecraft-network .minecraft-network-unsupported-grid" || part == ".minecraft-network .minecraft-network-server" {
+				declarations, _, _ := strings.Cut(compact[strings.Index(compact, rule[0])+len(rule[0]):], "}")
+				for _, forbidden := range []string{"display:grid", "grid-template-columns", "1fr", "width:100%", "width:50%", "width:33%", "flex:1", "flex-grow:1", "flex-basis:100%"} {
+					if strings.Contains(strings.ReplaceAll(declarations, "max-width:100%", ""), forbidden) {
+						t.Errorf("card layout must wrap without equal columns or stretching: %s", rule[0]+declarations)
+					}
+				}
+			}
 			if !strings.HasPrefix(strings.TrimSpace(part), ".minecraft-network ") && strings.TrimSpace(part) != ".minecraft-network" {
 				t.Errorf("network style escapes workspace: %q", part)
 			}
