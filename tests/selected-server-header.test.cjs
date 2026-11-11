@@ -548,3 +548,33 @@ test('Quick Look keeps one stationary drawer with shared network row spacing', (
   assert.match(quick, /quickLook\.style\.width = bounds\.width/);
   assert.equal((quick.match(/fetch\("\/api\/network\/remote-access"/g) || []).length, 1);
 });
+
+test('shared headers contain one shrinkable title and selector lane with fixed actions', () => {
+  const css = readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8');
+  const rule = selector => {
+    const start = css.indexOf(`${selector}{`);
+    assert.notEqual(start, -1, `missing shared rule: ${selector}`);
+    return css.slice(start + selector.length + 1, css.indexOf('}', start));
+  };
+  assert.doesNotMatch(css, /margin-right:\s*calc\(0px - var\(--jv-workspace-edge\) - 1px\)/);
+  assert.doesNotMatch(css, /flex:\s*1\s+0\s+auto/);
+  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/data-workspace-drag-handle|workspace-header|system-monitor-header|system-update-dialog-header/.test(match[1])) continue;
+    assert.doesNotMatch(match[2], /overflow(?:-x)?:\s*(?:auto|scroll)/, 'header lanes must never scroll');
+  }
+  const title = rule('.workspace-window [data-workspace-drag-handle]>div:first-child');
+  assert.match(title, /flex:1 1 auto;min-width:0;overflow:hidden/);
+  assert.match(rule('.workspace-window [data-workspace-drag-handle]>div:first-child h2'), /min-width:0/);
+  assert.match(css, /\.system-update-dialog-header>div:first-child h2[^{}]*\{[^}]*white-space:nowrap;overflow:hidden;text-overflow:ellipsis/);
+  const actions = rule('.workspace-window .selected-server-header-actions');
+  assert.match(actions, /flex:0 1 auto;min-width:0;max-width:100%;flex-wrap:nowrap/);
+  assert.doesNotMatch(actions, /flex:none|width:max-content/);
+  assert.match(rule('.workspace-window .selected-server-header-actions>[data-server-selector-slot]'), /flex:0 1 auto;min-width:4rem;max-width:100%/);
+  assert.match(rule('.workspace-window .selected-server-header-actions .server-selector'), /width:100%;min-width:0;max-width:100%/);
+  assert.match(rule('.workspace-window :is(.workspace-header-refresh,.workspace-header-close)'), /flex:none/);
+  assert.match(rule('.workspace-window .selected-server-header-actions>:is(.workspace-header-refresh,.workspace-header-close)'), /flex:none/);
+  assert.match(rule('.workspace-window .selected-server-header-actions .server-selector>summary::after'), /flex:none/);
+  assert.match(rule('.workspace-window .server-selector>summary'), /height:32px;min-height:32px;[^}]*border-radius:10px/);
+  assert.match(rule('.server-selector span'), /overflow:hidden;text-overflow:ellipsis;white-space:nowrap/);
+  assert.match(rule('.server-selector-icon'), /flex:none/);
+});

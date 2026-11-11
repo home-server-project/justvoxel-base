@@ -293,7 +293,7 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 	shared := ""
 	actions := ""
 	for _, rule := range rules {
-		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-dialog-header,") && strings.Contains(rule[2], "height:32px") {
+		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-dialog-header,") && strings.Contains(rule[2], "height:36px") {
 			shared = rule[0]
 		}
 		if strings.HasPrefix(strings.TrimSpace(rule[1]), ".workspace-window :is(.system-update-header-actions,") {
@@ -311,7 +311,7 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 			t.Errorf("%s does not share the workspace lane", name)
 		}
 	}
-	for _, declaration := range []string{"height:32px;min-height:32px", "flex:none", "align-items:center", "padding:0 var(--jv-workspace-edge)"} {
+	for _, declaration := range []string{"height:36px;min-height:36px", "flex:none", "align-items:center", "min-width:0", "flex-wrap:nowrap", "padding:0 var(--jv-workspace-edge)", "border-radius:calc(var(--jv-radius-window) - 1px) calc(var(--jv-radius-window) - 1px) 0 0"} {
 		if !strings.Contains(shared, declaration) {
 			t.Errorf("shared workspace header missing %s", declaration)
 		}
@@ -321,17 +321,25 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 	}
 	for _, name := range []string{"system-update-header-actions", "system-monitor-header-actions", "storage-workspace-header-actions", "backups-workspace-header-actions", "minecraft-workspace-header-actions", "system-workspace-header-actions", "migration-workspace-header-actions", "network-workspace-header-actions", "selected-server-header-actions"} {
 		if !strings.Contains(actions, "."+name) {
-			t.Errorf("%s must share the flush right action lane", name)
+			t.Errorf("%s must share the contained action lane", name)
 		}
 	}
-	for _, declaration := range []string{"display:flex", "align-items:center", "gap:var(--jv-space-xs)", "flex:none", "flex-wrap:nowrap", "margin-right:calc(0px - var(--jv-workspace-edge) - 1px)"} {
+	for _, declaration := range []string{"display:flex", "align-items:center", "gap:var(--jv-space-xs)", "flex:none", "flex-wrap:nowrap"} {
 		if !strings.Contains(actions, declaration) {
 			t.Errorf("shared workspace action lane missing %s", declaration)
 		}
 	}
+	for _, forbidden := range []string{"margin-right:calc(-.5rem - 1px)", "margin-right:calc(0px - var(--jv-workspace-edge) - 1px)", "flex:1 0 auto"} {
+		if strings.Contains(css, forbidden) {
+			t.Errorf("obsolete shared header geometry: %s", forbidden)
+		}
+	}
+	if !strings.Contains(css, "--jv-radius-window:12px;") || strings.Contains(css, "--jv-radius-window:16px;") {
+		t.Error("workspace windows must share the 12px outer radius")
+	}
 	networkRule := regexp.MustCompile(`\.network-workspace-header\{([^}]*)\}`).FindStringSubmatch(network)
 	if len(networkRule) != 2 || !strings.Contains(networkRule[1], "height:40px;min-height:40px;padding:3px") || strings.Contains(networkRule[1], "48px") {
-		t.Fatal("Network stylesheet must preserve its original header contract; app.css owns the live 32px lane")
+		t.Fatal("Network stylesheet must preserve its original header contract; app.css owns the live 36px lane")
 	}
 	for _, name := range []string{"plugins", "version"} {
 		rule := regexp.MustCompile(`\.` + name + `-workspace-header\{([^}]*)\}`).FindStringSubmatch(css)
@@ -340,8 +348,8 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`.app-header.topbar{height:32px;min-height:32px;`,
-		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}`,
+		`.app-header.topbar{height:36px;min-height:36px;`,
+		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;flex:none}`,
 		`.workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}`,
 		`.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:32px;height:32px;font-size:inherit}`,
 		`.workspace-window .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem}`,
@@ -399,7 +407,7 @@ func TestControlCenterTriggerFitsInsideTopbar(t *testing.T) {
 	css := string(data)
 	for _, want := range []string{
 		`.topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;`,
-		`.app-header.topbar{height:32px;min-height:32px;`,
+		`.app-header.topbar{height:36px;min-height:36px;`,
 		`.app-header .control-center{height:32px}`,
 		`.app-header .control-center-trigger{min-height:32px;height:32px;`,
 		`.app-header .control-center-trigger{width:32px;padding:0}`,

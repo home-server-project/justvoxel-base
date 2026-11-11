@@ -581,8 +581,8 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	for _, want := range []string{
 		".dashboard-wallpaper{position:fixed;inset:0;width:100%;height:100dvh;object-fit:cover;object-position:center",
 		"#dashboard::before{content:\"\";position:fixed;inset:0;",
-		// The 32px floating panel plus its vertical margins occupies 40px.
-		"min-height:calc(100dvh - 40px)",
+		// The 36px floating panel plus its vertical margins occupies 44px.
+		"min-height:calc(100dvh - 44px)",
 		".app-header.topbar{",
 		".dashboard-setup-area{display:grid;place-items:center",
 		"#dashboard .dashboard-setup-area .minecraft-setup-invitation{width:min(560px",
@@ -605,7 +605,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 		t.Fatal("authenticated header rule is incomplete")
 	}
 	header := styles[headerStart+len(".app-header.topbar{") : headerStart+headerEnd]
-	for _, want := range []string{"height:32px", "min-height:32px", "margin:4px 8px", "padding:0 .5rem", "top:4px", "border-radius:12px"} {
+	for _, want := range []string{"height:36px", "min-height:36px", "margin:4px 8px", "padding:0 .5rem", "top:4px", "border-radius:12px"} {
 		if !strings.Contains(";"+header+";", ";"+want+";") {
 			t.Fatalf("authenticated header must retain %s", want)
 		}

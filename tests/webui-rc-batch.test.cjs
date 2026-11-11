@@ -20,8 +20,8 @@ class Element {
   querySelectorAll(tag) { return this.all().filter(node => node.tag === tag); }
 }
 
-test('Control Center matches the 32px topbar and preserves panel anchoring and green frame', () => {
-  assert.ok(css.includes('@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}'));
+test('Control Center fits inside the 36px topbar and preserves panel anchoring and green frame', () => {
+  assert.doesNotMatch(css, /margin-right:\s*calc\(-\.5rem - 1px\)/);
   assert.match(css, /\.app-header\.topbar\{[^}]*padding:0 \.5rem;[^}]*border:1px solid/);
   const declarations = block => Object.fromEntries(block.split(';').filter(Boolean).map(value => value.trim().split(':')));
   const topbar = declarations([...css.matchAll(/\.app-header\.topbar\{([^}]*)\}/g)].findLast(match => match[1].startsWith('height:'))[1]);
@@ -35,11 +35,13 @@ test('Control Center matches the 32px topbar and preserves panel anchoring and g
   assert.ok(css.includes('*{box-sizing:border-box}'));
   assert.match(css, /\.topbar\{display:grid;[^}]*align-items:center;/);
   assert.equal(wrapper.height, '32px', 'preserve the panel containing block height');
-  assert.equal(topbar.height, '32px', 'preserve the visible topbar height');
-  assert.equal(topbar['min-height'], '32px');
+  assert.equal(topbar.height, '36px', 'contain the 32px trigger inside the border');
+  assert.equal(topbar['min-height'], '36px');
+  assert.equal(topbar['border-radius'], '12px');
+  assert.match(css, /\.control-center-trigger\{[^}]*border-radius:10px;/);
   assert.equal(topbar.padding, '0 .5rem');
   assert.equal(topbar.margin, '4px 8px');
-  assert.equal(parseFloat(topbar.height) + 2 * parseFloat(topbar.margin), 40, 'preserve the outer topbar footprint');
+  assert.equal(parseFloat(topbar.height) + 2 * parseFloat(topbar.margin), 44, 'include the existing outer margins');
   assert.ok(css.includes('.quick-look{position:fixed;top:40px;'));
   assert.equal(trigger.height, '32px');
   assert.equal(trigger['min-height'], '32px');

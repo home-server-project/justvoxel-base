@@ -830,7 +830,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .quick-look-network-row>span,.network-overlay-list>span>span{color:#89959e!important;font-size:.66rem!important;font-weight:800;text-transform:uppercase;letter-spacing:.02em}
 .quick-look-network-row>strong,.network-overlay-list>span>strong{min-width:0;overflow-wrap:anywhere;color:#eef1f4;font-size:.76rem;font-weight:700;white-space:normal}
 .quick-look-network-tile .network-overlay-list{gap:.13rem;margin-top:0}
-#dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 40px)}
+#dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 44px)}
 .dashboard-wallpaper{position:fixed;inset:0;width:100%;height:100dvh;object-fit:cover;object-position:center;z-index:-3;pointer-events:none}
 #dashboard::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:#07100b66}
 #dashboard[data-configured="false"] .dashboard-wallpaper{display:none}
@@ -936,7 +936,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
   --jv-danger:#d38a68;
   --jv-error:#a64c4c;
   --jv-radius:10px;
-  --jv-radius-window:16px;
+  --jv-radius-window:12px;
   --jv-space-xs:.25rem;
   --jv-space-sm:.5rem;
   --jv-space-md:.75rem;
@@ -992,8 +992,10 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .storage-workspace-dialog,.minecraft-workspace-dialog,.system-workspace-dialog{--jv-preferred-height:760px}
 .backups-workspace-dialog{--jv-preferred-height:820px}
 .workspace-window :is(.system-update-dialog-shell,.system-monitor-shell,.storage-workspace-shell,.backups-workspace-shell,.minecraft-workspace-shell,.system-workspace-shell,.migration-workspace-shell,.version-workspace-shell){min-width:0;min-height:0}
-.workspace-window :is(.system-update-dialog-header,.system-monitor-header,.storage-workspace-header,.backups-workspace-header,.minecraft-workspace-header,.system-workspace-header,.migration-workspace-header,.version-workspace-header,.plugins-workspace-header,.network-workspace-header){flex:none;align-items:center;height:32px;min-height:32px;padding:0 var(--jv-workspace-edge);border-color:var(--jv-border)}
-.workspace-window :is(.system-update-header-actions,.system-monitor-header-actions,.storage-workspace-header-actions,.backups-workspace-header-actions,.minecraft-workspace-header-actions,.system-workspace-header-actions,.migration-workspace-header-actions,.network-workspace-header-actions,.selected-server-header-actions){display:flex;align-items:center;gap:var(--jv-space-xs);flex:none;flex-wrap:nowrap;margin-right:calc(0px - var(--jv-workspace-edge) - 1px)}
+.workspace-window :is(.system-update-dialog-header,.system-monitor-header,.storage-workspace-header,.backups-workspace-header,.minecraft-workspace-header,.system-workspace-header,.migration-workspace-header,.version-workspace-header,.plugins-workspace-header,.network-workspace-header){flex:none;align-items:center;height:36px;min-height:36px;min-width:0;flex-wrap:nowrap;padding:0 var(--jv-workspace-edge);border-radius:calc(var(--jv-radius-window) - 1px) calc(var(--jv-radius-window) - 1px) 0 0;border-color:var(--jv-border)}
+.workspace-window :is(.system-update-header-actions,.system-monitor-header-actions,.storage-workspace-header-actions,.backups-workspace-header-actions,.minecraft-workspace-header-actions,.system-workspace-header-actions,.migration-workspace-header-actions,.network-workspace-header-actions,.selected-server-header-actions){display:flex;align-items:center;gap:var(--jv-space-xs);flex:none;flex-wrap:nowrap}
+.workspace-window [data-workspace-drag-handle]>div:first-child{flex:1 1 auto;min-width:0;overflow:hidden}
+.workspace-window [data-workspace-drag-handle]>div:first-child h2{min-width:0}
 .workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs){flex:none;gap:var(--jv-space-xs);padding:.42rem var(--jv-workspace-edge);border-color:var(--jv-border);background:var(--jv-surface-sunken)}
 .workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs,.plugins-workspace-tabs) button{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
 .workspace-window .minecraft-server-arrange-toolbar a{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
@@ -1308,7 +1310,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
   .migration-workspace-content .migration-facts,.migration-workspace-content .migration-review-grid,.migration-workspace-content .migration-smb-fields{grid-template-columns:1fr}
 }
 
-.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0}
+.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;flex:none}
 .workspace-window .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem}
 .workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}
 .workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:32px;height:32px;font-size:inherit}
@@ -1425,10 +1427,8 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 }
 @media(max-width:430px){.version-selection-row{flex-wrap:wrap}.version-selection-row>label,.version-selection-row>select{flex-basis:100%}}
 
-/* Floating panel: the visible bar is 32px plus 4px top/bottom margins for a 40px outer footprint; workspaces measure its bottom. */
-.app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
-/* Offset desktop padding and border so trigger and panel share the outer edge. */
-@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}
+/* Floating panel: the visible bar is 36px plus 4px top/bottom margins for a 44px outer footprint; workspaces measure its bottom. */
+.app-header.topbar{height:36px;min-height:36px;margin:4px 8px;padding:0 .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
 .app-header .brand-mark{min-height:32px;padding:1px .35rem}
 .app-header .brand-logo{width:28px;height:28px}
 .app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:#303942}
@@ -1683,11 +1683,12 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-addon-results input[type=file]{display:block;max-width:100%;margin:.3rem 0}
 .plugins-addon-results>.plugins-result-card>.plugins-card-badges{height:auto;flex-wrap:wrap}
 .plugins-addon-results>.plugins-result-card>button{margin-top:.4rem;align-self:flex-start}
-/* The five selected-server workspaces keep selection and controls in one lane.
-   Compact screens can scroll this lane to reach every control without wrapping. */
-.workspace-window [data-workspace-drag-handle]:has([data-server-selector-slot]){overflow-x:auto;min-width:0}
-.workspace-window [data-workspace-drag-handle]:has([data-server-selector-slot])>div:first-child{flex:1 0 auto;min-width:0}
-.workspace-window .selected-server-header-actions{display:flex;align-items:center;gap:var(--jv-space-xs,.45rem);flex:none;flex-wrap:nowrap}
+/* Selected-server headers shrink the title and selector while keeping actions usable. */
+.workspace-window .selected-server-header-actions{display:flex;align-items:center;gap:var(--jv-space-xs,.45rem);flex:0 1 auto;min-width:0;max-width:100%;flex-wrap:nowrap}
+.workspace-window .selected-server-header-actions>[data-server-selector-slot]{display:block;flex:0 1 auto;min-width:4rem;max-width:100%}
+.workspace-window .selected-server-header-actions .server-selector{width:100%;min-width:0;max-width:100%}
+.workspace-window .selected-server-header-actions>:is(.workspace-header-refresh,.workspace-header-close){flex:none}
+.workspace-window .selected-server-header-actions .server-selector>summary::after{flex:none}
 .server-selector{position:relative;width:max-content;min-width:8rem;max-width:100%;margin:0;color:#eef1f4}
 .server-selector>summary,.server-selector-option{display:flex;align-items:center;gap:.4rem;min-width:0;padding:.4rem .55rem;border:1px solid #303942;border-radius:7px;background:#171d22;color:inherit;font-size:.85rem;line-height:1.2;cursor:pointer;list-style:none}
 .workspace-window .server-selector>summary{height:32px;min-height:32px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;line-height:1.2;cursor:pointer;list-style:none}
