@@ -17,7 +17,8 @@
 .connect-method-row-primary{grid-template-columns:repeat(2,minmax(0,1fr))}
 .connect-method-row-private{grid-template-columns:repeat(3,minmax(0,1fr))}
 .connect-method{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;min-width:0;border:1px solid var(--jv-border);background:var(--jv-surface-sunken);border-radius:var(--jv-radius)}
-.connect-method-label{margin:0;font-weight:700}
+.connect-method-label{display:flex;align-items:center;gap:8px;margin:0;font-weight:700}
+.connect-method-icon{width:22px;height:22px;object-fit:contain;flex:none}
 .connect-actions{display:grid;width:100%;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:4px 16px;margin-top:20px}
 .connect-domain label{margin:0;font-weight:700}.connect-domain input[type=text]{width:100%;max-width:none;margin:0;min-width:0}
 .connect-domain small{grid-column:2;grid-row:2;line-height:1.5;font-size:.75rem}

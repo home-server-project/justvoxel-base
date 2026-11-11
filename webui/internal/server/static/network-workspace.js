@@ -1112,6 +1112,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     document.body.appendChild(popup); popup.showModal();
   };
 
+  const providerIcons = new Map([
+    ["tailscale", "/static/provider-icons/tailscale.svg"],
+    ["netbird", "/static/provider-icons/netbird.svg"],
+    ["playit", "/static/provider-icons/playit.svg"],
+    ["nordvpn", "/static/provider-icons/nordvpn.svg"],
+  ]);
+
   const renderRemoteAccess = () => {
     const section = document.createElement("section");
     section.className = "panel network-section";
@@ -1127,6 +1134,15 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       card.className = "panel network-device-card network-provider-card";
       const title = document.createElement("h3");
       title.textContent = provider.display_name;
+      const iconPath = providerIcons.get(provider.id);
+      if (iconPath) {
+        const icon = document.createElement("img");
+        icon.className = "network-provider-icon";
+        icon.src = iconPath;
+        icon.alt = "";
+        icon.setAttribute("aria-hidden", "true");
+        title.prepend(icon);
+      }
       card.append(title,
         row("Software", provider.status_unavailable ? "Unknown" : provider.installed ? "Installed" : "Unavailable"),
         row("Service enabled", provider.status_unavailable ? "Unknown" : provider.service_enabled ? "Yes" : "No"),

@@ -89,6 +89,6 @@
 </html>{{end}}
 
 {{define "connect-method-control"}}<div class="connect-method">
-  <label class="connect-method-label" for="connect-{{.ID}}">{{.Name}}</label>
+  <label class="connect-method-label" for="connect-{{.ID}}">{{if eq .ID "local"}}<img class="connect-method-icon" src="/static/provider-icons/local-network.svg" alt="" aria-hidden="true">{{else if eq .ID "tailscale"}}<img class="connect-method-icon" src="/static/provider-icons/tailscale.svg" alt="" aria-hidden="true">{{else if eq .ID "netbird"}}<img class="connect-method-icon" src="/static/provider-icons/netbird.svg" alt="" aria-hidden="true">{{else if eq .ID "playit"}}<img class="connect-method-icon" src="/static/provider-icons/playit.svg" alt="" aria-hidden="true">{{else if eq .ID "nordvpn"}}<img class="connect-method-icon" src="/static/provider-icons/nordvpn.svg" alt="" aria-hidden="true">{{end}}{{.Name}}</label>
   <input id="connect-{{.ID}}" type="checkbox" role="switch" aria-label="Include {{.Name}}" data-connect-method="{{.ID}}"{{if .Default}} checked{{end}}{{if not .Available}} disabled{{end}}>
 </div>{{end}}

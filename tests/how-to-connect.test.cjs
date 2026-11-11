@@ -209,7 +209,9 @@ test('approved page layout uses a full-width action lane and the same guide and 
   assert.match(lane, /<input id="connect-custom"[^>]+>\s*{{end}}{{end}}\s*<button[^>]+>Save to PDF<\/button>\s*<small class="muted" id="connect-domain-help">Hostname only — no https:\/\/ or port\.<\/small>\s*<\/div>\s*$/);
   assert.equal((lane.match(/<p[ >]/g) || []).length, 0);
   const method = template.slice(template.indexOf('{{define "connect-method-control"}}'));
-  assert.match(method, /<div class="connect-method">\s*<label[^>]+>{{.Name}}<\/label>\s*<input[^>]+role="switch"[^>]+>\s*<\/div>/);
+  assert.match(method, /<div class="connect-method">\s*<label[^>]+>[\s\S]*{{.Name}}<\/label>\s*<input[^>]+role="switch"[^>]+>\s*<\/div>/);
+  assert.equal((method.match(/alt="" aria-hidden="true"/g) || []).length, 5);
+  assert.ok(!lane.includes('<img'));
   assert.ok(!/<small|<span/.test(method));
   const grid = template.slice(template.indexOf('<div class="connect-methods">'), template.indexOf('<div class="connect-actions connect-domain">'));
   const order = Array.from(grid.matchAll(/eq \.ID "(local|playit|tailscale|netbird|nordvpn)"/g), match => match[1]);
@@ -219,7 +221,7 @@ test('approved page layout uses a full-width action lane and the same guide and 
   assert.ok(login.includes('src="/static/justvoxel-login-logo.png"'));
   assert.match(template, /connect-guide-top-row"><img[^>]+><p>{{.ConnectionGuide.Server}}<\/p>/);
   assert.ok(!template.slice(0, template.indexOf('<article class="connect-guide"')).includes('<img'));
-  assert.equal((template.match(/<img /g) || []).length, 1);
+  assert.equal((template.match(/<img /g) || []).length, 6);
   assert.match(template, /<h1>JustVoxel Connection Guide<\/h1>/);
   assert.match(screen, /\.connect-print-logo\{display:block;width:145px;height:auto\}/);
   assert.match(screen, /\.connect-guide-top-row\{display:flex;align-items:center;justify-content:space-between;/);

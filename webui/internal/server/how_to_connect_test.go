@@ -369,8 +369,8 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 		}
 	}
 	guideStart := strings.Index(body, `<article class="connect-guide"`)
-	if guideStart < 0 || strings.Contains(body[:guideStart], "<img") || strings.Count(body, "<img") != 1 {
-		t.Fatal("logo must exist only in the shared preview/print guide")
+	if guideStart < 0 || strings.Count(body[guideStart:], "<img") != 1 || strings.Count(body[:guideStart], `class="connect-method-icon"`) != 5 {
+		t.Fatal("provider icons belong in the controls and the logo only in the shared preview/print guide")
 	}
 	if strings.Count(body, `data-connect-guide`) != 1 || !strings.Contains(body, `<article class="connect-guide" data-connect-guide hidden>`) {
 		t.Fatal("preview and print must share one guide with visibility controlled by readiness")
@@ -384,6 +384,19 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 		t.Fatal("bottom action lane must follow the method grid")
 	}
 	controls := body[controlsStart:actionsStart]
+	for id, name := range map[string]string{"local": "Local connection IPv4", "playit": "Playit.gg", "tailscale": "Tailscale", "netbird": "NetBird", "nordvpn": "NordVPN Meshnet"} {
+		asset := id
+		if id == "local" {
+			asset = "local-network"
+		}
+		want := `for="connect-` + id + `"><img class="connect-method-icon" src="/static/provider-icons/` + asset + `.svg" alt="" aria-hidden="true">` + name + `</label>`
+		if !strings.Contains(controls, want) {
+			t.Fatalf("missing decorative icon and text label for %s", id)
+		}
+	}
+	if strings.Contains(body[actionsStart:guideStart], "<img") {
+		t.Fatal("Custom domain must remain without a provider icon")
+	}
 	previous := -1
 	for _, id := range []string{"local", "playit", "tailscale", "netbird", "nordvpn"} {
 		position := strings.Index(controls, `data-connect-method="`+id+`"`)

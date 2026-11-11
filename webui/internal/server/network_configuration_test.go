@@ -178,7 +178,7 @@ func TestRemoteAccessCardBehavior(t *testing.T) {
 	script := string(source)
 	controlsStart := strings.Index(script, "  const providerTransitional =")
 	controlsEnd := strings.Index(script, "  const isAdministrator =")
-	renderStart := strings.Index(script, "  const renderRemoteAccess =")
+	renderStart := strings.Index(script, "  const providerIcons =")
 	renderEnd := strings.Index(script, "  const renderNetwork =")
 	if controlsStart < 0 || controlsEnd <= controlsStart || renderStart < 0 || renderEnd <= renderStart {
 		t.Fatal("remote card functions missing")
@@ -189,6 +189,8 @@ class Element {
   constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.disabled = false; this.textContent = ""; }
   append(...nodes) { this.children.push(...nodes); }
   appendChild(node) { this.append(node); return node; }
+  prepend(node) { this.children.unshift(node); }
+  setAttribute(name, value) { this[name] = value; }
 }
 const document = { createElement: (tag) => new Element(tag) };
 const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
@@ -1085,7 +1087,7 @@ func TestRemoteAccessFailuresRenderOnlyInSectionHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(source)
-	renderStart := strings.Index(script, "  const renderRemoteAccess =")
+	renderStart := strings.Index(script, "  const providerIcons =")
 	renderEnd := strings.Index(script, "  const renderNetwork =")
 	actionStart := strings.Index(script, "  const pollRemoteAccess =")
 	actionEnd := strings.Index(script, "  const submitEthernet =")
