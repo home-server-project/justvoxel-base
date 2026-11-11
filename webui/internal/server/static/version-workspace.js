@@ -276,7 +276,7 @@ if (versionLauncher && versionDialog) {
   const renderContainer = async (ticket, selection, message) => {
     const current = () => ticket === sequence && selection === globalThis.justVoxelSelectionGeneration.version && currentTab === "container";
     const root = document.createElement("div"); root.className = "version-container-workspace";
-    const panel = card("Minecraft container");
+    const panel = card("Minecraft Container");
     panel.className += " version-container-panel";
     const identity = document.createElement("div");
     identity.className = "version-status-grid version-container-row version-container-summary";
@@ -285,6 +285,8 @@ if (versionLauncher && versionDialog) {
     const serverLine = line("Server", selector?.selectedOptions?.[0]?.textContent || "Unavailable");
     const imageLine = line("Image", "Checking…");
     identity.append(serverLine, imageLine);
+    const configuration = document.createElement("section"); configuration.className = "version-container-configuration";
+    const configurationHeading = document.createElement("h2"); configurationHeading.textContent = "Container configuration";
     const controls = document.createElement("div");
     controls.className = "version-container-row version-container-controls";
     controls.dataset.containerRow = "controls";
@@ -317,9 +319,9 @@ if (versionLauncher && versionDialog) {
     controls.appendChild(retentionLabel);
     const restart = toggle("Restart server now");
     const backup = toggle("Create backup before restart");
-    controls.appendChild(actionLane);
+
     const library = document.createElement("section"); library.className = "version-container-history";
-    const historyHeading = document.createElement("h2"); historyHeading.textContent = "Previous container images";
+    const historyHeading = document.createElement("h2"); historyHeading.textContent = "Previous Container Images";
     library.appendChild(historyHeading);
     const images = document.createElement("div"); images.className = "backup-file-grid";
     const footer = document.createElement("div"); footer.className = "backup-command-bar version-container-footer";
@@ -342,9 +344,10 @@ if (versionLauncher && versionDialog) {
     const sizeLabel = (bytes) => bytes > 0 ? bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(1)} GB` : `${Math.ceil(bytes / 1048576)} MB` : "";
     const helper = document.createElement("p"); helper.className = "muted compact"; helper.hidden = true;
     const progress = document.createElement("div");
-    const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = "";
+    const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = ""; terminal.hidden = true;
     terminal.textContent = "Checking the selected container image…";
-    panel.append(identity, controls, helper, library);
+    configuration.append(configurationHeading, controls, helper, actionLane);
+    panel.append(identity, configuration, library);
     root.append(panel, progress, terminal);
     if (!current()) return;
     content.replaceChildren(root);
@@ -412,6 +415,7 @@ if (versionLauncher && versionDialog) {
         if (!current()) return;
         operation = result.operation;
         if (!operation) throw new Error("Container operation status is unavailable.");
+        terminal.hidden = false;
         // Trace failure must not stop operation-state polling.
         try { await trace(id); } catch (failure) { if (current()) state.textContent = failure.message; }
         if (!current()) return;
@@ -448,6 +452,7 @@ if (versionLauncher && versionDialog) {
         containerCompleted = null;
         containerSubmitted = { selection, operationID: result.operation.operation_id, restart: restartNow, backup: body.get("backup_before_restart") === "yes" };
         operation = result.operation;
+        terminal.hidden = false;
         operationKinds.set(operation.operation_id, "container");
         progress.replaceChildren(operationFrame(operation));
         operationState.textContent = operation.state;
@@ -576,6 +581,7 @@ if (versionLauncher && versionDialog) {
       }
       terminal.textContent = status.state === "unavailable" ? "Unable to check the selected container image." : `Checking ${status.image}...\n${containerLabel(status.state)}.`;
       if (operation) {
+        terminal.hidden = false;
         operationKinds.set(operation.operation_id, "container");
         progress.replaceChildren(operationFrame(operation));
         operationState.textContent = operation.state;

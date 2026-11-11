@@ -100,7 +100,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		`controls.dataset.containerRow = "controls"`,
 		`identity.className = "version-status-grid version-container-row version-container-summary"`,
 		`identity.appendChild(statusLine)`,
-		`card("Minecraft container")`,
+		`card("Minecraft Container")`,
 		`library.className = "version-container-history"`,
 		`footer.className = "backup-command-bar version-container-footer"`,
 		`historyActions.className = "backup-command-actions"`,
@@ -115,6 +115,13 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		`toggle("Restart server now")`,
 		`toggle("Create backup before restart")`,
 		`terminal.textContent = text`,
+		`terminal.hidden = true`,
+		`terminal.hidden = false`,
+		`configuration.className = "version-container-configuration"`,
+		`configurationHeading.textContent = "Container configuration"`,
+		`configuration.append(configurationHeading, controls, helper, actionLane)`,
+		`panel.append(identity, configuration, library)`,
+		`historyHeading.textContent = "Previous Container Images"`,
 	} {
 		if !strings.Contains(version, want) {
 			t.Fatalf("Container workspace contract missing %q", want)

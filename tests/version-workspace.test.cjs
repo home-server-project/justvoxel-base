@@ -584,96 +584,98 @@ const retainedImage = digest => ({digest,image:'docker.io/itzg/minecraft-server:
 const containerMetrics = page => Object.fromEntries(page.content.all().find(node=>node.className==='backup-library-summary').children.map(cell=>cell.children.map(node=>node.textContent)));
 const retentionInput = page => page.content.all().find(node=>node.type==='number');
 const changeRetention = (page,value) => {const input=retentionInput(page);input.value=value;input.listeners.input();};
-test('Container combines controls and previous images in one outer card with separate untitled output',async()=>{
+test('Container frames summary, configuration and history with separate action lanes',async()=>{
  const page=containerWorkspace();await page.mount();
- const root=page.content.children[0];
- const panel=root.children[0];
- const history=panel.children.find(node=>node.className==='version-container-history');
- const controls=panel.children.find(node=>node.dataset.containerRow==='controls');
- assert.equal(panel.children[0].textContent,'Minecraft container');
- assert.equal(root.children.filter(node=>node.tag==='section').length,1);
- assert.ok(history);assert.equal(history.children[0].tag,'h2');
- assert.equal(history.children[0].textContent,'Previous container images');
- assert.ok(!history.className.includes('panel'));
- assert.ok(!history.all().includes(retentionInput(page)));
- assert.ok(!page.content.all().some(node=>node.tag==='button'&&node.textContent==='Save'));
- assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Server update channel','Keep previous images','Restart server now','Create backup before restart','Update']);
- const lane=controls.children[4];
- assert.equal(lane.className,'version-container-action-lane');
- assert.equal(page.update().parent,lane);
- assert.equal(page.update().textContent,'Update');
- assert.equal(controls.children.at(-1),lane);
+ const root=page.content.children[0], panel=root.children[0];
+ const configuration=panel.children.find(node=>node.className==='version-container-configuration');
+ const controls=configuration.children.find(node=>node.dataset.containerRow==='controls');
  const identity=panel.children.find(node=>node.dataset.containerRow==='identity');
- assert.equal(identity.children.length,3);
- assert.match(identity.children[2].textContent,/^Status /);
- assert.ok(!identity.all().includes(page.update()));
- assert.ok(!panel.children.some(node=>node.dataset.containerRow==='actions'));
- assert.match(cssRule('.version-container-panel .version-container-summary'),/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
- assert.equal(identity.className,'version-status-grid version-container-row version-container-summary');
- assert.match(cssRule('.version-container-panel .version-container-summary'),/margin:0;padding:\.15rem 0;border:0;border-radius:0;background:transparent/);
- assert.match(cssRule('.version-container-panel .version-container-summary>div'),/display:grid/);
- assert.match(cssRule('.version-container-panel .version-container-summary>div'),/padding:\.4rem \.55rem;border:0/);
+ const history=panel.children.find(node=>node.className==='version-container-history');
+ assert.deepEqual(page.content.all().filter(node=>node.tag==='h2').map(node=>node.textContent),['Minecraft Container','Container configuration','Previous Container Images']);
  assert.deepEqual(identity.children.map(cell=>cell.children[0].textContent),['Server','Image','Status']);
  assert.ok(identity.children.every(cell=>cell.children[1].tag==='strong'));
+ assert.equal(identity.className,'version-status-grid version-container-row version-container-summary');
+ assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Server update channel','Keep previous images','Restart server now','Create backup before restart']);
  assert.equal(retentionInput(page).parent,controls.children[1]);
+ const lane=configuration.children.at(-1);
+ assert.equal(lane.className,'version-container-action-lane');
+ assert.equal(page.update().parent,lane);
+ assert.ok(!identity.all().includes(page.update()));
+ assert.ok(!controls.all().includes(page.update()));
+ assert.equal(configuration.children[0].textContent,'Container configuration');
+ assert.equal(configuration.children[2].className,'muted compact');
+ assert.equal(configuration.children[2].textContent,'The new image will be used on the next server start.');
+ assert.equal(configuration.children[2].hidden,true);
  assert.equal(page.terminal().parent,root);assert.equal(root.children.at(-1),page.terminal());
- assert.ok(!panel.all().includes(page.terminal()));
- assert.deepEqual(page.content.all().filter(node=>node.tag==='h2').map(node=>node.textContent),['Minecraft container','Previous container images']);
- assert.doesNotMatch(page.content.textContent,/Console|Installed|Recommended|Geyser|Floodgate|ViaVersion|Minecraft update/);
- assert.match(history.textContent,/No previous container images\./);
- const restore=panel.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected');
- assert.equal(restore.parent.className,'backup-command-actions');
- const footer=restore.parent.parent;
- assert.equal(footer.className,'backup-command-bar version-container-footer');
- assert.equal(footer.parent,history);assert.equal(history.children.at(-1),footer);
+ assert.equal(page.terminal().hidden,true);
  assert.equal(history.children[1].className,'backup-file-grid');
  assert.equal(history.children[1].children[0].className,'backup-library-empty');
+ assert.match(history.textContent,/No previous container images\./);
+ const footer=history.children.at(-1);
+ assert.equal(footer.className,'backup-command-bar version-container-footer');
  assert.equal(footer.children[0].className,'backup-library-summary');
  assert.deepEqual(footer.children[0].children.map(cell=>cell.children[0].textContent),['Images','Total size','Selected','Status']);
- assert.match(cssRule('.version-container-panel .version-container-footer'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0/);
- assert.match(cssRule('.version-container-history'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0;background:transparent/);
- assert.match(cssRule('.version-container-retention input'),/width:3\.25rem;flex:none/);
- assert.match(cssRule('.version-container-panel .version-container-controls'),/display:flex;flex-wrap:wrap;align-items:flex-end/);
- assert.match(cssRule('.version-container-panel .version-container-controls'),/border:0;border-top:1px solid var\(--jv-border\);border-radius:0;background:transparent/);
- assert.match(cssRule('.version-container-panel .version-container-controls'),/gap:var\(--jv-space-md\)/);
- assert.match(cssRule('.version-container-panel .version-container-controls>label'),/flex-direction:column;align-items:flex-start/);
- assert.match(cssRule('.version-container-panel .version-container-controls>label'),/white-space:normal/);
- assert.match(cssRule('.version-container-controls>label>span'),/font-size:\.75rem/);
- const containerStyles=css.slice(css.indexOf('/* Version / Container: one surface'),css.indexOf('/* Version / Container owns'));
- assert.doesNotMatch(containerStyles,/border-left/);
- assert.doesNotMatch(cssRule('.version-container-panel .version-container-controls'),/grid-template-columns|border-radius:var/);
- assert.match(cssRule('.version-container-channel :is(select,input)'),/width:auto;max-width:100%;min-width:0/);
- assert.match(cssRule('.version-container-channel select'),/align-self:flex-start;flex:none/);
- assert.match(cssRule('.version-container-action-lane'),/justify-content:flex-end/);
- assert.match(cssRule('.version-container-controls>.version-container-action-lane'),/align-self:flex-end;margin-left:auto/);
- assert.match(cssRule('.version-container-panel .version-container-controls>label'),/padding:0/);
- assert.match(cssRule('.version-container-panel'),/container-type:inline-size/);
- assert.match(css,/@container\(max-width:700px\)\{\.version-container-panel \.version-container-summary/);
- assert.match(css,/@media\(max-width:700px\)\{\.version-container-panel \.version-container-summary/);
- assert.match(cssRule('.version-container-panel .version-container-footer'),/justify-content:space-between/);
+ assert.equal(footer.children[1].className,'backup-command-actions');
+ assert.equal(footer.children[1].children[0].textContent,'Restore selected');
+ assert.ok(!history.all().includes(retentionInput(page)));
+ assert.ok(!page.content.all().some(node=>node.tag==='button'&&node.textContent==='Save'));
 });
-test('Container inherits Version summary framing and typography and bounds the empty library',()=>{
+test('Container reuses Version framing and typography with responsive information grids',()=>{
  assert.ok(css.includes('.version-status-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:0;padding:.15rem var(--jv-space-sm);border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface-sunken)}'));
  assert.ok(css.includes('.version-status-grid span{color:var(--jv-muted);font-size:.75rem}'));
  assert.ok(css.includes('.version-status-grid strong{font-size:.89rem;line-height:1.3;overflow-wrap:anywhere}'));
- const summaryOverrides=css.slice(css.indexOf('/* Version / Container: one surface'),css.indexOf('/* Version / Container owns')).match(/[^{}]*version-container-summary[^{}]*\{[^}]*\}/g);
- assert.ok(summaryOverrides.length>0);
- for(const rule of summaryOverrides) assert.doesNotMatch(rule,/border-left:|font-size:/);
- assert.match(cssRule('.version-container-panel .version-container-summary'),/border:0;border-radius:0;background:transparent/);
- const empty=cssRule('.version-container-history .backup-library-empty');
- assert.match(empty,/grid-column:1 \/ -1/);
- assert.match(empty,/min-height:62px/);
- assert.match(empty,/border:1px dashed var\(--jv-border-strong\);border-radius:10px;color:var\(--jv-muted\)/);
- assert.match(cssRule('.version-container-footer .backup-library-summary'),/flex-wrap:wrap;gap:\.85rem/);
- assert.match(cssRule('.version-container-footer .backup-library-summary span'),/font-size:\.7rem;text-transform:uppercase;letter-spacing:\.08em/);
- assert.match(cssRule('.version-container-footer .backup-library-summary strong'),/font-size:1rem/);
- assert.match(cssRule('.version-container-footer .backup-command-actions'),/gap:\.4rem;flex-wrap:wrap/);
- for(const responsive of ['@media(max-width:700px)','@container(max-width:700px)']) {
-  const start=css.indexOf(responsive+'{.version-container-panel');
+ const summary=cssRule('.version-container-panel .version-container-summary');
+ assert.match(summary,/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+ assert.doesNotMatch(summary,/background:transparent|border:0|border-radius:0/);
+ const framing=/border:1px solid var\(--jv-border\);border-radius:var\(--jv-radius\);background:var\(--jv-surface-sunken\)/;
+ for(const selector of ['.version-container-panel .version-container-summary>div','.version-container-configuration,.version-container-history','.version-container-panel .version-container-controls>label','.version-container-footer .backup-library-summary>div']) assert.match(cssRule(selector),framing);
+ for(const selector of ['.version-container-panel .version-container-controls','.version-container-footer .backup-library-summary']) {
+  assert.match(cssRule(selector),/display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.doesNotMatch(cssRule(selector),/display:flex/);
+ }
+ assert.match(cssRule('.version-container-panel .version-container-controls>label'),/white-space:normal/);
+ assert.match(cssRule('.version-container-controls>label>span'),/font-size:\.75rem/);
+ assert.match(cssRule('.version-container-footer .backup-library-summary span'),/color:var\(--jv-muted\);font-size:\.75rem;text-transform:none;letter-spacing:normal/);
+ assert.match(cssRule('.version-container-footer .backup-library-summary strong'),/font-size:\.89rem;line-height:1\.3;overflow-wrap:anywhere/);
+ assert.match(cssRule('.version-container-channel :is(select,input)'),/width:100%;max-width:100%;min-width:0/);
+ assert.match(cssRule('.version-container-action-lane'),/justify-content:flex-end/);
+ assert.match(cssRule('.version-container-action-lane'),/border-top:1px solid var\(--jv-border\)/);
+ assert.match(cssRule('.version-container-footer .backup-command-actions'),/justify-content:flex-end/);
+ assert.match(cssRule('.version-container-configuration>.muted.compact'),/color:var\(--jv-muted\);font-size:\.75rem;line-height:1\.35;margin:var\(--jv-space-sm\) 0 0/);
+ assert.match(cssRule('.version-container-panel'),/container-type:inline-size/);
+ for(const kind of ['media','container']) for(const [width,columns] of [[700,'repeat(2,minmax(0,1fr))'],[420,'minmax(0,1fr)']]) {
+  const start=css.indexOf('@'+kind+'(max-width:'+width+'px){.version-container-panel');
   assert.ok(start>=0);
   const rules=css.slice(start,css.indexOf('\n',start));
-  assert.ok(rules.includes('.version-container-history .backup-file-grid{grid-template-columns:1fr}'));
-  assert.ok(rules.includes('.version-container-panel .version-container-footer{align-items:stretch;flex-direction:column}'));
+  assert.ok(rules.includes('.version-container-panel .version-container-controls,.version-container-footer .backup-library-summary{grid-template-columns:'+columns+'}'));
+  if(width===700) assert.ok(rules.includes('.version-container-history .backup-file-grid{grid-template-columns:1fr}'));
+ }
+ const empty=cssRule('.version-container-history .backup-library-empty');
+ assert.match(empty,/grid-column:1 \/ -1/);assert.match(empty,/min-height:62px/);
+ assert.match(empty,/border:1px dashed var\(--jv-border-strong\)/);
+});
+test('Container helper keeps its stopped-server visibility and remains inside configuration',async()=>{
+ for(const [running,status,hidden] of [[true,'update_available',true],[false,'update_available',false],[false,'unavailable',true]]) {
+  const page=containerWorkspace({running,status});await page.mount();
+  const configuration=page.content.all().find(node=>node.className==='version-container-configuration');
+  const helper=configuration.children.find(node=>node.className==='muted compact');
+  assert.equal(helper.hidden,hidden);
+  assert.equal(helper.textContent,'The new image will be used on the next server start.');
+ }
+});
+test('Container diagnostics stay hidden while idle and visible for every operation state',async()=>{
+ for(const status of ['up_to_date','update_available','image_missing','restart_needed','unavailable']) {
+  const page=containerWorkspace({status});await page.mount();assert.equal(page.terminal().hidden,true);
+ }
+ for(const state of ['running','succeeded','resolved','failed','needs_attention']) {
+  const page=containerWorkspace({pending:{operation_id:'container-1',state}});await page.mount();
+  assert.equal(page.terminal().hidden,false);assert.match(page.terminal().textContent,/Copying blob/);
+ }
+ for(const restoring of [false,true]) {
+  const page=containerWorkspace({status:'update_available',previousImages:[retainedImage('sha256:'+'a'.repeat(64))]});await page.mount();
+  if(restoring) {const select=page.content.all().find(node=>node.name==='previous-container-image');select.checked=true;select.listeners.change();}
+  const button=restoring?page.content.all().find(node=>node.tag==='button'&&node.textContent==='Restore selected'):page.update();
+  await button.listeners.click();assert.equal(page.terminal().hidden,false);
  }
 });
 test('Container retention is limited to one or two and missing defaults to one',async()=>{
