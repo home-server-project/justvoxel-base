@@ -69,6 +69,7 @@ type PluginCatalogProject struct {
 	IconURL          string                `json:"icon_url,omitempty"`
 	ID               string                `json:"project_id"`
 	Slug             string                `json:"slug"`
+	ReviewAvailable  bool                  `json:"review_available,omitempty"`
 	InstallAvailable bool                  `json:"install_available"`
 	Name             string                `json:"title"`
 	Description      string                `json:"description"`
@@ -200,6 +201,7 @@ type PluginInstallArtifact struct {
 	Satisfied     string   `json:"satisfied,omitempty"`
 }
 type PluginInstallPlan struct {
+	InstallAvailable     bool                    `json:"install_available"`
 	Source               string                  `json:"source,omitempty"`
 	ProjectID            string                  `json:"project_id"`
 	VersionID            string                  `json:"version_id"`

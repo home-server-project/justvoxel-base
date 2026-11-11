@@ -82,6 +82,7 @@ type pluginInstallArtifact struct {
 	Main             string `json:"-"`
 }
 type pluginInstallPlan struct {
+	InstallAvailable     bool                    `json:"install_available"`
 	Source               string                  `json:"source,omitempty"`
 	ProjectID            string                  `json:"project_id"`
 	VersionID            string                  `json:"version_id"`
@@ -215,9 +216,15 @@ func (s *server) adminPluginInstallPlan(w http.ResponseWriter, r *http.Request) 
 		s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "resolve", err)
 		return
 	}
-	if err := reviewRootPluginArtifact(ctx, plan); err != nil {
-		s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "review", err)
+	if !plan.InstallAvailable {
+		writeJSON(w, http.StatusOK, plan)
 		return
+	}
+	if javaServerContentKind(plan.Server.ServerType) != "mods" {
+		if err := reviewRootPluginArtifact(ctx, plan); err != nil {
+			s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "review", err)
+			return
+		}
 	}
 	online, names, err := pluginInstallPlayers(ctx, pluginInstanceID(ctx))
 	if err != nil {
@@ -260,6 +267,10 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 	plan, err := s.resolvePluginInstall(w, r.WithContext(ctx), request.ProjectID, request.VersionID, request.Source)
 	if err != nil {
 		s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "resolve", err)
+		return
+	}
+	if !plan.InstallAvailable {
+		writeError(w, http.StatusConflict, plan.Compatibility)
 		return
 	}
 	if plan.Fingerprint != request.PlanFingerprint {
@@ -333,6 +344,16 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 		return plan, errors.New("Plugins must be an existing real directory")
 	}
 	defer root.Close()
+	var runtime []trustedModComponent
+	if javaServerContentKind(serverContext.ServerType) == "mods" {
+		runtime, err = runtimeOwnedModComponents(serverContext, dataPath)
+		if err != nil {
+			return plan, err
+		}
+	}
+	// Cache authoritative hash mappings only within this one read-only resolution.
+	runtimeVersions := map[string]pluginCatalogVersion{}
+	runtimeLookedUp := false
 	seen, active := map[string]int{}, map[string]bool{}
 	filenames := map[string]bool{}
 	var total int64
@@ -344,6 +365,27 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 		if (project != "" && !modrinthPluginID.MatchString(project)) || (version != "" && !modrinthPluginID.MatchString(version)) || (project == "" && version == "") {
 			return errors.New("Required dependency lacks a safe Modrinth identity")
 		}
+		var provided *trustedModComponent
+		if parent != "" && len(runtime) > 0 {
+			if !runtimeLookedUp {
+				for _, c := range runtime {
+					if mapped, ok := runtimeModrinthVersion(ctx, serverContext, c); ok {
+						runtimeVersions[c.SHA512] = mapped
+					}
+				}
+				runtimeLookedUp = true
+			}
+			for i := range runtime {
+				mapped, ok := runtimeVersions[runtime[i].SHA512]
+				if ok && (project == "" || mapped.ProjectID == project) && (version == "" || mapped.ID == version) {
+					if provided != nil {
+						return errors.New(modDependencyConflict)
+					}
+					provided = &runtime[i]
+					project, version = mapped.ProjectID, mapped.ID
+				}
+			}
+		}
 		var v pluginCatalogVersion
 		if version != "" {
 			if err := modrinthPluginJSON(ctx, "/version/"+version, nil, &v); err != nil {
@@ -353,6 +395,9 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 				return errors.New("Modrinth project/version identity mismatch")
 			}
 			if !modrinthServerEnvironment(v.Environment) {
+				if v.Environment == "client_only" && javaServerContentKind(serverContext.ServerType) == "mods" {
+					return errors.New(clientOnlyModRejection)
+				}
 				return errors.New(modrinthServerEnvironmentRejection)
 			}
 			if parent != "" && !pluginLoaderOverlap(v.Loaders, serverContext.ServerType) {
@@ -420,6 +465,9 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 			}
 		}
 		if !modrinthServerEnvironment(v.Environment) {
+			if v.Environment == "client_only" && javaServerContentKind(serverContext.ServerType) == "mods" {
+				return errors.New(clientOnlyModRejection)
+			}
 			return errors.New(modrinthServerEnvironmentRejection)
 		}
 		if !modrinthPluginID.MatchString(v.ID) || !modrinthPluginID.MatchString(v.ProjectID) || v.Type != "release" || !pluginVersionCompatible(v, serverContext) || v.Number == "" || len(v.Number) > 256 {
@@ -512,6 +560,12 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 				a.Satisfied, a.ExistingFilename, a.ExistingHash, a.PluginName, a.Main = "Managed by Plugins", entry.Filename, hash, entry.PluginName, entry.Main
 			}
 		}
+		if provided != nil {
+			if a.Satisfied != "" || a.SHA512 != provided.SHA512 || a.Size != provided.Size {
+				return errors.New(modDependencyConflict)
+			}
+			a.Satisfied, a.ExistingFilename, a.ExistingHash = runtimeModSatisfied, provided.Filename, provided.SHA512
+		}
 		if a.Satisfied == "" {
 			var stat unix.Stat_t
 			err := unix.Fstatat(int(root.Fd()), a.Filename, &stat, unix.AT_SYMLINK_NOFOLLOW)
@@ -579,6 +633,9 @@ const pluginDirectReviewRejection = "This release is not a direct Paper/Bukkit p
 // Review creates no operation.
 func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error {
 	for _, artifact := range plan.Artifacts {
+		if artifact.Satisfied != "" {
+			continue
+		}
 		if !artifact.Requested && javaServerContentKind(plan.Server.ServerType) != "mods" {
 			continue
 		}
@@ -986,24 +1043,9 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
+	response, err := requestPluginArtifact(ctx, a, evidence)
 	if err != nil {
 		return "", err
-	}
-	// Metadata validation above must precede reading or attaching the private key.
-	if pluginSource(a.Source) == "CurseForge" {
-		key, keyErr := readCurseForgeKey()
-		if keyErr != nil {
-			return "", errors.New("CurseForge download requires a configured API key")
-		}
-		req.Header.Set("x-api-key", key)
-	}
-	req.Header.Set("User-Agent", "JustVoxel/PluginWorkspace-Stage2")
-	client := *pluginDownloadClient
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	response, err := client.Do(req)
-	if err != nil {
-		return "", errors.New("Plugin download failed")
 	}
 	defer response.Body.Close()
 	evidence["http_status"] = strconv.Itoa(response.StatusCode)
@@ -1759,6 +1801,9 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		recordPluginStartupEvidence(s.operations, id, plan.DataPath, pluginInstallExpectedNames(plan))
 		return rollback(errors.New("Existing Minecraft stack verification failed"))
 	}
+	if err := verifyRuntimeModReuse(plan); err != nil {
+		return rollback(err)
+	}
 	expected := []string{}
 	for _, a := range created {
 		expected = append(expected, a.PluginName)
@@ -1794,7 +1839,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		}
 	}
 	for _, a := range plan.Artifacts {
-		if a.Satisfied == "JustVoxel managed" {
+		if a.Satisfied == "JustVoxel managed" || a.Satisfied == runtimeModSatisfied {
 			continue
 		}
 		matched := false
@@ -1862,7 +1907,7 @@ func revalidatePluginInstall(ctx context.Context, s *server, plan pluginInstallP
 		return errors.New("Authoritative server context unavailable")
 	}
 	current, err := resolveProviderPluginInstallPlan(ctx, serverContext, dataPath, pluginSource(plan.Source), plan.ProjectID, plan.VersionID)
-	if err != nil || current.Fingerprint != plan.Fingerprint {
+	if err != nil || !current.InstallAvailable || current.Fingerprint != plan.Fingerprint {
 		return errors.New("Plugin plan or server context changed; review again")
 	}
 	return nil

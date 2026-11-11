@@ -98,6 +98,7 @@ type pluginCatalogProject struct {
 	IconURL          string                `json:"icon_url,omitempty"`
 	ID               string                `json:"project_id"`
 	Slug             string                `json:"slug"`
+	ReviewAvailable  bool                  `json:"review_available,omitempty"`
 	InstallAvailable bool                  `json:"install_available"`
 	Name             string                `json:"title"`
 	Description      string                `json:"description"`
@@ -825,6 +826,7 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 			}
 			project.Version = nil
 			project.InstallAvailable = false
+			project.ReviewAvailable = false
 			project.Compatible = false
 			project.MetadataError = ""
 			project.Source = "Modrinth"
@@ -845,7 +847,7 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 			}
 			sort.SliceStable(versions, func(i, j int) bool { return versions[i].Published > versions[j].Published })
 			for _, v := range versions {
-				if v.Environment == "client_only" || v.Environment == "singleplayer_only" {
+				if kind != "mod" && (v.Environment == "client_only" || v.Environment == "singleplayer_only") {
 					continue
 				}
 				if release && v.Type != "release" {
@@ -868,6 +870,9 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 				}
 				_, fileErr := selectPluginArtifact(v.Files)
 				project.InstallAvailable = modrinthServerEnvironment(v.Environment) && matches && server.Supported && v.Type == "release" && v.ProjectID == project.ID && modrinthPluginID.MatchString(v.ID) && fileErr == nil && managedPluginSlug(project.Slug) == ""
+				if kind == "mod" {
+					project.ReviewAvailable, project.InstallAvailable = project.InstallAvailable, false
+				}
 				v.Files = nil // Artifact URLs never leave the privileged agent.
 				project.Version = &v
 				project.Compatible = matches
@@ -878,6 +883,9 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 				}
 				if !modrinthServerEnvironment(v.Environment) {
 					project.Compatibility = modrinthServerEnvironmentRejection
+					if kind == "mod" && v.Environment == "client_only" {
+						project.Compatibility = clientOnlyModRejection
+					}
 				}
 				break
 			}

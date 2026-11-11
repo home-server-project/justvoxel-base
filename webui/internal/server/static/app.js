@@ -7179,7 +7179,7 @@ if (pluginsDialog && pluginsOpen) {
     const iconProjectID = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) ? project.project_id : undefined;
     const managed = project.source === "Modrinth" && ["geyser", "floodgate", "viaversion"].includes(project.slug);
     if (managed) badges.append(text("span", "JustVoxel managed", "plugins-badge"));
-    const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.id;
+    const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && (project.install_available || server.content_kind === "mods" && project.review_available) && project.compatible && server.supported && server.minecraft_version && version?.id;
     let reviewRejection = "";
     const readOnlyReview = (reason) => {
       reviewRejection = reason;
@@ -7695,6 +7695,7 @@ if (pluginsDialog && pluginsOpen) {
       if (await blockPluginInstall(current)) return;
       const plan = await pluginRequest("install/plan", { source: project?.source || "Modrinth", project_id: projectID, version_id: versionID }, installController.signal);
       if (current !== installGeneration) return;
+      if (plan.install_available === false) { readOnlyReview?.(plan.compatibility); return; }
       showPanel(`${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, true);
       overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, panelAction("Install", () => applyPlugin(plan)), project?.project_id === plan.project_id ? project.icon_url || "" : undefined, plan.source);
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
@@ -7718,7 +7719,7 @@ if (pluginsDialog && pluginsOpen) {
       dependencyList.className = "plugins-overlay-list";
       required.forEach((artifact) => {
         const item = text("li", `${artifact.project_name} · ${artifact.version_number}`);
-        item.append(text("span", artifact.satisfied ? "Already satisfied" : "Will be installed", "plugins-list-secondary"));
+        item.append(text("span", artifact.satisfied === "Already provided by the server / JustVoxel runtime" ? artifact.satisfied : artifact.satisfied ? "Already satisfied" : "Will be installed", "plugins-list-secondary"));
         item.className = "plugins-file-row";
         dependencyList.append(item);
       });

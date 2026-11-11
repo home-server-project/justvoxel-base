@@ -227,13 +227,20 @@ func curseForgeCompatible(f curseForgeFile, server pluginServerContext) bool {
 
 var curseForgeSHA1 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+func trustedCurseForgeCDN(u *url.URL) bool {
+	host := strings.ToLower(u.Hostname())
+	return u.Scheme == "https" && u.User == nil && net.ParseIP(host) == nil &&
+		(host == "forgecdn.net" || strings.HasSuffix(host, ".forgecdn.net")) &&
+		(u.Port() == "" || u.Port() == "443")
+}
+
 func safeCurseForgeArtifactURL(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.User != nil || u.Fragment != "" || strings.Contains(raw, "#") || u.RawQuery != "" || u.ForceQuery || u.RawPath != "" {
 		return false
 	}
-	// Exact CDN hosts, not a wildcard Internet suffix. No redirects or credentials.
-	if u.Host != "edge.forgecdn.net" && u.Host != "mediafilez.forgecdn.net" {
+	// Provider domain boundary, independent of individual CDN hostnames.
+	if !trustedCurseForgeCDN(u) {
 		return false
 	}
 	parts := strings.Split(u.Path, "/")
@@ -497,6 +504,9 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 				}
 				_, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope)
 				project.InstallAvailable = artifactErr == nil && server.Supported
+				if javaServerContentKind(server.ServerType) == "mods" {
+					project.ReviewAvailable, project.InstallAvailable = project.InstallAvailable, false
+				}
 				if artifactErr != nil {
 					project.Compatibility = artifactErr.Error()
 				}
@@ -551,6 +561,13 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 	manifest, _, err := readPluginManifest(dataPath)
 	if err != nil {
 		return plan, err
+	}
+	var runtime []trustedModComponent
+	if target == "mods" {
+		runtime, err = runtimeOwnedModComponents(server, dataPath)
+		if err != nil {
+			return plan, err
+		}
 	}
 	seen, active := map[string]int{}, map[string]bool{}
 	filenames := map[string]bool{}
@@ -644,6 +661,20 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 				return errors.New("Installed dependency differs from authoritative CurseForge file")
 			}
 			a.Satisfied, a.ExistingFilename, a.ExistingHash, a.PluginName, a.Main = "Managed content", e.Filename, e.SHA512, e.PluginName, e.Main
+		}
+		if !a.Requested && a.Satisfied == "" {
+			for _, component := range runtime {
+				jar, err := openPluginAt(root, component.Filename)
+				if err != nil {
+					return err
+				}
+				h := sha1.New()
+				n, readErr := io.Copy(h, io.LimitReader(jar, a.Size+1))
+				jar.Close()
+				if readErr == nil && n == a.Size && hex.EncodeToString(h.Sum(nil)) == a.SHA1 {
+					a.Satisfied, a.ExistingFilename, a.ExistingHash = runtimeModSatisfied, component.Filename, component.SHA512
+				}
+			}
 		}
 		if a.Satisfied == "" {
 			var st unix.Stat_t

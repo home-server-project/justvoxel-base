@@ -104,7 +104,7 @@ func TestCurseForgeCatalogAndInstallPluginsAndMods(t *testing.T) {
 		t.Run(loader, func(t *testing.T) {
 			f, c := curseForgeCatalogFixture(t, loader)
 			page, err := discoverCurseForgePlugins(context.Background(), c, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
-			if err != nil || len(page.Projects) != 1 || !page.Projects[0].InstallAvailable {
+			if err != nil || len(page.Projects) != 1 || !(page.Projects[0].InstallAvailable || c.ContentKind == "mods" && page.Projects[0].ReviewAvailable) {
 				t.Fatal(page, err)
 			}
 			plan, err := resolveCurseForgeInstallPlan(context.Background(), c, f.data, "10", "20")

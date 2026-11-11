@@ -166,7 +166,7 @@ func TestModInstallRollbackPreservesOtherContent(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(f.data, "mods"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(f.data, "mods", "manual.jar"), []byte("keep"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(f.data, "mods", "manual.jar"), componentModJar(t, "fabric", "manual_mod"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	raw := resetModJar(t, "fabric")
@@ -202,7 +202,7 @@ func TestModInstallRollbackPreservesOtherContent(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(f.data, "mods", "root.jar")); !os.IsNotExist(err) {
 		t.Fatal("mod rollback lost identity", err)
 	}
-	if raw, err := os.ReadFile(filepath.Join(f.data, "mods", "manual.jar")); err != nil || string(raw) != "keep" {
+	if raw, err := os.ReadFile(filepath.Join(f.data, "mods", "manual.jar")); err != nil || !reflect.DeepEqual(raw, componentModJar(t, "fabric", "manual_mod")) {
 		t.Fatal("unmanaged mod altered", err)
 	}
 }

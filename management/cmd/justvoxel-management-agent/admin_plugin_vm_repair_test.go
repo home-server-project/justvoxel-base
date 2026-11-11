@@ -220,6 +220,7 @@ func TestModrinthExactVersionDedicatedServerPolicy(t *testing.T) {
 			version.Environment, version.Loaders, version.GameVersions = environment, []string{"fabric"}, []string{"26.3"}
 			f.versions["release"] = version
 			server := pluginContentContext("fabric")
+			server.InstanceID = "jv-a1b2c3"
 			server.MinecraftVersion = "26.3"
 			want := environment != "client_only" && environment != "singleplayer_only" && environment != "unknown" && environment != "" && environment != "future_environment"
 			if modrinthServerEnvironment(environment) != want {
@@ -241,18 +242,13 @@ func TestModrinthExactVersionDedicatedServerPolicy(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if environment == "client_only" || environment == "singleplayer_only" {
-					if len(page.Projects) != 0 {
-						t.Fatal("known client-only catalog trap", compatible, page)
-					}
-				} else {
-					if len(page.Projects) != 1 || page.Projects[0].InstallAvailable != want {
-						t.Fatal("catalog eligibility", compatible, page)
-					}
-					if !want && strings.Contains(page.Projects[0].Compatibility, "Compatible according to publisher metadata") {
-						t.Fatal("unknown advertised as compatible")
-					}
+				if len(page.Projects) != 1 || page.Projects[0].InstallAvailable || page.Projects[0].ReviewAvailable != want {
+					t.Fatal("catalog must retain inspectable projects and require exact preflight", compatible, page)
 				}
+				if !want && strings.Contains(page.Projects[0].Compatibility, "Compatible according to publisher metadata") {
+					t.Fatal("unknown advertised as compatible")
+				}
+
 			}
 		})
 	}

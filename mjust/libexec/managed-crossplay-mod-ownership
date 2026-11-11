@@ -61,7 +61,15 @@ try:
                         import tomllib
                         conflict = any(m.get('modId') in names.values() for m in tomllib.loads(text).get('mods', []))
                     if conflict: raise ValueError('Duplicate managed mod identity')
-except Exception:
+except Exception as cause:
+    # Only fixed internal causes reach the private service journal. Never echo
+    # filenames, descriptor contents, provider responses, or arbitrary exceptions.
+    reasons = {'Unsafe mod artifact', 'Unsafe mods root', 'Installed mod hash mismatch',
+               'Unsafe ownership evidence', 'Invalid ownership evidence',
+               'Unowned or modified canonical mod', 'Too many mod artifacts',
+               'Oversized mod descriptor', 'Duplicate managed mod identity'}
+    detail = str(cause) if isinstance(cause, ValueError) and str(cause) in reasons else type(cause).__name__
+    print('Managed mod ownership check: ' + detail[:96], file=sys.stderr)
     print('ERROR: Managed mod ownership cannot be verified; server files were preserved.', file=sys.stderr)
     sys.exit(1)
 PY

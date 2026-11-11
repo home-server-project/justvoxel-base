@@ -356,7 +356,7 @@ func inspectDedicatedModSide(file *os.File, loader string) error {
 	return dedicatedModDescriptorSide(raw, loader)
 }
 
-const clientOnlyModRejection = "This mod is client-only and cannot be installed on a dedicated server."
+const clientOnlyModRejection = "Client-only mod — not available for this dedicated server."
 
 func dedicatedModDescriptorSide(raw []byte, loader string) error {
 	if len(raw) == 0 || len(raw) > pluginMetadataLimit {

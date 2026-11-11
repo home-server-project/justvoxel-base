@@ -25,6 +25,19 @@ code. Minecraft runtime health is verified after restart, which does not prove
 individual mod functionality. Failure removes only unchanged transaction artifacts
 and restores the original service state using the existing recovery model.
 
+Discover remains a catalog view. Exact compatibility preflight identifies client-only
+releases before offering Install; these results never start an installation,
+backup, or server shutdown. CurseForge preflight verifies and statically inspects
+the exact JAR. Artifact redirects are bounded and accepted only within the HTTPS
+`forgecdn.net` provider domain; exact downloaded size and SHA-1 remain mandatory.
+
+Dependency handling applies to Fabric, NeoForge, Forge, and Quilt. Dependencies
+already supplied by another verified JustVoxel runtime component are reused
+rather than duplicated, with provider compatibility and exact local ownership
+rechecked before changes and after startup. Manual/unmanaged JARs are never
+silently adopted as dependency ownership; conflicting or unverifiable identities
+block Review.
+
 Mods have no enable/disable/update/remove lifecycle in this scope. Add-ons remain
 available only for supported Bukkit plugin hosts. Existing plugin descriptor,
 lifecycle, backup, and recovery behavior remains authoritative.
@@ -795,8 +808,9 @@ and content class, filters exact game/loader compatibility, and uses bounded
 pagination and dependency resolution. API requests use a fixed HTTPS origin,
 private authentication header, bounded responses and timeouts, and no redirects.
 Verified CurseForge artifacts use only validated official CDN JAR URLs and receive
-the configured key in the `x-api-key` request header. Redirects are refused;
-icons and other providers never receive that key. Exact publisher size and SHA-1
+the configured key in the `x-api-key` request header. Artifact downloads may follow
+at most five redirects, each within the validated HTTPS `forgecdn.net` provider
+domain; icons and other providers never receive that key. Exact publisher size and SHA-1
 remain mandatory. Discover disables installation when any of this file evidence
 is missing or ambiguous; the planner independently enforces the same checks.
 Search and install failures return a retryable provider error without exposing

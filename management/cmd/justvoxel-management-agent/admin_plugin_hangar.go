@@ -68,15 +68,38 @@ func hangarPluginPlatform(serverType string) (string, error) {
 	return "", errors.New("No Hangar platform mapping exists for the selected server type")
 }
 func resolveProviderPluginInstallPlan(ctx context.Context, server pluginServerContext, path, source, project, version string) (pluginInstallPlan, error) {
+	var plan pluginInstallPlan
+	var err error
 	switch pluginSource(source) {
 	case "Modrinth":
-		return resolvePluginInstallPlan(ctx, server, path, project, version)
+		plan, err = resolvePluginInstallPlan(ctx, server, path, project, version)
 	case "CurseForge":
-		return resolveCurseForgeInstallPlan(ctx, server, path, project, version)
+		plan, err = resolveCurseForgeInstallPlan(ctx, server, path, project, version)
 	case "Hangar":
-		return resolveHangarPluginInstallPlan(ctx, server, path, project, version)
+		plan, err = resolveHangarPluginInstallPlan(ctx, server, path, project, version)
+	default:
+		return plan, errors.New("Unsupported plugin provider")
 	}
-	return pluginInstallPlan{}, errors.New("Unsupported plugin provider")
+	if err == nil {
+		err = prepareModInstallPlan(ctx, &plan)
+	}
+	if javaServerContentKind(server.ServerType) == "mods" && err != nil && err.Error() == clientOnlyModRejection {
+		plan.Compatibility = clientOnlyModRejection
+		plan.InstallAvailable = false
+		return plan, nil
+	}
+	if err != nil && javaServerContentKind(server.ServerType) == "mods" {
+		values := map[string]string{"provider": pluginSource(source), "loader": server.ServerType, "minecraft_version": server.MinecraftVersion, "project_id": project, "release_id": version, "reason": err.Error()}
+		var diagnostic *pluginProviderDiagnosticError
+		if errors.As(err, &diagnostic) {
+			for k, v := range diagnostic.values {
+				values[k] = v
+			}
+		}
+		err = &pluginProviderDiagnosticError{reason: err.Error(), values: values}
+	}
+	plan.InstallAvailable = err == nil
+	return plan, err
 }
 
 type hangarDependency struct {

@@ -219,7 +219,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	discover := behavior[project:installed]
-	for _, want := range []string{`interactiveCard(card, project.title, () => reviewRejection`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && project.install_available`, `reviewPlugin(project.project_id, version.id, project, readOnlyReview)`} {
+	for _, want := range []string{`interactiveCard(card, project.title, () => reviewRejection`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && (project.install_available`, `reviewPlugin(project.project_id, version.id, project, readOnlyReview)`} {
 		if !strings.Contains(discover, want) {
 			t.Fatalf("Discover summary or Info missing %s", want)
 		}
@@ -387,7 +387,7 @@ func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
 	}
 	script = script[start:end]
 	for _, want := range []string{
-		`project.install_available && project.compatible && server.supported && server.minecraft_version && version?.id`,
+		`(project.install_available || server.content_kind === "mods" && project.review_available) && project.compatible && server.supported && server.minecraft_version && version?.id`,
 		`["geyser", "floodgate", "viaversion"].includes(project.slug)`,
 		`pluginRequest("install/plan"`, `plan.project_name`, `overlaySection("Compatibility")`, `plan.artifacts`, `plan.installation_location`,
 		`if (plan.confirmation_required)`, `plan.players`, `confirm_players: String(plan.confirmation_required === true)`,
@@ -2409,5 +2409,36 @@ func TestPluginWorkspaceDiagnosticErrorPayload(t *testing.T) {
 		if payload.ID != want {
 			t.Fatal("unsafe or missing diagnostic identity", rr.Body.String())
 		}
+	}
+}
+
+func TestModCompatibilityPreflightHidesInstall(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	review := pluginScriptSection(t, script, "  const reviewPlugin =", "  const resumePluginInstall =")
+	program := `
+const assert = require("node:assert/strict");
+let installGeneration=0, installController, installActions=0;
+const reason="Client-only mod — not available for this dedicated server.";
+const requests=[], results=[], loading=[];
+const contentSingular=()=>"mod", stopPolling=()=>{}, showPanel=()=>{}, closePanel=()=>{};
+const text=(tag,value)=>({tag,textContent:value});
+const panelBody={append:(node)=>loading.push(node.textContent)};
+const overlayActions=()=>{};
+const panelAction=(label)=>{if(label==="Install")installActions++;return {label}};
+const blockPluginInstall=async()=>false;
+const pluginRequest=async(path)=>{requests.push(path);return {install_available:false,compatibility:reason}};
+const panelError=(error)=>{throw error};
+` + review + `
+(async()=>{
+ await reviewPlugin("10","20",{source:"CurseForge"},reason=>results.push(reason));
+ assert.deepEqual(requests,["install/plan"]);
+ assert.deepEqual(results,[reason]);
+ assert.deepEqual(loading,["Preparing installation review…"]);
+ assert.equal(installActions,0);
+})().catch(error=>{console.error(error);process.exitCode=1});
+`
+	command := exec.Command("node", "-e", program)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("client-only mod detail offered Install: %v\n%s", err, out)
 	}
 }
