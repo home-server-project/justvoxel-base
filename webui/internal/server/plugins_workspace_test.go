@@ -1063,6 +1063,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
         const installation = await pluginRequest("operation", null, controller.signal);
         if (current !== generation) return;
         if (!pluginInventorySafe(installation.operation)) {
+          resumeActiveOperation(installation.operation, installGeneration);
           state.textContent = "Managed content operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
           inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
           return;
@@ -1094,6 +1095,69 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatal("inventory gate removed refresh, tabs or install resume", want)
 		}
+	}
+}
+
+func TestPluginsInstalledUnresolvedOperationSurfacesExistingRecovery(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	settled := pluginScriptSection(t, script, "  const pluginOperationSettled =", "  let overlayDismissible =")
+	operation := pluginScriptSection(t, script, "  const showOperation =", "  const pollOperation =")
+	resume := pluginScriptSection(t, script, "  const resumeActiveOperation =", "  const blockPluginInstall =")
+	loader := pluginScriptSection(t, script, "  const load =", "  const discoverCapacity =")
+	program := `
+const assert = require("node:assert/strict");
+class Node {
+ constructor(tag="div", textContent="", className="") { Object.assign(this,{tag,textContent,className,children:[]}); }
+ append(...nodes) { this.children.push(...nodes); }
+ setAttribute() {}
+}
+const text = (tag,value,className) => new Node(tag,value,className);
+const panel = {hidden:true}, panelBody = new Node();
+let operationViewID = null, operationIdentity = null, heading = "";
+const showPanel = () => { panel.hidden = false; panelBody.children = []; };
+const overlayHeader = value => { heading = value; };
+const panelAction = (label,click) => Object.assign(text("button",label),{click});
+const overlayActions = (...buttons) => panelBody.append(...buttons);
+const closePanel = () => { panel.hidden = true; };
+const pluginDiagnosticLink = () => {};
+const document = {body:{classList:{contains:()=>true}},createElement:tag=>new Node(tag)};
+const pluginsDialog = {open:true}, curseForgeSection = {}, pagination = {}, previous = {}, next = {}, form = {};
+const syncCurseForgeInfo = () => {}, discoverQuery = () => "", cursor = {};
+let tab = "installed", generation = 0, controller = null, installGeneration = 7, installController = null;
+let inventoryTimer = null, pollTimer = null, timerID = 0;
+const timers = new Map(), setTimeout = (fn,delay) => { timers.set(++timerID,{fn,delay}); return timerID; };
+const clearInventoryTimer = () => { timers.delete(inventoryTimer); inventoryTimer = null; };
+const state = {textContent:""}, results = {children:["stale inventory"],classList:{toggle(){}},replaceChildren(){this.children=[];}};
+const persisted = {operation_id:"persisted-unresolved",operation_type:"plugin_install",state:"needs_attention",status:"Persisted recovery needs verification"};
+const requests = [];
+const pluginRequest = async route => { requests.push(route); return {operation:persisted}; };
+const fetch = () => { throw Error("Unresolved inventory must not be fetched"); };
+const recheckBlockedInventory = () => {}, pollOperation = () => {};
+` + settled + operation + resume + `
+const pluginInventorySafe = pluginOperationSettled;
+` + loader + `
+(async () => {
+ for (const contentKind of ["plugins","mods"]) for (const operationType of ["plugin_install","plugin_remove"]) {
+  acceptedServer.content_kind = contentKind;
+  persisted.operation_type = operationType; panel.hidden = true; operationViewID = null; requests.length = 0; timers.clear();
+  results.children = ["stale inventory"];
+  await load();
+  assert.deepEqual(requests,["operation"]);
+  assert.deepEqual(results.children,[]);
+  assert.equal(state.textContent,"Managed content operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.");
+  assert.equal(panel.hidden,false);
+  assert.equal(operationViewID,persisted.operation_id);
+  assert.equal(heading,"Administrator attention required");
+  assert(panelBody.children.some(node=>node.textContent===persisted.status));
+  assert(panelBody.children.some(node=>node.textContent==="Re-check recovery" && typeof node.click==="function"));
+  assert(panelBody.children.some(node=>node.textContent==="Close" && typeof node.click==="function"));
+  assert.equal(timers.size,1);
+  assert.equal(timers.get(inventoryTimer).delay,1500);
+ }
+})().catch(error=>{console.error(error);process.exitCode=1});
+`
+	if output, err := exec.Command("node", "-e", "globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => acceptedServer.content_kind === \"mods\" ? \"mod\" : \"plugin\"; globalThis.contentPlural = () => acceptedServer.content_kind;\n"+program).CombinedOutput(); err != nil {
+		t.Fatalf("Installed persisted recovery: %v\n%s", err, output)
 	}
 }
 

@@ -7946,6 +7946,7 @@ if (pluginsDialog && pluginsOpen) {
         const installation = await pluginRequest("operation", null, controller.signal);
         if (current !== generation) return;
         if (!pluginInventorySafe(installation.operation)) {
+          resumeActiveOperation(installation.operation, installGeneration);
           state.textContent = "Managed content operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
           inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
           return;
