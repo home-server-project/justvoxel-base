@@ -6990,7 +6990,7 @@ if (pluginsDialog && pluginsOpen) {
     tile.setAttribute("aria-hidden", "true");
     tile.dataset.tone = String(Array.from(name || "?").reduce((sum, char) => sum + char.codePointAt(0), 0) & 3);
     // Search logos get one metadata retry; absent search logos start with metadata.
-    if ((source !== "CurseForge" || (typeof iconURL === "string" && iconURL)) && typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID)) {
+    if (["Modrinth", "Hangar", "CurseForge"].includes(source) && typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID)) {
       const image = document.createElement("img");
       image.alt = "";
       image.decoding = "async";
@@ -7446,6 +7446,7 @@ if (pluginsDialog && pluginsOpen) {
     pluginsDialog.querySelector('[data-plugins-tab="installed"]').click();
   };
   const reviewManagedPlugin = async (plugin, action) => {
+    const identity = { name: plugin.name || plugin.filename, source: plugin.source, project_id: plugin.project_id, icon_project_id: plugin.icon_project_id, version: plugin.version };
     stopPolling();
     const current = installGeneration;
     installController = new AbortController();
@@ -7457,7 +7458,7 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration) return;
       showPanel("Review plugin action", true);
       const label = action === "enable" ? "Enable" : action === "disable" ? "Disable" : "Remove";
-      overlayHeader(plan.project_name, "", [[plugin.version, "plugins-badge-version"], [acceptedServer?.content_kind === "mods" ? "Installed" : plan.state === "disabled" ? "Disabled" : "Enabled", acceptedServer?.content_kind === "mods" ? "plugins-badge-installed" : plan.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled"]], plan.project_id, null, undefined, plan.source);
+      overlayHeader(identity.name, "", [[plugin.version, "plugins-badge-version"], [acceptedServer?.content_kind === "mods" ? "Installed" : plan.state === "disabled" ? "Disabled" : "Enabled", acceptedServer?.content_kind === "mods" ? "plugins-badge-installed" : plan.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled"]], identity.project_id || identity.icon_project_id, null, undefined, identity.source);
       const explanation = action === "enable"
         ? "The same verified stored JAR returns to /plugins. Plugin configuration/data is preserved. Minecraft restart and active-plugin verification follow."
         : action === "disable"
@@ -7480,9 +7481,9 @@ if (pluginsDialog && pluginsOpen) {
           if (await blockPluginInstall(current)) return;
           const payload = await pluginRequest("manage", { source: plan.source || "Modrinth", action: plan.action, project_id: plan.project_id, plan_fingerprint: plan.plan_fingerprint, confirm_players: String(Boolean(players?.checked)) }, installController.signal);
           if (current !== installGeneration) return;
-          operationIdentity = { operation_id: payload.operation.operation_id, source: plugin.source, project_id: plugin.project_id, name: plugin.name, version: plugin.version };
+          if (operationIdentity?.operation_id !== payload.operation.operation_id) operationIdentity = { ...identity, operation_id: payload.operation.operation_id };
           if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
-        } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+        } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error, identity); }
       }, action === "remove" ? "plugins-remove-action" : "plugins-state-action");
       let slider = null, finalConfirm = null;
       if (action === "remove") {
@@ -7511,7 +7512,7 @@ if (pluginsDialog && pluginsOpen) {
       players?.addEventListener("change", sync);
       sync();
       overlayActions(panelAction("Cancel", returnToInstalled, true), apply);
-    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error, identity); }
   };
   const pluginRequest = async (route, body, signal) => {
     const selection = globalThis.justVoxelSelectionGeneration.plugins;
@@ -7548,9 +7549,10 @@ if (pluginsDialog && pluginsOpen) {
     }, true));
     panelBody.append(row);
   };
-  const panelError = (error) => {
+  const panelError = (error, identity = null) => {
     showPanel();
-    panelBody.append(text("h3", "Plugin operation could not continue"), text("p", error.message || "Status is unavailable. Reopen Plugins to check the persistent operation."));
+    if (identity) overlayHeader(identity.name, "", [[identity.version, "plugins-badge-version"]], identity.project_id || identity.icon_project_id, null, identity.icon_url, identity.source);
+    panelBody.append(text("p", "Plugin operation could not continue"), text("p", error.message || "Status is unavailable. Reopen Plugins to check the persistent operation."));
     pluginDiagnosticLink(error.diagnosticID);
     overlayActions(panelAction("Done", closePanel, true));
   };
@@ -7582,9 +7584,9 @@ if (pluginsDialog && pluginsOpen) {
     const attention = operation.state === "needs_attention";
     const terminal = ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(operation.state);
     const identity = operationIdentity?.operation_id === operation.operation_id ? operationIdentity : null;
-    const heading = lifecycle ? (success ? "Plugin action verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Plugin action did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Changing managed plugin") : success ? (acceptedServer?.content_kind === "mods" ? "Mods installed" : "Plugin installation verified") : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : contentSingular() === "mod" ? "Installing mod" : "Installing plugin";
+    const heading = lifecycle ? (success ? "Plugin action verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Plugin action did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Changing managed plugin") : success ? (acceptedServer?.content_kind === "mods" ? "Mods installed" : "Plugins installed") : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : contentSingular() === "mod" ? "Installing mod" : "Installing plugin";
     if (!sameOperation) {
-      overlayHeader(identity?.name || heading, "", [[identity?.version, "plugins-badge-version"]], identity?.project_id, null, undefined, identity?.source || "Modrinth");
+      overlayHeader(identity?.name || heading, "", [[identity?.version, "plugins-badge-version"]], identity?.project_id || identity?.icon_project_id, null, identity?.icon_url, identity?.source);
       operationViewID = operation.operation_id;
     } else if (!identity) panelBody.querySelector(".plugins-overlay-identity h3").textContent = heading;
     if (identity) panelBody.append(text("h3", heading));
@@ -7648,7 +7650,7 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration) return;
       if (!payload.operation) throw new Error("Installation status is unavailable.");
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(id, current), 1500);
-    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error, operationIdentity?.operation_id === id ? operationIdentity : null); }
   };
   const resumeActiveOperation = (operation, current) => {
     if (!showOperation(operation)) pollTimer = setTimeout(() => pollOperation(operation.operation_id, current), 1000);
@@ -7660,11 +7662,15 @@ if (pluginsDialog && pluginsOpen) {
     resumeActiveOperation(payload.operation, current);
     return true;
   };
-  const applyPlugin = async (plan) => {
+  const applyPlugin = async (plan, project) => {
+    // Presentation metadata never supplies identity for an installation request.
+    const matchingProject = project?.project_id === plan.project_id && project?.source === plan.source ? project : null;
+    const identity = { source: plan.source, project_id: plan.project_id, name: plan.project_name, version: plan.version_number, icon_project_id: matchingProject?.icon_project_id, icon_url: matchingProject?.icon_url };
     stopPolling();
     const current = installGeneration;
     installController = new AbortController();
     showPanel();
+    overlayHeader(identity.name, "", [[identity.version, "plugins-badge-version"]], identity.project_id || identity.icon_project_id, null, identity.icon_url, identity.source);
     panelBody.append(text("h3", "Submitting reviewed installation…"));
     try {
       if (await blockPluginInstall(current)) return;
@@ -7674,9 +7680,9 @@ if (pluginsDialog && pluginsOpen) {
       }, installController.signal);
       if (current !== installGeneration) return;
       if (!payload.operation) throw new Error("Installation did not start. Review again.");
-      operationIdentity = { operation_id: payload.operation.operation_id, source: plan.source, project_id: plan.project_id, name: plan.project_name, version: plan.version_number };
+      if (operationIdentity?.operation_id !== payload.operation.operation_id) operationIdentity = { ...identity, operation_id: payload.operation.operation_id };
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
-    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error, identity); }
   };
   const readableSize = (size) => {
     if (!Number.isFinite(size) || size < 0) return "Size unavailable";
@@ -7699,7 +7705,7 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration) return;
       if (plan.install_available === false) { readOnlyReview?.(plan.compatibility); return; }
       showPanel(`${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, true);
-      overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, panelAction("Install", () => applyPlugin(plan)), project?.project_id === plan.project_id ? project.icon_url || "" : undefined, plan.source);
+      overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, panelAction("Install", () => applyPlugin(plan, project)), project?.project_id === plan.project_id && project?.source === plan.source ? project.icon_url || "" : undefined, plan.source);
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
       const about = infoRows(overlaySection("About this version"));
       about("Release", plan.version_number);
@@ -7757,7 +7763,7 @@ if (pluginsDialog && pluginsOpen) {
       if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.");
       else if (error.message === "BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there." && readOnlyReview) readOnlyReview(error.message);
       else if (error.message === "This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server." && readOnlyReview) readOnlyReview(error.message);
-      else panelError(error);
+      else panelError(error, project ? { name: project.title, source: project.source, project_id: project.project_id, icon_project_id: project.icon_project_id, icon_url: project.icon_url } : null);
     }
   };
   const resumePluginInstall = async () => {

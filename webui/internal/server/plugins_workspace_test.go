@@ -498,7 +498,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	review := script[reviewStart:resume]
-	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about(plan.source === "Hangar" ? "Channel" : "Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `const informational = plan.display_dependencies || []`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `panelAction("Install", () => applyPlugin(plan))`} {
+	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about(plan.source === "Hangar" ? "Channel" : "Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `const informational = plan.display_dependencies || []`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `panelAction("Install", () => applyPlugin(plan, project))`} {
 		if !strings.Contains(review, want) {
 			t.Fatal("combined plugin overlay missing", want)
 		}
@@ -523,7 +523,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	progress := script[progressStart:poll]
-	for _, want := range []string{`["Prepare", "Backup", "Install", "Restart", "Verify"]`, `[operation.stage]`, `operation.state`, `operation.status`, `"Plugin installation verified"`, `"Plugin state verified"`, `"Installation did not complete"`, `"Administrator attention required"`, `"Re-check recovery"`, `pluginRequest(lifecycle ? "manage/acknowledge" : "install/acknowledge"`, `operation_id: operation.operation_id`, `payload.operation.state !== "resolved"`, `"View in Installed"`, `"Done"`, `overlayActions(`} {
+	for _, want := range []string{`["Prepare", "Backup", "Install", "Restart", "Verify"]`, `[operation.stage]`, `operation.state`, `operation.status`, `"Plugins installed"`, `"Plugin state verified"`, `"Installation did not complete"`, `"Administrator attention required"`, `"Re-check recovery"`, `pluginRequest(lifecycle ? "manage/acknowledge" : "install/acknowledge"`, `operation_id: operation.operation_id`, `payload.operation.state !== "resolved"`, `"View in Installed"`, `"Done"`, `overlayActions(`} {
 		if !strings.Contains(progress, want) {
 			t.Fatal("persistent progress action missing", want)
 		}
@@ -660,7 +660,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 		`}, projectID, undefined, plugin.source || "Modrinth")`,
 		`operationIdentity?.operation_id === operation.operation_id`,
 		`project_id: plan.project_id, name: plan.project_name`,
-		`overlayHeader(identity?.name || heading, "", [[identity?.version, "plugins-badge-version"]], identity?.project_id, null, undefined, identity?.source || "Modrinth")`,
+		`overlayHeader(identity?.name || heading, "", [[identity?.version, "plugins-badge-version"]], identity?.project_id || identity?.icon_project_id, null, identity?.icon_url, identity?.source)`,
 	} {
 		if !strings.Contains(workspace, want) {
 			t.Fatalf("identity reuse missing %s", want)
@@ -954,7 +954,7 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 		t.Fatal("Install must be passed to the identity header before details")
 	}
 	headerEnd := strings.Index(review[identity:], "\n") + identity
-	if headerEnd < install || !strings.Contains(review[identity:headerEnd], `plan.project_id, panelAction("Install", () => applyPlugin(plan))`) {
+	if headerEnd < install || !strings.Contains(review[identity:headerEnd], `plan.project_id, panelAction("Install", () => applyPlugin(plan, project))`) {
 		t.Fatal("Install must be the optional action passed within overlayHeader")
 	}
 	if strings.Count(review, `panelAction("Install"`) != 1 || strings.Contains(review, `overlayActions(panelAction("Install"`) {
@@ -1433,7 +1433,7 @@ let generation = 1, tab = "installed", inventoryTimer = null, controller = new A
 const setTimeout = (fn, delay) => { timers.set(++timerID, {fn, delay}); return timerID; };
 const clearTimeout = (id) => timers.delete(id);
 const pluginsDialog = {open:true}, panel = {hidden:true}, panelBody = {append(){}}, state = {textContent:""};
-const text = () => ({}), overlayActions = () => {}, panelAction = () => ({}), showPanel = () => {};
+const text = () => ({}), overlayActions = () => {}, overlayHeader = () => {}, panelAction = () => ({}), showPanel = () => {};
 const closePanel = () => {}, panelError = () => {}, pollOperation = () => {}, load = () => { clearInventoryTimer(); loads++; };
 const stopPolling = () => { clearTimeout(pollTimer); installController?.abort(); ++installGeneration; };
 const clearInventoryTimer = () => { clearTimeout(inventoryTimer); inventoryTimer = null; };
@@ -1586,7 +1586,7 @@ func TestPluginWorkspaceApprovedPolish(t *testing.T) {
 		}
 	}
 	review := pluginScriptSection(t, script, "  const reviewPlugin =", "  const resumePluginInstall =")
-	for _, want := range []string{`project?.project_id === plan.project_id ? project.icon_url || "" : undefined`, `This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server.`} {
+	for _, want := range []string{`project?.project_id === plan.project_id && project?.source === plan.source ? project.icon_url || "" : undefined`, `This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server.`} {
 		if !strings.Contains(review, want) {
 			t.Fatal("Discover review explanation/icon missing", want)
 		}
@@ -1780,8 +1780,23 @@ assert.equal(curseForgeImage.requests.length, 1, "source-only failure must not r
 for (const missingLogo of ["", undefined]) {
  const tile = identityTile("CurseForge example", "123", missingLogo, "CurseForge");
  assert.equal(tile.textContent, "CU");
- assert.equal(tile.image, undefined, "missing catalog logo must not request an image");
+ const image = tile.image;
+ assert(image, "CurseForge project identity must request an image without a catalog logo");
+ const url = new URL(image.src, "https://appliance.example");
+ assert.equal(url.origin, "https://appliance.example");
+ assert.equal(url.pathname, "/api/plugins/workspace/icon");
+ assert.equal(url.searchParams.get("source"), "CurseForge");
+ assert.equal(url.searchParams.get("project_id"), "123");
+ assert.equal(url.searchParams.has("icon_url"), false);
+ assert.equal([...url.searchParams].length, 2);
+ assert.equal(image.requests.length, 1);
+ image.emit("error");
+ assert.equal(image.removed, true);
+ assert.equal(image.hidden, true);
+ assert.equal(tile.textContent, "CU");
  assert.equal(tile.classList.contains("has-logo"), false);
+ for (let i = 0; i < 10; i++) image.emit("error");
+ assert.equal(image.requests.length, 1, "metadata failure must not retry");
 }
 
 assert.equal(identityTile("Manual",undefined).image,undefined);
@@ -2308,7 +2323,7 @@ func TestPluginsPlainPaginationAndSemanticBadgeStyles(t *testing.T) {
 			t.Fatal("server-specific styling", forbidden)
 		}
 	}
-	if !strings.Contains(script, `panelAction("Install", () => applyPlugin(plan))`) {
+	if !strings.Contains(script, `panelAction("Install", () => applyPlugin(plan, project))`) {
 		t.Fatal("top-right install action missing")
 	}
 }
@@ -2526,5 +2541,188 @@ const panelError=(error)=>{throw error};
 	command := exec.Command("node", "-e", program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("client-only mod detail offered Install: %v\n%s", err, out)
+	}
+}
+
+// Exercise the actual presentation helpers and submission callbacks together.
+// This covers source behavior only; rendered acceptance belongs in the VM.
+func TestPluginsWorkspaceProjectIdentityThroughOperationsAndErrors(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	identity := pluginScriptSection(t, script, "  const identityTile =", "  const overlaySection =")
+	panel := pluginScriptSection(t, script, "  const showPanel =", "  const pluginAction =")
+	manage := pluginScriptSection(t, script, "  const reviewManagedPlugin =", "  const pluginRequest =")
+	errors := pluginScriptSection(t, script, "  const pluginDiagnosticLink =", "  const showAddonOperation =")
+	operation := pluginScriptSection(t, script, "  const showOperation =", "  const resumeActiveOperation =")
+	install := pluginScriptSection(t, script, "  const applyPlugin =", "  const readableSize =")
+	review := pluginScriptSection(t, script, "  const reviewPlugin =", "  const resumePluginInstall =")
+	program := `
+const assert = require("node:assert/strict");
+class Node {
+ constructor(tag="div") {
+  this.tag=tag; this.children=[]; this.dataset={}; this.listeners={}; this.textContent="";
+  this.hidden=false; this.style={setProperty(){}}; this.attributes={};
+  const values=new Set();
+  this.classList={add:v=>values.add(v),remove:v=>values.delete(v),contains:v=>values.has(v),toggle:(v,on)=>on?values.add(v):values.delete(v)};
+ }
+ append(...nodes){for(const node of nodes){node.parent=this;this.children.push(node);}}
+ replaceChildren(...nodes){this.children=[];this.append(...nodes);}
+ remove(){this.parent.children=this.parent.children.filter(node=>node!==this);}
+ addEventListener(name,fn){this.listeners[name]=fn;}
+ setAttribute(name,value){this.attributes[name]=value;}
+ focus(){} contains(){return false;}
+ get lastElementChild(){return this.children.at(-1);}
+ querySelector(selector){return flatten(this).find(n=>selector==="button"?n.tag==="button":n.tag==="h3");}
+ querySelectorAll(){return [];}
+}
+const flatten=node=>[node,...node.children.flatMap(flatten)];
+const document={activeElement:null,createElement:tag=>new Node(tag)};
+const queueMicrotask=()=>{}, setTimeout=()=>1, clearTimeout=()=>{};
+let acceptedServer, operationIdentity=null, operationViewID=null, installGeneration=0, installController=null, pollTimer=null;
+let overlayDismissible=false, returnFocus=null, closed=0, requested=[], responsePlan, responseOperation, failureRoute=null;
+const panel=new Node(), panelBody=new Node(), workspaceShell={}, pluginsDialog={querySelector:()=>({click(){}})};
+panel.hidden=true;
+const contentSingular=()=>acceptedServer.content_kind==="mods"?"mod":"plugin";
+const text=(tag,value,className="")=>Object.assign(new Node(tag),{textContent:value,className});
+const pluginBadge=(value,className)=>text("span",value,className);
+const overlayActions=(...buttons)=>{const row=new Node("footer");row.append(...buttons);panelBody.append(row);return row;};
+const overlaySection=label=>{const node=text("section",label);panelBody.append(node);return node;};
+const infoRows=()=>()=>{}, dependencyGroups=()=>new Node(), readableSize=()=>"1 B";
+const closePanel=()=>{closed++;panel.hidden=true;operationViewID=null;}, returnToInstalled=()=>{}, load=()=>{};
+const stopPolling=()=>{++installGeneration;};
+const blockPluginInstall=async()=>false;
+const pluginAction=(label,action)=>panelAction(label,action);
+const diagnosticID="12345678-1234-4234-8234-123456789abc", opened=[];
+const window={JustVoxelSystem:{openPluginLogs:id=>opened.push(id)}};
+const failure=new Error("CurseForge official artifact URL is unsafe"); failure.diagnosticID=diagnosticID;
+const pluginRequest=async(route,body)=>{
+ requested.push({route,body});
+ if(route===failureRoute)throw failure;
+ if(route.endsWith("/plan"))return responsePlan;
+ return {operation:responseOperation};
+};
+` + identity + panel + errors + operation + install + review + manage + `
+function headerIdentity(name,source,id){
+ const header=panelBody.children[0];
+ assert.equal(header.tag,"header");
+ const title=flatten(header).find(n=>n.tag==="h3");
+ assert.equal(title.textContent,name,"literal selectable project title");
+ const tile=flatten(header).find(n=>n.className==="plugins-icon-tile");
+ assert.equal(tile.textContent,Array.from(name).slice(0,2).join("").toUpperCase());
+ const image=tile.children.find(n=>n.tag==="img");
+ assert(image,"known provider logo must use shared icon helper");
+ const url=new URL(image.src,"https://appliance.example");
+ assert.equal(url.origin,"https://appliance.example");
+ assert.equal(url.pathname,"/api/plugins/workspace/icon");
+ assert.equal(url.searchParams.get("source"),source);
+ assert.equal(url.searchParams.get("project_id"),id);
+ if(source!=="Modrinth")assert.equal(url.searchParams.has("icon_url"),false);
+ return {header,tile,image};
+}
+function button(label){const node=flatten(panelBody).find(n=>n.tag==="button"&&n.textContent===label);assert(node,label);return node;}
+function verifyStages(op,name,source,id){
+ const original=headerIdentity(name,source,id);
+ const captured=operationIdentity;
+ for(const stage of ["backup","installing","restarting","verifying"]){
+  showOperation({...op,stage});
+  assert.equal(panelBody.children[0],original.header);
+  assert.equal(operationIdentity,captured);
+ }
+ for(const state of ["succeeded","rolled_back","failed","needs_attention"]){
+  showOperation({...op,state});
+  assert.equal(headerIdentity(name,source,id).header,original.header);
+  assert.equal(operationIdentity,captured);
+ }
+ return original;
+}
+(async()=>{
+ for(const kind of ["plugins","mods"])for(const source of ["Modrinth","Hangar","CurseForge"]){
+  acceptedServer={content_kind:kind};
+  const project={title:"Adventure Mode Bypass",source,project_id:"123",icon_project_id:"123",icon_url:source==="Modrinth"?"https://cdn.modrinth.com/data/123/icon.png":source==="CurseForge"?"https://media.forgecdn.net/avatars/1/2/icon.png":"https://hangarcdn.papermc.io/icon.png"};
+  responsePlan={source,project_id:"123",project_name:project.title,version_id:"release",version_number:"1.0",server:{content_kind:kind},artifacts:[]};
+  responseOperation={operation_type:"plugin_install",operation_id:source+kind,state:"running",stage:"backup",status:"Backing up"};
+  await reviewPlugin("123","release",project);
+  const reviewed=headerIdentity(project.title,source,"123");
+  const reviewURL=reviewed.image.src;
+  await button("Install").listeners.click();
+  assert.equal(operationIdentity.name,project.title);
+  assert.equal(operationIdentity.source,source);
+  assert.equal(operationIdentity.project_id,"123");
+  assert.equal(operationIdentity.icon_url,project.icon_url);
+  assert.equal(operationIdentity.icon_project_id,project.icon_project_id);
+  const progressHeader=panelBody.children[0], capturedIdentity=operationIdentity;
+  await pollOperation(responseOperation.operation_id,installGeneration);
+  assert.equal(panelBody.children[0],progressHeader,"polling must retain the header node");
+  assert.equal(operationIdentity,capturedIdentity);
+  assert.equal(headerIdentity(project.title,source,"123").image.src,reviewURL);
+  assert(flatten(panelBody).some(n=>n.textContent==="Installing "+contentSingular()));
+  const original=verifyStages(responseOperation,project.title,source,"123");
+  showOperation({...responseOperation,state:"succeeded"});
+  assert(flatten(panelBody).some(n=>n.textContent===(kind==="mods"?"Mods installed":"Plugins installed")));
+  const captured=operationIdentity;
+  await applyPlugin({...responsePlan,project_name:"Replacement title"},project);
+  assert.equal(operationIdentity,captured,"same operation ID must keep captured identity");
+  showOperation({...responseOperation,operation_id:"unrelated"});
+  assert.notEqual(panelBody.children[0],original.header);
+  assert(!flatten(panelBody).some(n=>n.textContent===project.title),"different operation cannot inherit identity");
+  failureRoute="install/plan";
+  await reviewPlugin("123","release",project);
+  const failed=headerIdentity(project.title,source,"123");
+  const generic=flatten(panelBody).find(n=>n.textContent==="Plugin operation could not continue");
+  const reason=flatten(panelBody).find(n=>n.textContent===failure.message);
+  assert.equal(generic.tag,"p");assert.equal(reason.tag,"p");assert.equal(generic.className,reason.className);
+  assert.equal(flatten(panelBody).filter(n=>n.tag==="h3").length,1,"only project name is a title");
+  const diagnostic=flatten(panelBody).find(n=>n.className==="plugins-diagnostic-link");
+  assert.equal(diagnostic.textContent,"See System -> Logs -> Plugins for diagnostic details. ");
+  const snapshot=[...panelBody.children];button("Open Plugins logs").listeners.click();
+  assert.equal(opened.at(-1),diagnosticID);assert.deepEqual(panelBody.children,snapshot);
+  failed.image.listeners.error();
+  if(failed.tile.children.length)failed.image.listeners.error();
+  assert.equal(failed.tile.children.length,0);assert.equal(failed.tile.textContent,"AD");
+  const before=closed;button("Done").listeners.click();assert.equal(closed,before+1);
+  failureRoute="install";
+  await applyPlugin(responsePlan,project);headerIdentity(project.title,source,"123");
+  failureRoute=null;
+  // Installed uses its exact visible name, including the filename fallback.
+  for(const action of kind==="mods"?["remove"]:["enable","disable","remove"])for(const useIconID of [false,true]){
+   const plugin={source,version:"1.0",filename:"example.jar",name:useIconID?"":"Installed project",project_id:useIconID?undefined:"123",icon_project_id:useIconID?"123":undefined};
+   responsePlan={source,project_id:"123",project_name:"Plan title",action,state:"enabled"};
+   responseOperation={operation_type:"plugin_"+action,operation_id:source+kind+action+useIconID,state:"running",stage:"changing",status:"Changing"};
+   await reviewManagedPlugin(plugin,action);
+   const name=plugin.name||plugin.filename;
+   headerIdentity(name,source,"123");
+   if(action==="remove"){
+    const slider=flatten(panelBody).find(n=>n.type==="range"), confirm=flatten(panelBody).find(n=>n.type==="checkbox");
+    slider.value="100";slider.listeners.input();confirm.checked=true;confirm.listeners.change();
+   }
+   const apply=button(action[0].toUpperCase()+action.slice(1));assert.equal(apply.disabled,false);
+   await apply.listeners.click();
+   assert.equal(operationIdentity.project_id,plugin.project_id);
+   assert.equal(operationIdentity.icon_project_id,plugin.icon_project_id);
+   verifyStages(responseOperation,name,source,"123");
+   failureRoute="manage/plan";
+   await reviewManagedPlugin(plugin,action);headerIdentity(name,source,"123");
+   failureRoute=null;
+  }
+ }
+ // Mismatched provider/project metadata cannot supply an installation icon.
+ acceptedServer={content_kind:"plugins"};
+ responsePlan={source:"Modrinth",project_id:"123",project_name:"Authoritative plan",version_id:"release"};
+ for(const project of [{source:"Hangar",project_id:"123",icon_url:"unexpected"},{source:"Modrinth",project_id:"456",icon_url:"unexpected"}]){
+  responseOperation={operation_type:"plugin_install",operation_id:JSON.stringify(project),state:"running"};
+  await applyPlugin(responsePlan,project);
+  assert.equal(operationIdentity.icon_url,undefined);
+  assert.equal(requested.at(-1).body.project_id,"123");assert.equal(requested.at(-1).body.source,"Modrinth");
+ }
+ // A polling failure can carry only the identity bound to the polled operation.
+ failureRoute="operation?id="+encodeURIComponent(responseOperation.operation_id);
+ await pollOperation(responseOperation.operation_id,installGeneration);
+ headerIdentity("Authoritative plan","Modrinth","123");
+ failureRoute="operation?id=unknown";
+ await pollOperation("unknown",installGeneration);
+ assert(!flatten(panelBody).some(n=>n.tag==="header"));
+})().catch(error=>{console.error(error);process.exitCode=1;});
+`
+	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+		t.Fatalf("project presentation lifecycle: %v\n%s", err, output)
 	}
 }
