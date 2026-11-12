@@ -18,12 +18,17 @@ import (
 
 func componentModJar(t *testing.T, loader, id string) []byte {
 	t.Helper()
-	descriptor := `{"schemaVersion":1,"id":"` + id + `","version":"1","environment":"*"}`
+	return componentModJarVersion(t, loader, id, "1")
+}
+
+func componentModJarVersion(t *testing.T, loader, id, version string) []byte {
+	t.Helper()
+	descriptor := `{"schemaVersion":1,"id":"` + id + `","version":"` + version + `","environment":"*"}`
 	if loader == "quilt" {
-		descriptor = `{"quilt_loader":{"id":"` + id + `","version":"1"}}`
+		descriptor = `{"quilt_loader":{"id":"` + id + `","version":"` + version + `"}}`
 	}
 	if loader == "forge" || loader == "neoforge" {
-		descriptor = "[[mods]]\nmodId='" + id + "'\nversion='1'\n"
+		descriptor = "[[mods]]\nmodId='" + id + "'\nversion='" + version + "'\n"
 	}
 	path := filepath.Join(t.TempDir(), "mod.jar")
 	pluginTestJar(t, path, map[string]string{modDescriptor(loader): descriptor})
@@ -260,8 +265,7 @@ func TestRuntimeDependencyProviderLookupFallsBackToVerifiedLoaderIdentity(t *tes
 			addComponentRelease(t, f, "fabric", "root", "release", "root.jar", "requested_mod")
 			addComponentRelease(t, f, "fabric", "dependency", "depversion", "dependency.jar", "shared_mod")
 			// The runtime has a different release of the same local mod identity.
-			runtime := componentModJar(t, "fabric", "shared_mod")
-			runtime = append(runtime, []byte("different-release")...)
+			runtime := componentModJarVersion(t, "fabric", "shared_mod", "runtime-version")
 			recordRuntimeComponent(t, f, "fabric", "runtime.jar", runtime)
 			sum := sha512.Sum512(runtime)
 			localHash := hex.EncodeToString(sum[:])
@@ -330,8 +334,15 @@ func TestFabricRuntimeDependencyDifferentProviderArtifact(t *testing.T) {
 			v := f.versions["release"]
 			v.Dependencies = []pluginDependency{{ProjectID: "dependency", VersionID: "depversion", Type: "required"}}
 			f.versions["release"] = v
-			raw := append(componentModJar(t, "fabric", "fabric-api"), []byte("runtime release")...)
+			raw := componentModJarVersion(t, "fabric", "fabric-api", "runtime-version")
 			recordRuntimeComponent(t, f, "fabric", "fabric-api.jar", raw)
+			base := pluginCatalogClient.Transport
+			pluginCatalogClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				if strings.HasPrefix(r.URL.Path, "/v2/version_file/") && r.URL.Query().Get("algorithm") == "sha512" {
+					return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+				}
+				return base.RoundTrip(r)
+			})
 			switch state {
 			case "invalid ownership":
 				os.WriteFile(filepath.Join(f.data, "mods", "fabric-api.jar"), []byte("tampered"), 0644)
@@ -342,7 +353,8 @@ func TestFabricRuntimeDependencyDifferentProviderArtifact(t *testing.T) {
 				data, _ := json.Marshal(evidence)
 				os.WriteFile(filepath.Join(instanceRuntimes.root, "jv-a1b2c3", "crossplay-mods.json"), data, 0600)
 			case "unrelated":
-				recordRuntimeComponent(t, f, "fabric", "fabric-api.jar", componentModJar(t, "fabric", "other_runtime"))
+				raw = componentModJar(t, "fabric", "other_runtime")
+				recordRuntimeComponent(t, f, "fabric", "fabric-api.jar", raw)
 			case "root", "root same filename":
 				name := "root.jar"
 				if state == "root same filename" {

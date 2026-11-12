@@ -486,7 +486,7 @@ func TestCurseForgeFabricRuntimeLoaderIdentityReuse(t *testing.T) {
 	for _, rootProvided := range []bool{false, true} {
 		t.Run(strconv.FormatBool(rootProvided), func(t *testing.T) {
 			f, c := curseForgeCatalogFixture(t, "fabric")
-			recordRuntimeComponent(t, f, "fabric", "fabric-api.jar", append(componentModJar(t, "fabric", "fabric-api"), []byte("runtime version")...))
+			recordRuntimeComponent(t, f, "fabric", "fabric-api.jar", componentModJarVersion(t, "fabric", "fabric-api", "runtime-version"))
 			rootID := "absorbaholic"
 			if rootProvided {
 				rootID = "fabric-api"
