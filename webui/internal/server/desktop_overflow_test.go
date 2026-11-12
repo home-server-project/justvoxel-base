@@ -20,8 +20,12 @@ func TestDesktopWorkspaceViewportBounds(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 const window = { innerHeight: 800 };
-const document = { documentElement: { clientWidth: 1200 }, querySelector: () => ({ getBoundingClientRect: () => ({ bottom: 38 }) }) };
-const getComputedStyle = () => ({ fontSize: "16px", getPropertyValue: () => "6px" });
+const topbar = { getBoundingClientRect: () => ({ bottom: 36 }) };
+const document = { documentElement: { clientWidth: 1200 }, querySelector: selector => {
+  assert.equal(selector, ".app-header.topbar");
+  return topbar;
+} };
+const getComputedStyle = () => ({ fontSize: "16px", getPropertyValue: name => { assert.equal(name, "--jv-panel-gap"); return "4px"; } });
 const workspaceCompactQuery = { matches: false };
 function makeWindow(left, top, width, height) {
   const style = { left: left + "px", top: top + "px", width: width + "px", height: height + "px", setProperty(key, value) { this[key] = value; } };
@@ -32,10 +36,11 @@ function makeWindow(left, top, width, height) {
   } };
 }
 ` + script[start:end] + `
-assert.equal(workspaceTopInset(), 44);
+assert.equal(topbar.getBoundingClientRect().bottom, 36);
+assert.equal(workspaceTopInset(), 40);
 function assertFits(element) {
   const rect = element.getBoundingClientRect();
-  assert(rect.left >= 8 && rect.top >= 44);
+  assert(rect.left >= 8 && rect.top >= 40);
   assert(rect.left + rect.width <= document.documentElement.clientWidth - 8);
   assert(rect.top + rect.height <= window.innerHeight - 8);
 }
@@ -72,6 +77,7 @@ clampWorkspaceWindow(compact); assert.equal(compact.style.top, "-50px");
 		t.Fatal(err)
 	}
 	for _, want := range []string{
+		`:root{--jv-panel-gap:4px}`,
 		`body:has(> #dashboard){display:flex;flex-direction:column;height:100dvh;min-height:0}`,
 		`body>#dashboard{flex:1;min-height:0;width:100%;overflow:auto}`,
 		`dialog.workspace-window{`,

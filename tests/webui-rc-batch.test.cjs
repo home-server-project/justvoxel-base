@@ -29,7 +29,7 @@ test('Control Center matches the 32px topbar and preserves panel anchoring and g
     .find(match => declarations(match[1]).height === '32px');
   assert.ok(desktop, 'panel anchor height must be preserved at desktop widths above 600px');
   const wrapper = declarations(desktop[1]);
-  const trigger = declarations(css.match(/\.app-header \.control-center-trigger\{([^}]*height:32px;[^}]*)\}/)[1]);
+  const trigger = declarations(css.match(/@media\(min-width:601px\)\{\s*\.app-header \.control-center-trigger\{([^}]*)\}/)[1]);
   assert.equal(topbar.border, '1px solid #303942', 'preserve the topbar border color');
   assert.equal(trigger['border-color'], '#303942', 'normal desktop trigger border matches the topbar');
   assert.ok(css.includes('*{box-sizing:border-box}'));
@@ -53,7 +53,9 @@ test('Control Center matches the 32px topbar and preserves panel anchoring and g
   assert.equal(topbar.height, '32px', 'preserve the visible topbar height');
   assert.equal(topbar['min-height'], '32px');
   assert.equal(topbar['border-radius'], '12px');
-  assert.match(css, /\.control-center-trigger\{[^}]*border-radius:10px;/);
+  assert.equal(trigger['border-radius'], `0 ${topbar['border-radius']} ${topbar['border-radius']} 0`, 'desktop trigger is the right end-cap');
+  assert.equal(trigger.background, topbar.background, 'normal trigger merges with the floating frame');
+  assert.match(css, /\.control-center-trigger\{[^}]*border-radius:10px;/, 'compact trigger retains its rounded treatment');
   assert.equal(topbar.padding, '0 .5rem');
   assert.equal(topbar.margin, '4px 8px');
   assert.equal(parseFloat(topbar.height) + 2 * parseFloat(topbar.margin), 40, 'preserve the outer topbar footprint');
@@ -67,14 +69,39 @@ test('Control Center matches the 32px topbar and preserves panel anchoring and g
   }
   assert.match(css, /\.control-center\{position:relative;justify-self:end\}/);
   assert.match(css, /\.control-center-panel\{position:absolute;[^}]*right:0;/);
-  assert.ok(css.includes('@media(min-width:601px){.control-center-panel{right:calc(-.5rem - 1px)}}'));
+  assert.ok(!css.includes('.control-center-panel{right:calc(-.5rem - 1px)}'));
+  for (const panel of css.matchAll(/\.control-center-panel\{([^}]*)\}/g)) {
+    assert.doesNotMatch(panel[1], /right:\s*(?:-|calc\(\s*-)/, 'panel must not compensate the right edge again');
+  }
+  assert.equal(css.split('margin-right:calc(-.5rem - 1px)').length - 1, 1);
+  const viewportWidth = 1200;
+  const topbarRight = viewportWidth - 8;
+  const paddingRight = parseFloat(topbar.padding.split(' ')[1]) * 16;
+  const compensation = wrapper['margin-right'].match(/^calc\(-([\d.]+)rem - ([\d.]+)px\)$/);
+  assert.ok(compensation);
+  const marginRight = -Number(compensation[1]) * 16 - Number(compensation[2]);
+  const containerRight = topbarRight - parseFloat(topbar.border) - paddingRight - marginRight;
+  assert.equal(containerRight, topbarRight, 'container and trigger end at the floating frame');
+  const panel = declarations(css.match(/\.control-center-panel\{(position:absolute;[^}]*)\}/)[1]);
+  assert.equal(containerRight - parseFloat(panel.right), topbarRight, 'panel right:0 shares the same outer edge');
   assert.ok(css.includes('.control-center-panel{position:fixed;top:50px;left:.45rem;right:.45rem;bottom:.45rem;width:auto;'));
   assert.ok(css.includes('.app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}'));
   assert.ok(css.includes('.app-header .control-center-trigger{width:32px;padding:0}'));
   assert.ok(css.includes('.control-center-panel{top:44px}'));
-  assert.ok(css.includes(':root{--jv-panel-gap:6px}'));
+  assert.ok(css.includes(':root{--jv-panel-gap:4px}'));
   assert.ok(css.includes('top:calc(100% + var(--jv-panel-gap))'));
   assert.ok(!css.includes('--jv-panel-gap:.45rem'));
+  assert.ok(!css.includes('--jv-panel-gap:6px'));
+  const generic = declarations(css.match(/^\.topbar\{([^}]*)\}/m)[1]);
+  for (const obsolete of ['height', 'min-height', 'padding', 'top']) assert.equal(generic[obsolete], undefined);
+  assert.ok(!css.includes('.app-header.topbar{height:48px;'));
+  assert.equal(topbar.position, 'sticky');
+  assert.equal(topbar['z-index'], '1000');
+  assert.equal(topbar.top, '4px');
+  const topbarBottom = parseFloat(topbar.top) + parseFloat(topbar.height);
+  assert.equal(topbarBottom, 36);
+  const panelGap = parseFloat(css.match(/:root\{--jv-panel-gap:([^}]+)\}/)[1]);
+  assert.equal(topbarBottom + panelGap, 40, 'panel begins 4px below the floating frame');
   assert.ok(css.includes('.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}'));
   assert.ok(css.includes('.server-software-card.is-selected,'));
   assert.ok(!css.includes('.version-software-choice.is-current'));
@@ -94,18 +121,30 @@ test('desktop workspace clearance uses the pixel gap and measured anchor bottom'
   const start = app.indexOf('const workspaceTopInset =');
   const end = app.indexOf('const clampWorkspaceWindow =', start);
   const gap = css.match(/:root\{--jv-panel-gap:([^}]+)\}/)[1];
-  let bottom = 38;
+  let bottom = 36;
+  let anchorAvailable = true;
+  let configuredGap = gap;
   let fontSize = '16px';
   const context = vm.createContext({
-    document: { documentElement: {}, querySelector: () => ({ getBoundingClientRect: () => ({ bottom }) }) },
-    getComputedStyle: () => ({ fontSize, getPropertyValue: name => { assert.equal(name, '--jv-panel-gap'); return gap; } }),
+    document: { documentElement: {}, querySelector: selector => {
+      assert.equal(selector, ".app-header.topbar");
+      return anchorAvailable ? { getBoundingClientRect: () => ({ bottom }) } : null;
+    } },
+    getComputedStyle: () => ({ fontSize, getPropertyValue: name => { assert.equal(name, '--jv-panel-gap'); return configuredGap; } }),
   });
   vm.runInContext(app.slice(start, end) + '\nthis.topInset = workspaceTopInset;', context);
-  assert.equal(context.topInset(), 44);
+  assert.equal(context.topInset(), 40);
   fontSize = '20px';
-  assert.equal(context.topInset(), 44, 'pixel clearance is independent of root font size');
+  assert.equal(context.topInset(), 40, 'pixel clearance is independent of root font size');
   bottom = 58;
-  assert.equal(context.topInset(), 64, 'desktop positioning continues to follow its anchor');
+  assert.equal(context.topInset(), 62, 'desktop positioning continues to follow its anchor');
+  bottom = 36;
+  configuredGap = '';
+  assert.equal(context.topInset(), 40, 'missing CSS gap falls back to 4px');
+  configuredGap = 'invalid';
+  assert.equal(context.topInset(), 40, 'invalid CSS gap keeps a finite inset');
+  anchorAvailable = false;
+  assert.equal(context.topInset(), 8, 'missing anchor retains the minimum safe inset');
 });
 
 test('compact workspace families share the 44px top and retain bottom clearance', () => {

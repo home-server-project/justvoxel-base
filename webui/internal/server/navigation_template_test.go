@@ -628,10 +628,14 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"const workspaceTopInset = () => {", `document.querySelector(".control-center")`, `rootStyle.getPropertyValue("--jv-panel-gap")`, "Math.round((anchor?.getBoundingClientRect().bottom || 0) + gap)", "const minTop = workspaceTopInset();"} {
+	for _, want := range []string{"const workspaceTopInset = () => {", `document.querySelector(".app-header.topbar")`, `rootStyle.getPropertyValue("--jv-panel-gap")`, "Math.round((anchor?.getBoundingClientRect().bottom || 0) + gap)", "const minTop = workspaceTopInset();"} {
 		if !strings.Contains(string(appJS), want) {
 			t.Fatalf("workspace clearance below the floating panel missing %q", want)
 		}
+	}
+	inset := strings.Split(strings.Split(string(appJS), "const workspaceTopInset =")[1], "const clampWorkspaceWindow =")[0]
+	if strings.Contains(inset, `document.querySelector(".control-center")`) || strings.Contains(styles, "--jv-panel-gap:6px") {
+		t.Fatal("desktop geometry must use the floating topbar and shared 4px gap")
 	}
 	for _, removed := range []string{"spotlightActive", "hideSpotlight", "--voxel-x", "--voxel-y", `dashboard.addEventListener("pointermove"`} {
 		if strings.Contains(string(appJS), removed) {
@@ -1283,7 +1287,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 			t.Fatal("menu tiles must occupy one normal grid cell")
 		}
 	}
-	for _, want := range []string{`:root{--jv-panel-gap:6px}`, `top:calc(100% + var(--jv-panel-gap))`} {
+	for _, want := range []string{`:root{--jv-panel-gap:4px}`, `top:calc(100% + var(--jv-panel-gap))`} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("shared Control Center/workspace top gap missing: %s", want)
 		}

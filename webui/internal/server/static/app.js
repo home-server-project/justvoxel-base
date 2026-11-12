@@ -1837,9 +1837,9 @@ const workspaceWindowZMax = 900;
 const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
 
 const workspaceTopInset = () => {
-  const anchor = document.querySelector(".control-center") || document.querySelector(".topbar");
+  const anchor = document.querySelector(".app-header.topbar");
   const rootStyle = getComputedStyle(document.documentElement);
-  const gap = parseFloat(rootStyle.getPropertyValue("--jv-panel-gap"));
+  const gap = parseFloat(rootStyle.getPropertyValue("--jv-panel-gap")) || 4;
   return Math.max(8, Math.round((anchor?.getBoundingClientRect().bottom || 0) + gap));
 };
 

@@ -572,3 +572,39 @@ func TestWorkspaceHeadersShareControlCenterTypography(t *testing.T) {
 		}
 	}
 }
+
+func TestDesktopControlCenterEndCapGeometry(t *testing.T) {
+	data, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(data)
+	for _, want := range []string{
+		`.app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;position:sticky;top:4px;z-index:1000;border:1px solid #303942;border-radius:12px;background:#151a1f`,
+		`@media(min-width:601px){.app-header .control-center{height:32px;margin-top:-1px;margin-bottom:-1px;margin-right:calc(-.5rem - 1px)}}`,
+		"@media(min-width:601px){\n  .app-header .control-center-trigger{min-height:32px;height:32px;border-radius:0 12px 12px 0;border-color:#303942;background:#151a1f}",
+		`.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{background:#1d2a23;color:#c8f2d7}`,
+		`.app-header .control-center-trigger{width:32px;padding:0}`,
+		`.control-center-label{display:none}`,
+		`.control-center-panel{top:44px}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("attached desktop Control Center or compact contract missing %s", want)
+		}
+	}
+	if strings.Count(css, "margin-right:calc(-.5rem - 1px)") != 1 || strings.Contains(css, `.control-center-panel{right:calc(-.5rem - 1px)}`) {
+		t.Error("only the Control Center container may compensate for the topbar padding and border")
+	}
+	generic := regexp.MustCompile(`(?m)^\.topbar\{([^}]*)\}`).FindStringSubmatch(css)
+	if len(generic) != 2 {
+		t.Fatal("generic structural topbar rule missing")
+	}
+	for _, obsolete := range []string{"height:", "min-height:", "padding:", "top:"} {
+		if strings.Contains(generic[1], obsolete) {
+			t.Errorf("generic topbar must not own visible geometry: %s", obsolete)
+		}
+	}
+	if strings.Contains(css, `.app-header.topbar{height:48px;`) {
+		t.Error("floating topbar must have only one authoritative desktop height")
+	}
+}
