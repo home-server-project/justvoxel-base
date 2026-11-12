@@ -56,14 +56,14 @@ func curseForgeCatalogFixture(t *testing.T, loader string) (*pluginInstallFixtur
 		Algo  int    `json:"algo"`
 	}{hex.EncodeToString(sum[:]), 1})
 	project := curseForgeProject{ID: 10, Game: 1, Class: class, Name: "Example", Slug: "example"}
-	// Direct installation does not redistribute artifacts. This provider-only
-	// field must be ignored without adding it to production project structs.
+	// Normal projects permit installation; restrictions have dedicated cases.
 	projectRaw, _ := json.Marshal(project)
 	var projectJSON map[string]any
 	if err := json.Unmarshal(projectRaw, &projectJSON); err != nil {
 		t.Fatal(err)
 	}
-	projectJSON["allowModDistribution"] = false
+	projectJSON["allowModDistribution"] = true
+	projectJSON["isAvailable"] = true
 	curseForgeClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Scheme != "https" || r.URL.Host != "api.curseforge.com" || r.Header.Get("x-api-key") != "private-fixture-key" {
 			t.Fatal("credential origin", r.URL.Host)
@@ -398,10 +398,9 @@ func TestCurseForgeCatalogLogoNeverFiltersValidProjects(t *testing.T) {
 	}
 }
 
-func TestCurseForgeDirectInstallIgnoresRedistributionField(t *testing.T) {
+func TestCurseForgeDirectInstallAllowedDistribution(t *testing.T) {
 	f, server := curseForgeCatalogFixture(t, "fabric")
-	// The shared fixture supplies allowModDistribution=false for discovery and
-	// exact project JSON; the real resolver, review and install must all work.
+	// Allowed supplier metadata permits exact review and installation.
 	page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
 	if err != nil || len(page.Projects) != 1 || page.Projects[0].ID != "10" || page.Projects[0].InstallAvailable || !page.Projects[0].ReviewAvailable {
 		t.Fatal(page, err)
@@ -415,5 +414,145 @@ func TestCurseForgeDirectInstallIgnoresRedistributionField(t *testing.T) {
 	}
 	if journal := f.execute(t, plan, false); journal.State != operationSucceeded {
 		t.Fatal(journal)
+	}
+}
+
+func TestCurseForgeSupplierInstallability(t *testing.T) {
+	for _, loader := range []string{"fabric", "paper"} {
+		for _, state := range []string{"allowed", "forbidden", "unavailable", "absent"} {
+			t.Run(loader+"/"+state, func(t *testing.T) {
+				f, server := curseForgeCatalogFixture(t, loader)
+				base := curseForgeClient.Transport
+				downloads := 0
+				curseForgeClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+					if strings.HasSuffix(r.URL.Path, "/download-url") {
+						downloads++
+						t.Fatal("restricted project requested download URL")
+					}
+					response, err := base.RoundTrip(r)
+					if err != nil {
+						return response, err
+					}
+					var body map[string]any
+					if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+						t.Fatal(err)
+					}
+					response.Body.Close()
+					modify := func(p map[string]any) {
+						delete(p, "allowModDistribution")
+						if state != "absent" {
+							p["allowModDistribution"] = state != "forbidden"
+						}
+						p["isAvailable"] = state != "unavailable"
+					}
+					if r.URL.Path == "/v1/mods/10" {
+						modify(body["data"].(map[string]any))
+					}
+					if r.URL.Path == "/v1/mods/search" {
+						for _, p := range body["data"].([]any) {
+							modify(p.(map[string]any))
+						}
+					}
+					// Force URL fallback if installation erroneously reaches artifact resolution.
+					if r.URL.Path == "/v1/mods/10/files/20" && (state == "forbidden" || state == "unavailable") {
+						body["data"].(map[string]any)["downloadUrl"] = ""
+					}
+					raw, _ := json.Marshal(body)
+					response.Body = io.NopCloser(bytes.NewReader(raw))
+					return response, nil
+				})
+				page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
+				if err != nil || len(page.Projects) != 1 {
+					t.Fatal(page, err)
+				}
+				allowed := state == "allowed" || state == "absent"
+				card := page.Projects[0]
+				if (card.ReviewAvailable || card.InstallAvailable) != allowed {
+					t.Fatal(card)
+				}
+				plan, err := resolveProviderPluginInstallPlan(context.Background(), server, f.data, "CurseForge", "10", "20")
+				if err != nil || plan.InstallAvailable != allowed {
+					t.Fatal(plan, err)
+				}
+				if !allowed && (!strings.Contains(plan.Compatibility, "CurseForge") || downloads != 0 || f.backup || len(f.commands) != 0) {
+					t.Fatal(plan, downloads)
+				}
+			})
+		}
+	}
+}
+
+func TestCurseForgeFabricRuntimeLoaderIdentityReuse(t *testing.T) {
+	for _, rootProvided := range []bool{false, true} {
+		t.Run(strconv.FormatBool(rootProvided), func(t *testing.T) {
+			f, c := curseForgeCatalogFixture(t, "fabric")
+			recordRuntimeComponent(t, f, "fabric", "fabric-api.jar", append(componentModJar(t, "fabric", "fabric-api"), []byte("runtime version")...))
+			rootID := "absorbaholic"
+			if rootProvided {
+				rootID = "fabric-api"
+			}
+			rootRaw := componentModJar(t, "fabric", rootID)
+			depRaw := componentModJar(t, "fabric", "fabric-api")
+			makeFile := func(project, id int64, name string, raw []byte) curseForgeFile {
+				sum := sha1.Sum(raw)
+				file := curseForgeFile{ID: id, ModID: project, Game: 1, Available: true, Filename: name, DisplayName: "1", Size: int64(len(raw)), URL: "https://edge.forgecdn.net/files/1234/567/" + name, GameVersions: []string{"1.21.8", "Fabric"}, Release: 1, Status: 4, Dependencies: []curseForgeDependency{}}
+				file.Hashes = append(file.Hashes, struct {
+					Value string `json:"value"`
+					Algo  int    `json:"algo"`
+				}{hex.EncodeToString(sum[:]), 1})
+				return file
+			}
+			root := makeFile(10, 20, "root.jar", rootRaw)
+			dep := makeFile(11, 21, "dependency.jar", depRaw)
+			if !rootProvided {
+				root.Dependencies = []curseForgeDependency{{ModID: 11, Relation: 3}}
+			}
+			base := curseForgeClient.Transport
+			curseForgeClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				var payload any
+				switch r.URL.Path {
+				case "/v1/mods/10/files/20":
+					payload = map[string]any{"data": root}
+				case "/v1/mods/11":
+					payload = map[string]any{"data": curseForgeProject{ID: 11, Game: 1, Class: 6, Name: "Shared dependency"}}
+				case "/v1/mods/11/files":
+					payload = map[string]any{"data": []curseForgeFile{dep}, "pagination": curseForgePagination{0, 25, 1, 1}}
+				case "/v1/mods/11/files/21":
+					payload = map[string]any{"data": dep}
+				default:
+					return base.RoundTrip(r)
+				}
+				raw, _ := json.Marshal(payload)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+			})
+			pluginDownloadClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				raw := rootRaw
+				if filepath.Base(r.URL.Path) == "dependency.jar" {
+					raw = depRaw
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+			})
+			plan, err := resolveProviderPluginInstallPlan(context.Background(), c, f.data, "CurseForge", "10", "20")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rootProvided {
+				if plan.InstallAvailable || plan.Compatibility != runtimeModProvided {
+					t.Fatal(plan)
+				}
+			} else {
+				if !plan.InstallAvailable || len(plan.Artifacts) != 2 {
+					t.Fatal(plan)
+				}
+				for _, a := range plan.Artifacts {
+					if !a.Requested && (a.Satisfied != runtimeModSatisfied || a.ExistingFilename != "fabric-api.jar" || a.ExistingHash == "") {
+						t.Fatal(a)
+					}
+				}
+			}
+			if f.backup || len(f.commands) != 0 {
+				t.Fatal("read-only review changed runtime")
+			}
+		})
 	}
 }

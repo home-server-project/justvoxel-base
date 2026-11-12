@@ -4858,6 +4858,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const state = systemWorkspaceDialog.querySelector("[data-system-state]");
   const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
   const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
+  const allowedSystemTabs = new Set(["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "about", "ups"]);
   const administratorTabs = new Set(["health", "users", "security", "logs", "date-time", "reset"]);
   const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
@@ -6908,7 +6909,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const target = new URLSearchParams(window.location.search);
           const requested = target.get("workspace") === "system" ? target.get("tab") : "";
           currentTab = user.role === "administrator" ? "health" : "history";
-          if (["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "about"].includes(requested) &&
+          if (allowedSystemTabs.has(requested) && (requested !== "ups" || upsAvailable) &&
               (!administratorTabs.has(requested) || user.role === "administrator")) currentTab = requested;
           syncSystemTabs();
         }
@@ -6926,7 +6927,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       await window.JustVoxelSystem.openTab("logs");
     },
     openTab: async (tab) => {
-      if (!settingsPanels.has(tab)) return;
+      if (!allowedSystemTabs.has(tab) || (tab === "ups" && !upsAvailable)) return;
       if (window.JustVoxelWallpaper?.canLeave() === false) return;
       const user = await loadIdentity();
       if (!user || administratorTabs.has(tab) && user.role !== "administrator") return;
@@ -7539,7 +7540,6 @@ if (pluginsDialog && pluginsOpen) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id || "")) return;
     const row = text("p", "See System -> Logs -> Plugins for diagnostic details. ", "plugins-diagnostic-link");
     if (window.JustVoxelSystem?.openPluginLogs) row.append(panelAction("Open Plugins logs", () => {
-      workspaceWindow?.close();
       window.JustVoxelSystem.openPluginLogs(id);
     }, true));
     panelBody.append(row);

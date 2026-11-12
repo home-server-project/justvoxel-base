@@ -219,6 +219,10 @@ func modIDsOverlap(a, b []string) bool {
 }
 
 const runtimeModSatisfied = "Already provided by the server / JustVoxel runtime"
+
+var errPluginNotInstallable = errors.New("Content is not available for installation")
+
+const runtimeModProvided = "Already installed — provided and managed by the JustVoxel runtime."
 const modDependencyConflict = "Required dependency is already present but could not be verified as compatible."
 
 // Exact read-only preflight precedes operation creation. All active JAR identities
@@ -226,7 +230,7 @@ const modDependencyConflict = "Required dependency is already present but could 
 func prepareModInstallPlan(ctx context.Context, plan *pluginInstallPlan) (failure error) {
 	values := map[string]string{"provider": pluginSource(plan.Source), "loader": plan.Server.ServerType, "minecraft_version": plan.Server.MinecraftVersion, "project_id": plan.ProjectID, "release_id": plan.VersionID}
 	defer func() {
-		if failure == nil || failure.Error() == clientOnlyModRejection {
+		if failure == nil || errors.Is(failure, errPluginNotInstallable) || failure.Error() == clientOnlyModRejection {
 			return
 		}
 		var diagnostic *pluginProviderDiagnosticError
@@ -286,6 +290,7 @@ func prepareModInstallPlan(ctx context.Context, plan *pluginInstallPlan) (failur
 		return err
 	}
 	defer os.RemoveAll(directory)
+	plannedIDs := map[string]bool{}
 	for i := range plan.Artifacts {
 		a := &plan.Artifacts[i]
 		values["dependency_project_id"], values["dependency_release_id"] = a.ProjectID, a.VersionID
@@ -313,7 +318,7 @@ func prepareModInstallPlan(ctx context.Context, plan *pluginInstallPlan) (failur
 				return sideErr
 			}
 		} else {
-			hash, err := downloadVerifiedPluginArtifact(ctx, *a, directory)
+			_, err := downloadVerifiedPluginArtifact(ctx, *a, directory)
 			if err != nil {
 				return err
 			}
@@ -329,21 +334,34 @@ func prepareModInstallPlan(ctx context.Context, plan *pluginInstallPlan) (failur
 			if err != nil {
 				return err
 			}
-			// Cross-provider reuse requires exact official artifact equality as well as
-			// loader identity. Same ID alone never proves version compatibility.
-			for _, component := range runtime {
+			// Verified runtime ownership satisfies loader identity; the loader checks
+			// dependency version compatibility during transactional startup.
+			var matched *trustedModComponent
+			for j := range runtime {
+				component := &runtime[j]
 				if !modIDsOverlap(ids, component.IDs) {
 					continue
 				}
-				if a.Requested || hash != component.SHA512 || !slices.Equal(ids, component.IDs) {
-					values["dependency_state"] = "conflicting"
-					values["dependency_identity"] = strings.Join(ids, ",")
+				if matched != nil {
 					return errors.New(modDependencyConflict)
 				}
-				a.Satisfied, a.ExistingFilename, a.ExistingHash = runtimeModSatisfied, component.Filename, component.SHA512
+				matched = component
+			}
+			if matched != nil {
+				if a.Requested && !slices.Equal(ids, matched.IDs) {
+					return errors.New(modDependencyConflict)
+				}
+				a.Satisfied, a.ExistingFilename, a.ExistingHash = runtimeModSatisfied, matched.Filename, matched.SHA512
 			}
 		}
+		if a.Satisfied == "" && len(existing[a.Filename]) > 0 {
+			return errors.New("Mod target filename already exists")
+		}
 		for _, id := range ids {
+			if plannedIDs[id] {
+				return fmt.Errorf("Installation would create a duplicate mod identity: %s", id)
+			}
+			plannedIDs[id] = true
 			values["dependency_identity"] = id
 			if owner := owners[id]; owner != "" && (a.Satisfied == "" || owner != a.ExistingFilename) {
 				values["dependency_state"] = "conflicting"
@@ -352,6 +370,12 @@ func prepareModInstallPlan(ctx context.Context, plan *pluginInstallPlan) (failur
 			if a.Satisfied == "" {
 				owners[id] = a.Filename
 			}
+		}
+	}
+	for _, a := range plan.Artifacts {
+		if a.Requested && a.Satisfied == runtimeModSatisfied {
+			plan.Compatibility = runtimeModProvided
+			return errPluginNotInstallable
 		}
 	}
 	plan.Fingerprint = fingerprintPluginPlan(*plan)

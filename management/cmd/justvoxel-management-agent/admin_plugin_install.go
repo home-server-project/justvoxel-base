@@ -569,7 +569,8 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 		if a.Satisfied == "" {
 			var stat unix.Stat_t
 			err := unix.Fstatat(int(root.Fd()), a.Filename, &stat, unix.AT_SYMLINK_NOFOLLOW)
-			if err == nil || !errors.Is(err, unix.ENOENT) {
+			// A verified runtime filename is resolved by loader identity in preflight.
+			if !errors.Is(err, unix.ENOENT) && (err != nil || !slices.ContainsFunc(runtime, func(c trustedModComponent) bool { return c.Filename == a.Filename })) {
 				return errors.New("Plugin target filename already exists or cannot be safely checked")
 			}
 		}
@@ -1208,6 +1209,14 @@ func pluginService(ctx context.Context, id, action string) error {
 	return err
 }
 func verifyPluginRuntime(ctx context.Context, id, version string) error {
+	return verifyPluginRuntimeMode(ctx, id, version, false)
+}
+
+func verifyPluginInstallRuntime(ctx context.Context, id, version string) error {
+	return verifyPluginRuntimeMode(ctx, id, version, true)
+}
+
+func verifyPluginRuntimeMode(ctx context.Context, id, version string, contentInstall bool) error {
 	if err := validatePluginInstance(id, ""); err != nil {
 		return err
 	}
@@ -1234,7 +1243,12 @@ func verifyPluginRuntime(ctx context.Context, id, version string) error {
 	}
 	verify, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	output, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, version)
+	args := []string{"--instance", id}
+	if contentInstall {
+		args = append(args, "--content-install")
+	}
+	args = append(args, version)
+	output, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", args...)
 	if err != nil {
 		return &pluginRuntimeVerificationError{output: string(output[:min(len(output), 64<<10)])}
 	}
@@ -1796,7 +1810,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if _, err := s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and installed plugin runtime state."); err != nil {
 		return rollback(err)
 	}
-	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), plan.Server.MinecraftVersion); err != nil {
+	if err := verifyPluginInstallRuntime(ctx, pluginInstanceID(ctx), plan.Server.MinecraftVersion); err != nil {
 		recordPluginFailure(s.operations, id, "stack_verification", err)
 		recordPluginStartupEvidence(s.operations, id, plan.DataPath, pluginInstallExpectedNames(plan))
 		return rollback(errors.New("Existing Minecraft stack verification failed"))

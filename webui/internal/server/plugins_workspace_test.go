@@ -2325,8 +2325,8 @@ func TestPluginDiagnosticLinksUseExactLogWithoutReload(t *testing.T) {
 	if !strings.Contains(panel, "pluginDiagnosticLink(error.diagnosticID)") || !strings.Contains(operation, "pluginDiagnosticLink(operation.operation_id)") {
 		t.Fatal("exact diagnostic ID missing from a failure path")
 	}
-	if strings.Contains(link, "load()") || strings.Contains(link, "closePanel()") || !strings.Contains(link, "workspaceWindow?.close()") {
-		t.Fatal("diagnostic link must close the workspace without reloading Plugins")
+	if strings.Contains(link, "load()") || strings.Contains(link, "closePanel()") || strings.Contains(link, "workspaceWindow?.close()") {
+		t.Fatal("diagnostic link must preserve the Plugins workspace and overlay")
 	}
 	css, err := assets.ReadFile("static/app.css")
 	if err != nil || !strings.Contains(string(css), ".plugins-diagnostic-link{display:flex;align-items:center;gap:.5rem}") {
@@ -2345,11 +2345,11 @@ func TestPluginDiagnosticLinksUseExactLogWithoutReload(t *testing.T) {
 const assert = require("node:assert/strict");
 class Node {
  constructor(tag="div", value="", className="") { this.tag=tag; this.textContent=value; this.className=className; this.children=[]; this.classList={add(){}}; }
- append(...nodes){this.children.push(...nodes);} setAttribute(){} querySelector(){return null;}
+ append(...nodes){this.children.push(...nodes);} setAttribute(){} querySelector(){return new Node("h3");}
 }
 let events=[], opened=[], operationViewID=null, operationIdentity=null;
 const panel={hidden:true}, panelBody=new Node(), pluginsDialog={};
-const showPanel=()=>{panelBody.children=[];};
+const showPanel=()=>{panel.hidden=false;panelBody.children=[];};
 const text=(tag,value,className)=>new Node(tag,value,className);
 const panelAction=(label,click)=>Object.assign(new Node("button",label),{click});
 const overlayActions=(...buttons)=>{const node=new Node();node.append(...buttons);panelBody.append(node);return node;};
@@ -2370,7 +2370,7 @@ function followExactLink(){
  assert(row); assert.equal(row.tag,"p");
  assert.equal(row.textContent,"See System -> Logs -> Plugins for diagnostic details. ");
  assert.equal(row.children.length,1);assert.equal(row.children[0].textContent,"Open Plugins logs");
- events=[];row.children[0].click();assert.deepEqual(events,["close-plugins","open-system-plugins"]);assert.equal(opened.at(-1),id);
+ const children=[...panelBody.children];events=[];row.children[0].click();assert.deepEqual(events,["open-system-plugins"]);assert(!events.includes("close-plugins"));assert.equal(panel.hidden,false);assert.deepEqual(panelBody.children,children);assert.equal(opened.at(-1),id);
 }
 (async()=>{
  for(const state of ["failed","rolled_back","needs_attention"]){

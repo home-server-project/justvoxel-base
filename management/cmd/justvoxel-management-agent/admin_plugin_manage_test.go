@@ -81,6 +81,9 @@ func newPluginManageFixture(t *testing.T, state string) *pluginManageFixture {
 			}
 			return []byte("ready"), nil
 		case "/usr/libexec/justvoxel/mjust/verify-minecraft-stack":
+			if strings.Contains(strings.Join(args, " "), "--content-install") {
+				t.Fatal("plugin management must retain strict stack verification")
+			}
 			if f.duringVerify != nil {
 				f.duringVerify()
 			}

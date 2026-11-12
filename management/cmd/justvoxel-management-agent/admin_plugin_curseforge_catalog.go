@@ -174,14 +174,27 @@ type curseForgeAsset struct {
 }
 
 type curseForgeProject struct {
-	Logo    *curseForgeAsset `json:"logo"`
-	ID      int64            `json:"id"`
-	Game    int64            `json:"gameId"`
-	Class   int64            `json:"classId"`
-	Name    string           `json:"name"`
-	Slug    string           `json:"slug"`
-	Summary string           `json:"summary"`
+	Available            *bool            `json:"isAvailable,omitempty"`
+	AllowModDistribution *bool            `json:"allowModDistribution,omitempty"`
+	Logo                 *curseForgeAsset `json:"logo"`
+	ID                   int64            `json:"id"`
+	Game                 int64            `json:"gameId"`
+	Class                int64            `json:"classId"`
+	Name                 string           `json:"name"`
+	Slug                 string           `json:"slug"`
+	Summary              string           `json:"summary"`
 }
+
+func curseForgeInstallRestriction(p curseForgeProject) string {
+	if p.Available != nil && !*p.Available {
+		return "This CurseForge project is not available for installation."
+	}
+	if p.AllowModDistribution != nil && !*p.AllowModDistribution {
+		return "CurseForge does not permit third-party installation for this project."
+	}
+	return ""
+}
+
 type curseForgeDependency struct {
 	ModID    int64 `json:"modId"`
 	Relation int   `json:"relationType"`
@@ -508,7 +521,9 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 				if project.Compatible {
 					project.Compatibility = "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review."
 				}
-				if javaServerContentKind(server.ServerType) == "mods" {
+				if restriction := curseForgeInstallRestriction(p); restriction != "" {
+					project.Compatibility = restriction
+				} else if javaServerContentKind(server.ServerType) == "mods" {
 					// Discover establishes candidate identity only. Exact Review
 					// re-fetches and verifies all install-grade artifact evidence.
 					project.ReviewAvailable = server.Supported && project.Compatible && f.Game == scope.Game
@@ -609,6 +624,10 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 		if err != nil {
 			return err
 		}
+		if restriction := curseForgeInstallRestriction(metadata); restriction != "" {
+			plan.Name, plan.Description, plan.Compatibility = metadata.Name, metadata.Summary, restriction
+			return errPluginNotInstallable
+		}
 		var f curseForgeFile
 		if version != "" {
 			f, err = exactCurseForgeFile(ctx, project, version)
@@ -687,7 +706,7 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 		}
 		if a.Satisfied == "" {
 			var st unix.Stat_t
-			if err := unix.Fstatat(int(root.Fd()), a.Filename, &st, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, unix.ENOENT) {
+			if err := unix.Fstatat(int(root.Fd()), a.Filename, &st, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, unix.ENOENT) && (err != nil || !slices.ContainsFunc(runtime, func(c trustedModComponent) bool { return c.Filename == a.Filename })) {
 				return errors.New("Content target filename already exists or cannot be safely checked")
 			}
 		}

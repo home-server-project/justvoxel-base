@@ -12,6 +12,11 @@ else
     JV_INSTANCE_CONTAINER=minecraft
     JV_INSTANCE_UNIT=minecraft.service
 fi
+content_install=no
+if [[ ${1:-} == --content-install ]]; then
+    content_install=yes
+    shift
+fi
 if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
     exec 9>"${JV_MAINTENANCE_LOCK}"
     flock -n 9 || { echo 'ERROR: another Minecraft maintenance operation is running.' >&2; exit 1; }
@@ -98,7 +103,7 @@ case "${MINECRAFT_SERVER_TYPE-paper}" in
             geyser="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version')" || {
                 echo 'ERROR: Geyser version query failed.' >&2; exit 1;
             }
-            [[ ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ]] || {
+            [[ ${content_install} == yes || ( ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ) ]] || {
                 echo 'ERROR: Geyser version response could not be verified.' >&2; exit 1;
             }
             platform_name=Geyser-Fabric
@@ -164,7 +169,7 @@ elif [[ ${BEDROCK_ENABLED} == yes ]]; then
     [[ ${plugins} == *Geyser* && ${plugins,,} == *floodgate* && ${plugins} != *§cGeyser* && ${plugins,,} != *§cfloodgate* ]] || { echo 'ERROR: Cross-play plugins could not be verified.' >&2; exit 1; }
     geyser="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version')"
     printf 'Geyser: %s\n' "${geyser}"
-    [[ ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ]] || {
+    [[ ${content_install} == yes || ( ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ) ]] || {
         echo 'ERROR: Geyser version response could not be verified.' >&2; exit 1;
     }
     grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*(#.*)?$' "${DATA_PATH}/plugins/Geyser-Spigot/config.yml" || {

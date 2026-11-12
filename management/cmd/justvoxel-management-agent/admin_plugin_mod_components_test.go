@@ -250,7 +250,7 @@ func TestRuntimeComponentEvidenceFailsClosed(t *testing.T) {
 	}
 }
 
-func TestRuntimeDependencyProviderEvidenceCannotBeGuessed(t *testing.T) {
+func TestRuntimeDependencyProviderLookupFallsBackToVerifiedLoaderIdentity(t *testing.T) {
 	for _, mismatch := range []string{"project", "version", "loader", "game", "hash", "unavailable"} {
 		t.Run(mismatch, func(t *testing.T) {
 			f := newPluginInstallFixtureFor(t, "fabric", "1.21.8")
@@ -295,8 +295,8 @@ func TestRuntimeDependencyProviderEvidenceCannotBeGuessed(t *testing.T) {
 			})
 			c := pluginContentContext("fabric")
 			c.InstanceID, c.MinecraftVersion = "jv-a1b2c3", "1.21.8"
-			if _, err := resolveProviderPluginInstallPlan(context.Background(), c, f.data, "Modrinth", "root", "release"); err == nil {
-				t.Fatal("unproven runtime dependency accepted", mismatch)
+			if plan, err := resolveProviderPluginInstallPlan(context.Background(), c, f.data, "Modrinth", "root", "release"); err != nil || !plan.InstallAvailable {
+				t.Fatal("verified loader dependency was not reused after unavailable provider mapping", mismatch, err)
 			}
 			current, _ := f.s.operations.currentPluginInstall()
 			if current != nil || f.backup || len(f.commands) != 0 {
@@ -315,5 +315,111 @@ func TestGenericResolverHasNoMagicDependencyIdentity(t *testing.T) {
 		if bytes.Contains(raw, []byte("fabric-api")) {
 			t.Fatal("generic resolver contains a magic dependency identity", name)
 		}
+	}
+}
+
+func TestFabricRuntimeDependencyDifferentProviderArtifact(t *testing.T) {
+	for _, state := range []string{"different hash", "invalid ownership", "ambiguous", "unrelated", "root", "root same filename", "duplicate plan", "bad provider hash"} {
+		t.Run(state, func(t *testing.T) {
+			f := newPluginInstallFixtureFor(t, "fabric", "1.21.8")
+			if err := os.Mkdir(filepath.Join(f.data, "mods"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			addComponentRelease(t, f, "fabric", "root", "release", "root.jar", "absorbaholic")
+			addComponentRelease(t, f, "fabric", "dependency", "depversion", "dependency.jar", "fabric-api")
+			v := f.versions["release"]
+			v.Dependencies = []pluginDependency{{ProjectID: "dependency", VersionID: "depversion", Type: "required"}}
+			f.versions["release"] = v
+			raw := append(componentModJar(t, "fabric", "fabric-api"), []byte("runtime release")...)
+			recordRuntimeComponent(t, f, "fabric", "fabric-api.jar", raw)
+			switch state {
+			case "invalid ownership":
+				os.WriteFile(filepath.Join(f.data, "mods", "fabric-api.jar"), []byte("tampered"), 0644)
+			case "ambiguous":
+				os.WriteFile(filepath.Join(f.data, "mods", "second.jar"), raw, 0644)
+				sum := sha256.Sum256(raw)
+				evidence := map[string]any{"schema": 1, "platform": "fabric", "artifacts": map[string]string{"fabric-api.jar": hex.EncodeToString(sum[:]), "second.jar": hex.EncodeToString(sum[:])}}
+				data, _ := json.Marshal(evidence)
+				os.WriteFile(filepath.Join(instanceRuntimes.root, "jv-a1b2c3", "crossplay-mods.json"), data, 0600)
+			case "unrelated":
+				recordRuntimeComponent(t, f, "fabric", "fabric-api.jar", componentModJar(t, "fabric", "other_runtime"))
+			case "root", "root same filename":
+				name := "root.jar"
+				if state == "root same filename" {
+					name = "fabric-api.jar"
+				}
+				addComponentRelease(t, f, "fabric", "root", "release", name, "fabric-api")
+			case "duplicate plan":
+				addComponentRelease(t, f, "fabric", "root", "release", "root.jar", "fabric-api")
+				v = f.versions["release"]
+				v.Dependencies = []pluginDependency{{ProjectID: "dependency", VersionID: "depversion", Type: "required"}}
+				f.versions["release"] = v
+			case "bad provider hash":
+				v = f.versions["depversion"]
+				v.Files[0].Hashes.SHA512 = strings.Repeat("0", 128)
+				f.versions["depversion"] = v
+			}
+			c := pluginContentContext("fabric")
+			c.InstanceID = "jv-a1b2c3"
+			c.MinecraftVersion = "1.21.8"
+			plan, err := resolveProviderPluginInstallPlan(context.Background(), c, f.data, "Modrinth", "root", "release")
+			if state == "invalid ownership" || state == "ambiguous" || state == "duplicate plan" || state == "bad provider hash" {
+				if err == nil {
+					t.Fatal("unsafe plan accepted", plan)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasPrefix(state, "root") {
+				if plan.InstallAvailable || plan.Compatibility != runtimeModProvided || f.backup || len(f.commands) != 0 {
+					t.Fatal(plan)
+				}
+				return
+			}
+			if !plan.InstallAvailable {
+				t.Fatal(plan)
+			}
+			for _, a := range plan.Artifacts {
+				if !a.Requested {
+					if state == "unrelated" {
+						if a.Satisfied != "" {
+							t.Fatal(a)
+						}
+					} else if a.Satisfied != runtimeModSatisfied || a.ExistingFilename != "fabric-api.jar" || a.ExistingHash == a.SHA512 {
+						t.Fatal(a)
+					}
+				}
+			}
+			if state == "different hash" {
+				journal := f.execute(t, plan, false)
+				if journal.State != operationSucceeded {
+					t.Fatal(journal)
+				}
+				if _, err := os.Stat(filepath.Join(f.data, "mods", "dependency.jar")); !os.IsNotExist(err) {
+					t.Fatal("duplicate placed", err)
+				}
+			}
+		})
+	}
+}
+
+func TestPluginRuntimeVerificationModes(t *testing.T) {
+	installFixture := newPluginInstallFixture(t)
+	if journal := installFixture.execute(t, installFixture.plan(t), false); journal.State != operationSucceeded {
+		t.Fatal(journal)
+	}
+	calls := strings.Join(installFixture.commands, "\n")
+	if !strings.Contains(calls, "verify-minecraft-stack --instance jv-a1b2c3 --content-install 1.21.8") {
+		t.Fatal(calls)
+	}
+	strictFixture := newPluginInstallFixture(t)
+	strictFixture.commands = nil
+	if err := verifyPluginRuntime(context.Background(), "jv-a1b2c3", "1.21.8"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(strictFixture.commands, "\n"), "--content-install") {
+		t.Fatal(strictFixture.commands)
 	}
 }

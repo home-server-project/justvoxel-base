@@ -83,6 +83,10 @@ func resolveProviderPluginInstallPlan(ctx context.Context, server pluginServerCo
 	if err == nil {
 		err = prepareModInstallPlan(ctx, &plan)
 	}
+	if errors.Is(err, errPluginNotInstallable) {
+		plan.InstallAvailable = false
+		return plan, nil
+	}
 	if javaServerContentKind(server.ServerType) == "mods" && err != nil && err.Error() == clientOnlyModRejection {
 		plan.Compatibility = clientOnlyModRejection
 		plan.InstallAvailable = false

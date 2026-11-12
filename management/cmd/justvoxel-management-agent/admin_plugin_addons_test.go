@@ -485,6 +485,9 @@ func TestAddonRollbackAfterRuntimeFailureAndDiagnostics(t *testing.T) {
 	originalCommand := pluginInstallCommand
 	pluginInstallCommand = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
 		if cmd == "/usr/libexec/justvoxel/mjust/verify-minecraft-stack" {
+			if strings.Contains(strings.Join(args, " "), "--content-install") {
+				t.Fatal("Add-ons must retain strict stack verification")
+			}
 			if _, e := os.Stat(filepath.Join(fixture.data, p.Target)); e == nil {
 				return nil, io.ErrUnexpectedEOF
 			}

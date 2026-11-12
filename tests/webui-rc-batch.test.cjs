@@ -634,3 +634,35 @@ test('installed memory above simultaneous capacity is informational', () => {
   assert.match(status.textContent, /can remain installed/);
   assert.match(status.textContent, /cannot all run at the same time/);
 });
+
+test('System accepts bounded dynamic Logs navigation and preserves exact Plugins diagnostic IDs', async () => {
+  const allowed = app.match(/  const allowedSystemTabs = new Set\([^\n]+/)[0];
+  const start = app.indexOf('  window.JustVoxelSystem = {');
+  const end = app.indexOf('\n  systemWorkspaceOpen.addEventListener', start);
+  let opened = 0;
+  const context = vm.createContext({
+    window: {}, settingsPanels: new Map(), administratorTabs: new Set(['logs']), upsAvailable: false,
+    loadIdentity: async () => ({role: 'administrator'}), initialized: false, currentTab: 'health',
+    requestedMigrationLog: null, syncSystemTabs() {}, controlCenter: {open: true},
+    workspaceWindow: {open() { opened++; }},
+  });
+  vm.runInContext(allowed + '\n' + app.slice(start, end), context);
+  const id = '12345678-1234-4234-8234-123456789abc';
+  await context.window.JustVoxelSystem.openPluginLogs(id);
+  assert.equal(context.currentTab, 'logs');
+  assert.equal(context.requestedMigrationLog.group, 'Plugins');
+  assert.equal(context.requestedMigrationLog.id, id);
+  assert.equal(opened, 1);
+  await context.window.JustVoxelSystem.openPluginLogs(id);
+  assert.equal(opened, 2, 'already open workspace is brought to front again');
+  for (const invalid of ['../bad', 'latest', '', '12345678-1234-1234-8234-123456789abc']) {
+    await context.window.JustVoxelSystem.openPluginLogs(invalid);
+  }
+  await context.window.JustVoxelSystem.openTab('arbitrary');
+  await context.window.JustVoxelSystem.openTab('ups');
+  assert.equal(opened, 2);
+  assert.ok(app.includes('if (allowedSystemTabs.has(requested)'));
+  const setup = app.slice(app.indexOf('const setupWorkspaceWindow ='), app.indexOf('const setupWorkspaceWindow =') + 4500);
+  assert.match(setup, /const open = \(\) => \{[\s\S]*?bringToFront\(\);[\s\S]*?options.onOpen\?\.\(\);/);
+  assert.ok(app.includes('entry.category === requestedMigrationLog.group.toLowerCase() && entry.log_id === requestedMigrationLog.id'));
+});

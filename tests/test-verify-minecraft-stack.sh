@@ -10,6 +10,7 @@ cat > "${fixture_dir}/common.sh" <<'STUB'
 require_root() { :; }
 require_config() { :; }
 JV_MAINTENANCE_LOCK="${DATA_PATH}/lock"
+fixture_ownership() { [[ ${OWNERSHIP_FAIL:-no} != yes ]]; }
 systemctl() { [[ ${ACTIVE:-yes} == yes ]]; }
 wait_for_rcon() { [[ ${READY:-yes} == yes ]]; }
 sleep() { printf '%s\n' "$1" >> "${DATA_PATH}/sleeps"; }
@@ -24,7 +25,7 @@ podman() {
             (( $(wc -l < "${DATA_PATH}/monitor-probes") > ${MONITOR_FAILURES:-0} )) || return 1
             printf '%s' "${MONITOR_RESPONSE}"
             ;;
-        list) printf 'There are 0 of a max of 10 players online' ;;
+        list) [[ ${LIST_FAIL:-no} != yes ]] || return 1; printf 'There are 0 of a max of 10 players online' ;;
         version) [[ ${VERSION_FAIL:-no} != yes ]] || return 1; [[ ${MINECRAFT_SERVER_TYPE:-paper} != vanilla ]] || { echo 'Unexpected Vanilla version command' >&2; return 1; }; if [[ ${TRANSIENT:-no} == yes ]]; then
             count=$(cat "${DATA_PATH}/probes" 2>/dev/null || printf 0)
             printf '%s' "$((count + 1))" > "${DATA_PATH}/probes"
@@ -36,7 +37,8 @@ podman() {
     esac
 }
 STUB
-sed "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
+sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
+    -e "s|/usr/libexec/justvoxel/mjust/managed-crossplay-mod-ownership|fixture_ownership|g" \
     "${repo_root}/mjust/libexec/verify-minecraft-stack" > "${fixture_dir}/verify"
 bash "${fixture_dir}/verify" 26.2
 VERSION_RESPONSE='This server is running Paper (MC: 26.2)' bash "${fixture_dir}/verify" 26.2
@@ -195,6 +197,37 @@ for software in forge neoforge fabric quilt; do
         MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' bash "${fixture_dir}/verify" 1.21.1; then
         echo 'Wrong loader implementation accepted' >&2; exit 1
     fi
+done
+# Content installation ignores only unstable Geyser human-readable text.
+for software in fabric neoforge; do
+    platform=Geyser-Fabric
+    marker='Loading Minecraft 1.21.1 with Fabric Loader 0.16.10'
+    if [[ ${software} == neoforge ]]; then
+        platform=Geyser-NeoForge
+        marker='NeoForge mod loading, version 0.16.10, for MC 1.21.1'
+    fi
+    mkdir -p "${DATA_PATH}/config/${platform}"
+    printf 'auth-type: floodgate\n' > "${DATA_PATH}/config/${platform}/config.yml"
+    printf '%s\n' "${marker}" > "${DATA_PATH}/logs/latest.log"
+    content_verify() {
+        env JV_INSTANCE_ID=jv-aaaaaa MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION=0.16.10 BEDROCK_ENABLED=yes \
+            MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' GEYSER_RESPONSE='Información del puente: edición actual' "$@" bash "${fixture_dir}/verify" --content-install 1.21.1
+    }
+    if JV_INSTANCE_ID=jv-aaaaaa MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION=0.16.10 BEDROCK_ENABLED=yes \
+        MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' GEYSER_RESPONSE='Información del puente: edición actual' \
+        bash "${fixture_dir}/verify" 1.21.1 2>"${fixture_dir}/geyser-error"; then
+        echo 'Normal Geyser verification weakened' >&2; exit 1
+    fi
+    grep -Fxq 'ERROR: Geyser version response could not be verified.' "${fixture_dir}/geyser-error"
+    content_verify
+    for failure in 'OWNERSHIP_FAIL=yes' 'ACTIVE=no' 'READY=no' 'LIST_FAIL=yes' 'MINECRAFT_LOADER_VERSION=wrong' 'MONITOR_RESPONSE={"server_info":{"version":{"name":"1.21.2"}}}'; do
+        if content_verify "${failure}"; then echo "Invalid content runtime accepted: ${failure}" >&2; exit 1; fi
+    done
+    printf 'Another Loader 0.16.10\n' > "${DATA_PATH}/logs/latest.log"
+    if content_verify; then echo 'Wrong content loader marker accepted' >&2; exit 1; fi
+    printf '%s\n' "${marker}" > "${DATA_PATH}/logs/latest.log"
+    printf 'auth-type: online\n' > "${DATA_PATH}/config/${platform}/config.yml"
+    if content_verify; then echo 'Wrong content auth config accepted' >&2; exit 1; fi
 done
 # Enrollment overrides saved standalone cross-play settings for Paper/Purpur.
 for software in paper purpur; do
