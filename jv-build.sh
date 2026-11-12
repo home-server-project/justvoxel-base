@@ -72,6 +72,9 @@ assert_base_unchanged() {
     [[ "$(base_digest_now)" == "${base_digest}" ]] || fail 'Home Server Base stable moved during the build; rerun ./jv-build.sh.'
 }
 
+stage 'Clean dangling images from prior local builds'
+sudo podman image prune -f
+
 stage 'Verify Home Server Base stable and refresh the reusable builder'
 # Verify the exact manifest as well as the channel, preventing a tag-movement race.
 cosign verify --new-bundle-format=false --key ./cosign.pub "${base_image}" >/dev/null
@@ -300,6 +303,9 @@ sudo podman run --rm \
     bootc container lint --fatal-warnings
   '
 
+stage 'Remove validated build temporary image'
+sudo podman image rm localhost/justvoxel-base:unrechunked
+
 stage 'Push immutable image, sign and verify its exact digest'
 # Check registry availability and refuse to overwrite an immutable tag.
 skopeo list-tags --tls-verify=false "docker://${repository}" >"${work_dir}/tags.json"
@@ -320,11 +326,11 @@ skopeo copy --src-tls-verify=false --dest-tls-verify=false --preserve-digests \
     "docker://${repository}@${digest}" "docker://${repository}:dev"
 [[ "$(skopeo inspect --tls-verify=false --no-tags --format '{{.Digest}}' "docker://${repository}:dev")" == "${digest}" ]]
 
-stage 'Retain newest five immutable dev images'
+stage 'Retain newest two immutable dev images'
 # Registry v2 deletes by digest, not tag. Resolve everything before deleting and
 # protect every digest also referenced by a retained, moving or unrelated tag.
 skopeo list-tags --tls-verify=false "docker://${repository}" >"${work_dir}/tags.json"
-jq -r '(.Tags // []) | map(select(startswith("dev-"))) | sort | reverse | .[5:][]' \
+jq -r '(.Tags // []) | map(select(startswith("dev-"))) | sort | reverse | .[2:][]' \
     "${work_dir}/tags.json" >"${work_dir}/expired-tags"
 declare -A protected_digests=()
 declare -A expired_digests=()
@@ -346,6 +352,9 @@ for tag_digest in "${!expired_digests[@]}"; do
     curl --fail --silent --show-error -X DELETE "${registry_api}/manifests/${tag_digest}"
     printf 'Removed expired manifest: %s\n' "${expired_digests[${tag_digest}]}"
 done
+
+stage 'Clean dangling images from the completed local build'
+sudo podman image prune -f
 
 stage 'Local development build complete'
 printf 'WebUI version: %s\nManagement Agent: %s\nHome Server Base: %s\nImmutable tag: %s:%s\nMoving tag: %s:dev\nFinal digest: %s\nRechunked layers: %s / 128\n' \
