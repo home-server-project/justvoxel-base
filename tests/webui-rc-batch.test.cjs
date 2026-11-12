@@ -20,8 +20,8 @@ class Element {
   querySelectorAll(tag) { return this.all().filter(node => node.tag === tag); }
 }
 
-test('Control Center fits inside the 36px topbar and preserves panel anchoring and green frame', () => {
-  assert.doesNotMatch(css, /margin-right:\s*calc\(-\.5rem - 1px\)/);
+test('Control Center matches the 32px topbar and preserves panel anchoring and green frame', () => {
+  assert.ok(css.includes('@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}'));
   assert.match(css, /\.app-header\.topbar\{[^}]*padding:0 \.5rem;[^}]*border:1px solid/);
   const declarations = block => Object.fromEntries(block.split(';').filter(Boolean).map(value => value.trim().split(':')));
   const topbar = declarations([...css.matchAll(/\.app-header\.topbar\{([^}]*)\}/g)].findLast(match => match[1].startsWith('height:'))[1]);
@@ -35,13 +35,13 @@ test('Control Center fits inside the 36px topbar and preserves panel anchoring a
   assert.ok(css.includes('*{box-sizing:border-box}'));
   assert.match(css, /\.topbar\{display:grid;[^}]*align-items:center;/);
   assert.equal(wrapper.height, '32px', 'preserve the panel containing block height');
-  assert.equal(topbar.height, '36px', 'contain the 32px trigger inside the border');
-  assert.equal(topbar['min-height'], '36px');
+  assert.equal(topbar.height, '32px', 'preserve the visible topbar height');
+  assert.equal(topbar['min-height'], '32px');
   assert.equal(topbar['border-radius'], '12px');
   assert.match(css, /\.control-center-trigger\{[^}]*border-radius:10px;/);
   assert.equal(topbar.padding, '0 .5rem');
   assert.equal(topbar.margin, '4px 8px');
-  assert.equal(parseFloat(topbar.height) + 2 * parseFloat(topbar.margin), 44, 'include the existing outer margins');
+  assert.equal(parseFloat(topbar.height) + 2 * parseFloat(topbar.margin), 40, 'preserve the outer topbar footprint');
   assert.ok(css.includes('.quick-look{position:fixed;top:40px;'));
   assert.equal(trigger.height, '32px');
   assert.equal(trigger['min-height'], '32px');
@@ -52,6 +52,7 @@ test('Control Center fits inside the 36px topbar and preserves panel anchoring a
   }
   assert.match(css, /\.control-center\{position:relative;justify-self:end\}/);
   assert.match(css, /\.control-center-panel\{position:absolute;[^}]*right:0;/);
+  assert.ok(css.includes('@media(min-width:601px){.control-center-panel{right:calc(-.5rem - 1px)}}'));
   assert.ok(css.includes('.control-center-panel{position:fixed;top:50px;left:.45rem;right:.45rem;bottom:.45rem;width:auto;'));
   assert.ok(css.includes('.app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}'));
   assert.ok(css.includes('.app-header .control-center-trigger{width:32px;padding:0}'));
@@ -63,6 +64,15 @@ test('Control Center fits inside the 36px topbar and preserves panel anchoring a
   assert.ok(css.includes('.server-software-card.is-selected,'));
   assert.ok(!css.includes('.version-software-choice.is-current'));
   assert.ok(!css.includes('.server-software-card.is-current'));
+});
+
+test('Control Center heading escapes panel padding and shares the 36px workspace lane', () => {
+  assert.ok(css.includes('*{box-sizing:border-box}'));
+  assert.ok(css.includes('.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:36px;min-height:36px;margin:-.8rem -.8rem .8rem;padding:0 var(--jv-workspace-edge);border-bottom:1px solid var(--jv-border);border-radius:13px 13px 0 0}'));
+  const panelPadding = [...css.matchAll(/\.control-center-panel\{([^}]*)\}/g)]
+    .flatMap(match => match[1].split(';').filter(value => value.startsWith('padding:')));
+  assert.deepEqual(panelPadding, ['padding:.8rem'], 'all panel sizes retain the padding matched by the heading escape');
+  assert.match(css, /\.workspace-window :is\(\.system-update-dialog-header,[^}]+\)\{[^}]*height:36px;min-height:36px;[^}]*padding:0 var\(--jv-workspace-edge\);/);
 });
 
 test('desktop workspace clearance uses the pixel gap and measured anchor bottom', () => {

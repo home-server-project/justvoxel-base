@@ -605,7 +605,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 		t.Fatal("authenticated header rule is incomplete")
 	}
 	header := styles[headerStart+len(".app-header.topbar{") : headerStart+headerEnd]
-	for _, want := range []string{"height:36px", "min-height:36px", "margin:4px 8px", "padding:0 .5rem", "top:4px", "border-radius:12px"} {
+	for _, want := range []string{"height:32px", "min-height:32px", "margin:4px 8px", "padding:0 .5rem", "top:4px", "border-radius:12px"} {
 		if !strings.Contains(";"+header+";", ";"+want+";") {
 			t.Fatalf("authenticated header must retain %s", want)
 		}
@@ -1263,15 +1263,10 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if !strings.Contains(markup, `<a class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
 		t.Fatal("How to connect must reuse shared button styling and retain its destination")
 	}
-	if !strings.Contains(styles, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:36px;min-height:36px;padding:0 .2rem}`) {
+	if !strings.Contains(styles, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:36px;min-height:36px;margin:-.8rem -.8rem .8rem;padding:0 var(--jv-workspace-edge);border-bottom:1px solid var(--jv-border);border-radius:13px 13px 0 0}`) {
 		t.Fatal("Control Center title lane must share the 36px workspace header rhythm")
 	}
 
-	for _, rule := range regexp.MustCompile(`(?m)^\.control-center-heading\{([^}]*)\}`).FindAllStringSubmatch(styles, -1) {
-		if strings.Contains(rule[1], "border-bottom:") || strings.Contains(rule[1], "border:") {
-			t.Fatal("Control Center heading must not have a divider before Session & Power")
-		}
-	}
 	headingGap := strings.Split(strings.Split(markup, `<h2>Control Center</h2>`)[1], `<section class="control-section control-session">`)[0]
 	if strings.Contains(headingGap, "<hr") {
 		t.Fatal("extra divider before Session & Power")

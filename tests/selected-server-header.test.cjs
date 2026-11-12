@@ -430,7 +430,7 @@ for (const workspace of workspaces) {
 
 test('shared details selector renders safe icon/name summaries and every option, including missing icons', async () => {
   const servers = [
-    {id:'jv-paper01',name:'Paper1',software_icon:'/static/server-software/paper.svg'},
+    {id:'jv-paper01',name:'MyWhatSoEverMinecraftAmazingServer',software_icon:'/static/server-software/paper.svg'},
     {id:'jv-purpur1',name:'Kids',software_icon:'/static/server-software/purpur.svg'},
     {id:'jv-unknown',name:'<img src=x onerror=alert(1)>'},
   ];
@@ -447,7 +447,7 @@ test('shared details selector renders safe icon/name summaries and every option,
     p.select(workspace).open = true;
     p.change(workspace,'jv-paper01');
     assert.equal(p.selected(workspace),'jv-paper01');
-    assert.equal(p.summary(workspace).textContent,'Paper1');
+    assert.equal(p.summary(workspace).textContent,'MyWhatSoEverMinecraftAmazingServer');
     assert.equal(p.summary(workspace).children[0].src,servers[0].software_icon);
     assert.equal(p.select(workspace).open,false);
     assert.equal(p.summary(workspace).focused,true);
@@ -549,7 +549,7 @@ test('Quick Look keeps one stationary drawer with shared network row spacing', (
   assert.equal((quick.match(/fetch\("\/api\/network\/remote-access"/g) || []).length, 1);
 });
 
-test('shared headers contain one shrinkable title and selector lane with fixed actions', () => {
+test('shared headers shrink the title before the full-name selector with fixed actions', () => {
   const css = readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8');
   const rule = selector => {
     const start = css.indexOf(`${selector}{`);
@@ -567,14 +567,18 @@ test('shared headers contain one shrinkable title and selector lane with fixed a
   assert.match(rule('.workspace-window [data-workspace-drag-handle]>div:first-child h2'), /min-width:0/);
   assert.match(css, /\.system-update-dialog-header>div:first-child h2[^{}]*\{[^}]*white-space:nowrap;overflow:hidden;text-overflow:ellipsis/);
   const actions = rule('.workspace-window .selected-server-header-actions');
-  assert.match(actions, /flex:0 1 auto;min-width:0;max-width:100%;flex-wrap:nowrap/);
-  assert.doesNotMatch(actions, /flex:none|width:max-content/);
-  assert.match(rule('.workspace-window .selected-server-header-actions>[data-server-selector-slot]'), /flex:0 1 auto;min-width:4rem;max-width:100%/);
-  assert.match(rule('.workspace-window .selected-server-header-actions .server-selector'), /width:100%;min-width:0;max-width:100%/);
+  assert.match(actions, /flex:none;flex-wrap:nowrap/);
+  assert.doesNotMatch(actions, /max-width:|flex:0 1 auto/);
+  assert.match(rule('.workspace-window .selected-server-header-actions>[data-server-selector-slot]'), /display:block;flex:none$/);
+  assert.match(rule('.workspace-window .selected-server-header-actions .server-selector'), /width:max-content;max-width:none$/);
   assert.match(rule('.workspace-window :is(.workspace-header-refresh,.workspace-header-close)'), /flex:none/);
   assert.match(rule('.workspace-window .selected-server-header-actions>:is(.workspace-header-refresh,.workspace-header-close)'), /flex:none/);
   assert.match(rule('.workspace-window .selected-server-header-actions .server-selector>summary::after'), /flex:none/);
   assert.match(rule('.workspace-window .server-selector>summary'), /height:32px;min-height:32px;[^}]*border-radius:10px/);
   assert.match(rule('.server-selector span'), /overflow:hidden;text-overflow:ellipsis;white-space:nowrap/);
+  assert.match(rule('.workspace-window .selected-server-header-actions .server-selector>summary>span'), /overflow:visible;text-overflow:clip;white-space:nowrap;flex:none/);
   assert.match(rule('.server-selector-icon'), /flex:none/);
+  assert.equal(rule('[data-server-selector-compact] .server-selector'), 'width:100%');
+  assert.equal(rule('[data-server-selector-compact] .server-selector>summary'), 'padding:.15rem .3rem;font-size:.75rem');
+  assert.equal(rule('[data-server-selector-compact] .server-selector-icon'), 'width:16px;height:16px');
 });

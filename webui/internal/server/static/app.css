@@ -62,7 +62,7 @@
 .control-center-icon{color:inherit!important;font-size:1.05rem}
 .control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .control-center-panel{position:absolute;top:calc(100% + var(--jv-panel-gap));right:0;width:min(620px,calc(100vw - 1.5rem));max-height:calc(100vh - 64px);overflow:auto;padding:.8rem;border:1px solid #303942;border-radius:14px;background:#151a1ff7;box-shadow:0 22px 60px #0009;backdrop-filter:blur(12px)}
-.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:36px;min-height:36px;padding:0 .2rem}
+.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:36px;min-height:36px;margin:-.8rem -.8rem .8rem;padding:0 var(--jv-workspace-edge);border-bottom:1px solid var(--jv-border);border-radius:13px 13px 0 0}
 .control-navigation{display:grid;gap:.7rem;margin-top:.7rem}
 .control-section{padding:.65rem;border:1px solid #293139;border-radius:12px;background:#10161a}
 .control-section-label{display:block;margin:0 0 .5rem;color:#89959e!important;font-size:.68rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
@@ -87,7 +87,7 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
   .topbar-clock{min-width:56px;padding:.3rem .4rem;font-size:.82rem}
   .control-center-label{display:none}
   .control-center-trigger{width:38px;height:38px;padding:0}
-  .control-center-panel{position:fixed;top:50px;left:.45rem;right:.45rem;bottom:.45rem;width:auto;max-height:none;border-radius:14px;padding:.65rem}
+  .control-center-panel{position:fixed;top:50px;left:.45rem;right:.45rem;bottom:.45rem;width:auto;max-height:none;border-radius:14px}
   .control-tile-grid{grid-template-columns:1fr 1fr}
   .control-tile{padding:.6rem}
   .control-tile span{display:none}
@@ -212,7 +212,7 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
 
 .control-center-trigger{min-height:40px;padding:.38rem .72rem}
 .control-center-icon{font-size:1.35rem;line-height:1}
-.control-center-panel{width:min(560px,calc(100vw - 1.5rem));padding:.7rem}
+.control-center-panel{width:min(560px,calc(100vw - 1.5rem))}
 .control-navigation{gap:.55rem;margin-top:.55rem}
 .control-section{padding:.55rem}
 .control-section-label{margin-bottom:.4rem}
@@ -716,10 +716,10 @@ input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggl
 
 
 /* Shared compact workspace chrome. Title descendants outrank historical family rules. */
-.system-update-dialog-header>div:first-child,.system-monitor-header>div:first-child,.storage-workspace-header>div:first-child,.backups-workspace-header>div:first-child,.minecraft-workspace-header>div:first-child,.system-workspace-header>div:first-child,.migration-workspace-header>div:first-child,.version-workspace-header>div:first-child,.plugins-workspace-header>div:first-child,.network-workspace-header>div:first-child,.control-center-heading>div:first-child{display:flex;align-items:baseline;gap:.38rem;min-width:0}
-.system-update-dialog-header>div:first-child .eyebrow,.system-monitor-header>div:first-child .eyebrow,.storage-workspace-header>div:first-child .eyebrow,.backups-workspace-header>div:first-child .eyebrow,.minecraft-workspace-header>div:first-child .eyebrow,.system-workspace-header>div:first-child .eyebrow,.migration-workspace-header>div:first-child .eyebrow,.version-workspace-header>div:first-child .eyebrow,.plugins-workspace-header>div:first-child .eyebrow,.network-workspace-header>div:first-child .eyebrow,.control-center-heading>div:first-child .eyebrow{margin:0;white-space:nowrap;color:#78c99d;font-family:inherit;font-size:.72rem;font-weight:400;letter-spacing:.12em;text-transform:uppercase;line-height:normal}
+.system-update-dialog-header>div:first-child,.system-monitor-header>div:first-child,.storage-workspace-header>div:first-child,.backups-workspace-header>div:first-child,.minecraft-workspace-header>div:first-child,.system-workspace-header>div:first-child,.migration-workspace-header>div:first-child,.version-workspace-header>div:first-child,.plugins-workspace-header>div:first-child,.workspace-window .network-workspace-header>div:first-child,.control-center-heading>div:first-child{display:flex;align-items:baseline;gap:.32rem;min-width:0}
+.system-update-dialog-header>div:first-child .eyebrow,.system-monitor-header>div:first-child .eyebrow,.storage-workspace-header>div:first-child .eyebrow,.backups-workspace-header>div:first-child .eyebrow,.minecraft-workspace-header>div:first-child .eyebrow,.system-workspace-header>div:first-child .eyebrow,.migration-workspace-header>div:first-child .eyebrow,.version-workspace-header>div:first-child .eyebrow,.plugins-workspace-header>div:first-child .eyebrow,.network-workspace-header>div:first-child .eyebrow,.control-center-heading>div:first-child .eyebrow{margin:0;white-space:nowrap;color:#78c99d;font-family:inherit;font-size:.68rem;font-weight:400;letter-spacing:.12em;text-transform:uppercase;line-height:normal}
 .system-update-dialog-header>div:first-child .eyebrow::after,.system-monitor-header>div:first-child .eyebrow::after,.storage-workspace-header>div:first-child .eyebrow::after,.backups-workspace-header>div:first-child .eyebrow::after,.minecraft-workspace-header>div:first-child .eyebrow::after,.system-workspace-header>div:first-child .eyebrow::after,.migration-workspace-header>div:first-child .eyebrow::after,.version-workspace-header>div:first-child .eyebrow::after,.plugins-workspace-header>div:first-child .eyebrow::after,.network-workspace-header>div:first-child .eyebrow::after,.control-center-heading>div:first-child .eyebrow::after{content:" ·"}
-.system-update-dialog-header>div:first-child h2,.system-monitor-header>div:first-child h2,.storage-workspace-header>div:first-child h2,.backups-workspace-header>div:first-child h2,.minecraft-workspace-header>div:first-child h2,.system-workspace-header>div:first-child h2,.migration-workspace-header>div:first-child h2,.version-workspace-header>div:first-child h2,.plugins-workspace-header>div:first-child h2,.network-workspace-header>div:first-child h2,.control-center-heading>div:first-child h2{margin:0;font-family:inherit;font-size:1.05rem;font-weight:700;line-height:normal;color:var(--jv-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.system-update-dialog-header>div:first-child h2,.system-monitor-header>div:first-child h2,.storage-workspace-header>div:first-child h2,.backups-workspace-header>div:first-child h2,.minecraft-workspace-header>div:first-child h2,.system-workspace-header>div:first-child h2,.migration-workspace-header>div:first-child h2,.version-workspace-header>div:first-child h2,.plugins-workspace-header>div:first-child h2,.network-workspace-header>div:first-child h2,.control-center-heading>div:first-child h2{margin:0;font-family:inherit;font-size:.98rem;font-weight:700;line-height:normal;color:var(--jv-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .system-update-dialog-header .system-monitor-header-button,.system-monitor-header .system-monitor-header-button,.storage-workspace-header .system-monitor-header-button,.backups-workspace-header .system-monitor-header-button,.minecraft-workspace-header .system-monitor-header-button,.system-workspace-header .system-monitor-header-button,.migration-workspace-header .system-monitor-header-button{width:32px;height:32px;border-radius:8px;font-size:1.08rem}
 
 /* Network overlay addresses in the IPv4 tile. */
@@ -891,7 +891,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .version-workspace-dialog{position:absolute;width:min(820px,calc(100vw - 1rem));height:min(720px,calc(100dvh - 76px));min-width:min(560px,calc(100vw - 1rem));min-height:min(360px,calc(100dvh - 76px));max-width:calc(100vw - 1rem);max-height:calc(100dvh - 76px);padding:0;overflow:hidden;resize:both;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
 .version-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0}
 .version-workspace-header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:1rem;border-bottom:1px solid #303942;cursor:move;touch-action:none}
-.version-workspace-header>div{display:flex;align-items:baseline;gap:.38rem;min-width:0}.version-workspace-header .eyebrow{margin:0;white-space:nowrap}.version-workspace-header .eyebrow::after{content:" ·"}.version-workspace-header h2{margin:0;font-size:1.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.version-workspace-header>div{display:flex;align-items:baseline;gap:.38rem;min-width:0}.version-workspace-header .eyebrow{margin:0;white-space:nowrap}.version-workspace-header .eyebrow::after{content:" ·"}.version-workspace-header h2{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .version-workspace-tabs{display:flex;flex:none;gap:.35rem;padding:.55rem .8rem;border-bottom:1px solid #303942;background:#11171b;overflow-x:auto}
 .version-workspace-tabs button{padding:.5rem .8rem;border:1px solid transparent;border-radius:9px;background:transparent;color:#aeb8c0}
 .version-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}
@@ -1427,8 +1427,11 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 }
 @media(max-width:430px){.version-selection-row{flex-wrap:wrap}.version-selection-row>label,.version-selection-row>select{flex-basis:100%}}
 
-/* Floating panel: the visible bar is 36px plus 4px top/bottom margins for a 44px outer footprint; workspaces measure its bottom. */
-.app-header.topbar{height:36px;min-height:36px;margin:4px 8px;padding:0 .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+/* Floating panel: the visible bar is 32px plus 4px top/bottom margins for a 40px outer footprint; workspaces measure its bottom. */
+.app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+/* Offset desktop padding and border so trigger and panel share the outer edge. */
+@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}
+@media(min-width:601px){.control-center-panel{right:calc(-.5rem - 1px)}}
 .app-header .brand-mark{min-height:32px;padding:1px .35rem}
 .app-header .brand-logo{width:28px;height:28px}
 .app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:#303942}
@@ -1526,7 +1529,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-workspace-dialog{position:absolute;width:min(980px,calc(100vw - 1rem));height:min(740px,var(--jv-workspace-height,calc(100dvh - 76px)));min-width:min(540px,calc(100vw - 1rem));min-height:min(360px,calc(100dvh - 76px));max-width:calc(100vw - 1rem);max-height:calc(100dvh - 76px);padding:0;overflow:hidden;resize:both;border:1px solid var(--jv-border-strong,#3b454e);border-radius:16px;background:var(--jv-surface,#171d22);color:var(--jv-text,#eef1f4);box-shadow:0 28px 80px #000b}
 .plugins-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0}
 .plugins-workspace-header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:1rem;border-bottom:1px solid var(--jv-border,#303942);cursor:move;touch-action:none}
-.plugins-workspace-header>div{display:flex;align-items:baseline;gap:.38rem;min-width:0}.plugins-workspace-header .eyebrow{margin:0;white-space:nowrap}.plugins-workspace-header .eyebrow::after{content:" ·"}.plugins-workspace-header h2{margin:0;font-size:1.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plugins-workspace-header>div{display:flex;align-items:baseline;gap:.38rem;min-width:0}.plugins-workspace-header .eyebrow{margin:0;white-space:nowrap}.plugins-workspace-header .eyebrow::after{content:" ·"}.plugins-workspace-header h2{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .plugins-workspace-tabs{display:flex;flex:none;gap:var(--jv-space-xs,.35rem);padding:.42rem var(--jv-workspace-edge,.8rem);border-bottom:1px solid var(--jv-border,#303942);background:var(--jv-surface-sunken,#11171b);overflow-x:auto}
 .plugins-workspace-tabs button{border:1px solid transparent;background:transparent;color:var(--jv-muted,#aeb8c0)}
 .plugins-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}
@@ -1683,10 +1686,11 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-addon-results input[type=file]{display:block;max-width:100%;margin:.3rem 0}
 .plugins-addon-results>.plugins-result-card>.plugins-card-badges{height:auto;flex-wrap:wrap}
 .plugins-addon-results>.plugins-result-card>button{margin-top:.4rem;align-self:flex-start}
-/* Selected-server headers shrink the title and selector while keeping actions usable. */
-.workspace-window .selected-server-header-actions{display:flex;align-items:center;gap:var(--jv-space-xs,.45rem);flex:0 1 auto;min-width:0;max-width:100%;flex-wrap:nowrap}
-.workspace-window .selected-server-header-actions>[data-server-selector-slot]{display:block;flex:0 1 auto;min-width:4rem;max-width:100%}
-.workspace-window .selected-server-header-actions .server-selector{width:100%;min-width:0;max-width:100%}
+/* Selected-server headers give the full selector name room by shrinking the title first. */
+.workspace-window .selected-server-header-actions{display:flex;align-items:center;gap:var(--jv-space-xs,.45rem);flex:none;flex-wrap:nowrap}
+.workspace-window .selected-server-header-actions>[data-server-selector-slot]{display:block;flex:none}
+.workspace-window .selected-server-header-actions .server-selector{width:max-content;max-width:none}
+.workspace-window .selected-server-header-actions .server-selector>summary>span{overflow:visible;text-overflow:clip;white-space:nowrap;flex:none}
 .workspace-window .selected-server-header-actions>:is(.workspace-header-refresh,.workspace-header-close){flex:none}
 .workspace-window .selected-server-header-actions .server-selector>summary::after{flex:none}
 .server-selector{position:relative;width:max-content;min-width:8rem;max-width:100%;margin:0;color:#eef1f4}
