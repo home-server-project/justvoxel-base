@@ -385,7 +385,7 @@ body.role-operator .control-tile.nav-operator-only{display:flex!important}
 body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-header-button{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3b454e;border-radius:10px;background:#232b31;color:#dce7e0;font-size:1.25rem;line-height:1}
 .system-monitor-header-button:hover,.system-monitor-header-button:focus-visible{background:#303941;border-color:#52616d;color:#fff}
-.workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;min-height:32px;padding:0 .75rem;border-radius:10px;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}
+.workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:31px;min-height:31px;padding:0 .75rem;border-radius:10px;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}
 .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem;line-height:1;font-weight:700;white-space:nowrap}
 .workspace-header-close{flex:none;width:32px;height:32px}
 .workspace-header-close svg{display:block;width:19px;height:19px;stroke:currentColor;stroke-width:2;stroke-linecap:round}
@@ -1310,10 +1310,10 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
   .migration-workspace-content .migration-facts,.migration-workspace-content .migration-review-grid,.migration-workspace-content .migration-smb-fields{grid-template-columns:1fr}
 }
 
-.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;flex:none}
+.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:31px;min-height:31px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;flex:none}
 .workspace-window .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem}
-.workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}
-.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:32px;height:32px;font-size:inherit}
+.workspace-window .workspace-header-close{width:31px;padding:0;font-size:inherit}
+.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:31px;height:31px;font-size:inherit}
 .workspace-window :is(.workspace-header-refresh,.workspace-header-close):is(:hover,:focus-visible){background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}
 @media(prefers-color-scheme:light){
   .workspace-window :is(.workspace-header-refresh,.workspace-header-close){background:#fff;border-color:#cbd4da;color:#34414a}
@@ -1429,16 +1429,12 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 
 /* Floating panel: the visible bar is 32px plus 4px top/bottom margins for a 40px outer footprint; workspaces measure its bottom. */
 .app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
-/* Offset desktop padding and border so trigger and panel share the outer edge. */
-@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}
+/* Overlap the desktop topbar borders and offset its padding for an attached trigger. */
+@media(min-width:601px){.app-header .control-center{height:32px;margin-top:-1px;margin-bottom:-1px;margin-right:calc(-.5rem - 1px)}}
 @media(min-width:601px){.control-center-panel{right:calc(-.5rem - 1px)}}
 .app-header .brand-mark{min-height:32px;padding:1px .35rem}
 .app-header .brand-logo{width:28px;height:28px}
 .app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:#303942}
-/* Keep the panel's 32px anchor and the trigger centered inside the top bar. */
-@media(min-width:601px){
-  .app-header .control-center{height:32px}
-}
 .app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}
 .topbar-time{min-width:0}
 .topbar-clock{white-space:nowrap;padding:.2rem .4rem;font-size:.82rem}
@@ -1695,7 +1691,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .workspace-window .selected-server-header-actions .server-selector>summary::after{flex:none}
 .server-selector{position:relative;width:max-content;min-width:8rem;max-width:100%;margin:0;color:#eef1f4}
 .server-selector>summary,.server-selector-option{display:flex;align-items:center;gap:.4rem;min-width:0;padding:.4rem .55rem;border:1px solid #303942;border-radius:7px;background:#171d22;color:inherit;font-size:.85rem;line-height:1.2;cursor:pointer;list-style:none}
-.workspace-window .server-selector>summary{height:32px;min-height:32px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;line-height:1.2;cursor:pointer;list-style:none}
+.workspace-window .server-selector>summary{height:31px;min-height:31px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;line-height:1.2;cursor:pointer;list-style:none}
 .workspace-window .server-selector>summary:is(:hover,:focus-visible),.workspace-window .server-selector[open]>summary{background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}
 @media(prefers-color-scheme:light){
   .workspace-window .server-selector>summary{background:#fff;border-color:#cbd4da;color:#34414a}

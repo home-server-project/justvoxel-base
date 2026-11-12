@@ -574,11 +574,51 @@ test('shared headers shrink the title before the full-name selector with fixed a
   assert.match(rule('.workspace-window :is(.workspace-header-refresh,.workspace-header-close)'), /flex:none/);
   assert.match(rule('.workspace-window .selected-server-header-actions>:is(.workspace-header-refresh,.workspace-header-close)'), /flex:none/);
   assert.match(rule('.workspace-window .selected-server-header-actions .server-selector>summary::after'), /flex:none/);
-  assert.match(rule('.workspace-window .server-selector>summary'), /height:32px;min-height:32px;[^}]*border-radius:10px/);
+  assert.match(rule('.workspace-window .server-selector>summary'), /height:31px;min-height:31px;[^}]*border-radius:10px/);
   assert.match(rule('.server-selector span'), /overflow:hidden;text-overflow:ellipsis;white-space:nowrap/);
   assert.match(rule('.workspace-window .selected-server-header-actions .server-selector>summary>span'), /overflow:visible;text-overflow:clip;white-space:nowrap;flex:none/);
   assert.match(rule('.server-selector-icon'), /flex:none/);
   assert.equal(rule('[data-server-selector-compact] .server-selector'), 'width:100%');
   assert.equal(rule('[data-server-selector-compact] .server-selector>summary'), 'padding:.15rem .3rem;font-size:.75rem');
   assert.equal(rule('[data-server-selector-compact] .server-selector-icon'), 'width:16px;height:16px');
+});
+
+
+test('workspace border-box lane leaves exactly two pixels above and below each 31px control', () => {
+  const css = readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8');
+  const network = readFileSync(`${__dirname}/../webui/internal/server/static/network-workspace.css`, 'utf8');
+  const declarations = block => Object.fromEntries(block.split(';').filter(Boolean).map(value => value.trim().split(':')));
+  const rule = (source, selector) => declarations([...source.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .find(match => match[1].trim() === selector)[2]);
+  assert.ok(css.includes('*{box-sizing:border-box}'));
+  const shared = declarations(css.match(/\.workspace-window :is\(\.system-update-dialog-header,[^{}]+\)\{([^}]*)\}/)[1]);
+  assert.equal(shared.height, '36px');
+  assert.equal(shared['min-height'], '36px');
+  assert.equal(shared['align-items'], 'center');
+  assert.equal(shared.padding, '0 var(--jv-workspace-edge)');
+  const header = rule(css, '.minecraft-workspace-header');
+  const divider = parseFloat(header['border-bottom']);
+  assert.equal(divider, 1);
+  const usableHeight = parseFloat(shared.height) - divider;
+  assert.equal(usableHeight, 35);
+  for (const selector of [
+    '.workspace-window :is(.workspace-header-refresh,.workspace-header-close)',
+    '.workspace-window .server-selector>summary',
+    '.workspace-window .system-monitor-header-button.system-monitor-settings-button',
+  ]) {
+    const control = rule(css, selector);
+    assert.equal(control.height, '31px', selector);
+    assert.equal(control['min-height'], '31px', selector);
+    const remainingGap = usableHeight - parseFloat(control.height);
+    assert.equal(remainingGap, 4, selector);
+    assert.equal(remainingGap / 2, 2, `${selector}: top gap`);
+    assert.equal(remainingGap / 2, 2, `${selector}: bottom gap`);
+  }
+  assert.equal(rule(css, '.workspace-window .workspace-header-close').width, '31px');
+  const networkClose = rule(css, '.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close');
+  assert.equal(networkClose.width, '31px');
+  assert.equal(networkClose.height, '31px');
+  const networkButton = rule(network, '.network-workspace-header .system-monitor-header-button:not(.workspace-header-refresh)');
+  assert.equal(networkButton.width, '31px');
+  assert.equal(networkButton.height, '31px');
 });

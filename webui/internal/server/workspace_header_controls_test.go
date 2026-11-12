@@ -61,7 +61,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button:not(.workspace-header-refresh){width:32px;height:32px;font-size:1.08rem}`) || strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button{`) {
+	if !strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button:not(.workspace-header-refresh){width:31px;height:31px;font-size:1.08rem}`) || strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button{`) {
 		t.Error("network header button rule must leave shared Refresh typography and geometry intact")
 	}
 	css, err := assets.ReadFile("static/app.css")
@@ -76,7 +76,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if !strings.Contains(string(css), ".control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor") {
 		t.Error("Control Center gear icon must use currentColor SVG sizing")
 	}
-	settingsRule := ".workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;min-height:32px;padding:0 .75rem;border-radius:10px;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}"
+	settingsRule := ".workspace-window .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:31px;min-height:31px;padding:0 .75rem;border-radius:10px;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}"
 	if !strings.Contains(string(css), settingsRule) {
 		t.Error("workspace Settings must retain the shared text button geometry")
 	}
@@ -349,17 +349,49 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 	}
 	for _, want := range []string{
 		`.app-header.topbar{height:32px;min-height:32px;`,
-		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:32px;min-height:32px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;flex:none}`,
-		`.workspace-window .workspace-header-close{width:32px;padding:0;font-size:inherit}`,
-		`.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:32px;height:32px;font-size:inherit}`,
+		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close){height:31px;min-height:31px;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;flex:none}`,
+		`.workspace-window .workspace-header-close{width:31px;padding:0;font-size:inherit}`,
+		`.workspace-window .network-workspace-header .system-monitor-header-button.workspace-header-close{width:31px;height:31px;font-size:inherit}`,
 		`.workspace-window .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;font-size:.84rem}`,
 		`.workspace-window :is(.workspace-header-refresh,.workspace-header-close):is(:hover,:focus-visible){background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}`,
-		`.workspace-window .server-selector>summary{height:32px;min-height:32px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;`,
+		`.workspace-window .server-selector>summary{height:31px;min-height:31px;padding:0 .55rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;font-size:.84rem;`,
 		`.workspace-window .server-selector>summary:is(:hover,:focus-visible),.workspace-window .server-selector[open]>summary{background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}`,
 		`[data-server-selector-compact] .server-selector>summary{padding:.15rem .3rem;font-size:.75rem}`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("shared header/control contract missing %s", want)
+		}
+	}
+	if !strings.Contains(css, "*{box-sizing:border-box}") {
+		t.Fatal("workspace lane geometry requires border-box sizing")
+	}
+	pixels := func(source, pattern string) int {
+		t.Helper()
+		match := regexp.MustCompile(pattern).FindStringSubmatch(source)
+		if len(match) != 2 {
+			t.Fatalf("missing geometry: %s", pattern)
+		}
+		value, err := strconv.Atoi(match[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	headerHeight := pixels(shared, `height:(\d+)px;`)
+	divider := pixels(css, `\.minecraft-workspace-header\{[^}]*border-bottom:(\d+)px solid`)
+	usable := headerHeight - divider
+	if headerHeight != 36 || divider != 1 || usable != 35 {
+		t.Fatalf("workspace border-box lane: outer=%d divider=%d usable=%d", headerHeight, divider, usable)
+	}
+	for _, selector := range []string{
+		".workspace-window :is(.workspace-header-refresh,.workspace-header-close)",
+		".workspace-window .server-selector>summary",
+		".workspace-window .system-monitor-header-button.system-monitor-settings-button",
+	} {
+		controlHeight := pixels(css, regexp.QuoteMeta(selector)+`\{[^}]*\bheight:(\d+)px;`)
+		gap := usable - controlHeight
+		if controlHeight != 31 || gap != 4 || gap%2 != 0 || gap/2 != 2 {
+			t.Errorf("%s must leave exactly 2px above and below: height=%d total gap=%d", selector, controlHeight, gap)
 		}
 	}
 	for _, selector := range []string{".workspace-window :is(.workspace-header-refresh,.workspace-header-close)", ".workspace-window .server-selector>summary"} {
@@ -408,8 +440,7 @@ func TestControlCenterTriggerMeetsTopbarEdges(t *testing.T) {
 	for _, want := range []string{
 		`.topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;`,
 		`.app-header.topbar{height:32px;min-height:32px;`,
-		`@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}`,
-		`.app-header .control-center{height:32px}`,
+		`@media(min-width:601px){.app-header .control-center{height:32px;margin-top:-1px;margin-bottom:-1px;margin-right:calc(-.5rem - 1px)}}`,
 		`.app-header .control-center-trigger{min-height:32px;height:32px;`,
 		`.app-header .control-center-trigger{width:32px;padding:0}`,
 	} {
@@ -417,28 +448,48 @@ func TestControlCenterTriggerMeetsTopbarEdges(t *testing.T) {
 			t.Errorf("attached Control Center geometry missing %s", want)
 		}
 	}
-	workspace := regexp.MustCompile(`\.workspace-window :is\(\.workspace-header-refresh,\.workspace-header-close\)\{height:(\d+)px;`).FindStringSubmatch(css)
-	if len(workspace) != 2 {
-		t.Fatal("shared workspace control height missing")
+	if !strings.Contains(css, "*{box-sizing:border-box}") {
+		t.Fatal("Control Center geometry requires border-box sizing")
 	}
-	workspaceHeight, err := strconv.Atoi(workspace[1])
-	if err != nil {
-		t.Fatal(err)
+	pixels := func(pattern string) int {
+		t.Helper()
+		match := regexp.MustCompile(pattern).FindStringSubmatch(css)
+		if len(match) != 2 {
+			t.Fatalf("missing geometry: %s", pattern)
+		}
+		value, err := strconv.Atoi(match[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	topbarHeight := pixels(`\.app-header\.topbar\{height:(32)px;`)
+	borderTop := pixels(`\.app-header\.topbar\{height:32px;[^}]*border:(\d+)px solid`)
+	borderBottom := borderTop // The border shorthand applies to both edges.
+	if borderTop != 1 || borderBottom != 1 {
+		t.Fatal("topbar must retain 1px top and bottom borders")
+	}
+	track := topbarHeight - borderTop - borderBottom
+	wrapper := pixels(`@media\(min-width:601px\)\{\.app-header \.control-center\{height:(\d+)px;`)
+	marginTop := pixels(`@media\(min-width:601px\)\{\.app-header \.control-center\{[^}]*margin-top:(-?\d+)px;`)
+	marginBottom := pixels(`@media\(min-width:601px\)\{\.app-header \.control-center\{[^}]*margin-bottom:(-?\d+)px;`)
+	occupied := wrapper + marginTop + marginBottom
+	if track != 30 || wrapper != 32 || marginTop != -1 || marginBottom != -1 || occupied != 30 || occupied != track {
+		t.Fatalf("Control Center must occupy the 30px track: track=%d wrapper=%d margins=%d,%d occupied=%d", track, wrapper, marginTop, marginBottom, occupied)
+	}
+	if borderTop+(track-occupied)/2+marginTop != 0 || borderTop+(track-occupied)/2+marginTop+wrapper != topbarHeight {
+		t.Error("Control Center border box must meet both outer topbar edges")
 	}
 	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1) {
-		if !strings.Contains(rule[1], ".app-header .control-center-trigger") {
+		if !strings.Contains(rule[1], ".app-header .control-center-trigger") && !strings.Contains(rule[1], ".app-header .control-center") {
 			continue
 		}
 		if regexp.MustCompile(`\btop\s*:\s*-4px`).MatchString(rule[2]) {
 			t.Errorf("Control Center must not be shifted outside its anchor: %s", rule[0])
 		}
 		for _, height := range regexp.MustCompile(`(?:^|;)\s*(?:min-|max-)?height\s*:\s*(\d+)px`).FindAllStringSubmatch(rule[2], -1) {
-			value, err := strconv.Atoi(height[1])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if value >= 40 || value > workspaceHeight {
-				t.Errorf("Control Center must fit inside the topbar and be no taller than workspace controls: %s", rule[0])
+			if height[1] != "32" {
+				t.Errorf("Control Center height must stay 32px: %s", rule[0])
 			}
 		}
 	}

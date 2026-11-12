@@ -193,7 +193,7 @@ func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 	baseline := map[string]string{
 		"static/how-to-connect.css":    "28a1fc3990f8bdd135ec979d31db1e142f1863515b61b6f047630aa0c7d75256",
 		"static/minecraft-servers.css": "b39b7f286d3a8819a19fef8ef4e2f53db890eb06cec424f7765e19d6cea87bab",
-		"static/network-workspace.css": "61d7d615b78064a0304e547af53b9ee35cae4bc45d4136de35270f01acf0e975",
+		"static/network-workspace.css": "20a064ea8d9256760e1d7418e0ed67e4a6b1ff10cafaa8a6a53dc78c4549eae8",
 		"static/new-backups.css":       "e414942748a1d69286bec340e0e804be95394d864139787560f3cc0cf1a761da",
 		"static/playit-setup.css":      "fdaae36a639c41bc22374d42a70803b771e4a07f35810464080923e7582d39b1",
 		"static/setup-review.css":      "02d4fe58915d40862c728f3541932e9f60870ebaee6ebb70be452e441a782df3",

@@ -21,7 +21,7 @@ class Element {
 }
 
 test('Control Center matches the 32px topbar and preserves panel anchoring and green frame', () => {
-  assert.ok(css.includes('@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}'));
+  assert.ok(css.includes('@media(min-width:601px){.app-header .control-center{height:32px;margin-top:-1px;margin-bottom:-1px;margin-right:calc(-.5rem - 1px)}}'));
   assert.match(css, /\.app-header\.topbar\{[^}]*padding:0 \.5rem;[^}]*border:1px solid/);
   const declarations = block => Object.fromEntries(block.split(';').filter(Boolean).map(value => value.trim().split(':')));
   const topbar = declarations([...css.matchAll(/\.app-header\.topbar\{([^}]*)\}/g)].findLast(match => match[1].startsWith('height:'))[1]);
@@ -35,6 +35,21 @@ test('Control Center matches the 32px topbar and preserves panel anchoring and g
   assert.ok(css.includes('*{box-sizing:border-box}'));
   assert.match(css, /\.topbar\{display:grid;[^}]*align-items:center;/);
   assert.equal(wrapper.height, '32px', 'preserve the panel containing block height');
+  const borderTop = parseFloat(topbar.border);
+  const borderBottom = parseFloat(topbar.border);
+  assert.equal(borderTop, 1);
+  assert.equal(borderBottom, 1);
+  const internalTrack = parseFloat(topbar.height) - borderTop - borderBottom;
+  assert.equal(internalTrack, 30, 'border-box leaves a 30px grid track');
+  assert.equal(wrapper['margin-top'], '-1px');
+  assert.equal(wrapper['margin-bottom'], '-1px');
+  assert.equal(wrapper['margin-right'], 'calc(-.5rem - 1px)');
+  const occupiedHeight = parseFloat(wrapper.height) + parseFloat(wrapper['margin-top']) + parseFloat(wrapper['margin-bottom']);
+  assert.equal(occupiedHeight, 30, 'negative margins fit the 32px border box in the 30px track');
+  assert.equal(occupiedHeight, internalTrack);
+  const centeredGap = (internalTrack - occupiedHeight) / 2;
+  assert.equal(borderTop + centeredGap + parseFloat(wrapper['margin-top']), 0, 'wrapper touches the outer top edge');
+  assert.equal(borderTop + centeredGap + parseFloat(wrapper['margin-top']) + parseFloat(wrapper.height), 32, 'wrapper touches the outer bottom edge');
   assert.equal(topbar.height, '32px', 'preserve the visible topbar height');
   assert.equal(topbar['min-height'], '32px');
   assert.equal(topbar['border-radius'], '12px');
