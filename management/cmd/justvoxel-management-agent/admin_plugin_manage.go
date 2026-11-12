@@ -724,7 +724,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if _, err = s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and managed plugin state."); err != nil {
 		return rollback(err)
 	}
-	if err = verifyPluginRuntime(ctx, pluginInstanceID(ctx), p.Server.MinecraftVersion); err != nil {
+	if err = verifyPluginManageRuntime(ctx, tx); err != nil {
 		recordPluginFailure(s.operations, id, "verification", err)
 		recordPluginStartupEvidence(s.operations, id, p.DataPath, []string{p.Entry.PluginName})
 		return rollback(errors.New("Minecraft stack verification failed"))
@@ -897,6 +897,13 @@ func restorePluginManageFiles(tx pluginManageTransaction) error {
 	}
 	return nil
 }
+func verifyPluginManageRuntime(ctx context.Context, tx pluginManageTransaction) error {
+	if tx.Entry.Target == "mods" {
+		return verifyPluginInstallRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion)
+	}
+	return verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion)
+}
+
 func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction, lock *pluginMaintenanceLock) error {
 	ctx = withPluginInstance(ctx, tx.InstanceID)
 	var previous *pluginLifecycleStartupSnapshot
@@ -910,7 +917,7 @@ func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction,
 	if err := lock.start(ctx, pluginInstanceID(ctx)); err != nil {
 		return err
 	}
-	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion); err != nil {
+	if err := verifyPluginManageRuntime(ctx, tx); err != nil {
 		return err
 	}
 	if tx.Entry.Target != "mods" {
@@ -1465,7 +1472,7 @@ func verifyPluginManageTargetRuntime(ctx context.Context, tx pluginManageTransac
 	if err := lock.start(ctx, pluginInstanceID(ctx)); err != nil {
 		return err
 	}
-	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion); err != nil {
+	if err := verifyPluginManageRuntime(ctx, tx); err != nil {
 		return err
 	}
 	if tx.Entry.Target != "mods" {

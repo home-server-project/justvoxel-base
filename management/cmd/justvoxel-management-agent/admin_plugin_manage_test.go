@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -97,8 +98,13 @@ func newPluginManageFixtureFor(t *testing.T, state, software string) *pluginMana
 			}
 			return []byte("ready"), nil
 		case "/usr/libexec/justvoxel/mjust/verify-minecraft-stack":
-			if strings.Contains(strings.Join(args, " "), "--content-install") {
-				t.Fatal("plugin management must retain strict stack verification")
+			want := []string{"--instance", "jv-a1b2c3"}
+			if f.entry.Target == "mods" {
+				want = append(want, "--content-install")
+			}
+			want = append(want, "1.21.8")
+			if !slices.Equal(args, want) {
+				t.Fatalf("lifecycle verifier arguments: got %v, want %v", args, want)
 			}
 			if f.duringVerify != nil {
 				f.duringVerify()
@@ -171,6 +177,24 @@ func (f *pluginManageFixture) manage(t *testing.T, p pluginManagePlan, confirm b
 	}
 	return j
 }
+func (f *pluginManageFixture) assertManageRuntimeVerifications(t *testing.T, want int) {
+	t.Helper()
+	command := "/usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance jv-a1b2c3"
+	if f.entry.Target == "mods" {
+		command += " --content-install"
+	}
+	command += " 1.21.8"
+	count := 0
+	for _, got := range f.commands {
+		if got == command {
+			count++
+		}
+	}
+	if count != want {
+		t.Fatalf("runtime verifier invoked %d times, want %d", count, want)
+	}
+}
+
 func TestManagedPluginLifecycleSuccessAndPreservation(t *testing.T) {
 	for _, tc := range []struct{ action, state, want string }{{"enable", "disabled", "enabled"}, {"disable", "enabled", "disabled"}, {"remove", "enabled", ""}, {"remove", "disabled", ""}} {
 		for _, running := range []bool{true, false} {
@@ -199,6 +223,7 @@ func TestManagedPluginLifecycleSuccessAndPreservation(t *testing.T) {
 				if j.State != operationSucceeded {
 					t.Fatalf("%s: %#v", tc.action, j)
 				}
+				f.assertManageRuntimeVerifications(t, 1)
 				if f.active != running {
 					t.Fatal("original service state not restored")
 				}
@@ -300,6 +325,7 @@ func TestManagedPluginRollbackRestoresExactLocationAndManifest(t *testing.T) {
 			if j.State != operationRolledBack {
 				t.Fatalf("rollback: %#v", j)
 			}
+			f.assertManageRuntimeVerifications(t, 2)
 			state, err := resolveManagedPluginLocation(f.data, f.entry)
 			if err != nil || state != tc.state {
 				t.Fatal("exact location/hash not restored", state, err)
@@ -708,7 +734,66 @@ func TestManagedModFileTransactionAndRestorationWithoutRoot(t *testing.T) {
 	}
 }
 
-func TestManagedModRemoveStrictRuntimeAndRollback(t *testing.T) {
+func TestManagedModRemovalEvidenceRejectsChangesWithoutRoot(t *testing.T) {
+	for _, scenario := range []string{"hash", "loader", "manifest", "target"} {
+		t.Run(scenario, func(t *testing.T) {
+			data, server, entry := modManageFiles(t)
+			p, err := resolvePluginManagePlan(context.Background(), server, data, "remove", entry.ProjectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx := pluginManageTransaction{Loader: "fabric", InstanceID: server.InstanceID, SchemaVersion: "v1", OperationID: "12345678-1234-4123-8123-123456789abc", Action: "remove", DataPath: data, DataDevice: p.DataDevice, DataInode: p.DataInode, Entry: entry, OriginalState: "enabled", Manifest: p.Manifest}
+			root, err := openContentDirectory(data, "mods")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			stage, err := openPluginOperationStaging(data, tx.OperationID, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stage.Close()
+			if _, err = checkedPluginMove(root, stage, entry); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = commitPluginManifest(data, p.Manifest, pluginManifest{"v1", []pluginManifestEntry{}}); err != nil {
+				t.Fatal(err)
+			}
+			if err = pluginManageTargetState(tx); err != nil {
+				t.Fatal("valid removal rejected", err)
+			}
+			switch scenario {
+			case "hash":
+				tx.Entry.SHA512 = strings.Repeat("0", 128)
+			case "loader":
+				// The exact Fabric JAR and hash cannot prove a NeoForge descriptor.
+				tx.Loader = "neoforge"
+			case "manifest":
+				_, raw, err := readPluginManifest(data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = commitPluginManifest(data, raw, pluginManifest{"v1", []pluginManifestEntry{entry}}); err != nil {
+					t.Fatal(err)
+				}
+			case "target":
+				if _, err = checkedPluginMove(stage, root, entry); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "hash" || scenario == "loader" {
+				if err = verifyModRemovalFiles(tx); err == nil {
+					t.Fatal("changed staged artifact evidence accepted", scenario)
+				}
+			}
+			if err = pluginManageTargetState(tx); err == nil {
+				t.Fatal("changed removal evidence accepted", scenario)
+			}
+		})
+	}
+}
+
+func TestManagedModRemoveContentRuntimeAndRollback(t *testing.T) {
 	for _, running := range []bool{true, false} {
 		for _, fail := range []bool{false, true} {
 			t.Run(fmt.Sprint(running, fail), func(t *testing.T) {
@@ -734,7 +819,7 @@ func TestManagedModRemoveStrictRuntimeAndRollback(t *testing.T) {
 					}
 					_, raw, _ := readPluginManifest(f.data)
 					if !bytes.Equal(before, raw) {
-						t.Fatal("manifest committed before strict verification")
+						t.Fatal("manifest committed before runtime verification")
 					}
 				}
 				j := f.manage(t, p, false)
@@ -759,11 +844,11 @@ func TestManagedModRemoveStrictRuntimeAndRollback(t *testing.T) {
 				} else if len(m.Artifacts) != 0 {
 					t.Fatal("removal not committed")
 				}
-				for _, command := range f.commands {
-					if strings.Contains(command, "--content-install") {
-						t.Fatal("relaxed lifecycle verifier", command)
-					}
+				wantVerifications := 1
+				if fail {
+					wantVerifications++
 				}
+				f.assertManageRuntimeVerifications(t, wantVerifications)
 			})
 		}
 	}
@@ -824,6 +909,11 @@ func TestManagedModDurableRecovery(t *testing.T) {
 			f.s.adminPluginManageAcknowledge(rr, pluginTestRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/plugins/manage/acknowledge", string(body)))
 			if rr.Code != 200 {
 				t.Fatal(rr.Code, rr.Body.String())
+			}
+			f.assertManageRuntimeVerifications(t, 1)
+			finished, err := store.get(j.OperationID)
+			if err != nil || finished.State != operationResolved {
+				t.Fatal("recovery did not resolve needs_attention", finished, err)
 			}
 			if f.active {
 				t.Fatal("original stopped state not restored")
