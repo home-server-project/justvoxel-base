@@ -440,7 +440,7 @@ func TestControlCenterTriggerMeetsTopbarEdges(t *testing.T) {
 	for _, want := range []string{
 		`.topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;`,
 		`.app-header.topbar{height:32px;min-height:32px;`,
-		`@media(min-width:601px){.app-header .control-center{height:32px;margin-top:-1px;margin-bottom:-1px;margin-right:calc(-.5rem - 1px)}}`,
+		`@media(min-width:601px){.app-header .control-center{position:absolute;top:-1px;right:-1px;height:32px;margin:0}}`,
 		`.app-header .control-center-trigger{min-height:32px;height:32px;`,
 		`.app-header .control-center-trigger{width:32px;padding:0}`,
 	} {
@@ -451,34 +451,14 @@ func TestControlCenterTriggerMeetsTopbarEdges(t *testing.T) {
 	if !strings.Contains(css, "*{box-sizing:border-box}") {
 		t.Fatal("Control Center geometry requires border-box sizing")
 	}
-	pixels := func(pattern string) int {
-		t.Helper()
-		match := regexp.MustCompile(pattern).FindStringSubmatch(css)
-		if len(match) != 2 {
-			t.Fatalf("missing geometry: %s", pattern)
+	// This is a source contract; rendered border alignment requires VM visual verification.
+	for _, forbidden := range []string{
+		"margin-right:calc(-.5rem - 1px)",
+		"border-radius:0 12px 12px 0",
+	} {
+		if strings.Contains(css, forbidden) {
+			t.Errorf("failed Control Center geometry must not return: %s", forbidden)
 		}
-		value, err := strconv.Atoi(match[1])
-		if err != nil {
-			t.Fatal(err)
-		}
-		return value
-	}
-	topbarHeight := pixels(`\.app-header\.topbar\{height:(32)px;`)
-	borderTop := pixels(`\.app-header\.topbar\{height:32px;[^}]*border:(\d+)px solid`)
-	borderBottom := borderTop // The border shorthand applies to both edges.
-	if borderTop != 1 || borderBottom != 1 {
-		t.Fatal("topbar must retain 1px top and bottom borders")
-	}
-	track := topbarHeight - borderTop - borderBottom
-	wrapper := pixels(`@media\(min-width:601px\)\{\.app-header \.control-center\{height:(\d+)px;`)
-	marginTop := pixels(`@media\(min-width:601px\)\{\.app-header \.control-center\{[^}]*margin-top:(-?\d+)px;`)
-	marginBottom := pixels(`@media\(min-width:601px\)\{\.app-header \.control-center\{[^}]*margin-bottom:(-?\d+)px;`)
-	occupied := wrapper + marginTop + marginBottom
-	if track != 30 || wrapper != 32 || marginTop != -1 || marginBottom != -1 || occupied != 30 || occupied != track {
-		t.Fatalf("Control Center must occupy the 30px track: track=%d wrapper=%d margins=%d,%d occupied=%d", track, wrapper, marginTop, marginBottom, occupied)
-	}
-	if borderTop+(track-occupied)/2+marginTop != 0 || borderTop+(track-occupied)/2+marginTop+wrapper != topbarHeight {
-		t.Error("Control Center border box must meet both outer topbar edges")
 	}
 	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1) {
 		if !strings.Contains(rule[1], ".app-header .control-center-trigger") && !strings.Contains(rule[1], ".app-header .control-center") {
@@ -573,7 +553,7 @@ func TestWorkspaceHeadersShareControlCenterTypography(t *testing.T) {
 	}
 }
 
-func TestDesktopControlCenterEndCapGeometry(t *testing.T) {
+func TestDesktopControlCenterRoundedButtonGeometry(t *testing.T) {
 	data, err := assets.ReadFile("static/app.css")
 	if err != nil {
 		t.Fatal(err)
@@ -581,8 +561,8 @@ func TestDesktopControlCenterEndCapGeometry(t *testing.T) {
 	css := string(data)
 	for _, want := range []string{
 		`.app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;position:sticky;top:4px;z-index:1000;border:1px solid #303942;border-radius:12px;background:#151a1f`,
-		`@media(min-width:601px){.app-header .control-center{height:32px;margin-top:-1px;margin-bottom:-1px;margin-right:calc(-.5rem - 1px)}}`,
-		"@media(min-width:601px){\n  .app-header .control-center-trigger{min-height:32px;height:32px;border-radius:0 12px 12px 0;border-color:#303942;background:#151a1f}",
+		`@media(min-width:601px){.app-header .control-center{position:absolute;top:-1px;right:-1px;height:32px;margin:0}}`,
+		"@media(min-width:601px){\n  .app-header .control-center-trigger{min-height:32px;height:32px;border-radius:10px 12px 12px 10px;border-color:#303942;background:#151a1f}",
 		`.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{background:#1d2a23;color:#c8f2d7}`,
 		`.app-header .control-center-trigger{width:32px;padding:0}`,
 		`.control-center-label{display:none}`,
@@ -592,8 +572,30 @@ func TestDesktopControlCenterEndCapGeometry(t *testing.T) {
 			t.Errorf("attached desktop Control Center or compact contract missing %s", want)
 		}
 	}
-	if strings.Count(css, "margin-right:calc(-.5rem - 1px)") != 1 || strings.Contains(css, `.control-center-panel{right:calc(-.5rem - 1px)}`) {
-		t.Error("only the Control Center container may compensate for the topbar padding and border")
+	for _, want := range []string{
+		`.control-center{position:relative;justify-self:end}`,
+		`.control-center-trigger{display:flex;align-items:center;justify-content:center;gap:.45rem;min-height:38px;padding:.4rem .65rem;border:1px solid #35414b;border-radius:10px;`,
+		`.app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:#303942}`,
+		`.control-center-panel{position:absolute;top:calc(100% + var(--jv-panel-gap));right:0;`,
+		`:root{--jv-panel-gap:4px}`,
+		`.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}`,
+		"@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}",
+		`.control-center-panel{position:fixed;top:50px;left:.45rem;right:.45rem;bottom:.45rem;width:auto;`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("Control Center panel, button or compact contract missing %s", want)
+		}
+	}
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1) {
+		if !regexp.MustCompile(`\.(?:control-center(?:-trigger|-panel)?|topbar)(?:[^a-zA-Z0-9_-]|$)`).MatchString(rule[1]) {
+			continue
+		}
+		if regexp.MustCompile(`(?:^|;)\s*(?:overflow(?:-x|-y)?\s*:\s*(?:hidden|clip)|clip(?:-path)?\s*:|(?:transform|translate)\s*:)|translateX\(`).MatchString(rule[2]) {
+			t.Errorf("topbar and Control Center must not use clipping or transforms for alignment: %s", rule[0])
+		}
+		if strings.Contains(rule[1], ".control-center-panel") && regexp.MustCompile(`(?:^|;)\s*right\s*:\s*(?:-|calc\()`).MatchString(rule[2]) {
+			t.Errorf("Control Center panel must not compensate its right edge: %s", rule[0])
+		}
 	}
 	generic := regexp.MustCompile(`(?m)^\.topbar\{([^}]*)\}`).FindStringSubmatch(css)
 	if len(generic) != 2 {

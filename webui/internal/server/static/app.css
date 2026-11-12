@@ -1428,13 +1428,13 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 
 /* Floating panel: the visible bar is 32px plus 4px top/bottom margins for a 40px outer footprint; workspaces measure its bottom. */
 .app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;position:sticky;top:4px;z-index:1000;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
-/* Overlap the desktop topbar borders and offset its padding for an attached trigger. */
-@media(min-width:601px){.app-header .control-center{height:32px;margin-top:-1px;margin-bottom:-1px;margin-right:calc(-.5rem - 1px)}}
+/* Anchor the desktop Control Center directly to the floating topbar outer borders. */
+@media(min-width:601px){.app-header .control-center{position:absolute;top:-1px;right:-1px;height:32px;margin:0}}
 .app-header .brand-mark{min-height:32px;padding:1px .35rem}
 .app-header .brand-logo{width:28px;height:28px}
 .app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:#303942}
 @media(min-width:601px){
-  .app-header .control-center-trigger{min-height:32px;height:32px;border-radius:0 12px 12px 0;border-color:#303942;background:#151a1f}
+  .app-header .control-center-trigger{min-height:32px;height:32px;border-radius:10px 12px 12px 10px;border-color:#303942;background:#151a1f}
   .app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{background:#1d2a23;color:#c8f2d7}
 }
 .app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}

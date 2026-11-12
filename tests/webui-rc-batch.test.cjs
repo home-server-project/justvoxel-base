@@ -21,7 +21,7 @@ class Element {
 }
 
 test('Control Center matches the 32px topbar and preserves panel anchoring and green frame', () => {
-  assert.ok(css.includes('@media(min-width:601px){.app-header .control-center{height:32px;margin-top:-1px;margin-bottom:-1px;margin-right:calc(-.5rem - 1px)}}'));
+  assert.ok(css.includes('@media(min-width:601px){.app-header .control-center{position:absolute;top:-1px;right:-1px;height:32px;margin:0}}'));
   assert.match(css, /\.app-header\.topbar\{[^}]*padding:0 \.5rem;[^}]*border:1px solid/);
   const declarations = block => Object.fromEntries(block.split(';').filter(Boolean).map(value => value.trim().split(':')));
   const topbar = declarations([...css.matchAll(/\.app-header\.topbar\{([^}]*)\}/g)].findLast(match => match[1].startsWith('height:'))[1]);
@@ -35,57 +35,55 @@ test('Control Center matches the 32px topbar and preserves panel anchoring and g
   assert.ok(css.includes('*{box-sizing:border-box}'));
   assert.match(css, /\.topbar\{display:grid;[^}]*align-items:center;/);
   assert.equal(wrapper.height, '32px', 'preserve the panel containing block height');
-  const borderTop = parseFloat(topbar.border);
-  const borderBottom = parseFloat(topbar.border);
-  assert.equal(borderTop, 1);
-  assert.equal(borderBottom, 1);
-  const internalTrack = parseFloat(topbar.height) - borderTop - borderBottom;
-  assert.equal(internalTrack, 30, 'border-box leaves a 30px grid track');
-  assert.equal(wrapper['margin-top'], '-1px');
-  assert.equal(wrapper['margin-bottom'], '-1px');
-  assert.equal(wrapper['margin-right'], 'calc(-.5rem - 1px)');
-  const occupiedHeight = parseFloat(wrapper.height) + parseFloat(wrapper['margin-top']) + parseFloat(wrapper['margin-bottom']);
-  assert.equal(occupiedHeight, 30, 'negative margins fit the 32px border box in the 30px track');
-  assert.equal(occupiedHeight, internalTrack);
-  const centeredGap = (internalTrack - occupiedHeight) / 2;
-  assert.equal(borderTop + centeredGap + parseFloat(wrapper['margin-top']), 0, 'wrapper touches the outer top edge');
-  assert.equal(borderTop + centeredGap + parseFloat(wrapper['margin-top']) + parseFloat(wrapper.height), 32, 'wrapper touches the outer bottom edge');
+  // Verify source declarations; VM visual review establishes rendered alignment.
+  assert.equal(wrapper.position, 'absolute');
+  assert.equal(wrapper.top, '-1px');
+  assert.equal(wrapper.right, '-1px');
+  assert.equal(wrapper.margin, '0');
+  for (const margin of ['margin-top', 'margin-bottom', 'margin-right']) assert.equal(wrapper[margin], undefined);
+  assert.ok(!css.includes('margin-right:calc(-.5rem - 1px)'));
+  assert.ok(!css.includes('border-radius:0 12px 12px 0'));
   assert.equal(topbar.height, '32px', 'preserve the visible topbar height');
   assert.equal(topbar['min-height'], '32px');
   assert.equal(topbar['border-radius'], '12px');
-  assert.equal(trigger['border-radius'], `0 ${topbar['border-radius']} ${topbar['border-radius']} 0`, 'desktop trigger is the right end-cap');
-  assert.equal(trigger.background, topbar.background, 'normal trigger merges with the floating frame');
+  assert.equal(trigger['border-radius'], '10px 12px 12px 10px', 'desktop trigger retains rounded left corners and matches the topbar right radius');
+  assert.equal(trigger.background, '#151a1f', 'preserve the normal desktop trigger background');
+  assert.equal(topbar.background, '#151a1f');
   assert.match(css, /\.control-center-trigger\{[^}]*border-radius:10px;/, 'compact trigger retains its rounded treatment');
   assert.equal(topbar.padding, '0 .5rem');
   assert.equal(topbar.margin, '4px 8px');
-  assert.equal(parseFloat(topbar.height) + 2 * parseFloat(topbar.margin), 40, 'preserve the outer topbar footprint');
   assert.ok(css.includes('.quick-look{position:fixed;top:40px;'));
   assert.equal(trigger.height, '32px');
   assert.equal(trigger['min-height'], '32px');
   for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     if (!rule[1].includes('.app-header .control-center-trigger')) continue;
-    assert.doesNotMatch(rule[2], /(?:^|;)\s*top\s*:\s*-4px\b/, 'trigger must stay centered inside its anchor');
+    assert.doesNotMatch(rule[2], /(?:^|;)\s*top\s*:\s*-4px\b/, 'trigger must stay inside its anchor');
     assert.doesNotMatch(rule[2], /(?:^|;)\s*(?:min-|max-)?height\s*:\s*40px\b/, 'no desktop 40px trigger override');
   }
   assert.match(css, /\.control-center\{position:relative;justify-self:end\}/);
   assert.match(css, /\.control-center-panel\{position:absolute;[^}]*right:0;/);
   assert.ok(!css.includes('.control-center-panel{right:calc(-.5rem - 1px)}'));
   for (const panel of css.matchAll(/\.control-center-panel\{([^}]*)\}/g)) {
-    assert.doesNotMatch(panel[1], /right:\s*(?:-|calc\(\s*-)/, 'panel must not compensate the right edge again');
+    assert.doesNotMatch(panel[1], /right:\s*(?:-|calc\()/, 'panel must not compensate the right edge again');
   }
-  assert.equal(css.split('margin-right:calc(-.5rem - 1px)').length - 1, 1);
-  const viewportWidth = 1200;
-  const topbarRight = viewportWidth - 8;
-  const paddingRight = parseFloat(topbar.padding.split(' ')[1]) * 16;
-  const compensation = wrapper['margin-right'].match(/^calc\(-([\d.]+)rem - ([\d.]+)px\)$/);
-  assert.ok(compensation);
-  const marginRight = -Number(compensation[1]) * 16 - Number(compensation[2]);
-  const containerRight = topbarRight - parseFloat(topbar.border) - paddingRight - marginRight;
-  assert.equal(containerRight, topbarRight, 'container and trigger end at the floating frame');
   const panel = declarations(css.match(/\.control-center-panel\{(position:absolute;[^}]*)\}/)[1]);
-  assert.equal(containerRight - parseFloat(panel.right), topbarRight, 'panel right:0 shares the same outer edge');
+  assert.equal(panel.position, 'absolute');
+  assert.equal(panel.right, '0');
+  assert.equal(panel.top, 'calc(100% + var(--jv-panel-gap))');
+  assert.ok(css.includes('.app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:#303942}'));
+  assert.match(css, /\.control-center-trigger\{[^}]*border:1px solid #35414b;/);
+  for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/\.(?:control-center(?:-trigger|-panel)?|topbar)(?:[^a-zA-Z0-9_-]|$)/.test(rule[1])) continue;
+    assert.doesNotMatch(rule[2], /(?:^|;)\s*(?:overflow(?:-x|-y)?\s*:\s*(?:hidden|clip)|clip(?:-path)?\s*:|(?:transform|translate)\s*:)|translateX\(/, 'no clipping or transforms for alignment');
+  }
+  for (const mobile of css.matchAll(/@media\(max-width:600px\)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g)) {
+    for (const rule of mobile[1].matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (rule[1].trim() !== '.app-header .control-center' && rule[1].trim() !== '.control-center') continue;
+      assert.doesNotMatch(rule[2], /position:absolute|top:-1px|right:-1px/, 'mobile must not use desktop attachment');
+    }
+  }
   assert.ok(css.includes('.control-center-panel{position:fixed;top:50px;left:.45rem;right:.45rem;bottom:.45rem;width:auto;'));
-  assert.ok(css.includes('.app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}'));
+  assert.ok(css.includes('@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}'));
   assert.ok(css.includes('.app-header .control-center-trigger{width:32px;padding:0}'));
   assert.ok(css.includes('.control-center-panel{top:44px}'));
   assert.ok(css.includes(':root{--jv-panel-gap:4px}'));
@@ -98,11 +96,8 @@ test('Control Center matches the 32px topbar and preserves panel anchoring and g
   assert.equal(topbar.position, 'sticky');
   assert.equal(topbar['z-index'], '1000');
   assert.equal(topbar.top, '4px');
-  const topbarBottom = parseFloat(topbar.top) + parseFloat(topbar.height);
-  assert.equal(topbarBottom, 36);
-  const panelGap = parseFloat(css.match(/:root\{--jv-panel-gap:([^}]+)\}/)[1]);
-  assert.equal(topbarBottom + panelGap, 40, 'panel begins 4px below the floating frame');
   assert.ok(css.includes('.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}'));
+  assert.ok(css.includes('.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{background:#1d2a23;color:#c8f2d7}'));
   assert.ok(css.includes('.server-software-card.is-selected,'));
   assert.ok(!css.includes('.version-software-choice.is-current'));
   assert.ok(!css.includes('.server-software-card.is-current'));
