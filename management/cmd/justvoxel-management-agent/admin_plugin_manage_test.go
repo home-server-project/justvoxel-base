@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,12 +25,26 @@ type pluginManageFixture struct {
 
 func newPluginManageFixture(t *testing.T, state string) *pluginManageFixture {
 	t.Helper()
-	f := &pluginManageFixture{pluginInstallFixture: newPluginInstallFixture(t)}
-	a := f.plan(t).Artifacts[0]
-	f.entry = pluginManifestArtifact(a)
-	f.entry.PluginName = "Root"
-	f.entry.Main = "example.Root"
-	if err := os.WriteFile(filepath.Join(f.data, "plugins", f.entry.Filename), f.jars[f.entry.Filename], 0644); err != nil {
+	return newPluginManageFixtureFor(t, state, "paper")
+}
+func newPluginManageFixtureFor(t *testing.T, state, software string) *pluginManageFixture {
+	t.Helper()
+	f := &pluginManageFixture{pluginInstallFixture: newPluginInstallFixtureFor(t, software, "1.21.8")}
+	if javaServerContentKind(software) == "mods" {
+		if err := os.Mkdir(filepath.Join(f.data, "mods"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		raw := componentModJar(t, software, "root_mod")
+		hash := sha512.Sum512(raw)
+		f.entry = pluginManifestEntry{Target: "mods", ProjectID: "root", VersionID: "release", VersionNumber: "1.0", Filename: "root.jar", SHA512: hex.EncodeToString(hash[:]), PluginName: "Root", Requested: true, RequiredBy: []string{}}
+		f.jars[f.entry.Filename] = raw
+	} else {
+		a := f.plan(t).Artifacts[0]
+		f.entry = pluginManifestArtifact(a)
+		f.entry.PluginName = "Root"
+		f.entry.Main = "example.Root"
+	}
+	if err := os.WriteFile(filepath.Join(f.data, pluginTarget(f.entry.Target), f.entry.Filename), f.jars[f.entry.Filename], 0644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := commitPluginManifest(f.data, nil, pluginManifest{"v1", []pluginManifestEntry{f.entry}}); err != nil {
@@ -90,6 +106,9 @@ func newPluginManageFixture(t *testing.T, state string) *pluginManageFixture {
 			if f.failNextVerify {
 				f.failNextVerify = false
 				return nil, errors.New("runtime failed")
+			}
+			if f.entry.Target == "mods" {
+				return nil, nil
 			}
 			root, err := openPluginDirectory(f.data)
 			if err != nil {
@@ -341,7 +360,7 @@ func TestManagedPluginInterruptedEvidenceAndAmbiguousAcknowledge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx := pluginManageTransaction{"jv-a1b2c3", "v1", j.OperationID, "disable", p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, true, p.Entry, p.State, p.Manifest}
+	tx := pluginManageTransaction{"", "jv-a1b2c3", "v1", j.OperationID, "disable", p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, true, p.Entry, p.State, p.Manifest}
 	evidence, err := createPluginManageEvidence(f.s.operations, j.OperationID, tx)
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +415,7 @@ func TestManagedPluginAcknowledgementVerifiesCompleteTargetOrRestoredOriginal(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			tx := pluginManageTransaction{"jv-a1b2c3", "v1", j.OperationID, "disable", p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, true, p.Entry, p.State, p.Manifest}
+			tx := pluginManageTransaction{"", "jv-a1b2c3", "v1", j.OperationID, "disable", p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, true, p.Entry, p.State, p.Manifest}
 			dir, err := createPluginManageEvidence(f.s.operations, j.OperationID, tx)
 			if err != nil {
 				t.Fatal(err)
@@ -494,5 +513,336 @@ func TestGenericLifecycleCannotAdoptApplianceComponent(t *testing.T) {
 		if _, err = f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), action, "wKkoqHrH"); err == nil {
 			t.Fatal("component received generic action")
 		}
+	}
+}
+
+// These plan and file-transaction checks deliberately run without root, sockets,
+// an activated instance, provider calls or privileged ownership fixtures.
+func modManageFiles(t *testing.T) (string, pluginServerContext, pluginManifestEntry) {
+	t.Helper()
+	data := t.TempDir()
+	if err := os.Mkdir(filepath.Join(data, "mods"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw := componentModJar(t, "fabric", "example_mod")
+	hash := sha512.Sum512(raw)
+	entry := pluginManifestEntry{Target: "mods", ProjectID: "root", VersionID: "release", VersionNumber: "1.0", Filename: "root.jar", SHA512: hex.EncodeToString(hash[:]), PluginName: "Root", Requested: true, RequiredBy: []string{}}
+	if err := os.WriteFile(filepath.Join(data, "mods", entry.Filename), raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commitPluginManifest(data, nil, pluginManifest{"v1", []pluginManifestEntry{entry}}); err != nil {
+		t.Fatal(err)
+	}
+	oldRuntime, oldPlayers := instanceRuntimes, pluginInstallPlayers
+	instanceRuntimes = &instanceRuntimeBackend{root: t.TempDir()}
+	pluginInstallPlayers = func(context.Context, string) (int, []string, error) { return 0, []string{}, nil }
+	t.Cleanup(func() { instanceRuntimes, pluginInstallPlayers = oldRuntime, oldPlayers })
+	server := pluginContentContext("fabric")
+	server.InstanceID, server.MinecraftVersion = "jv-a1b2c3", "1.21.8"
+	return data, server, entry
+}
+
+func TestManagedModPlanBoundariesWithoutRoot(t *testing.T) {
+	for _, scenario := range []string{"remove", "enable", "disable", "manual", "runtime", "hash", "loader", "provider", "symlink", "unsupported"} {
+		t.Run(scenario, func(t *testing.T) {
+			data, server, e := modManageFiles(t)
+			action, project, source := "remove", e.ProjectID, "Modrinth"
+			switch scenario {
+			case "enable", "disable":
+				action = scenario
+			case "manual", "runtime":
+				_, raw, _ := readPluginManifest(data)
+				if _, err := commitPluginManifest(data, raw, pluginManifest{"v1", []pluginManifestEntry{}}); err != nil {
+					t.Fatal(err)
+				}
+			case "hash":
+				// A different valid ZIP, never bytes appended after EOCD.
+				if err := os.WriteFile(filepath.Join(data, "mods", e.Filename), componentModJar(t, "fabric", "changed_mod"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "loader":
+				server = pluginContentContext("forge")
+				server.InstanceID, server.MinecraftVersion = "jv-a1b2c3", "1.21.8"
+			case "provider":
+				source = "Hangar"
+			case "symlink":
+				path := filepath.Join(data, "mods", e.Filename)
+				if err := os.Rename(path, filepath.Join(data, "original.jar")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(data, "original.jar"), path); err != nil {
+					t.Fatal(err)
+				}
+			case "unsupported":
+				server = pluginContentContext("vanilla")
+				server.MinecraftVersion = "1.21.8"
+			}
+			p, err := resolvePluginManagePlan(context.Background(), server, data, action, project, source)
+			if scenario == "remove" {
+				if err != nil || p.Entry.Target != "mods" || p.Entry.Main != "" || p.State != "enabled" || p.Fingerprint == "" {
+					t.Fatal(p, err)
+				}
+			} else if err == nil {
+				t.Fatal("unsafe mod lifecycle plan accepted", scenario)
+			}
+		})
+	}
+}
+
+func TestManagedModProviderAwareDependencyBlockingWithoutRoot(t *testing.T) {
+	for _, parentSource := range []string{"Modrinth", "CurseForge"} {
+		t.Run(parentSource, func(t *testing.T) {
+			data, server, e := modManageFiles(t)
+			parent := e
+			parent.Source, parent.ProjectID, parent.VersionID, parent.PluginName, parent.Filename = parentSource, "1234", "5678", "DependentMod", "parent.jar"
+			raw, err := os.ReadFile(filepath.Join(data, "mods", e.Filename))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(filepath.Join(data, "mods", parent.Filename), raw, 0644); err != nil {
+				t.Fatal(err)
+			}
+			e.RequiredBy = []string{"1234"} // Deployed unqualified relationship means Modrinth.
+			_, before, _ := readPluginManifest(data)
+			if _, err = commitPluginManifest(data, before, pluginManifest{"v1", []pluginManifestEntry{e, parent}}); err != nil {
+				t.Fatal(err)
+			}
+			_, err = resolvePluginManagePlan(context.Background(), server, data, "remove", e.ProjectID)
+			if parentSource == "Modrinth" {
+				if err == nil || !strings.Contains(err.Error(), "DependentMod") {
+					t.Fatal("dependent identity not blocked", err)
+				}
+			} else if err != nil {
+				t.Fatal("wrong provider blocked removal", err)
+			}
+		})
+	}
+}
+
+func TestManagedModFileTransactionAndRestorationWithoutRoot(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(fmt.Sprint(committed), func(t *testing.T) {
+			data, server, e := modManageFiles(t)
+			other := e
+			other.ProjectID, other.VersionID, other.Filename = "unrelated", "otherRelease", "other.jar"
+			otherRaw := componentModJar(t, "fabric", "other_mod")
+			sum := sha512.Sum512(otherRaw)
+			other.SHA512 = hex.EncodeToString(sum[:])
+			if err := os.WriteFile(filepath.Join(data, "mods", other.Filename), otherRaw, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(data, "mods", "manual.jar"), otherRaw, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(data, "config"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			config := filepath.Join(data, "config", "mod.conf")
+			if err := os.WriteFile(config, []byte("preserve"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, original, _ := readPluginManifest(data)
+			if _, err := commitPluginManifest(data, original, pluginManifest{"v1", []pluginManifestEntry{e, other}}); err != nil {
+				t.Fatal(err)
+			}
+			p, err := resolvePluginManagePlan(context.Background(), server, data, "remove", e.ProjectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx := pluginManageTransaction{Loader: "fabric", InstanceID: server.InstanceID, SchemaVersion: "v1", OperationID: "12345678-1234-4123-8123-123456789abc", Action: "remove", DataPath: data, DataDevice: p.DataDevice, DataInode: p.DataInode, Entry: e, OriginalState: "enabled", Manifest: p.Manifest}
+			root, err := openContentDirectory(data, "mods")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			stage, err := openPluginOperationStaging(data, tx.OperationID, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stage.Close()
+			if _, err = checkedPluginMove(root, stage, e); err != nil {
+				t.Fatal(err)
+			}
+			if err = verifyModRemovalFiles(tx); err != nil {
+				t.Fatal(err)
+			}
+			_, raw, _ := readPluginManifest(data)
+			if !bytes.Equal(raw, p.Manifest) {
+				t.Fatal("ownership changed before verification")
+			}
+			if committed {
+				if _, err = commitPluginManifest(data, p.Manifest, pluginManifest{"v1", []pluginManifestEntry{other}}); err != nil {
+					t.Fatal(err)
+				}
+				if err = pluginManageTargetState(tx); err != nil {
+					t.Fatal("completed removal not proven", err)
+				}
+			} else if pluginManageTargetState(tx) == nil {
+				t.Fatal("uncommitted removal treated as success")
+			}
+			if err = restorePluginManageFiles(tx); err != nil {
+				t.Fatal("interrupted removal not restored", err)
+			}
+			if err = verifyManageModAt(root, e, "fabric"); err != nil {
+				t.Fatal(err)
+			}
+			_, raw, _ = readPluginManifest(data)
+			if !bytes.Equal(raw, p.Manifest) {
+				t.Fatal("original ownership not restored")
+			}
+			if err = verifyManageModAt(root, other, "fabric"); err != nil {
+				t.Fatal("unrelated artifact changed", err)
+			}
+			manual, err := os.ReadFile(filepath.Join(data, "mods", "manual.jar"))
+			if err != nil || !bytes.Equal(manual, otherRaw) {
+				t.Fatal("manual mod changed", err)
+			}
+			configRaw, err := os.ReadFile(config)
+			if err != nil || string(configRaw) != "preserve" {
+				t.Fatal("config changed", err)
+			}
+			if _, err = os.Stat(filepath.Join(data, ".justvoxel", "disabled-plugins")); !os.IsNotExist(err) {
+				t.Fatal("mod recovery created disabled storage", err)
+			}
+		})
+	}
+}
+
+func TestManagedModRemoveStrictRuntimeAndRollback(t *testing.T) {
+	for _, running := range []bool{true, false} {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprint(running, fail), func(t *testing.T) {
+				f := newPluginManageFixtureFor(t, "enabled", "fabric")
+				f.active = running
+				p := f.managePlan(t, "remove")
+				_, before, _ := readPluginManifest(f.data)
+				f.failNextVerify = fail
+				firstVerify := true
+				f.duringVerify = func() {
+					// Rollback verifies the restored active artifact separately.
+					if !firstVerify {
+						return
+					}
+					firstVerify = false
+					stage, err := openPluginOperationStaging(f.data, f.s.operations.currentMinecraftResetID, false)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer stage.Close()
+					if err = verifyManageModAt(stage, f.entry, "fabric"); err != nil {
+						t.Fatal(err)
+					}
+					_, raw, _ := readPluginManifest(f.data)
+					if !bytes.Equal(before, raw) {
+						t.Fatal("manifest committed before strict verification")
+					}
+				}
+				j := f.manage(t, p, false)
+				want := operationSucceeded
+				if fail {
+					want = operationRolledBack
+				}
+				if j.State != want || f.active != running {
+					t.Fatal(j, f.active)
+				}
+				m, raw, err := readPluginManifest(f.data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fail {
+					if !bytes.Equal(before, raw) {
+						t.Fatal("manifest not restored")
+					}
+					if _, err = resolveManagedContentLocation(f.data, f.entry); err != nil {
+						t.Fatal(err)
+					}
+				} else if len(m.Artifacts) != 0 {
+					t.Fatal("removal not committed")
+				}
+				for _, command := range f.commands {
+					if strings.Contains(command, "--content-install") {
+						t.Fatal("relaxed lifecycle verifier", command)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestManagedModDurableRecovery(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(fmt.Sprint(committed), func(t *testing.T) {
+			f := newPluginManageFixtureFor(t, "enabled", "fabric")
+			p := f.managePlan(t, "remove")
+			j, _, err := f.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginRemove, "jv-a1b2c3")
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx := pluginManageTransaction{Loader: "fabric", InstanceID: p.Server.InstanceID, SchemaVersion: "v1", OperationID: j.OperationID, Action: "remove", PlanFingerprint: p.Fingerprint, DataPath: p.DataPath, DataDevice: p.DataDevice, DataInode: p.DataInode, MinecraftVersion: p.Server.MinecraftVersion, OriginallyRunning: false, Entry: p.Entry, OriginalState: p.State, Manifest: p.Manifest}
+			evidence, err := createPluginManageEvidence(f.s.operations, j.OperationID, tx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			evidence.Close()
+			root, err := openContentDirectory(f.data, "mods")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			stage, err := openPluginOperationStaging(f.data, j.OperationID, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stage.Close()
+			if _, err = checkedPluginMove(root, stage, p.Entry); err != nil {
+				t.Fatal(err)
+			}
+			if committed {
+				if _, err = commitPluginManifest(f.data, p.Manifest, pluginManifest{"v1", []pluginManifestEntry{}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err = f.s.operations.transition(j.OperationID, operationValidating, "validating", "Validated."); err != nil {
+				t.Fatal(err)
+			}
+			base := f.s.operations.baseDir
+			if err = f.s.operations.close(); err != nil {
+				t.Fatal(err)
+			}
+			store, err := openOperationStore(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.close()
+			f.s.operations = store
+			recovered, err := readPluginManageTransaction(store, j.OperationID)
+			if err != nil || recovered.Loader != "fabric" {
+				t.Fatal(recovered, err)
+			}
+			body, _ := json.Marshal(pluginManageAcknowledgeRequest{OperationID: j.OperationID})
+			rr := httptest.NewRecorder()
+			f.s.adminPluginManageAcknowledge(rr, pluginTestRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/plugins/manage/acknowledge", string(body)))
+			if rr.Code != 200 {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+			if f.active {
+				t.Fatal("original stopped state not restored")
+			}
+			if committed {
+				if err = pluginManageTargetState(tx); err != nil {
+					t.Fatal(err)
+				}
+			} else if err = verifyManageModAt(root, p.Entry, "fabric"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestManagedModCannotRemoveRuntimeOwnership(t *testing.T) {
+	f := newPluginManageFixtureFor(t, "enabled", "fabric")
+	recordRuntimeComponent(t, f.pluginInstallFixture, "fabric", f.entry.Filename, f.jars[f.entry.Filename])
+	if _, err := f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), "remove", f.entry.ProjectID); err == nil || !strings.Contains(err.Error(), "runtime-owned") {
+		t.Fatal("runtime ownership gained lifecycle", err)
 	}
 }

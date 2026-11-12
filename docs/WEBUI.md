@@ -236,7 +236,9 @@ Desktop workspaces can be dragged by their headers and resized from the browser�
 
 **Minecraft → Plugins & Mods → Installed** shows Enabled or Disabled for verified
 plugin entries. Mod-loader servers show active mod inventory with ownership and
-attention status; mod lifecycle actions are not available yet. Discover uses
+attention status. Verified Plugins-managed mods offer **Remove** only;
+Enable/Disable remain plugin-only. Manual/unmanaged and JustVoxel runtime-managed
+mods remain read only. Discover uses
 Modrinth and configured CurseForge for mods, and adds Hangar for eligible plugin
 servers. Exact server and loader compatibility is required. See
 [Plugins & Mods](plugin-workspace.md) for installation and recovery behavior.
@@ -247,7 +249,11 @@ remain read only. Enable/Disable review has Cancel and one yellow final action.
 Remove requires the destructive slider fully armed and the final confirmation
 switch, with Cancel and red Remove. Cancel returns to Installed. Configuration
 and data folders are preserved; dependencies are not removed automatically.
-Enabled managed parents can block disabling/removing a required dependency.
+Enabled managed plugin parents can block disabling/removing a required dependency.
+Installed verified managed mod parents block removal of their required mods, with
+the dependent mod named. Mod removal preserves configuration/data directories,
+uses the same cold backup, strict restart verification and durable rollback, and
+restores the original running/stopped state.
 Actions use cold backup and verified Minecraft restart, with no hot toggling.
 Successful operations refresh Installed; Done is green and View in Installed is
 dark secondary. Failures point to **System → Logs → Plugins**, with an in-workspace

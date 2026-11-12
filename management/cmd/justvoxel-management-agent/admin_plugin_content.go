@@ -174,7 +174,7 @@ func readModInventory(dataPath, loader string) ([]installedPlugin, error) {
 				}
 				item.Management, item.State, item.Source, item.ProjectID, item.VersionID = "plugins", "installed", pluginSource(e.Source), e.ProjectID, e.VersionID
 				item.Name, item.Version = e.PluginName, e.VersionNumber
-				item.UpdateStatus = "Managed content; lifecycle actions are not available yet"
+				item.UpdateStatus = "Updates are not available yet"
 			}
 		}
 		out = append(out, item)
@@ -222,7 +222,7 @@ func checkModInstallCollisions(root *os.File, plan pluginInstallPlan) error {
 	return nil
 }
 
-// Reset and inventory share artifact verification without extending plugin lifecycle.
+// Inventory, lifecycle and reset share exact target-aware artifact verification.
 func verifyManagedArtifactAt(root *os.File, e pluginManifestEntry) error {
 	if !validPluginTarget(e.Target) {
 		return errors.New("Invalid managed artifact target")

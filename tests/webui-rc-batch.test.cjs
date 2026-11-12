@@ -427,16 +427,25 @@ test('Installed lifecycle actions derive one toggle and preserve read-only owner
     reviewManagedPlugin() {},
   });
   vm.runInContext(app.slice(start, end) + '\nthis.renderInstalled = renderInstalled;', context);
-  for (const [management, state, labels, badge] of [
+  for (const [management, state, labels, badge, kind = "plugins"] of [
     ['plugins', 'enabled', ['Disable', 'Remove'], 'Enabled'],
     ['plugins', 'disabled', ['Enable', 'Remove'], 'Disabled'],
+    ['plugins', 'installed', ['Remove'], '', 'mods'],
+    ['plugins', 'attention', [], '', 'mods'],
+    ['manual', 'installed', [], '', 'mods'],
+    ['justvoxel', 'installed', [], '', 'mods'],
     ['manual', 'enabled', [], ''],
     ['justvoxel', 'enabled', [], ''],
   ]) {
+    context.acceptedServer.content_kind = kind;
     const card = context.renderInstalled({ management, state, name: 'Root', filename: 'root.jar', version: '1.0', project_id: management === 'plugins' ? 'root' : undefined, icon_project_id: management === 'justvoxel' ? 'wKkoqHrH' : undefined, metadata_status: 'Metadata read' });
     const buttons = card.info() || [];
     assert.deepEqual(Array.from(buttons, node => node.textContent), labels);
     assert.ok(!(buttons.some(node => node.textContent === 'Enable') && buttons.some(node => node.textContent === 'Disable')));
+    if (kind === 'mods') {
+      assert.ok(!buttons.some(node => ['Enable', 'Disable'].includes(node.textContent)));
+      if (management === 'plugins') assert.ok(card.all().some(node => node.textContent === 'Managed by Plugins'));
+    }
     if (badge) {
       const stateClass = state === 'disabled' ? 'plugins-badge-disabled' : 'plugins-badge-enabled';
       for (const [label, semanticClass] of [['Installed', 'plugins-badge-installed'], [badge, stateClass]]) {
@@ -450,7 +459,7 @@ test('Installed lifecycle actions derive one toggle and preserve read-only owner
       assert.equal(buttons[0].className, 'plugins-state-action');
       assert.equal(buttons[1].className, 'plugins-remove-action');
       assert.equal(card.iconProjectID, 'root');
-    } else {
+    } else if (management !== 'plugins') {
       assert.equal(headerStatus, null);
       if (management === 'justvoxel') assert.equal(card.iconProjectID, 'wKkoqHrH');
       else assert.equal(card.iconProjectID, undefined);
@@ -458,7 +467,7 @@ test('Installed lifecycle actions derive one toggle and preserve read-only owner
   }
 });
 
-async function pluginLifecycleReview(action) {
+async function pluginLifecycleReview(action, kind = "plugins") {
   const start = app.indexOf('  const reviewManagedPlugin =');
   const end = app.indexOf('  const pluginRequest =', start);
   const body = lifecycleElement('div');
@@ -469,6 +478,7 @@ async function pluginLifecycleReview(action) {
     AbortController, Array, Number, Math, String, installGeneration: 0, installController: null, operationIdentity: null, pollTimer: null,
     document: { createElement: tag => lifecycleElement(tag) }, text: lifecycleElement, panelBody: body,
     stopPolling: () => { context.installGeneration++; }, showPanel: () => body.replaceChildren(),
+    acceptedServer: {content_kind: kind},
     overlayHeader() {}, blockPluginInstall: async () => false,
     returnToInstalled: () => { installed++; },
     panelAction: (label, handler) => { const button = lifecycleElement('button', label); button.addEventListener('click', handler); return button; },
@@ -497,7 +507,7 @@ test('Enable and Disable reviews have Cancel and one yellow final action with no
 });
 
 test('Remove review requires both a fully armed slider and the final confirmation switch', async () => {
-  const page = await pluginLifecycleReview('remove');
+  const page = await pluginLifecycleReview('remove', 'mods');
   const buttons = page.body.all().filter(node => node.tag === 'button');
   assert.deepEqual(buttons.map(node => node.textContent), ['Cancel', 'Remove']);
   const remove = buttons[1];

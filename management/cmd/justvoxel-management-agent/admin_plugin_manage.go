@@ -64,6 +64,7 @@ type pluginManagePlan struct {
 	Fingerprint          string                   `json:"plan_fingerprint"`
 }
 type pluginManageTransaction struct {
+	Loader            string              `json:"loader,omitempty"`
 	InstanceID        string              `json:"instance_id"`
 	SchemaVersion     string              `json:"schema_version"`
 	OperationID       string              `json:"operation_id"`
@@ -212,6 +213,93 @@ func resolveManagedPluginLocation(path string, e pluginManifestEntry) (string, e
 	}
 	return "disabled", verifyManagedPluginAt(disabled, e)
 }
+
+// Mods have one active location and no disabled state.
+func resolveManagedContentLocation(path string, e pluginManifestEntry) (string, error) {
+	if e.Target == "mods" {
+		return resolveResetManagedLocation(path, e)
+	}
+	return resolveManagedPluginLocation(path, e)
+}
+
+func verifyManageModAt(root *os.File, e pluginManifestEntry, loader string) error {
+	if root == nil {
+		return errors.New("Mod directory unavailable")
+	}
+	f, err := openPluginAt(root, e.Filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var before, current, opened unix.Stat_t
+	if err = unix.Fstat(int(f.Fd()), &before); err != nil {
+		return err
+	}
+	if _, err = inspectStagedMod(f, e.Filename, loader); err != nil {
+		return err
+	}
+	if err = verifyManagedArtifactAt(root, e); err != nil {
+		return err
+	}
+	if unix.Fstatat(int(root.Fd()), e.Filename, &current, unix.AT_SYMLINK_NOFOLLOW) != nil || unix.Fstat(int(f.Fd()), &opened) != nil || current.Dev != before.Dev || current.Ino != before.Ino || current.Mode&unix.S_IFMT != unix.S_IFREG || current.Size != before.Size || current.Mtim != before.Mtim || current.Ctim != before.Ctim || opened.Size != before.Size || opened.Mtim != before.Mtim || opened.Ctim != before.Ctim {
+		return errors.New("Managed mod changed during loader verification")
+	}
+	return nil
+}
+
+func verifyManageModOwnership(server pluginServerContext, path string, e pluginManifestEntry) error {
+	root, err := openContentDirectory(path, "mods")
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err = verifyManageModAt(root, e, server.ServerType); err != nil {
+		return err
+	}
+	runtime, err := runtimeOwnedModComponents(server, path)
+	if err != nil {
+		return err
+	}
+	f, err := openPluginAt(root, e.Filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	ids, err := modArtifactIdentities(f, e.Filename, server.ServerType)
+	if err != nil {
+		return err
+	}
+	for _, component := range runtime {
+		if component.Filename == e.Filename || modIDsOverlap(component.IDs, ids) {
+			return errors.New("JustVoxel runtime-owned components are read only")
+		}
+	}
+	return nil
+}
+
+// During removal the original manifest and exact rollback JAR must survive
+// runtime verification. Mods use file evidence, never Bukkit startup names.
+func verifyModRemovalFiles(tx pluginManageTransaction) error {
+	if err := checkManageDataIdentity(tx); err != nil {
+		return err
+	}
+	root, err := openContentDirectory(tx.DataPath, "mods")
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	present, err := pluginFilePresent(root, tx.Entry.Filename)
+	if err != nil || present {
+		return errors.New("Removed mod is still present or unsafe")
+	}
+	stage, err := openPluginOperationStaging(tx.DataPath, tx.OperationID, false)
+	if err != nil {
+		return err
+	}
+	defer stage.Close()
+	return verifyManageModAt(stage, tx.Entry, tx.Loader)
+}
+
 func fingerprintPluginManagePlan(p pluginManagePlan) string {
 	raw, _ := json.Marshal(struct {
 		Action, Project, State, Path string
@@ -233,8 +321,12 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	if !slices.Contains([]string{"enable", "disable", "remove"}, action) || !validPluginIdentity(source, project) {
 		return p, errors.New("Invalid plugin action or project identity")
 	}
-	if !server.Supported || javaServerContentKind(server.ServerType) != "plugins" || server.MinecraftVersion == "" {
-		return p, errors.New("Current Paper/Purpur server context is unavailable")
+	kind := javaServerContentKind(server.ServerType)
+	if !server.Supported || kind == "" || server.MinecraftVersion == "" {
+		return p, errors.New("Current supported server context is unavailable")
+	}
+	if kind == "mods" && action != "remove" {
+		return p, errors.New("Mods support Remove only; Enable and Disable are plugin-only")
 	}
 	data, err := openPluginDataDirectory(path)
 	if err != nil {
@@ -253,7 +345,7 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	p.Manifest = raw
 	found := false
 	for _, e := range manifest.Artifacts {
-		if pluginTarget(e.Target) == "plugins" && pluginIdentity(e.Source, e.ProjectID) == pluginIdentity(source, project) {
+		if pluginTarget(e.Target) == kind && pluginIdentity(e.Source, e.ProjectID) == pluginIdentity(source, project) {
 			p.Entry = e
 			found = true
 		}
@@ -261,24 +353,42 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	if !found {
 		return p, errors.New("Only exact Plugins-managed entries support this action")
 	}
-	p.State, err = resolveManagedPluginLocation(path, p.Entry)
+	if kind == "mods" {
+		if err = verifyManageModOwnership(server, path, p.Entry); err != nil {
+			return p, err
+		}
+	}
+	p.State, err = resolveManagedContentLocation(path, p.Entry)
 	if err != nil {
 		return p, err
 	}
 	p.Name = p.Entry.PluginName
+	if kind == "mods" && p.Name == "" {
+		p.Name = p.Entry.Filename
+	}
 	if action == "enable" && p.State != "disabled" || action == "disable" && p.State != "enabled" {
 		return p, errors.New("Plugin state does not allow the requested action")
 	}
 	for _, parent := range p.Entry.RequiredBy {
 		// Orphan relationships may remain after removal of the parent.
 		for _, e := range manifest.Artifacts {
-			if pluginTarget(e.Target) == "plugins" && pluginIdentity(e.Source, e.ProjectID) == pluginParentIdentity(parent) {
-				state, eerr := resolveManagedPluginLocation(path, e)
+			if pluginTarget(e.Target) == kind && pluginIdentity(e.Source, e.ProjectID) == pluginParentIdentity(parent) {
+				state, eerr := resolveManagedContentLocation(path, e)
+				if eerr == nil && kind == "mods" {
+					eerr = verifyManageModOwnership(server, path, e)
+				}
 				if eerr != nil {
 					return p, errors.New("Required managed parent state cannot be safely verified")
 				}
 				p.Parents = append(p.Parents, pluginLocationEvidence{e, state})
 				if action != "enable" && state == "enabled" {
+					if kind == "mods" {
+						name := e.PluginName
+						if name == "" {
+							name = e.Filename
+						}
+						return p, fmt.Errorf("%s requires this mod; remove that managed mod first", name)
+					}
 					return p, fmt.Errorf("%s requires this plugin; disable that managed plugin first", e.PluginName)
 				}
 			}
@@ -446,7 +556,7 @@ func openPluginOperationStaging(path, id string, create bool) (*os.File, error) 
 	return openPrivatePluginChild(parent, id, create)
 }
 func checkedPluginMove(from, to *os.File, e pluginManifestEntry) (bool, error) {
-	if err := verifyManagedPluginAt(from, e); err != nil {
+	if err := verifyManagedArtifactAt(from, e); err != nil {
 		return false, err
 	}
 	present, err := pluginFilePresent(to, e.Filename)
@@ -515,7 +625,10 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if err != nil {
 		return untouched(err)
 	}
-	tx := pluginManageTransaction{p.Server.InstanceID, "v1", id, p.Action, p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, running, p.Entry, p.State, p.Manifest}
+	tx := pluginManageTransaction{"", p.Server.InstanceID, "v1", id, p.Action, p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, running, p.Entry, p.State, p.Manifest}
+	if p.Entry.Target == "mods" {
+		tx.Loader = p.Server.ServerType
+	}
 	evidence, err := createPluginManageEvidence(s.operations, id, tx)
 	if err != nil {
 		return untouched(errors.New("Private plugin transaction evidence could not be saved"))
@@ -541,20 +654,23 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if err = checkManageDataIdentity(tx); err != nil {
 		return rollback(err)
 	}
-	state, err := resolveManagedPluginLocation(p.DataPath, p.Entry)
+	state, err := resolveManagedContentLocation(p.DataPath, p.Entry)
 	if err != nil || state != p.State {
 		return rollback(errors.New("Managed plugin state changed"))
 	}
-	active, err := openPluginDirectory(p.DataPath)
+	active, err := openContentDirectory(p.DataPath, pluginTarget(p.Entry.Target))
 	if err != nil {
 		return rollback(err)
 	}
 	defer active.Close()
-	disabled, err := openDisabledPluginDirectory(p.DataPath, true)
-	if err != nil {
-		return rollback(err)
+	var disabled *os.File
+	if pluginTarget(tx.Entry.Target) == "plugins" {
+		disabled, err = openDisabledPluginDirectory(p.DataPath, true)
+		if err != nil {
+			return rollback(err)
+		}
+		defer disabled.Close()
 	}
-	defer disabled.Close()
 	source, target := active, disabled
 	if p.State == "disabled" {
 		source = disabled
@@ -583,13 +699,21 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if err = checkPinnedManagedPluginDirectories(tx, active, disabled, staging); err != nil {
 		return rollback(err)
 	}
+	if tx.Entry.Target == "mods" {
+		if err = verifyManageModOwnership(p.Server, p.DataPath, p.Entry); err != nil {
+			return rollback(err)
+		}
+	}
 	if _, err = checkedPluginMove(source, target, p.Entry); err != nil {
 		return rollback(errors.New("Atomic plugin move could not be proven"))
 	}
 	if err = s.operations.pluginProgress(id, "restarting", "Starting Minecraft for runtime verification."); err != nil {
 		return rollback(err)
 	}
-	previousStartup, err := snapshotPluginLifecycleStartup(p.DataPath)
+	var previousStartup *pluginLifecycleStartupSnapshot
+	if tx.Entry.Target != "mods" {
+		previousStartup, err = snapshotPluginLifecycleStartup(p.DataPath)
+	}
 	if err != nil {
 		return rollback(err)
 	}
@@ -605,12 +729,16 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 		recordPluginStartupEvidence(s.operations, id, p.DataPath, []string{p.Entry.PluginName})
 		return rollback(errors.New("Minecraft stack verification failed"))
 	}
-	if err = verifyPluginLifecycleStartupFresh(p.DataPath, previousStartup); err != nil {
-		recordPluginFailure(s.operations, id, "verification", err)
-		recordPluginStartupEvidence(s.operations, id, p.DataPath, []string{p.Entry.PluginName})
-		return rollback(err)
+	if tx.Entry.Target != "mods" {
+		if err = verifyPluginLifecycleStartupFresh(p.DataPath, previousStartup); err != nil {
+			recordPluginFailure(s.operations, id, "verification", err)
+			recordPluginStartupEvidence(s.operations, id, p.DataPath, []string{p.Entry.PluginName})
+			return rollback(err)
+		}
 	}
-	if p.Action == "enable" {
+	if tx.Entry.Target == "mods" {
+		err = verifyModRemovalFiles(tx)
+	} else if p.Action == "enable" {
 		err = verifyPluginStartup(p.DataPath, []string{p.Entry.PluginName})
 	} else {
 		err = verifyPluginAbsent(p.DataPath, p.Entry.PluginName)
@@ -634,8 +762,13 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if err = checkPinnedManagedPluginDirectories(tx, active, disabled, staging); err != nil {
 		return rollback(err)
 	}
-	if err = verifyManagedPluginAt(target, p.Entry); err != nil {
+	if err = verifyManagedArtifactAt(target, p.Entry); err != nil {
 		return rollback(err)
+	}
+	if tx.Entry.Target == "mods" {
+		if err = verifyModRemovalFiles(tx); err != nil {
+			return rollback(err)
+		}
 	}
 	manifest, raw, err := readPluginManifest(p.DataPath)
 	if err != nil || !bytes.Equal(raw, p.Manifest) {
@@ -660,7 +793,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	success = true
 	// Retain the rollback copy through the durable success journal.
 	if p.Action == "remove" {
-		if err = verifyManagedPluginAt(target, p.Entry); err == nil {
+		if err = verifyManagedArtifactAt(target, p.Entry); err == nil {
 			err = unix.Unlinkat(int(target.Fd()), p.Entry.Filename, 0)
 		}
 		if err == nil {
@@ -694,16 +827,19 @@ func restorePluginManageFiles(tx pluginManageTransaction) error {
 		}
 	}
 
-	active, err := openPluginDirectory(tx.DataPath)
+	active, err := openContentDirectory(tx.DataPath, pluginTarget(tx.Entry.Target))
 	if err != nil {
 		return err
 	}
 	defer active.Close()
-	disabled, err := openDisabledPluginDirectory(tx.DataPath, true)
-	if err != nil {
-		return err
+	var disabled *os.File
+	if pluginTarget(tx.Entry.Target) == "plugins" {
+		disabled, err = openDisabledPluginDirectory(tx.DataPath, true)
+		if err != nil {
+			return err
+		}
+		defer disabled.Close()
 	}
-	defer disabled.Close()
 	staging, err := openPluginOperationStaging(tx.DataPath, tx.OperationID, false)
 	if err != nil && !errors.Is(err, unix.ENOENT) {
 		return err
@@ -722,7 +858,12 @@ func restorePluginManageFiles(tx pluginManageTransaction) error {
 			if sourceIndex >= 0 {
 				return errors.New("Ambiguous plugin copies; recovery blocked")
 			}
-			if err = verifyManagedPluginAt(root, tx.Entry); err != nil {
+			if tx.Entry.Target == "mods" {
+				if err = verifyManageModAt(root, tx.Entry, tx.Loader); err != nil {
+					return err
+				}
+			}
+			if err = verifyManagedArtifactAt(root, tx.Entry); err != nil {
 				return err
 			}
 			sourceIndex = i
@@ -735,6 +876,11 @@ func restorePluginManageFiles(tx pluginManageTransaction) error {
 	if tx.OriginalState == "disabled" {
 		originalIndex = 1
 	}
+	if tx.Entry.Target == "mods" {
+		if err = checkPinnedManagedPluginDirectories(tx, active, disabled, staging); err != nil {
+			return err
+		}
+	}
 	if originalIndex != sourceIndex {
 		if _, err = checkedPluginMove(roots[sourceIndex], roots[originalIndex], tx.Entry); err != nil {
 			return err
@@ -745,7 +891,7 @@ func restorePluginManageFiles(tx pluginManageTransaction) error {
 			return err
 		}
 	}
-	state, err := resolveManagedPluginLocation(tx.DataPath, tx.Entry)
+	state, err := resolveManagedContentLocation(tx.DataPath, tx.Entry)
 	if err != nil || state != tx.OriginalState {
 		return errors.New("Original JAR location could not be proven")
 	}
@@ -753,7 +899,11 @@ func restorePluginManageFiles(tx pluginManageTransaction) error {
 }
 func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction, lock *pluginMaintenanceLock) error {
 	ctx = withPluginInstance(ctx, tx.InstanceID)
-	previous, err := snapshotPluginLifecycleStartup(tx.DataPath)
+	var previous *pluginLifecycleStartupSnapshot
+	var err error
+	if tx.Entry.Target != "mods" {
+		previous, err = snapshotPluginLifecycleStartup(tx.DataPath)
+	}
 	if err != nil {
 		return err
 	}
@@ -763,10 +913,17 @@ func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction,
 	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion); err != nil {
 		return err
 	}
-	if err = verifyPluginLifecycleStartupFresh(tx.DataPath, previous); err != nil {
-		return err
+	if tx.Entry.Target != "mods" {
+		if err = verifyPluginLifecycleStartupFresh(tx.DataPath, previous); err != nil {
+			return err
+		}
 	}
-	if tx.OriginalState == "enabled" {
+	if tx.Entry.Target == "mods" {
+		state, e := resolveManagedContentLocation(tx.DataPath, tx.Entry)
+		if e != nil || state != tx.OriginalState {
+			return errors.New("Original mod artifact cannot be proven")
+		}
+	} else if tx.OriginalState == "enabled" {
 		err = verifyPluginStartup(tx.DataPath, []string{tx.Entry.PluginName})
 	} else {
 		err = verifyPluginAbsent(tx.DataPath, tx.Entry.PluginName)
@@ -781,6 +938,21 @@ func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction,
 		if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 			return errors.New("Stopped runtime could not be proven")
 		}
+	}
+	if tx.Entry.Target == "mods" {
+		if err := checkManageDataIdentity(tx); err != nil {
+			return err
+		}
+		_, raw, err := readPluginManifest(tx.DataPath)
+		if err != nil || !bytes.Equal(raw, tx.Manifest) {
+			return errors.New("Original mod ownership cannot be proven")
+		}
+		root, err := openContentDirectory(tx.DataPath, "mods")
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		return verifyManageModAt(root, tx.Entry, tx.Loader)
 	}
 	return nil
 }
@@ -846,8 +1018,11 @@ func readPluginManageTransaction(store *operationStore, id string) (pluginManage
 		return tx, errors.New("Invalid lifecycle transaction relationship")
 	}
 	var manifest pluginManifest
-	if json.Unmarshal(tx.Manifest, &manifest) != nil || validatePluginManifest(manifest) != nil || !slices.ContainsFunc(manifest.Artifacts, func(e pluginManifestEntry) bool { return reflect.DeepEqual(e, tx.Entry) }) || !safePluginFilename(tx.Entry.Filename) || !pluginHashPattern.MatchString(tx.Entry.SHA512) || !pluginNamePattern.MatchString(tx.Entry.PluginName) || !pluginMainPattern.MatchString(tx.Entry.Main) || managedPluginDescriptor(tx.Entry.Filename, tx.Entry.PluginName, tx.Entry.Main) != "" {
+	if json.Unmarshal(tx.Manifest, &manifest) != nil || validatePluginManifest(manifest) != nil || !slices.ContainsFunc(manifest.Artifacts, func(e pluginManifestEntry) bool { return reflect.DeepEqual(e, tx.Entry) }) || !safePluginFilename(tx.Entry.Filename) || !pluginHashPattern.MatchString(tx.Entry.SHA512) || !validManagedDescriptorEvidence(tx.Entry) || (pluginTarget(tx.Entry.Target) == "plugins" && (!pluginNamePattern.MatchString(tx.Entry.PluginName) || !pluginMainPattern.MatchString(tx.Entry.Main) || managedPluginDescriptor(tx.Entry.Filename, tx.Entry.PluginName, tx.Entry.Main) != "")) {
 		return tx, errors.New("Invalid original ownership evidence")
+	}
+	if tx.Entry.Target == "mods" && (tx.Action != "remove" || tx.OriginalState != "enabled" || modDescriptor(tx.Loader) == "") {
+		return tx, errors.New("Invalid mod removal evidence")
 	}
 	return tx, nil
 }
@@ -915,7 +1090,7 @@ func (s *server) adminPluginManageAcknowledge(w http.ResponseWriter, r *http.Req
 			}
 			if tx.Action == "remove" {
 				if stage, e := openPluginOperationStaging(tx.DataPath, tx.OperationID, false); e == nil {
-					if verifyManagedPluginAt(stage, tx.Entry) == nil {
+					if verifyManagedArtifactAt(stage, tx.Entry) == nil {
 						_ = unix.Unlinkat(int(stage.Fd()), tx.Entry.Filename, 0)
 						_ = stage.Sync()
 					}
@@ -1208,7 +1383,7 @@ func pluginManageTargetState(tx pluginManageTransaction) error {
 		if !bytes.Equal(raw, tx.Manifest) {
 			return errors.New("Ownership changed")
 		}
-		state, err := resolveManagedPluginLocation(tx.DataPath, tx.Entry)
+		state, err := resolveManagedContentLocation(tx.DataPath, tx.Entry)
 		if err != nil {
 			return err
 		}
@@ -1229,10 +1404,14 @@ func pluginManageTargetState(tx pluginManageTransaction) error {
 	if !reflect.DeepEqual(manifest, old) {
 		return errors.New("Removal ownership commit not proven")
 	}
-	for _, state := range []string{"enabled", "disabled"} {
+	states := []string{"enabled", "disabled"}
+	if tx.Entry.Target == "mods" {
+		states = states[:1]
+	}
+	for _, state := range states {
 		var root *os.File
 		if state == "enabled" {
-			root, err = openPluginDirectory(tx.DataPath)
+			root, err = openContentDirectory(tx.DataPath, pluginTarget(tx.Entry.Target))
 		} else {
 			root, err = openDisabledPluginDirectory(tx.DataPath, false)
 		}
@@ -1260,7 +1439,10 @@ func pluginManageTargetState(tx pluginManageTransaction) error {
 		return err
 	}
 	if exists {
-		return verifyManagedPluginAt(staging, tx.Entry)
+		if tx.Entry.Target == "mods" {
+			return verifyManageModAt(staging, tx.Entry, tx.Loader)
+		}
+		return verifyManagedArtifactAt(staging, tx.Entry)
 	}
 	return nil
 }
@@ -1272,7 +1454,11 @@ func verifyPluginManageTargetRuntime(ctx context.Context, tx pluginManageTransac
 	if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 		return errors.New("Recovery stopped state unverified")
 	}
-	previous, err := snapshotPluginLifecycleStartup(tx.DataPath)
+	var previous *pluginLifecycleStartupSnapshot
+	var err error
+	if tx.Entry.Target != "mods" {
+		previous, err = snapshotPluginLifecycleStartup(tx.DataPath)
+	}
 	if err != nil {
 		return err
 	}
@@ -1282,10 +1468,14 @@ func verifyPluginManageTargetRuntime(ctx context.Context, tx pluginManageTransac
 	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion); err != nil {
 		return err
 	}
-	if err = verifyPluginLifecycleStartupFresh(tx.DataPath, previous); err != nil {
-		return err
+	if tx.Entry.Target != "mods" {
+		if err = verifyPluginLifecycleStartupFresh(tx.DataPath, previous); err != nil {
+			return err
+		}
 	}
-	if tx.Action == "enable" {
+	if tx.Entry.Target == "mods" {
+		err = pluginManageTargetState(tx)
+	} else if tx.Action == "enable" {
 		err = verifyPluginStartup(tx.DataPath, []string{tx.Entry.PluginName})
 	} else {
 		err = verifyPluginAbsent(tx.DataPath, tx.Entry.PluginName)
@@ -1381,7 +1571,7 @@ func checkPinnedManagedPluginDirectories(tx pluginManageTransaction, active, dis
 		var err error
 		switch pair.kind {
 		case "enabled":
-			current, err = openPluginDirectory(tx.DataPath)
+			current, err = openContentDirectory(tx.DataPath, pluginTarget(tx.Entry.Target))
 		case "disabled":
 			current, err = openDisabledPluginDirectory(tx.DataPath, false)
 		case "staging":

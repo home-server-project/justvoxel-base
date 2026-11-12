@@ -1787,6 +1787,15 @@ func TestManagedPluginLifecycleUIContract(t *testing.T) {
 			t.Fatal("managed UI contract missing", want)
 		}
 	}
+	for _, want := range []string{
+		`const managedMod = acceptedServer?.content_kind === "mods" && plugin.management === "plugins" && plugin.state === "installed";`,
+		`if (managedMod && !attention) return [pluginAction("Remove", () => reviewManagedPlugin(plugin, "remove"), "plugins-remove-action")];`,
+		`managedMod ? "Remove verifies the exact recorded mod JAR. Configuration and data are preserved."`,
+	} {
+		if !strings.Contains(inventory, want) {
+			t.Fatal("managed mod Remove contract missing", want)
+		}
+	}
 	for _, want := range []string{`pluginRequest("manage/plan"`, `pluginRequest("manage"`, `slider.type = "range"`, `finalConfirm.className = "destructive-confirm-toggle"`, `Number(slider.value) !== 100 || !finalConfirm.checked`, `overlayActions(panelAction("Cancel", returnToInstalled, true), apply)`, `See System -> Logs -> Plugins for diagnostic details.`, `pluginRequest("operation"`, `["Prepare", "Backup", "Change", "Restart", "Verify"]`, `pluginsDialog.querySelector('[data-plugins-tab="installed"]').click()`} {
 		if !strings.Contains(script, want) {
 			t.Fatal("review or progress missing", want)
@@ -1978,6 +1987,19 @@ for(const management of ["plugins","manual","justvoxel"]) for(const state of ["e
  assert(nodes.some(n=>n.textContent==="2" && n.className.includes("plugins-badge-version")));
  assert(!nodes.some(n=>n.tag==="button" && n.textContent==="Install"));
 }
+// Mods receive Remove only from verified Plugins ownership.
+acceptedServer={content_kind:"mods"};
+for(const management of ["plugins","manual","justvoxel"]) for(const state of ["installed","attention"]) {
+ const card=renderInstalled({name:"Mod",filename:"mod.jar",version:"1",management,state,update_status:state==="attention"?"Attention: changed mod":""});
+ results.append(card);card.events.click();
+ const nodes=flatten(panelBody), buttons=nodes.filter(n=>n.tag==="button" && ["Enable","Disable","Remove"].includes(n.textContent));
+ assert.deepEqual(buttons.map(n=>n.textContent),management==="plugins" && state==="installed"?["Remove"]:[]);
+ if(management==="plugins" && state==="installed") {
+  assert(nodes.some(n=>n.textContent==="Managed by Plugins"));
+  assert(!nodes.some(n=>n.textContent==="Lifecycle actions are not available yet."));
+ }
+}
+acceptedServer={content_kind:"plugins"};
 // Future authoritative server labels receive the same badge, without name matching.
 for(const label of ["Future server","Fabric","Quilt"]) {
  const card=renderProject({...base,source:"Hangar"},{...server,server_software:label});results.append(card);card.events.click();

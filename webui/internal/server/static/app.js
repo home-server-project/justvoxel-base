@@ -7203,12 +7203,13 @@ if (pluginsDialog && pluginsOpen) {
     card.className = "plugins-result-card";
     const name = plugin.name || plugin.filename;
     const projectID = plugin.project_id || plugin.icon_project_id || undefined;
-    const management = plugin.management === "justvoxel" ? "JustVoxel managed" : plugin.management === "plugins" ? (acceptedServer?.content_kind === "mods" ? "Managed content" : "Managed by Plugins") : "Manual / unmanaged";
+    const management = plugin.management === "justvoxel" ? "JustVoxel managed" : plugin.management === "plugins" ? "Managed by Plugins" : "Manual / unmanaged";
     card.append(text("h3", name), text("p", `Version: ${plugin.version || "Unknown"}`, "plugins-card-release"));
     const badges = document.createElement("div");
     badges.className = "plugins-card-badges";
     badges.append(text("span", management, "plugins-badge plugins-management"));
     const managed = acceptedServer?.content_kind === "plugins" && plugin.management === "plugins" && ["enabled", "disabled"].includes(plugin.state);
+    const managedMod = acceptedServer?.content_kind === "mods" && plugin.management === "plugins" && plugin.state === "installed";
     const stateLabel = managed ? (plugin.state === "disabled" ? "Disabled" : "Enabled") : "";
     const stateClass = plugin.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled";
     if (plugin.management === "plugins") badges.append(pluginBadge("Installed", "plugins-badge-installed"));
@@ -7222,13 +7223,14 @@ if (pluginsDialog && pluginsOpen) {
       overlayHeader(name, "", [[plugin.version || "Version unknown", "plugins-badge-version"], management, [plugin.management === "plugins" && "Installed", "plugins-badge-installed"], [stateLabel, stateClass], [attention && "Needs attention", "plugins-badge-attention"]], projectID, plugin.management === "plugins" ? installedStatus() : null, undefined, plugin.source || "Modrinth");
       overlaySection("JAR").append(text("p", plugin.filename));
       overlaySection("Metadata").append(text("p", plugin.metadata_status || "Unknown"));
-      overlaySection("Management").append(text("p", acceptedServer?.content_kind === "mods" ? "Lifecycle actions are not available yet." : plugin.management === "justvoxel" ? "Generic Install is unavailable for this component." : plugin.management === "plugins" ? "Lifecycle actions verify the exact recorded JAR. Plugin configuration and data are preserved." : "Plugins will not adopt or overwrite this JAR."));
+      overlaySection("Management").append(text("p", managedMod ? "Remove verifies the exact recorded mod JAR. Configuration and data are preserved." : acceptedServer?.content_kind === "mods" ? "Lifecycle actions are not available yet." : plugin.management === "justvoxel" ? "Generic Install is unavailable for this component." : plugin.management === "plugins" ? "Lifecycle actions verify the exact recorded JAR. Plugin configuration and data are preserved." : "Plugins will not adopt or overwrite this JAR."));
       overlaySection("Update status").append(text("p", updateStatus));
       if (plugin.project_id || plugin.version_id) {
         const identity = infoRows(overlaySection("Version details"));
         if (plugin.project_id) identity("Project ID", plugin.project_id);
         if (plugin.version_id) identity("Release ID", plugin.version_id);
       }
+      if (managedMod && !attention) return [pluginAction("Remove", () => reviewManagedPlugin(plugin, "remove"), "plugins-remove-action")];
       if (managed && !attention) {
         const action = plugin.state === "disabled" ? "enable" : "disable";
         return [pluginAction(action === "enable" ? "Enable" : "Disable", () => reviewManagedPlugin(plugin, action), "plugins-state-action"), pluginAction("Remove", () => reviewManagedPlugin(plugin, "remove"), "plugins-remove-action")];
@@ -7455,11 +7457,13 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration) return;
       showPanel("Review plugin action", true);
       const label = action === "enable" ? "Enable" : action === "disable" ? "Disable" : "Remove";
-      overlayHeader(plan.project_name, "", [[plugin.version, "plugins-badge-version"], [plan.state === "disabled" ? "Disabled" : "Enabled", plan.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled"]], plan.project_id, null, undefined, plan.source);
+      overlayHeader(plan.project_name, "", [[plugin.version, "plugins-badge-version"], [acceptedServer?.content_kind === "mods" ? "Installed" : plan.state === "disabled" ? "Disabled" : "Enabled", acceptedServer?.content_kind === "mods" ? "plugins-badge-installed" : plan.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled"]], plan.project_id, null, undefined, plan.source);
       const explanation = action === "enable"
         ? "The same verified stored JAR returns to /plugins. Plugin configuration/data is preserved. Minecraft restart and active-plugin verification follow."
         : action === "disable"
           ? "The plugin JAR will leave the active /plugins set. Plugin configuration/data is preserved. Minecraft restart is required when currently running; startup verification also runs when stopped."
+          : acceptedServer?.content_kind === "mods"
+            ? "The exact managed mod JAR will be removed. Configuration/data will remain. Dependencies are not automatically removed. Minecraft will restart for verification; an originally stopped server returns to stopped afterward."
           : "The exact managed JAR will be removed. Plugin configuration/data will remain. Dependencies are not automatically removed. Active plugin removal requires Minecraft restart; stopped-server verification may also start Minecraft temporarily.";
       panelBody.append(text("p", explanation));
       let players = null;

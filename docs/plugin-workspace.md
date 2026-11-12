@@ -38,7 +38,9 @@ rechecked before changes and after startup. Manual/unmanaged JARs are never
 silently adopted as dependency ownership; conflicting or unverifiable identities
 block Review.
 
-Mods have no enable/disable/update/remove lifecycle in this scope. Add-ons remain
+Verified Plugins-managed mods support Remove only. Enable/Disable remain
+plugin-only; mod updates are not available yet. Manual/unmanaged and JustVoxel
+runtime-managed mods remain read only. Add-ons remain
 available only for supported Bukkit plugin hosts. Existing plugin descriptor,
 lifecycle, backup, and recovery behavior remains authoritative.
 
@@ -590,11 +592,30 @@ human-approved task.
 
 ## Managed Enable, Disable and Remove
 
+Mod removal verifies the exact `mods/<filename>` against the ownership manifest,
+SHA-512 and selected loader descriptor. There is no disabled-mod directory.
+A still-installed verified managed mod recorded as a provider-aware `required_by`
+parent blocks removal and is named in the error. Dependencies and parents are
+never removed automatically. Configuration and data directories are preserved.
+The existing transaction records the loader as optional v1 evidence for mods;
+previous plugin evidence remains readable. Removal takes a verified cold backup,
+proves Minecraft stopped, stages only the exact JAR privately, starts Minecraft
+and runs strict stack verification. It proves the mod absent and the staged JAR
+unchanged before committing only that manifest entry. Bukkit startup-name checks
+apply only to plugins. The original running/stopped state is restored, and the
+rollback JAR is retained through durable success. Failure restores the exact JAR
+and original ownership, strictly verifies the original runtime, and restores its
+running/stopped state. Interrupted operations use the same durable recovery;
+unproven recovery retains evidence and maintenance protection as `needs_attention`.
+
 Only entries whose ownership is verified as **Managed by Plugins** receive
 lifecycle actions. Enabled entries show **Enabled** and one yellow **Disable**
 action; disabled entries show **Disabled** and one yellow **Enable** action.
 Both offer red **Remove**. Disabled is a normal state. Manual/unmanaged plugins
 and JustVoxel-managed Geyser, Floodgate and ViaVersion stay read only.
+Verified Plugins-managed mods show **Installed**, **Managed by Plugins**, and
+**Remove** only, using the same destructive slider and final confirmation.
+Manual/unmanaged and JustVoxel runtime-owned mods stay read only.
 
 The existing `<DataPath>/.justvoxel/plugins.json` **v1 schema remains backward compatible**.
 Enabled/disabled state is never persisted in that JSON: an enabled JAR is in
