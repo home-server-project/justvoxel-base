@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -258,8 +259,8 @@ func TestInstanceBackupInterruptedIntentAndMaintenanceConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	if err = f.server.runInstanceBackup(context.Background(), f.configs[1].ID); err == nil {
-		t.Fatal("active maintenance accepted backup")
+	if err = f.server.runInstanceBackup(context.Background(), f.configs[1].ID); !errors.Is(err, errInstanceBackupDeferred) {
+		t.Fatal("active maintenance did not defer backup", err)
 	}
 }
 func TestInstanceBackupSchedulesAndRollback(t *testing.T) {
@@ -626,8 +627,8 @@ func TestInstanceBackupWorkerCollisionAndStrictRequests(t *testing.T) {
 	instanceBackupWorkerMu.Lock()
 	err := f.server.runInstanceBackup(context.Background(), id)
 	instanceBackupWorkerMu.Unlock()
-	if err == nil || len(f.storage) != 0 {
-		t.Fatal("concurrent worker accepted")
+	if !errors.Is(err, errInstanceBackupDeferred) || len(f.storage) != 0 {
+		t.Fatal("concurrent worker did not defer before storage", err, f.storage)
 	}
 	mux := http.NewServeMux()
 	registerInstanceBackupRoutes(mux, f.server)
@@ -639,6 +640,144 @@ func TestInstanceBackupWorkerCollisionAndStrictRequests(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceBackupRunDeferredBeforeMutation(t *testing.T) {
+	for _, contention := range []string{"maintenance", "plugin-maintenance", "worker"} {
+		for _, previous := range []string{"absent", "running", "succeeded", "failed"} {
+			t.Run(contention+"/"+previous, func(t *testing.T) {
+				f := newInstanceBackupFixture(t)
+				id := f.configs[0].ID
+				f.states[id], f.containers[id] = "active", "running"
+				path := f.backend.backupPath(id, "status")
+				var before []byte
+				if previous != "absent" {
+					status := instanceBackupStatus{State: previous, LastAttempt: "2026-01-01T00:00:00Z", LastSuccess: "2025-12-31T00:00:00Z", Stage: "archive", RestartRequired: true, OriginallyRunning: true}
+					if err := f.backend.writeJSON(path, status, false); err != nil {
+						t.Fatal(err)
+					}
+					var err error
+					before, err = os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				switch contention {
+				case "maintenance":
+					release, err := f.server.lockInstanceBackup()
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer func() {
+						if err := release(); err != nil {
+							t.Error(err)
+						}
+					}()
+				case "plugin-maintenance":
+					lock, err := acquirePluginRuntimeLock()
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer lock.Close()
+				case "worker":
+					instanceBackupWorkerMu.Lock()
+					defer instanceBackupWorkerMu.Unlock()
+				}
+				// A deferred worker must not even observe or command Minecraft.
+				commands := 0
+				base := f.backend.command
+				f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+					commands++
+					return base(ctx, command, args...)
+				}
+				mux := http.NewServeMux()
+				registerInstanceBackupRoutes(mux, f.server)
+				rr := httptest.NewRecorder()
+				mux.ServeHTTP(rr, localRootMinecraftRequest("POST", "/v1/minecraft/instances/"+id+"/backups/run", `{}`))
+				if rr.Code != http.StatusOK {
+					t.Fatal(rr.Code, rr.Body.String())
+				}
+				var response map[string]any
+				if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				want := map[string]any{"ok": true, "id": id, "deferred": true, "reason": "appliance_maintenance"}
+				if !reflect.DeepEqual(response, want) {
+					t.Fatal(response)
+				}
+				if commands != 0 || len(f.storage) != 0 || len(f.scheduleCalls) != 0 {
+					t.Fatal("deferred worker performed runtime, storage, or schedule work", commands, f.storage, f.scheduleCalls)
+				}
+				after, err := os.ReadFile(path)
+				if previous == "absent" {
+					if !errors.Is(err, os.ErrNotExist) {
+						t.Fatal("deferred worker recorded an attempt", err)
+					}
+				} else if err != nil || string(after) != string(before) {
+					t.Fatal("deferred worker changed previous status", err, string(after))
+				}
+			})
+		}
+	}
+}
+
+func TestInstanceBackupRunExecutionResult(t *testing.T) {
+	for _, stage := range []string{"", "preflight", "create"} {
+		t.Run("stage="+stage, func(t *testing.T) {
+			f := newInstanceBackupFixture(t)
+			id := f.configs[0].ID
+			f.failStage = stage
+			mux := http.NewServeMux()
+			registerInstanceBackupRoutes(mux, f.server)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, localRootMinecraftRequest("POST", "/v1/minecraft/instances/"+id+"/backups/run", `{}`))
+			wantCode, wantState := http.StatusOK, "succeeded"
+			if stage != "" {
+				wantCode, wantState = http.StatusConflict, "failed"
+			}
+			if rr.Code != wantCode {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+			var response map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := response["deferred"]; exists {
+				t.Fatal("begun backup classified as deferred", response)
+			}
+			if stage == "" && !reflect.DeepEqual(response, map[string]any{"ok": true, "id": id}) {
+				t.Fatal("normal success response changed", response)
+			}
+			if stage != "" && (response["error"] == nil || response["ok"] == true) {
+				t.Fatal("backup failure reported as success", response)
+			}
+			status, err := f.backend.backupStatus(id)
+			if err != nil || status.State != wantState || status.LastAttempt == "" || len(f.storage) == 0 {
+				t.Fatal(status, err, f.storage)
+			}
+		})
+	}
+}
+
+func TestInstanceBackupNowMaintenanceConflictUnchanged(t *testing.T) {
+	f := newInstanceBackupFixture(t)
+	id := f.configs[0].ID
+	release, err := f.server.lockInstanceBackup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	mux := http.NewServeMux()
+	registerInstanceBackupRoutes(mux, f.server)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, authorizedRequest("POST", "/v1/minecraft/instances/"+id+"/backups", `{}`))
+	if rr.Code != http.StatusConflict || strings.Contains(rr.Body.String(), `"deferred"`) {
+		t.Fatal("manual maintenance probe behavior changed", rr.Code, rr.Body.String())
+	}
+	if len(f.storage) != 0 || len(f.scheduleCalls) != 0 {
+		t.Fatal("manual backup queued during maintenance", f.storage, f.scheduleCalls)
+	}
+}
+
 func TestInstanceBackupPendingScheduleRecovery(t *testing.T) {
 	f := newInstanceBackupFixture(t)
 	id := f.configs[0].ID

@@ -24,6 +24,9 @@ var instanceBackupTemplates = "/usr/share/justvoxel/templates/systemd"
 var instanceBackupMu sync.Mutex
 var instanceBackupWorkerMu sync.Mutex
 
+// Only initial lock contention, before any backup attempt has begun.
+var errInstanceBackupDeferred = errors.New("instance backup deferred before mutation")
+
 // Inventory may contain all 365 retained records. Runtime diagnostics use a
 // smaller capture; this separate bounded protocol must not silently truncate.
 var instanceBackupStorageCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
@@ -640,6 +643,10 @@ func (s *server) instanceBackupRun(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Hour)
 	defer cancel()
 	if err := s.runInstanceBackup(ctx, id); err != nil {
+		if errors.Is(err, errInstanceBackupDeferred) {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "deferred": true, "reason": "appliance_maintenance"})
+			return
+		}
 		instanceRuntimeError(w, err, id)
 		return
 	}
@@ -687,11 +694,14 @@ func (s *server) lockInstanceBackup() (func() error, error) {
 
 func (s *server) runInstanceBackup(ctx context.Context, id string) (result error) {
 	if !instanceBackupWorkerMu.TryLock() {
-		return errInstanceBusy
+		return errInstanceBackupDeferred
 	}
 	defer instanceBackupWorkerMu.Unlock()
 	release, err := s.lockInstanceBackup()
 	if err != nil {
+		if errors.Is(err, errInstanceBusy) {
+			return errInstanceBackupDeferred
+		}
 		return err
 	}
 	held := true
