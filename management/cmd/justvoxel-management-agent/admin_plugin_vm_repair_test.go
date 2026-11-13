@@ -242,11 +242,12 @@ func TestModrinthExactVersionDedicatedServerPolicy(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(page.Projects) != 1 || page.Projects[0].InstallAvailable || page.Projects[0].ReviewAvailable != want {
-					t.Fatal("catalog must retain inspectable projects and require exact preflight", compatible, page)
-				}
-				if !want && strings.Contains(page.Projects[0].Compatibility, "Compatible according to publisher metadata") {
-					t.Fatal("unknown advertised as compatible")
+				if !want {
+					if len(page.Projects) != 0 {
+						t.Fatal("non-server release appeared in Discover", compatible, page)
+					}
+				} else if len(page.Projects) != 1 || page.Projects[0].InstallAvailable || !page.Projects[0].ReviewAvailable {
+					t.Fatal("server-capable release missing Review", compatible, page)
 				}
 
 			}

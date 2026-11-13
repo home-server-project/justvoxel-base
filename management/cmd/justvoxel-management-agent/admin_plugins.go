@@ -847,6 +847,9 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 			}
 			sort.SliceStable(versions, func(i, j int) bool { return versions[i].Published > versions[j].Published })
 			for _, v := range versions {
+				if kind == "mod" && !modrinthServerEnvironment(v.Environment) {
+					continue
+				}
 				if kind != "mod" && (v.Environment == "client_only" || v.Environment == "singleplayer_only") {
 					continue
 				}

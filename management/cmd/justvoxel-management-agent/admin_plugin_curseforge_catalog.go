@@ -189,9 +189,6 @@ func curseForgeInstallRestriction(p curseForgeProject) string {
 	if p.Available != nil && !*p.Available {
 		return "This CurseForge project is not available for installation."
 	}
-	if p.AllowModDistribution != nil && !*p.AllowModDistribution {
-		return "CurseForge does not permit third-party installation for this project."
-	}
 	return ""
 }
 
@@ -249,15 +246,21 @@ func trustedCurseForgeCDN(u *url.URL) bool {
 
 func safeCurseForgeArtifactURL(raw string) bool {
 	u, err := url.Parse(raw)
-	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.User != nil || u.Fragment != "" || strings.Contains(raw, "#") || u.RawQuery != "" || u.ForceQuery || u.RawPath != "" {
+	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.User != nil || u.Fragment != "" || strings.Contains(raw, "#") || u.RawQuery != "" || u.ForceQuery {
 		return false
 	}
 	// Provider domain boundary, independent of individual CDN hostnames.
 	if !trustedCurseForgeCDN(u) {
 		return false
 	}
-	parts := strings.Split(u.Path, "/")
-	return len(parts) == 5 && parts[0] == "" && parts[1] == "files" && positiveCurseForgeID(parts[2]) && strings.Trim(parts[3], "0123456789") == "" && parts[3] != "" && len(parts[3]) <= 19 && safePluginFilename(parts[4])
+	// Split the escaped path first so encoded structural segments and separators
+	// cannot change the expected CDN layout. Only the filename may be escaped.
+	parts := strings.Split(u.EscapedPath(), "/")
+	if len(parts) != 5 || parts[0] != "" || parts[1] != "files" || !positiveCurseForgeID(parts[2]) || !positiveCurseForgeID(parts[3]) {
+		return false
+	}
+	filename, err := url.PathUnescape(parts[4])
+	return err == nil && safePluginFilename(filename)
 }
 
 // Current operational avatar allowlist, independent of artifact download URLs.
@@ -412,7 +415,47 @@ func exactCurseForgeFile(ctx context.Context, project, id string) (curseForgeFil
 	}
 	return result.Data, nil
 }
-func selectCurseForgeFile(ctx context.Context, project string, server pluginServerContext, compatible, release bool) (*curseForgeFile, error) {
+
+// Only explicit Server evidence qualifies a mod for dedicated-server Discover.
+// Plugins retain their existing platform and JAR verification behavior.
+func curseForgeDiscoverServerCapable(f curseForgeFile, server pluginServerContext) bool {
+	if javaServerContentKind(server.ServerType) != "mods" {
+		return true
+	}
+	for _, marker := range f.GameVersions {
+		if strings.EqualFold(marker, "Server") {
+			return true
+		}
+	}
+	return false
+}
+
+// Exact alternate identity evidence only. This does not switch the install plan,
+// dependency resolver or ownership manifest away from CurseForge.
+func exactCurseForgeModrinthVersion(ctx context.Context, a pluginInstallArtifact, server pluginServerContext) *pluginCatalogVersion {
+	if a.Source != "CurseForge" || !positiveCurseForgeID(a.ProjectID) || !positiveCurseForgeID(a.VersionID) || !server.Supported || !validPluginDownloadMetadata(a) {
+		return nil
+	}
+	var v pluginCatalogVersion
+	if err := modrinthPluginJSON(ctx, "/version_file/"+a.SHA1, url.Values{"algorithm": {"sha1"}}, &v); err != nil {
+		return nil
+	}
+	if !modrinthPluginID.MatchString(v.ProjectID) || !modrinthPluginID.MatchString(v.ID) || v.Type != "release" || !pluginVersionCompatible(v, server) || !modrinthServerEnvironment(v.Environment) {
+		return nil
+	}
+	for _, f := range v.Files {
+		if f.Hashes.SHA1 != a.SHA1 || f.Size != a.Size {
+			continue
+		}
+		if _, err := selectPluginArtifact([]pluginArtifactFile{f}); err == nil {
+			v.Files = []pluginArtifactFile{f}
+			return &v
+		}
+	}
+	return nil
+}
+
+func selectCurseForgeFile(ctx context.Context, project string, server pluginServerContext, compatible, release, discover bool) (*curseForgeFile, error) {
 	for index := 0; index < 75; index += 25 {
 		q := url.Values{"index": {strconv.Itoa(index)}, "pageSize": {"25"}}
 		if compatible {
@@ -433,6 +476,9 @@ func selectCurseForgeFile(ctx context.Context, project string, server pluginServ
 		}
 		sort.SliceStable(page.Data, func(i, j int) bool { return page.Data[i].Published > page.Data[j].Published })
 		for _, v := range page.Data {
+			if discover && !curseForgeDiscoverServerCapable(v, server) {
+				continue
+			}
 			if !v.Available || v.Status != 4 || curseForgeRelease(v.Release) == "" || release && v.Release != 1 || compatible && !curseForgeCompatible(v, server) {
 				continue
 			}
@@ -443,6 +489,9 @@ func selectCurseForgeFile(ctx context.Context, project string, server pluginServ
 			exact, err := exactCurseForgeFile(ctx, project, strconv.FormatInt(v.ID, 10))
 			if err != nil {
 				return nil, err
+			}
+			if discover && !curseForgeDiscoverServerCapable(exact, server) {
+				continue
 			}
 			if !exact.Available || exact.Status != 4 || curseForgeRelease(exact.Release) == "" || release && exact.Release != 1 || compatible && !curseForgeCompatible(exact, server) || loader != "" && !slices.Contains(exact.GameVersions, loader) {
 				continue
@@ -502,7 +551,7 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 				continue
 			}
 			project := pluginCatalogProject{ID: id, Source: "CurseForge", Name: p.Name, Slug: p.Slug, Description: p.Summary, Compatibility: "Compatibility unknown", IconURL: curseForgeProjectLogo(p, p.ID)}
-			f, err := selectCurseForgeFile(ctx, id, server, q.Compatible, q.Release)
+			f, err := selectCurseForgeFile(ctx, id, server, q.Compatible, q.Release, true)
 			if err != nil {
 				project.MetadataError = "Release metadata unavailable"
 			} else if f == nil {
@@ -633,7 +682,7 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 			f, err = exactCurseForgeFile(ctx, project, version)
 		} else {
 			var selected *curseForgeFile
-			selected, err = selectCurseForgeFile(ctx, project, server, true, true)
+			selected, err = selectCurseForgeFile(ctx, project, server, true, true, false)
 			if err == nil && selected == nil {
 				return errors.New("No compatible required dependency release within bounded review")
 			}

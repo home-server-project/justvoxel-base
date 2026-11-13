@@ -48,6 +48,7 @@ func TestCurseForgeClientOnlyExactPreflight(t *testing.T) {
 					t.Fatal(err)
 				}
 				update := func(file *curseForgeFile) {
+					file.GameVersions = append(file.GameVersions[:2:2], "Client")
 					file.Size = int64(len(raw))
 					file.Hashes[0].Value = hex.EncodeToString(sum[:])
 				}
@@ -79,8 +80,8 @@ func TestCurseForgeClientOnlyExactPreflight(t *testing.T) {
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, nil
 			})
 			page, err := discoverCurseForgePlugins(context.Background(), c, pluginDiscoverQuery{Limit: 8, Compatible: true, Release: true})
-			if err != nil || len(page.Projects) != 1 || page.Projects[0].InstallAvailable || !page.Projects[0].ReviewAvailable || downloads != 0 {
-				t.Fatal("Discover must remain cheap and inspectable", page, err, downloads)
+			if err != nil || len(page.Projects) != 0 || downloads != 0 {
+				t.Fatal("Discover must omit client-only mods without downloading", page, err, downloads)
 			}
 			plan, err := resolveProviderPluginInstallPlan(context.Background(), c, f.data, "CurseForge", "10", "20")
 			if err != nil || plan.InstallAvailable || plan.Compatibility != clientOnlyModRejection || downloads == 0 {

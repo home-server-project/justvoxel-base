@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func curseForgeCatalogFixture(t *testing.T, loader string) (*pluginInstallFixtur
 		raw = resetModJar(t, loader)
 		class = 6
 		_, name := curseForgeLoader(c)
-		versions = append(versions, name)
+		versions = append(versions, name, "Server")
 	}
 	sum := sha1.Sum(raw)
 	file := curseForgeFile{ID: 20, ModID: 10, Game: 1, Available: true, Filename: "root.jar", DisplayName: "1", Size: int64(len(raw)), URL: "https://edge.forgecdn.net/files/1234/567/root.jar", GameVersions: versions, Release: 1, Status: 4, Published: "2026-01-01T00:00:00Z", Dependencies: []curseForgeDependency{}}
@@ -427,7 +428,10 @@ func TestCurseForgeSupplierInstallability(t *testing.T) {
 				curseForgeClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 					if strings.HasSuffix(r.URL.Path, "/download-url") {
 						downloads++
-						t.Fatal("restricted project requested download URL")
+						if state == "unavailable" {
+							t.Fatal("unavailable project requested download URL")
+						}
+						return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":"https://edge.forgecdn.net/files/123/456/ageingspawners-1.0.0%2B26.3-fabric.jar"}`))}, nil
 					}
 					response, err := base.RoundTrip(r)
 					if err != nil {
@@ -453,9 +457,10 @@ func TestCurseForgeSupplierInstallability(t *testing.T) {
 							modify(p.(map[string]any))
 						}
 					}
-					// Force URL fallback if installation erroneously reaches artifact resolution.
-					if r.URL.Path == "/v1/mods/10/files/20" && (state == "forbidden" || state == "unavailable") {
+					// Every available distribution state must resolve an escaped official URL.
+					if r.URL.Path == "/v1/mods/10/files/20" {
 						body["data"].(map[string]any)["downloadUrl"] = ""
+						body["data"].(map[string]any)["fileName"] = "ageingspawners-1.0.0+26.3-fabric.jar"
 					}
 					raw, _ := json.Marshal(body)
 					response.Body = io.NopCloser(bytes.NewReader(raw))
@@ -465,7 +470,7 @@ func TestCurseForgeSupplierInstallability(t *testing.T) {
 				if err != nil || len(page.Projects) != 1 {
 					t.Fatal(page, err)
 				}
-				allowed := state == "allowed" || state == "absent"
+				allowed := state != "unavailable"
 				card := page.Projects[0]
 				if (card.ReviewAvailable || card.InstallAvailable) != allowed {
 					t.Fatal(card)
@@ -473,6 +478,14 @@ func TestCurseForgeSupplierInstallability(t *testing.T) {
 				plan, err := resolveProviderPluginInstallPlan(context.Background(), server, f.data, "CurseForge", "10", "20")
 				if err != nil || plan.InstallAvailable != allowed {
 					t.Fatal(plan, err)
+				}
+				if allowed {
+					if downloads == 0 || len(plan.Artifacts) != 1 || plan.Artifacts[0].Source != "CurseForge" {
+						t.Fatal("official URL resolution or provider identity lost", plan, downloads)
+					}
+					if journal := f.execute(t, plan, false); journal.State != operationSucceeded {
+						t.Fatal(journal)
+					}
 				}
 				if !allowed && (!strings.Contains(plan.Compatibility, "CurseForge") || downloads != 0 || f.backup || len(f.commands) != 0) {
 					t.Fatal(plan, downloads)
@@ -554,5 +567,61 @@ func TestCurseForgeFabricRuntimeLoaderIdentityReuse(t *testing.T) {
 				t.Fatal("read-only review changed runtime")
 			}
 		})
+	}
+}
+
+func TestCurseForgeDiscoverServerEnvironment(t *testing.T) {
+	for _, loader := range []string{"fabric", "paper"} {
+		for _, markers := range [][]string{{"Server"}, {"Client", "Server"}, {"sErVeR"}, {"Client"}, {"cLiEnT"}, {}} {
+			t.Run(loader+"/"+strings.Join(markers, "+"), func(t *testing.T) {
+				_, server := curseForgeCatalogFixture(t, loader)
+				base := curseForgeClient.Transport
+				curseForgeClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+					response, err := base.RoundTrip(r)
+					if err != nil || !strings.HasPrefix(r.URL.Path, "/v1/mods/10/files") {
+						return response, err
+					}
+					defer response.Body.Close()
+					var payload map[string]json.RawMessage
+					if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+						t.Fatal(err)
+					}
+					update := func(f *curseForgeFile) {
+						f.GameVersions = append([]string{"1.21.8", "Fabric"}, markers...)
+					}
+					if r.URL.Path == "/v1/mods/10/files" {
+						var files []curseForgeFile
+						if err := json.Unmarshal(payload["data"], &files); err != nil {
+							t.Fatal(err)
+						}
+						for i := range files {
+							update(&files[i])
+						}
+						payload["data"], _ = json.Marshal(files)
+					} else {
+						var file curseForgeFile
+						if err := json.Unmarshal(payload["data"], &file); err != nil {
+							t.Fatal(err)
+						}
+						update(&file)
+						payload["data"], _ = json.Marshal(file)
+					}
+					raw, _ := json.Marshal(payload)
+					response.Body = io.NopCloser(bytes.NewReader(raw))
+					return response, nil
+				})
+				pluginDownloadClient.Transport = pluginTestTransport(func(*http.Request) (*http.Response, error) {
+					t.Fatal("Discover downloaded a JAR")
+					return nil, errors.New("unexpected download")
+				})
+				for _, compatible := range []bool{true, false} {
+					page, err := discoverCurseForgePlugins(context.Background(), server, pluginDiscoverQuery{Limit: 8, Compatible: compatible, Release: true})
+					want := loader == "paper" || slices.ContainsFunc(markers, func(s string) bool { return strings.EqualFold(s, "Server") })
+					if err != nil || (len(page.Projects) == 1) != want || len(page.Projects) > 1 {
+						t.Fatal("dedicated-server Discover environment", page, err)
+					}
+				}
+			})
+		}
 	}
 }

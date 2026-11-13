@@ -45,6 +45,7 @@ type pluginArtifactFile struct {
 	Size     int64  `json:"size"`
 	Hashes   struct {
 		SHA512 string `json:"sha512"`
+		SHA1   string `json:"sha1,omitempty"`
 	} `json:"hashes"`
 }
 type pluginInstallRequest struct {
