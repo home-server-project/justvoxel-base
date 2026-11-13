@@ -142,6 +142,10 @@ func TestMinecraftNetworkConfigureLockPhases(t *testing.T) {
 				if starts != 0 || networkPending(f.backend) == nil {
 					t.Fatal("unsafe rollback restarted runtime or lost evidence", starts)
 				}
+			} else if mode == "prepare-failure" {
+				if starts != 0 || len(h.stops) != 0 || publications != 0 || reloads != 0 {
+					t.Fatal("preflight failure changed running infrastructure or backends", starts, h.stops)
+				}
 			} else if starts != 2 {
 				t.Fatal("infrastructure/backend restoration missing", starts)
 			}

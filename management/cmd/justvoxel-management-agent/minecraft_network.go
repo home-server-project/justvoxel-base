@@ -110,7 +110,25 @@ func networkContains(ids []string, id string) bool {
 	}
 	return false
 }
-func networkEligible(software string) bool { return software == "paper" || software == "purpur" }
+
+type minecraftNetworkBackendProfile string
+
+const networkPaperFamily minecraftNetworkBackendProfile = "paper-family"
+
+// Profiles describe only Network backend preparation, not standalone support.
+func networkBackendProfile(software string) (minecraftNetworkBackendProfile, bool) {
+	switch software {
+	case "paper", "purpur":
+		return networkPaperFamily, true
+	default:
+		return "", false
+	}
+}
+
+func networkEligible(software string) bool {
+	_, supported := networkBackendProfile(software)
+	return supported
+}
 func networkRecordEligible(c minecraftInstanceRuntimeConfig) bool {
 	if !networkEligible(c.Software) {
 		return false
@@ -217,11 +235,21 @@ func networkOverlay(f minecraftInstanceRuntimeFiles, r instanceRuntimeRecord) (m
 	if !networkRecordEligible(r.Runtime) {
 		return f, instanceRuntimeFailure("This server software remains standalone.")
 	}
+	profile, _ := networkBackendProfile(r.Runtime.Software)
 	f.Quadlet = regexp.MustCompile(`(?m)^PublishPort=.*\n`).ReplaceAll(f.Quadlet, nil)
 	f.Quadlet = bytes.Replace(f.Quadlet, []byte("[Container]\n"), []byte("[Container]\nNetwork="+minecraftNetworkName+".network\nNetworkAlias="+r.Runtime.ID+"\n"), 1)
 	f.Environment = bytes.Replace(f.Environment, []byte("ONLINE_MODE=TRUE\n"), []byte("ONLINE_MODE=FALSE\n"), 1)
-	f.Environment = append(f.Environment, []byte("PATCH_DEFINITIONS=/data/.justvoxel-network-patches.json\n")...)
-	return f, nil
+	return networkBackendOverlay(f, profile)
+}
+
+func networkBackendOverlay(f minecraftInstanceRuntimeFiles, profile minecraftNetworkBackendProfile) (minecraftInstanceRuntimeFiles, error) {
+	switch profile {
+	case networkPaperFamily:
+		f.Environment = append(f.Environment, []byte("PATCH_DEFINITIONS=/data/.justvoxel-network-patches.json\n")...)
+		return f, nil
+	default:
+		return f, instanceRuntimeFailure("This server software remains standalone.")
+	}
 }
 func networkInfrastructure(s minecraftNetworkState, names map[string]string) map[string][]byte {
 	if !s.Config.Enabled {

@@ -60,8 +60,12 @@ func TestMinecraftNetworkOptionalAndStandaloneOverlay(t *testing.T) {
 	}
 }
 func TestMinecraftNetworkSoftwareEligibility(t *testing.T) {
-	for _, software := range []string{"paper", "purpur", "fabric", "neoforge", "spigot", "vanilla", "forge", "quilt", "bedrock"} {
+	for _, software := range []string{"paper", "purpur", "pufferfish", "leaf", "fabric", "neoforge", "spigot", "vanilla", "forge", "quilt", "bedrock"} {
 		want := software == "paper" || software == "purpur"
+		profile, supported := networkBackendProfile(software)
+		if supported != want || (want && profile != networkPaperFamily) || (!want && profile != "") {
+			t.Fatal("unexpected backend profile", software, profile, supported)
+		}
 		if networkEligible(software) != want {
 			t.Fatal(software)
 		}
@@ -72,6 +76,32 @@ func TestMinecraftNetworkSoftwareEligibility(t *testing.T) {
 		}
 	}
 }
+func TestMinecraftNetworkBackendProfileOverlay(t *testing.T) {
+	for _, software := range []string{"paper", "purpur"} {
+		for _, version := range []string{"1.13", "1.18.2", "1.19", "LATEST"} {
+			config := minecraftInstanceRuntimeConfig{ID: "jv-a1b2c3", Software: software, Version: version}
+			input := minecraftInstanceRuntimeFiles{
+				Environment: []byte("ONLINE_MODE=TRUE\nEXISTING=value\n"),
+				Quadlet:     []byte("[Container]\nPublishPort=25566:25565\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n"),
+			}
+			got, err := networkOverlay(input, instanceRuntimeRecord{Runtime: config, NetworkMember: true})
+			if err != nil {
+				t.Fatal(software, version, err)
+			}
+			if string(got.Environment) != "ONLINE_MODE=FALSE\nEXISTING=value\nPATCH_DEFINITIONS=/data/.justvoxel-network-patches.json\n" ||
+				string(got.Quadlet) != "[Container]\nNetwork=justvoxel-minecraft-network.network\nNetworkAlias=jv-a1b2c3\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n" {
+				t.Fatal("Paper-family overlay changed", software, version)
+			}
+		}
+		if networkRecordEligible(minecraftInstanceRuntimeConfig{Software: software, Version: "1.12.2"}) {
+			t.Fatal("old Minecraft version became eligible", software)
+		}
+	}
+	if _, err := networkBackendOverlay(minecraftInstanceRuntimeFiles{}, "unknown"); err == nil {
+		t.Fatal("unsupported backend profile accepted")
+	}
+}
+
 func TestMinecraftNetworkWhitelistUnionAndIndependence(t *testing.T) {
 	a := minecraftNetworkPlayer{UUID: "11111111-1111-1111-1111-111111111111", Name: "Alex"}
 	b := minecraftNetworkPlayer{UUID: "00000000-0000-0000-0009-000000000001", Name: ".Bedrock"}
@@ -949,6 +979,10 @@ func TestMinecraftNetworkFailureRestoresOnlyWhenRecoverySafe(t *testing.T) {
 				if err := networkRecover(context.Background(), f.backend); err != nil {
 					t.Fatal("existing retry recovery failed", err)
 				}
+			} else if mode == "prepare" {
+				if len(h.stops) != 0 || len(h.starts) != 0 || h.published {
+					t.Fatal("preparation failure disrupted a running backend")
+				}
 			} else {
 				if networkPending(f.backend) != nil || !reflect.DeepEqual(h.starts, []string{id}) {
 					t.Fatal("safe failure did not restore running backend")
@@ -1560,5 +1594,66 @@ func TestMinecraftNetworkConfigurePersistsEnforcementWithoutDeletingPlayers(t *t
 		if err != nil || json.Unmarshal(generated, &files) != nil || string(files["velocity/plugins/global-whitelist/config.properties"]) != fmt.Sprintf("white-list=%t\nenforce-whitelist=%t\n", want, want) {
 			t.Fatal("configure did not publish enforcement", err)
 		}
+	}
+}
+
+// Both infrastructure and every affected profile must be prepared before the
+// first player warning, graceful signal, or Minecraft service Stop.
+func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
+	for _, failure := range []string{"", "prepare", "backend-preflight"} {
+		t.Run(failure, func(t *testing.T) {
+			f, c := networkTransactionFixture(t, true)
+			c.Members = []string{f.configs[0].ID, f.configs[1].ID}
+			for _, id := range c.Members {
+				f.states[id], f.containers[id] = "active", "running"
+			}
+			h := networkLifecycleControls(f)
+			original := f.backend.command
+			prepared, disrupted := false, false
+			checked := map[string]bool{}
+			var mu sync.Mutex
+			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				mu.Lock()
+				if command == minecraftNetworkHelper {
+					switch args[0] {
+					case "prepare":
+						if prepared || disrupted {
+							t.Error("infrastructure resolved again after preparation or shutdown")
+						}
+						prepared = true
+					case "backend-preflight":
+						if !prepared || disrupted {
+							t.Error("backend preflight outside preparation boundary")
+						}
+						if len(args) != 3 || args[2] != "member" {
+							t.Error("incorrect profile preflight request", args)
+						}
+						checked[args[1]] = true
+					}
+					if args[0] == failure && (failure != "backend-preflight" || len(checked) == len(c.Members)) {
+						mu.Unlock()
+						return nil, errors.New("mock preflight failure")
+					}
+				}
+				shutdown := command == "podman" && len(args) > 0 && (args[0] == "kill" || args[0] == "exec" && strings.HasPrefix(args[len(args)-1], "say "))
+				shutdown = shutdown || command == "systemctl" && len(args) > 1 && (args[0] == "stop" || args[0] == "--no-block" && args[1] == "stop")
+				if shutdown {
+					disrupted = true
+					if !prepared || len(checked) != len(c.Members) {
+						t.Error("Minecraft shutdown preceded complete preflight")
+					}
+				}
+				mu.Unlock()
+				return original(ctx, command, args...)
+			}
+			err := networkApply(context.Background(), f.backend, c)
+			if failure == "" {
+				if err != nil || len(h.stops) != len(c.Members) || len(h.starts) != len(c.Members) {
+					t.Fatal("prepared transaction failed", err)
+				}
+			} else if err == nil || len(h.stops) != 0 || len(h.starts) != 0 || len(h.signaled) != 0 || h.published {
+				t.Fatal("failed preflight disrupted Minecraft", err)
+			}
+		})
 	}
 }

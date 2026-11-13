@@ -82,6 +82,11 @@ evidence. Secrets are excluded from public API responses and diagnostics output.
 The existing per-instance runtime records retain standalone port settings and
 record whether the active definition is a network member.
 
+Apply resolves and verifies infrastructure artifacts into the private cache and
+runs read-only backend profile preflight before any player-aware server shutdown.
+Publication consumes those prepared artifacts without resolving or downloading
+them again. A preparation failure leaves running Minecraft servers running.
+
 Publication uses the existing maintenance locks and atomic private-file writes.
 A pending network journal blocks startup until recovery restores the previous
 configuration. Use **Network → Retry recovery** or `mjust minecraft-network recover`;
@@ -92,7 +97,12 @@ systemd state for units that are now absent; failures for still-loaded units rem
 visible for diagnosis.
 
 Standalone configuration and managed artifact snapshots are private to each
-instance. Network-member data also carries bounded original standalone
+instance. New snapshots bind their exact owned file set to the backend profile
+(`paper-family` for Paper/Purpur). Historical snapshots without a profile remain
+readable only with the selected instance ID and exact historical Paper file set;
+reading them does not rewrite them. Restoration uses the snapshot's ownership,
+while active members must also match the runtime software profile.
+Network-member data also carries bounded original standalone
 configuration evidence so backups and exports can restore original forwarding and
 Floodgate settings when imported as standalone servers. These records contain no
 routing identity or destination host paths. Worlds and per-server whitelists are

@@ -282,21 +282,88 @@ def publish_legacy_rollback(generated, normal_allowed):
             os.unlink(path)
 
 
-# Back up only these exact configuration/managed artifact paths. Whitelist.json,
-# worlds, ports and server.properties are never replaced by this helper.
-BACKEND_FILES = ['config/paper-global.yml','paper.yml','plugins/floodgate/key.pem','plugins/floodgate/config.yml','plugins/floodgate-spigot.jar','plugins/Geyser-Spigot.jar','.justvoxel-network-patches.json']
+# Ordered, fixed ownership per profile. Snapshot blob indices are persisted:
+# preserve this paper-family order for deployed network-before evidence.
+# Worlds, whitelist.json and server.properties are never owned by this helper.
+BACKEND_PROFILES = {
+    'paper-family': {
+        'files': ('config/paper-global.yml','paper.yml','plugins/floodgate/key.pem','plugins/floodgate/config.yml','plugins/floodgate-spigot.jar','plugins/Geyser-Spigot.jar','.justvoxel-network-patches.json'),
+        'portable_configs': ('config/paper-global.yml','paper.yml','plugins/floodgate/key.pem','plugins/floodgate/config.yml'),
+    },
+}
 
 
-PORTABLE_CONFIGS = ['config/paper-global.yml','paper.yml','plugins/floodgate/key.pem','plugins/floodgate/config.yml']
+def backend_profile(software):
+    if software in ('paper', 'purpur'):
+        return 'paper-family'
+    raise ValueError('unsupported network backend software')
+
+
+def backend_paths(profile):
+    if profile not in BACKEND_PROFILES:
+        raise ValueError('unsupported network backend profile')
+    return BACKEND_PROFILES[profile]
+
+
+def validate_backend_evidence(instance, evidence):
+    if not re.fullmatch(r'jv-[a-z0-9]{6,12}',instance) or not isinstance(evidence,dict):
+        raise ValueError('invalid standalone evidence')
+    # Only the exact historical Paper shape authorizes no-profile evidence.
+    profile = evidence['profile'] if 'profile' in evidence else 'paper-family'
+    paths = backend_paths(profile)
+    if evidence.get('id') != instance or not isinstance(evidence.get('files'),dict) or set(evidence['files']) != set(paths['files']):
+        raise ValueError('invalid standalone evidence')
+    return profile
+
+
+def backend_context(instance):
+    if not re.fullmatch(r'jv-[a-z0-9]{6,12}',instance):
+        raise ValueError('invalid instance')
+    record = private_json(INSTANCE_ROOT+'/'+instance+'/config.json')
+    root = safe(record['storage']['data_path'])
+    if not root.endswith('/minecraft-instances/'+instance+'/data') or not os.path.isdir(root):
+        raise ValueError('wrong storage')
+    snapshot = INSTANCE_ROOT+'/'+instance+'/network-before.json'
+    evidence = private_json(snapshot) if os.path.exists(snapshot) else None
+    if evidence is not None:
+        profile = validate_backend_evidence(instance,evidence)
+        if record.get('network_member',False) and backend_profile(record['runtime']['software']) != profile:
+            raise ValueError('backend snapshot profile mismatch')
+    else:
+        profile = backend_profile(record['runtime']['software'])
+    return record,root,profile,evidence
+
+
+def backend_preflight(instance, joining=True):
+    record,root,profile,evidence = backend_context(instance)
+    if joining and backend_profile(record['runtime']['software']) != profile:
+        raise ValueError('backend snapshot profile mismatch')
+    paths = backend_paths(profile)
+    # Restoration needs only its saved evidence, not publication artifacts.
+    if joining:
+        prepare_backend_profile(profile,root)
+    else:
+        check_backend_profile(profile,root)
+    for index,name in enumerate(paths['files']):
+        path = safe(root+'/'+name)
+        if os.path.exists(path):
+            read(path,MAX_JAR)
+        if evidence is not None and evidence['files'][name] is not None:
+            data = read(INSTANCE_ROOT+'/'+instance+'/network-before/'+str(index),MAX_JAR)
+            if hashlib.sha256(data).hexdigest() != evidence['files'][name]:
+                raise ValueError('standalone evidence checksum mismatch')
+
+
 PORTABLE_NAME = '.justvoxel-network-standalone.json'
 
 
-def restore_portable(root,uid,gid):
+def restore_portable(root,uid,gid,profile):
+    paths = backend_paths(profile)
     path = safe(root+'/'+PORTABLE_NAME)
     if not os.path.exists(path):
         return
     evidence = json.loads(read(path,2*1024*1024))
-    if evidence.get('schema') != 1 or set(evidence.get('configs',{})) != set(PORTABLE_CONFIGS):
+    if evidence.get('schema') != 1 or set(evidence.get('configs',{})) != set(paths['portable_configs']):
         raise ValueError('invalid portable standalone evidence')
     decoded = {}
     for name,entry in evidence['configs'].items():
@@ -320,11 +387,8 @@ def restore_portable(root,uid,gid):
             safe(os.path.dirname(target))
             os.makedirs(os.path.dirname(target),mode=0o755,exist_ok=True)
             atomic(target,data,uid,gid,0o600 if name.endswith('key.pem') else 0o644)
-    patch = safe(root+'/.justvoxel-network-patches.json')
-    if os.path.exists(patch):
-        if not stat.S_ISREG(os.stat(patch).st_mode):
-            raise ValueError('invalid managed patch')
-        os.unlink(patch)
+    if profile == 'paper-family':
+        remove_paper_patch(root)
     os.unlink(path)
     sync = os.open(root,os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -333,24 +397,28 @@ def restore_portable(root,uid,gid):
         os.close(sync)
 
 
+def remove_paper_patch(root):
+    patch = safe(root+'/.justvoxel-network-patches.json')
+    if os.path.exists(patch):
+        if not stat.S_ISREG(os.stat(patch).st_mode):
+            raise ValueError('invalid managed patch')
+        os.unlink(patch)
+
+
 def backend(instance, publishing=False):
-    if not re.fullmatch(r'jv-[a-z0-9]{6,12}',instance):
-        raise ValueError('invalid instance')
-    record = private_json(INSTANCE_ROOT+'/'+instance+'/config.json')
-    root = safe(record['storage']['data_path'])
-    if not root.endswith('/minecraft-instances/'+instance+'/data'):
-        raise ValueError('wrong storage')
+    record,root,profile,evidence = backend_context(instance)
+    paths = backend_paths(profile)
+    backend_files = paths['files']
     uid,gid = record['runtime']['uid'],record['runtime']['gid']
     snapshot = INSTANCE_ROOT+'/'+instance+'/network-before.json'
     blobdir = INSTANCE_ROOT+'/'+instance+'/network-before'
     member = record.get('network_member',False)
     if not os.path.exists(snapshot):
-        restore_portable(root,uid,gid)
+        restore_portable(root,uid,gid,profile)
     if not member:
         if os.path.exists(snapshot):
             evidence = private_json(snapshot)
-            if evidence.get('id') != instance or set(evidence.get('files',{})) != set(BACKEND_FILES):
-                raise ValueError('invalid standalone evidence')
+            validate_backend_evidence(instance,evidence)
             for name,hashvalue in evidence['files'].items():
                 target = safe(root+'/'+name)
                 if hashvalue is None:
@@ -359,7 +427,7 @@ def backend(instance, publishing=False):
                             raise ValueError('not a file')
                         os.unlink(target)
                 else:
-                    data = read(blobdir+'/'+str(BACKEND_FILES.index(name)),MAX_JAR)
+                    data = read(blobdir+'/'+str(backend_files.index(name)),MAX_JAR)
                     if hashlib.sha256(data).hexdigest() != hashvalue:
                         raise ValueError('standalone evidence checksum mismatch')
                     safe(os.path.dirname(target))
@@ -379,7 +447,7 @@ def backend(instance, publishing=False):
         if os.path.isdir(safe(blobdir)):
             # Fixed private snapshot files only. Unknown contents are preserved.
             for name in os.listdir(blobdir):
-                if name not in [str(i) for i in range(len(BACKEND_FILES))]:
+                if name not in [str(i) for i in range(len(backend_files))]:
                     raise ValueError('unexpected standalone snapshot file')
                 path = safe(blobdir+'/'+name)
                 info = os.stat(path)
@@ -391,17 +459,13 @@ def backend(instance, publishing=False):
     if not publishing:
         check()
     state = private_json(ROOT+'/state.json')
-    if instance not in state['config']['members'] or record['runtime']['software'] not in ['paper','purpur']:
+    if instance not in state['config']['members']:
         raise ValueError('invalid membership')
-    import subprocess
-    # Refuse duplicate/noncanonical managed artifacts before taking a snapshot;
-    # standalone restoration must never discard an unrecorded plugin filename.
-    for component, keep in [('geyser','Geyser-Spigot.jar'),('floodgate','floodgate-spigot.jar')]:
-        subprocess.run(['/usr/libexec/justvoxel/mjust/managed-plugin-files',root+'/plugins',component,keep,'--check'],check=True,stdout=subprocess.DEVNULL)
+    check_backend_profile(profile,root)
     if not os.path.exists(snapshot):
         directory(blobdir)
-        evidence = {'id':instance,'files':{}}
-        for index,name in enumerate(BACKEND_FILES):
+        evidence = {'id':instance,'profile':profile,'files':{}}
+        for index,name in enumerate(backend_files):
             path = safe(root+'/'+name)
             if os.path.exists(path):
                 data = read(path,MAX_JAR)
@@ -414,17 +478,42 @@ def backend(instance, publishing=False):
     # member can join this network; an imported standalone server can restore its
     # original proxy/identity settings without copying appliance state or IDs.
     evidence = private_json(snapshot)
+    validate_backend_evidence(instance,evidence)
     portable = {'schema':1,'configs':{}}
-    for name in PORTABLE_CONFIGS:
+    for name in paths['portable_configs']:
         hashvalue = evidence['files'][name]
         if hashvalue is None:
             portable['configs'][name] = None
         else:
-            data = read(blobdir+'/'+str(BACKEND_FILES.index(name)),256*1024)
+            data = read(blobdir+'/'+str(backend_files.index(name)),256*1024)
             if hashlib.sha256(data).hexdigest() != hashvalue:
                 raise ValueError('standalone evidence changed')
             portable['configs'][name] = {'sha256':hashvalue,'data':base64.b64encode(data).decode()}
     atomic(root+'/'+PORTABLE_NAME,json.dumps(portable).encode())
+    publish_backend_profile(profile,root,uid,gid,record,state)
+
+
+def prepare_backend_profile(profile,root):
+    # Profile preparation belongs before downtime. Any future compatibility
+    # component resolution/verification must remain behind this boundary.
+    check_backend_profile(profile,root)
+    validate_artifacts()
+
+
+def check_backend_profile(profile,root):
+    # Cheap local ownership revalidation is also safe during publication.
+    if profile != 'paper-family':
+        raise ValueError('unsupported network backend profile')
+    import subprocess
+    # Refuse duplicate/noncanonical managed artifacts before taking a snapshot;
+    # standalone restoration must never discard an unrecorded plugin filename.
+    for component, keep in [('geyser','Geyser-Spigot.jar'),('floodgate','floodgate-spigot.jar')]:
+        subprocess.run(['/usr/libexec/justvoxel/mjust/managed-plugin-files',root+'/plugins',component,keep,'--check'],check=True,stdout=subprocess.DEVNULL)
+
+
+def publish_backend_profile(profile,root,uid,gid,record,state):
+    if profile != 'paper-family':
+        raise ValueError('unsupported network backend profile')
     # Stop the managed backend listener; identity handling stays in Floodgate.
     geyser = safe(root+'/plugins/Geyser-Spigot.jar')
     if os.path.exists(geyser):
@@ -480,6 +569,8 @@ def main():
     elif sys.argv[1:] == ['start-velocity']:
         check()
         publish(sys.argv[1].removeprefix('start-'))
+    elif len(sys.argv) == 4 and sys.argv[1] == 'backend-preflight' and sys.argv[3] in ['member','standalone']:
+        backend_preflight(sys.argv[2],joining=sys.argv[3] == 'member')
     elif len(sys.argv) == 3 and sys.argv[1] in ['backend','backend-publish']:
         backend(sys.argv[2],publishing=sys.argv[1] == 'backend-publish')
     else:

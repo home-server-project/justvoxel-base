@@ -33,9 +33,10 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 		return err
 	}
 	committed := false
+	disruptionStarted := false
 	var stopped []string
 	defer func() {
-		if result == nil || committed || networkPending(b) != nil {
+		if result == nil || committed || !disruptionStarted || networkPending(b) != nil {
 			return
 		}
 		// Any rollback has completed and reservations have closed before this
@@ -155,8 +156,28 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 		return err
 	}
 	dir.Close()
+	// Resolve and verify infrastructure and profile prerequisites before any
+	// player-aware Stop. Publication consumes this private verified cache.
+	if c.Enabled {
+		if _, err = b.command(ctx, minecraftNetworkHelper, "prepare"); err != nil {
+			return instanceRuntimeFailure("Verified Minecraft Network components are unavailable. Existing server definitions were preserved.")
+		}
+	}
+	for _, record := range nextRecords {
+		if !affected[record.Runtime.ID] {
+			continue
+		}
+		mode := "standalone"
+		if record.NetworkMember {
+			mode = "member"
+		}
+		if _, err = b.command(ctx, minecraftNetworkHelper, "backend-preflight", record.Runtime.ID, mode); err != nil {
+			return instanceRuntimeFailure("Minecraft Network backend preparation failed. Existing servers were preserved.")
+		}
+	}
 	// Each independent normal lifecycle retains its own player check and bounded
 	// countdown. Indexed results keep bookkeeping deterministic without shared writes.
+	disruptionStarted = true
 	sort.Strings(running)
 	stopErrors := make([]error, len(running))
 	var wave sync.WaitGroup
@@ -224,13 +245,6 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 			return e
 		}
 		held = append(held, udp)
-	}
-	// Preparation is confined to new infrastructure. Downloads are verified before
-	// any backend publication; it does not touch existing Minecraft data labels.
-	if c.Enabled {
-		if _, err = b.command(ctx, minecraftNetworkHelper, "prepare"); err != nil {
-			return instanceRuntimeFailure("Verified Minecraft Network components are unavailable. Existing server definitions were preserved.")
-		}
 	}
 	if encoded, e := json.Marshal(after); e != nil || len(encoded) > 256*1024 {
 		return instanceRuntimeFailure("Minecraft Network whitelist exceeds the private state size limit.")
