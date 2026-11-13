@@ -1023,7 +1023,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     typeof value === "string" && value.length > 0 && value.length <= 4096 && !/[^\x21-\x7e]/.test(value);
   let nordDialog = null;
   const showNordAccountDialog = () => {
-    if (nordDialog?.open) return;
+    if (nordDialog?.open || remoteBusy) return;
     const popup = document.createElement("dialog");
     nordDialog = popup;
     popup.className = "system-action-dialog";
@@ -1031,10 +1031,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     body.className = "system-action-dialog-content";
     const title = document.createElement("h2");
     title.id = "nord-login-title";
-    title.textContent = "NordVPN account required";
+    title.textContent = "NordVPN access token";
     popup.setAttribute("aria-labelledby", title.id);
     const message = document.createElement("p");
-    message.textContent = "NordVPN Meshnet needs a NordVPN account and access token.";
+    message.textContent = "Use a current NordVPN access token to reconnect this server and enable Meshnet.";
     const details = document.createElement("div");
     const existing = document.createElement("p"); existing.textContent = "Already have a NordVPN account?";
     const dashboard = document.createElement("a");
@@ -1072,8 +1072,9 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const cancel = document.createElement("button");
     cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
     cancel.addEventListener("click", () => { input.value = ""; popup.close(); });
-    const login = document.createElement("button"); login.type = "button"; login.textContent = "Log in & activate";
+    const login = document.createElement("button"); login.type = "button"; login.textContent = "Reconnect with new token";
     login.addEventListener("click", async () => {
+      if (remoteBusy) return;
       if (!validNordAccessToken(input.value)) {
         input.value = "";
         status.textContent = "invalid NordVPN access token";
@@ -1082,6 +1083,8 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       let token = input.value;
       input.value = "";
       login.disabled = true;
+      remoteBusy = true;
+      renderNetwork();
       try {
         await postForm("/api/network/remote-access/nordvpn/login", { token: token });
         popup.close();
@@ -1098,6 +1101,8 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         token = "";
         input.value = "";
         login.disabled = false;
+        remoteBusy = false;
+        renderNetwork();
       }
     });
     actions.append(cancel, login);
@@ -1108,6 +1113,46 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       details.replaceChildren();
       popup.remove();
       if (nordDialog === popup) nordDialog = null;
+    });
+    document.body.appendChild(popup); popup.showModal();
+  };
+
+  let nordLoginChoice = null;
+  const showNordLoginChoice = () => {
+    if (nordLoginChoice?.open || remoteBusy) return;
+    const popup = document.createElement("dialog");
+    nordLoginChoice = popup;
+    popup.className = "system-action-dialog";
+    const body = document.createElement("div"); body.className = "system-action-dialog-content";
+    const title = document.createElement("h2"); title.id = "nord-login-choice-title";
+    title.textContent = "NordVPN login";
+    popup.setAttribute("aria-labelledby", title.id);
+    const message = document.createElement("p");
+    message.textContent = "NordVPN may already have a saved login on this server. Continue with the current login, or replace the access token.";
+    const actions = document.createElement("div"); actions.className = "action-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => popup.close());
+    const update = document.createElement("button");
+    update.type = "button"; update.className = "secondary"; update.textContent = "Update Token";
+    update.addEventListener("click", () => { popup.close(); showNordAccountDialog(); });
+    const current = document.createElement("button");
+    current.type = "button"; current.textContent = "Use current login";
+    current.addEventListener("click", async () => {
+      if (remoteBusy) return;
+      popup.close();
+      let loginRequired = false;
+      await runRemoteAction(async () => {
+        const result = await postForm("/api/network/remote-access/nordvpn", { action: "activate" });
+        loginRequired = Boolean(result?.login_required);
+      });
+      if (loginRequired) showNordAccountDialog();
+    });
+    actions.append(cancel, update, current);
+    body.append(title, message, actions); popup.appendChild(body);
+    popup.addEventListener("close", () => {
+      popup.remove();
+      if (nordLoginChoice === popup) nordLoginChoice = null;
     });
     document.body.appendChild(popup); popup.showModal();
   };
@@ -1176,6 +1221,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       const needsSetup = provider.id === "playit" && provider.installed && !provider.configured;
       const actions = document.createElement("div");
       actions.className = "network-inline-actions";
+      if (provider.id === "nordvpn") actions.className += " network-nord-lifecycle";
       if (needsSetup) {
         if (setupRunning()) card.appendChild(row("Setup", playitSetup.state === "waiting" ? "Waiting for approval" : "Preparing…"));
         if (playitSetup.state === "failed") card.appendChild(row("Setup", "Failed or timed out"));
@@ -1196,6 +1242,14 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         claim.className = "button-link primary network-action-button";
         claim.textContent = "Open Playit setup";
         actions.appendChild(claim);
+      } else if (provider.id === "nordvpn") {
+        const rightActions = document.createElement("div");
+        rightActions.className = "network-nord-actions";
+        const token = actionButton("Token", "networkProvider", provider.id);
+        token.dataset.action = "token";
+        token.disabled = !provider.installed || remoteBusy;
+        rightActions.append(token, activate);
+        actions.appendChild(rightActions);
       } else {
         actions.appendChild(activate);
       }
@@ -1646,11 +1700,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
           playitSetup = await postForm("/api/network/remote-access/playit/setup");
           updatePlayitPopup();
         });
+      } else if (id === "nordvpn" && provider.dataset.action === "token") {
+        showNordAccountDialog();
       } else if (id === "nordvpn" && provider.dataset.action === "activate") {
-        runRemoteAction(async () => {
-          const result = await postForm("/api/network/remote-access/nordvpn", { action: "activate" });
-          if (result?.login_required) showNordAccountDialog();
-        });
+        showNordLoginChoice();
       } else if (id === "tailscale" && provider.dataset.action === "activate") {
         const loginTab = openRemoteLoginPopup(id);
         providerProgress.set(id, "Starting Tailscale login…");

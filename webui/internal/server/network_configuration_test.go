@@ -213,10 +213,22 @@ for (const account of ["Logged in", "Not logged in", "Unknown"]) {
         const nord = render({ ...base, id: "nordvpn", account, meshnet, connected: meshnet === "Enabled", service_active, service_enabled, service_state: service_active ? "active" : "inactive" });
         assert(nord.some((n) => n.textContent === "Activate" && n.disabled === service_active));
         assert(nord.some((n) => n.textContent === "Deactivate" && n.disabled === !service_active));
+        const token = nord.find(n => n.textContent === "Token");
+        assert(token && !token.disabled);
+        assert.equal(token.dataset.action, "token");
+        assert.equal(token.dataset.networkProvider, "nordvpn");
+        const group = nord.find(n => n.className === "network-nord-actions");
+        assert.deepEqual(group.children.map(n => n.textContent), ["Token", "Activate"]);
       }
     }
   }
 }
+for (const [installed, busy] of [[false, false], [true, true]]) {
+  remoteBusy = busy;
+  const nord = render({ ...base, id: "nordvpn", installed });
+  assert(nord.find(n => n.textContent === "Token").disabled);
+}
+remoteBusy = false;
 let nodes = render(base);
 assert(!nodes.some((n) => n.textContent === "Set up Playit"));
 assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
@@ -236,6 +248,7 @@ for (const state of ["activating", "deactivating", "reloading", "refreshing"]) {
 }
 for (const id of ["tailscale", "netbird", "playit"]) {
   nodes = render({ ...base, id, configured: true });
+  assert(!nodes.some(n => n.textContent === "Token" || n.className === "network-nord-actions"));
   assert(nodes.some((n) => n.textContent === "Activate" && n.disabled === (id === "playit")));
   assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
   assert(!nodes.some((n) => n.textContent === "Set up Playit"));
@@ -1121,7 +1134,7 @@ const renderNetwork = () => { nodes = flatten(renderRemoteAccess()); };
 (async () => {
   for (const message of [
     "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying.",
-    "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying.",
+    "NordVPN Meshnet could not be activated. Use Token to reconnect with a current access token, or open Troubleshoot for diagnostics.",
     "<img src=x onerror=alert(1)>"
   ]) {
     await runRemoteAction(async () => { throw new Error(message); });

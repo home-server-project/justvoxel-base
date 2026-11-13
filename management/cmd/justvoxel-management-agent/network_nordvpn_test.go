@@ -32,6 +32,8 @@ func nordFixture(t *testing.T) *[][]string {
 			return "Account information\nEmail address: private@example.test\n", nil
 		case "settings":
 			return "Meshnet: " + mesh + "\n", nil
+		case "logout --persist-token":
+			return "", nil
 		case "set meshnet on":
 			mesh = "enabled"
 			return "", nil
@@ -78,7 +80,7 @@ func TestNordFixedProviderStatusAndMeshnetLifecycle(t *testing.T) {
 			if reflect.DeepEqual(call, want) {
 				found = true
 			}
-			if call[0] == "connect" || call[0] == "logout" {
+			if call[0] == "connect" || call[0] == "logout" || call[0] == "login" {
 				t.Fatal("commercial VPN or logout", call)
 			}
 		}
@@ -137,15 +139,62 @@ func TestNordTokenValidationAndRejectedActions(t *testing.T) {
 }
 
 func TestNordActivateLoginRequired(t *testing.T) {
-	calls := nordFixture(t)
-	runNordCommand = func(_ context.Context, args ...string) (string, error) {
-		*calls = append(*calls, append([]string(nil), args...))
-		return "You are not logged in.", errors.New("exit")
+	for _, output := range []string{"You are not logged in.", "private unrecognized account state"} {
+		t.Run(output, func(t *testing.T) {
+			calls := nordFixture(t)
+			runNordCommand = func(_ context.Context, args ...string) (string, error) {
+				*calls = append(*calls, append([]string(nil), args...))
+				return output, errors.New("private vendor error")
+			}
+			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"activate"}`)
+			if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"login_required":true`) ||
+				!reflect.DeepEqual(*calls, [][]string{{"account"}}) || strings.Contains(rr.Body.String(), "private") {
+				t.Fatal("credential attention response changed", rr.Code)
+			}
+		})
 	}
-	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"activate"}`)
-	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"login_required":true`) ||
-		!reflect.DeepEqual(*calls, [][]string{{"account"}}) {
-		t.Fatal("logged-out activation changed", rr.Code)
+}
+
+func TestNordTokenReplacementInitialAccountStates(t *testing.T) {
+	for _, tc := range []struct {
+		name, initial         string
+		initialErr, logoutErr error
+		logout                bool
+	}{
+		{name: "existing login", initial: "Account information", logout: true},
+		{name: "first login", initial: "You are not logged in.", initialErr: errors.New("exit")},
+		{name: "unknown", initial: "private unknown state", initialErr: errors.New("exit"), logout: true},
+		{name: "revoked login logout fails", initial: "Account information", logout: true, logoutErr: errors.New("private logout error")},
+		{name: "unknown logout fails", initial: "private unknown state", logout: true, logoutErr: errors.New("private logout error")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := nordFixture(t)
+			native := runNordCommand
+			reads := 0
+			runNordCommand = func(ctx context.Context, args ...string) (string, error) {
+				if args[0] == "account" {
+					reads++
+					if reads == 1 {
+						*calls = append(*calls, append([]string(nil), args...))
+						return tc.initial, tc.initialErr
+					}
+				}
+				if args[0] == "logout" {
+					*calls = append(*calls, append([]string(nil), args...))
+					return "private vendor output", tc.logoutErr
+				}
+				return native(ctx, args...)
+			}
+			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"token-login","token":"new-token"}`)
+			want := [][]string{{"account"}}
+			if tc.logout {
+				want = append(want, []string{"logout", "--persist-token"})
+			}
+			want = append(want, []string{"login", "--token", "new-token"}, []string{"account"}, []string{"set", "meshnet", "on"}, []string{"settings"})
+			if rr.Code != http.StatusOK || !reflect.DeepEqual(*calls, want) {
+				t.Fatal("replacement did not verify new login", rr.Code)
+			}
+		})
 	}
 }
 
@@ -156,7 +205,14 @@ func TestNordTokenLoginSequenceAndPrivacy(t *testing.T) {
 			native := runNordCommand
 			const token = "never_log_this+/_-.~=opaque"
 			const privateOutput = "private vendor output " + token
+			accountReads := 0
 			runNordCommand = func(ctx context.Context, args ...string) (string, error) {
+				if args[0] == "account" {
+					accountReads++
+					if accountReads == 1 {
+						return native(ctx, args...)
+					}
+				}
 				fail := (stage == "login" && args[0] == "login") ||
 					(stage == "account" && args[0] == "account") ||
 					((stage == "enable" || stage == "enable error but enabled") && args[0] == "set") ||
@@ -181,14 +237,14 @@ func TestNordTokenLoginSequenceAndPrivacy(t *testing.T) {
 			body, _ := json.Marshal(map[string]string{"action": "token-login", "token": token})
 			rr := networkAdminRequest(s, "/v1/admin/network/remote-access/nordvpn", string(body))
 			wantCode := 503
-			want := [][]string{{"login", "--token", token}, {"account"}, {"set", "meshnet", "on"}, {"settings"}}
+			want := [][]string{{"account"}, {"logout", "--persist-token"}, {"login", "--token", token}, {"account"}, {"set", "meshnet", "on"}, {"settings"}}
 			switch stage {
 			case "success", "enable error but enabled":
 				wantCode = 200
 			case "login":
-				want = want[:1]
+				want = want[:3]
 			case "account", "account unknown":
-				want = want[:2]
+				want = want[:4]
 			}
 			if rr.Code != wantCode || !reflect.DeepEqual(*calls, want) {
 				t.Fatal("token argv or verified sequence changed", rr.Code)
@@ -442,7 +498,7 @@ func TestNordDeactivateVerifiesMeshnetBeforeStopping(t *testing.T) {
 
 func TestNordActionFailuresAreSafeAndActionable(t *testing.T) {
 	for _, tc := range []struct{ action, message string }{
-		{"activate", "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."},
+		{"activate", "NordVPN Meshnet could not be activated. Use Token to reconnect with a current access token, or open Troubleshoot for diagnostics."},
 		{"deactivate", "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying."},
 		{"token-login", "NordVPN login could not be completed. Check the access token and retry."},
 	} {
@@ -501,7 +557,7 @@ func TestNordTokenLoginMaximumEscapedToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", string(body))
-	if rr.Code != 200 || len(*calls) != 4 || !reflect.DeepEqual((*calls)[0], []string{"login", "--token", token}) {
+	if rr.Code != 200 || len(*calls) != 6 || !reflect.DeepEqual((*calls)[2], []string{"login", "--token", token}) {
 		t.Fatal("escaped token bound or opaque argv changed", rr.Code)
 	}
 }
@@ -538,13 +594,19 @@ func TestNordEnableVerifiesSettingsAfterSetFailure(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
 			var calls []string
+			var expectedCtx context.Context = ctx
 			runNordCommand = func(gotCtx context.Context, args ...string) (string, error) {
-				if gotCtx != ctx {
+				if expectedCtx != nil && gotCtx != expectedCtx {
 					t.Fatal("follow-up must use the parent operation context")
+				}
+				if _, ok := gotCtx.Deadline(); !ok {
+					t.Fatal("unbounded follow-up operation")
 				}
 				call := strings.Join(args, " ")
 				calls = append(calls, call)
 				switch call {
+				case "account":
+					return "Account information", nil
 				case "set meshnet on":
 					return "private vendor output", errors.New("private set error")
 				case "settings":
@@ -564,6 +626,27 @@ func TestNordEnableVerifiesSettingsAfterSetFailure(t *testing.T) {
 			}
 			if !reflect.DeepEqual(calls, []string{"set meshnet on", "settings"}) {
 				t.Fatal("authoritative verification sequence", calls)
+			}
+			calls = nil
+			expectedCtx = nil
+			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/nordvpn", `{"action":"activate"}`)
+			if !reflect.DeepEqual(calls, []string{"account", "set meshnet on", "settings"}) {
+				t.Fatal("current login activation must not log in or out", calls)
+			}
+			if tc.success {
+				if rr.Code != http.StatusOK {
+					t.Fatal(rr.Code)
+				}
+			} else {
+				var response struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if rr.Code != http.StatusServiceUnavailable || response.Error != "NordVPN Meshnet could not be activated. Use Token to reconnect with a current access token, or open Troubleshoot for diagnostics." {
+					t.Fatal("activation must offer safe token recovery", rr.Code, response.Error)
+				}
 			}
 		})
 	}

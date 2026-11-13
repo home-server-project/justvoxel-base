@@ -182,19 +182,35 @@ func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 	}
 	script := string(source)
 	for _, want := range []string{
-		"NordVPN account required", "NordVPN Meshnet needs a NordVPN account and access token.",
+		"NordVPN access token", "Use a current NordVPN access token to reconnect this server and enable Meshnet.",
 		"Already have a NordVPN account?", "Open NordVPN dashboard", "Create NordVPN account",
 		"https://my.nordaccount.com/dashboard/nordvpn/", "https://refer-nordvpn.com/pZGMpGTrBrO",
 		"Get your NordVPN access token", "Select NordVPN from the left menu.", "Scroll down to Advanced settings.",
 		"Under Access token, select Get Access token.", "Select Generate new token.", "Copy the token and paste it below.",
 		"NordVPN may ask you to verify your email before generating the token.",
-		"Access token", "Log in & activate", "noopener noreferrer", "Open NordVPN account",
+		"Access token", "Reconnect with new token", "noopener noreferrer", "Open NordVPN account",
 		`input.type = "password"`, `input.maxLength = 4096`, `input.autocomplete = "off"`,
 		`input.spellcheck = false`, `input.autocapitalize = "off"`,
-		`if (result?.login_required) showNordAccountDialog()`,
+		`if (loginRequired) showNordAccountDialog()`, "NordVPN login", "Update Token", "Use current login",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatal("approved UI missing", want)
+		}
+	}
+	for _, action := range []struct{ name, call string }{
+		{"token", "showNordAccountDialog();"}, {"activate", "showNordLoginChoice();"},
+	} {
+		start := strings.Index(script, `} else if (id === "nordvpn" && provider.dataset.action === "`+action.name+`") {`)
+		if start < 0 {
+			t.Fatal("Nord click handler missing", action.name)
+		}
+		end := strings.Index(script[start+1:], "} else if")
+		if end < 0 {
+			t.Fatal("Nord click handler boundary missing")
+		}
+		branch := script[start : start+1+end]
+		if !strings.Contains(branch, action.call) || strings.Contains(branch, "postForm") || strings.Contains(branch, "runRemoteAction") {
+			t.Fatal("Nord click must open a dialog before any request", action.name)
 		}
 	}
 	for _, old := range []string{"Complete NordVPN login", "NordVPN success URL", "Open NordVPN login", "xdg-open", "exchange_token", "nordvpn://", "validNordCallback", "validNordLoginURL", "complete-login"} {
@@ -214,7 +230,7 @@ func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{".network-provider-grid{grid-template-columns:minmax(0,1fr)}", "@container(min-width:580px){.network-provider-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}", "@container(min-width:860px){.network-provider-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}", "@container(min-width:1140px){.network-provider-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}", "width:min(1180px,calc(100vw - 1rem))", "height:min(760px,var(--jv-workspace-height))"} {
+	for _, want := range []string{".network-provider-grid{grid-template-columns:minmax(0,1fr)}", "@container(min-width:580px){.network-provider-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}", "@container(min-width:860px){.network-provider-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}", "@container(min-width:1140px){.network-provider-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}", "width:min(1180px,calc(100vw - 1rem))", "height:min(760px,var(--jv-workspace-height))", ".network-provider-card>.network-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))", ".network-provider-card>.network-inline-actions.network-nord-lifecycle{grid-template-columns:auto minmax(0,1fr)}", ".network-nord-actions{display:flex;justify-content:flex-end;align-items:center;gap:.4rem;flex-wrap:wrap;min-width:0}"} {
 		if !strings.Contains(string(css), want) {
 			t.Fatal("responsive layout or geometry", want)
 		}
@@ -256,7 +272,7 @@ func TestNordActivationLoginRequiredResponse(t *testing.T) {
 
 func TestNordLifecycleErrorsPassThroughSafely(t *testing.T) {
 	for _, tc := range []struct{ action, message string }{
-		{"activate", "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."},
+		{"activate", "NordVPN Meshnet could not be activated. Use Token to reconnect with a current access token, or open Troubleshoot for diagnostics."},
 		{"deactivate", "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying."},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
@@ -319,7 +335,20 @@ const window = { open: () => { throw new Error("automatic Nord tab"); } };
 const flatten = node => [node, ...node.children.flatMap(flatten)];
 const secret = "never_reflect_this+/_-.~=opaque";
 let submitted, input, fail = true, failure = new Error(secret), refreshed = 0;
+let remoteBusy = false, activationCalls = 0, loginRequired = true;
+const renderNetwork = () => {};
+const runRemoteAction = async action => {
+  assert.equal(remoteBusy, false);
+  remoteBusy = true;
+  try { await action(); await refreshRemoteAccess(); }
+  finally { remoteBusy = false; }
+};
 const postForm = async (path, request) => {
+  if (path === "/api/network/remote-access/nordvpn") {
+    assert.deepEqual(request, { action: "activate" });
+    activationCalls++;
+    return { ok: true, login_required: loginRequired };
+  }
   assert.equal(path, "/api/network/remote-access/nordvpn/login");
   assert.equal(input.value, "", "clear field before async POST");
   assert.deepEqual(request, { token: secret });
@@ -350,7 +379,7 @@ const refreshRemoteAccess = async () => { refreshed++; };
     assert.equal(link.href, href); assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
   }
   input.value = "bad token";
-  await button("Log in & activate").listeners.click();
+  await button("Reconnect with new token").listeners.click();
   assert.equal(submitted, undefined);
   assert.equal(input.value, "");
   const loginFailure = "NordVPN login could not be completed. Check the access token and retry.";
@@ -366,7 +395,7 @@ const refreshRemoteAccess = async () => { refreshed++; };
   ]) {
     failure = error;
     input.value = secret;
-    await button("Log in & activate").listeners.click();
+    await button("Reconnect with new token").listeners.click();
     assert.equal(submitted, secret);
     assert.equal(input.value, "");
     assert.equal(popup.open, true);
@@ -382,7 +411,7 @@ const refreshRemoteAccess = async () => { refreshed++; };
   }
   fail = false;
   input.value = secret;
-  await button("Log in & activate").listeners.click();
+  await button("Reconnect with new token").listeners.click();
   assert.equal(popup.open, false); assert.equal(input.value, ""); assert.equal(refreshed, 1);
   showNordAccountDialog();
   popup = document.body.children.at(-1);
@@ -396,6 +425,41 @@ const refreshRemoteAccess = async () => { refreshed++; };
   input.value = secret;
   popup.close(); // Native Escape close event also clears the secret.
   assert.equal(input.value, "");
+  // Every Activate starts with a choice, independent of displayed account state.
+  showNordLoginChoice();
+  popup = document.body.children.at(-1);
+  assert.equal(activationCalls, 0);
+  assert(flatten(popup).some(n => n.tag === "h2" && n.textContent === "NordVPN login"));
+  button("Cancel").listeners.click();
+  assert.equal(popup.open, false); assert.equal(activationCalls, 0);
+  showNordLoginChoice();
+  popup = document.body.children.at(-1);
+  const choice = popup;
+  button("Update Token").listeners.click();
+  assert.equal(choice.open, false); assert.equal(activationCalls, 0);
+  popup = document.body.children.at(-1);
+  assert(flatten(popup).some(n => n.tag === "h2" && n.textContent === "NordVPN access token"));
+  button("Cancel").listeners.click();
+  for (const needsToken of [true, false]) {
+    loginRequired = needsToken;
+    showNordLoginChoice();
+    popup = document.body.children.at(-1);
+    const choice = popup;
+    const before = activationCalls, beforeRefresh = refreshed;
+    assert.equal(choice.open, true);
+    await button("Use current login").listeners.click();
+    assert.equal(choice.open, false);
+    assert.equal(activationCalls, before + 1);
+    assert.equal(refreshed, beforeRefresh + 1);
+    assert.equal(remoteBusy, false);
+    if (needsToken) {
+      popup = document.body.children.at(-1);
+      assert(flatten(popup).some(n => n.tag === "h2" && n.textContent === "NordVPN access token"));
+      button("Cancel").listeners.click();
+    } else {
+      assert.equal(document.body.children.at(-1), choice);
+    }
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
 	cmd := exec.Command("node")

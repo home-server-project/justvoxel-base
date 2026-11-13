@@ -260,6 +260,13 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 				_, err = remoteSystemctl(ctx, "disable", "nordvpnd.socket", provider.unit)
 			}
 		case "token-login":
+			output, checkErr := runNordCommand(ctx, "account")
+			if nordAccount(output, checkErr) != "Not logged in" {
+				// Explicit replacement alone may reset saved credentials. Unknown
+				// can also be stale local state. A failed logout must not prevent
+				// trying the new token; login and its account check decide success.
+				_, _ = runNordCommand(ctx, "logout", "--persist-token")
+			}
 			_, err = runNordCommand(ctx, "login", "--token", token)
 			token = "" // No persistence, error wrapping or auditing of token/CLI output.
 			if err != nil {
@@ -279,12 +286,10 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 		case "activate":
 			output, checkErr := runNordCommand(ctx, "account")
 			switch nordAccount(output, checkErr) {
-			case "Not logged in":
+			case "Not logged in", "Unknown":
 				loginRequired = true
 			case "Logged in":
 				err = nordEnableMeshnet(ctx)
-			default:
-				err = errors.New("NordVPN account state unavailable")
 			}
 		}
 	}
@@ -299,7 +304,7 @@ func (s *server) networkNordChange(w http.ResponseWriter, r *http.Request, actor
 				message = "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot."
 			}
 		case "activate":
-			message = "NordVPN could not be activated. Open Troubleshoot and generate a Network report before retrying."
+			message = "NordVPN Meshnet could not be activated. Use Token to reconnect with a current access token, or open Troubleshoot for diagnostics."
 		case "deactivate":
 			message = "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying."
 		}
