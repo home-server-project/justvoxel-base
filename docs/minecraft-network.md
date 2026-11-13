@@ -6,8 +6,8 @@ servers do not require a proxy.
 
 Open **Control Center → Minecraft → Network** or **Minecraft Servers → Network**
 as an administrator. Both open the Minecraft Network workspace on the dashboard.
-Choose Paper or Purpur servers, set the public Java and Bedrock ports and a lobby
-welcome message, and
+Choose Paper, Purpur, Pufferfish or Leaf servers, set the public Java and Bedrock
+ports and a lobby welcome message, and
 turn on Enabled. Modern forwarding requires Minecraft 1.13 or later. Fabric,
 NeoForge, Spigot, Vanilla, Forge, Quilt and native Bedrock stay standalone in this
 implementation. Velocity is infrastructure, not an Add Server choice.
@@ -98,7 +98,8 @@ visible for diagnosis.
 
 Standalone configuration and managed artifact snapshots are private to each
 instance. New snapshots bind their exact owned file set to the backend profile
-(`paper-family` for Paper/Purpur). Historical snapshots without a profile remain
+(`paper-family` for Paper, Purpur, Pufferfish and Leaf). This native profile needs
+no additional proxy plugin or mod. Historical snapshots without a profile remain
 readable only with the selected instance ID and exact historical Paper file set;
 reading them does not rewrite them. Restoration uses the snapshot's ownership,
 while active members must also match the runtime software profile.
@@ -119,8 +120,8 @@ Existing instance mounts and data labels retain their established model.
 ## Lobby and server selection
 
 Velocity is the only Minecraft Network infrastructure container and the only
-public Java entrance. Selected Paper/Purpur members remain private. LimboAPI
-provides one lightweight virtual lobby inside Velocity; the small JustVoxel Lobby
+public Java entrance. Selected Paper, Purpur, Pufferfish and Leaf members remain
+private. LimboAPI provides one lightweight virtual lobby inside Velocity; the small JustVoxel Lobby
 Velocity plugin supplies the server selector. No separate full Minecraft lobby
 server or second lobby container exists. Geyser and Floodgate remain on Velocity
 for Bedrock players.

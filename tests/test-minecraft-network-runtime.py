@@ -83,10 +83,10 @@ class BackendProfiles(unittest.TestCase):
     portable = ('config/paper-global.yml', 'paper.yml', 'plugins/floodgate/key.pem',
                 'plugins/floodgate/config.yml')
 
-    def test_only_paper_and_purpur_resolve(self):
-        for software in ('paper', 'purpur'):
+    def test_supported_paper_family_software_resolves(self):
+        for software in ('paper', 'purpur', 'pufferfish', 'leaf'):
             self.assertEqual(runtime['backend_profile'](software), 'paper-family')
-        for software in ('pufferfish', 'leaf', 'fabric', 'quilt', 'forge', 'neoforge',
+        for software in ('fabric', 'quilt', 'forge', 'neoforge',
                          'spigot', 'vanilla', 'bedrock', '', 'unknown'):
             with self.subTest(software=software), self.assertRaises(ValueError):
                 runtime['backend_profile'](software)
@@ -195,8 +195,8 @@ class BackendStandaloneRecovery(unittest.TestCase):
         for name, data in self.unowned.items():
             self.assertEqual((self.root/name).read_bytes(), data)
 
-    def test_snapshot_publication_and_standalone_roundtrip_for_both_software(self):
-        for software in ('paper', 'purpur'):
+    def test_snapshot_publication_and_standalone_roundtrip_for_paper_family(self):
+        for software in ('paper', 'purpur', 'pufferfish', 'leaf'):
             with self.subTest(software=software):
                 self.record['runtime']['software'] = software
                 self.record['network_member'] = True
@@ -269,28 +269,33 @@ class BackendStandaloneRecovery(unittest.TestCase):
                 for path in self.root.rglob('*') if path.is_file()}
 
     def test_preflight_is_read_only_and_requires_verified_cache(self):
-        before = self.backend_bytes()
-        private_before = {str(path):path.read_bytes() for path in self.private.rglob('*') if path.is_file()}
-        verify = mock.Mock(wraps=runtime['validate_artifacts'])
-        forbidden = mock.Mock(side_effect=AssertionError('preflight must not publish or resolve'))
-        with mock.patch.dict(runtime, {'validate_artifacts': verify, 'atomic': forbidden,
-                                      'prepare': forbidden, 'fetch': forbidden}):
-            runtime['backend_preflight'](self.instance)
-        verify.assert_called_once_with()
-        self.assertEqual(self.backend_bytes(), before)
-        self.assertFalse(self.snapshot.exists())
-        self.assertFalse(self.blobs.exists())
-        self.assertEqual({str(path):path.read_bytes() for path in self.private.rglob('*') if path.is_file()}, private_before)
         artifact = self.network/'artifacts/floodgate-spigot.jar'
-        artifact.write_bytes(b'corrupt prepared artifact')
-        with self.assertRaisesRegex(ValueError, 'installed artifact checksum mismatch'):
-            runtime['backend_preflight'](self.instance)
-        artifact.unlink()
-        with self.assertRaises(FileNotFoundError):
-            runtime['backend_preflight'](self.instance)
-        self.assertEqual(self.backend_bytes(), before)
-        self.assertFalse(self.snapshot.exists())
-        self.assertFalse(self.blobs.exists())
+        for software in ('paper', 'purpur', 'pufferfish', 'leaf'):
+            with self.subTest(software=software):
+                self.record['runtime']['software'] = software
+                self.save_record()
+                artifact.write_bytes(self.jar)
+                before = self.backend_bytes()
+                private_before = {str(path):path.read_bytes() for path in self.private.rglob('*') if path.is_file()}
+                verify = mock.Mock(wraps=runtime['validate_artifacts'])
+                forbidden = mock.Mock(side_effect=AssertionError('preflight must not publish or resolve'))
+                with mock.patch.dict(runtime, {'validate_artifacts': verify, 'atomic': forbidden,
+                                              'prepare': forbidden, 'fetch': forbidden}):
+                    runtime['backend_preflight'](self.instance)
+                verify.assert_called_once_with()
+                self.assertEqual(self.backend_bytes(), before)
+                self.assertFalse(self.snapshot.exists())
+                self.assertFalse(self.blobs.exists())
+                self.assertEqual({str(path):path.read_bytes() for path in self.private.rglob('*') if path.is_file()}, private_before)
+                artifact.write_bytes(b'corrupt prepared artifact')
+                with self.assertRaisesRegex(ValueError, 'installed artifact checksum mismatch'):
+                    runtime['backend_preflight'](self.instance)
+                artifact.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    runtime['backend_preflight'](self.instance)
+                self.assertEqual(self.backend_bytes(), before)
+                self.assertFalse(self.snapshot.exists())
+                self.assertFalse(self.blobs.exists())
 
     def test_preflight_rejects_wrong_storage_and_unsupported_software(self):
         before = self.backend_bytes()
@@ -369,9 +374,15 @@ class BackendStandaloneRecovery(unittest.TestCase):
     def test_backend_publication_never_resolves_artifacts(self):
         forbidden = mock.Mock(side_effect=AssertionError('publication must consume prepared cache'))
         with mock.patch.dict(runtime, {'prepare': forbidden, 'prepare_backend_profile': forbidden, 'fetch': forbidden}):
-            self.enroll()
+            for software in ('paper', 'purpur', 'pufferfish', 'leaf'):
+                with self.subTest(software=software):
+                    self.record['runtime']['software'] = software
+                    self.record['network_member'] = True
+                    self.save_record()
+                    self.enroll()
+                    self.assertEqual((self.root/'plugins/floodgate-spigot.jar').read_bytes(), self.jar)
+                    self.leave()
         forbidden.assert_not_called()
-        self.assertEqual((self.root/'plugins/floodgate-spigot.jar').read_bytes(), self.jar)
 
     def test_bad_snapshot_identity_paths_checksum_and_symlinks_preserve_evidence(self):
         self.enroll()
@@ -398,12 +409,17 @@ class BackendStandaloneRecovery(unittest.TestCase):
     def test_unsupported_software_cannot_publish_as_member(self):
         self.enroll()
         before = self.snapshot.read_bytes()
-        self.record['runtime']['software'] = 'fabric'
-        self.save_record()
-        with self.assertRaises(ValueError):
-            self.enroll()
-        self.assertEqual(self.snapshot.read_bytes(), before)
-        self.assert_unowned()
+        for software in ('fabric', 'quilt', 'forge', 'neoforge', 'spigot',
+                         'vanilla', 'bedrock', '', 'unknown'):
+            with self.subTest(software=software):
+                self.record['runtime']['software'] = software
+                self.save_record()
+                with self.assertRaises(ValueError):
+                    runtime['backend_preflight'](self.instance)
+                with self.assertRaises(ValueError):
+                    self.enroll()
+                self.assertEqual(self.snapshot.read_bytes(), before)
+                self.assert_unowned()
 
     def test_managed_plugin_checks_precede_snapshot_and_publication(self):
         import subprocess
@@ -425,18 +441,20 @@ class BackendStandaloneRecovery(unittest.TestCase):
         self.assert_unowned()
 
     def test_paper_version_specific_forwarding_patches(self):
-        for version, filename, parent, field in (
-                ('1.18.2', '/data/paper.yml', '$.settings', 'velocity-support'),
-                ('1.19', '/data/config/paper-global.yml', '$.proxies', 'velocity'),
-                ('LATEST', '/data/config/paper-global.yml', '$.proxies', 'velocity')):
-            with self.subTest(version=version):
-                self.record['runtime']['version'] = version
-                self.save_record()
-                self.enroll()
-                patches = json.loads((self.root/'.justvoxel-network-patches.json').read_bytes())
-                self.assertEqual(patches, {'patches':[{'file':filename, 'ops':[{'$put':{
-                    'path':parent, 'key':field, 'value':{'enabled':True, 'online-mode':True,
-                                                       'secret':self.state['forwarding_secret']}}}]}]})
+        for software in ('paper', 'purpur', 'pufferfish', 'leaf'):
+            for version, filename, parent, field in (
+                    ('1.18.2', '/data/paper.yml', '$.settings', 'velocity-support'),
+                    ('1.19', '/data/config/paper-global.yml', '$.proxies', 'velocity'),
+                    ('LATEST', '/data/config/paper-global.yml', '$.proxies', 'velocity')):
+                with self.subTest(software=software, version=version):
+                    self.record['runtime']['software'] = software
+                    self.record['runtime']['version'] = version
+                    self.save_record()
+                    self.enroll()
+                    patches = json.loads((self.root/'.justvoxel-network-patches.json').read_bytes())
+                    self.assertEqual(patches, {'patches':[{'file':filename, 'ops':[{'$put':{
+                        'path':parent, 'key':field, 'value':{'enabled':True, 'online-mode':True,
+                                                           'secret':self.state['forwarding_secret']}}}]}]})
 
 
 class NetworkArtifacts(unittest.TestCase):

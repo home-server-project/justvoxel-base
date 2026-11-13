@@ -118,7 +118,7 @@ const networkPaperFamily minecraftNetworkBackendProfile = "paper-family"
 // Profiles describe only Network backend preparation, not standalone support.
 func networkBackendProfile(software string) (minecraftNetworkBackendProfile, bool) {
 	switch software {
-	case "paper", "purpur":
+	case "paper", "purpur", "pufferfish", "leaf":
 		return networkPaperFamily, true
 	default:
 		return "", false

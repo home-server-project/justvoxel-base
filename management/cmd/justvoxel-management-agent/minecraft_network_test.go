@@ -60,14 +60,19 @@ func TestMinecraftNetworkOptionalAndStandaloneOverlay(t *testing.T) {
 	}
 }
 func TestMinecraftNetworkSoftwareEligibility(t *testing.T) {
-	for _, software := range []string{"paper", "purpur", "pufferfish", "leaf", "fabric", "neoforge", "spigot", "vanilla", "forge", "quilt", "bedrock"} {
-		want := software == "paper" || software == "purpur"
+	for _, software := range []string{"paper", "purpur", "pufferfish", "leaf", "fabric", "neoforge", "spigot", "vanilla", "forge", "quilt", "bedrock", "", "unknown"} {
+		want := software == "paper" || software == "purpur" || software == "pufferfish" || software == "leaf"
 		profile, supported := networkBackendProfile(software)
 		if supported != want || (want && profile != networkPaperFamily) || (!want && profile != "") {
 			t.Fatal("unexpected backend profile", software, profile, supported)
 		}
 		if networkEligible(software) != want {
 			t.Fatal(software)
+		}
+		for _, version := range []string{"1.13", "1.20.6", "LATEST"} {
+			if networkRecordEligible(minecraftInstanceRuntimeConfig{Software: software, Version: version}) != want {
+				t.Fatal("unexpected record eligibility", software, version)
+			}
 		}
 		if !want {
 			if _, err := networkOverlay(minecraftInstanceRuntimeFiles{}, instanceRuntimeRecord{Runtime: minecraftInstanceRuntimeConfig{Software: software}, NetworkMember: true}); err == nil {
@@ -77,7 +82,7 @@ func TestMinecraftNetworkSoftwareEligibility(t *testing.T) {
 	}
 }
 func TestMinecraftNetworkBackendProfileOverlay(t *testing.T) {
-	for _, software := range []string{"paper", "purpur"} {
+	for _, software := range []string{"paper", "purpur", "pufferfish", "leaf"} {
 		for _, version := range []string{"1.13", "1.18.2", "1.19", "LATEST"} {
 			config := minecraftInstanceRuntimeConfig{ID: "jv-a1b2c3", Software: software, Version: version}
 			input := minecraftInstanceRuntimeFiles{

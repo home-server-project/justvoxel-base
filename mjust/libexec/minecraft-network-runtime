@@ -294,7 +294,7 @@ BACKEND_PROFILES = {
 
 
 def backend_profile(software):
-    if software in ('paper', 'purpur'):
+    if software in ('paper', 'purpur', 'pufferfish', 'leaf'):
         return 'paper-family'
     raise ValueError('unsupported network backend software')
 
