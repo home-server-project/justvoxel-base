@@ -146,7 +146,7 @@ class ProviderMOTD(unittest.TestCase):
         self.env["PLAYIT_ACTIVE"] = "1"
         self.assertEqual(self.rows()["Playit"], "Not configured")
         self.configs["/etc/playit/playit.toml"].write_text("fixture")
-        for active, expected in [("1", "Running"), ("0", "Stopped")]:
+        for active, expected in [("1", "Unavailable"), ("0", "Stopped")]:
             self.env["PLAYIT_ACTIVE"] = active
             self.assertEqual(self.rows()["Playit"], expected)
             self.assertEqual(self.rows(issue=True)["Playit"], expected)
@@ -182,7 +182,7 @@ class LocalRemoteStatus(unittest.TestCase):
         self.helper = importlib.util.module_from_spec(spec)
         loader.exec_module(self.helper)
 
-    def lifecycle(self, tunnels=None, state="running", version=2, request_id=1):
+    def lifecycle(self, tunnels=None, state="running", version=2, request_id=1, capabilities=None):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         path = str(Path(directory.name) / "playit.sock")
@@ -191,15 +191,16 @@ class LocalRemoteStatus(unittest.TestCase):
         listener.listen(1)
         self.addCleanup(listener.close)
         requests = []
+        capabilities = ["lifecycle_state"] if capabilities is None else capabilities
         lifecycle = {"state": state, "data": {"tunnels": tunnels, "login_link": "SECRET", "active_tcp": 0}}
         def serve():
             with listener.accept()[0] as client:
-                client.sendall(json.dumps({"message_kind": "hello", "data": {"protocol": {"ipc_version": version, "capabilities": ["lifecycle_state"]}}}).encode() + b"\n")
-                if version != 2:
+                client.sendall(json.dumps({"message_kind": "hello", "data": {"protocol": {"ipc_version": version, "capabilities": capabilities}}}).encode() + b"\n")
+                if version not in (2, 3) or "lifecycle_state" not in capabilities:
                     return
                 with client.makefile("rb") as reader:
                     requests.append(json.loads(reader.readline()))
-                client.sendall(json.dumps({"message_kind": "response", "data": {"ipc_version": 2, "request_id": request_id, "response": {"type": "state", "data": lifecycle}}}).encode() + b"\n")
+                client.sendall(json.dumps({"message_kind": "response", "data": {"ipc_version": version, "request_id": request_id, "response": {"type": "state", "data": lifecycle}}}).encode() + b"\n")
         thread = threading.Thread(target=serve, daemon=True)
         thread.start()
         try:
@@ -207,8 +208,8 @@ class LocalRemoteStatus(unittest.TestCase):
         finally:
             thread.join(1)
             self.assertFalse(thread.is_alive())
-            if version == 2:
-                self.assertEqual(requests, [{"ipc_version": 2, "request_id": 1, "request": {"type": "get_state"}}])
+            if version in (2, 3) and "lifecycle_state" in capabilities:
+                self.assertEqual(requests, [{"ipc_version": version, "request_id": 1, "request": {"type": "get_state"}}])
 
     def test_one_multiple_disabled_and_empty_tunnels(self):
         tunnel = lambda name, disabled=False: {"display_address": name, "destination": "127.0.0.1:25565", "is_disabled": disabled}
@@ -216,11 +217,29 @@ class LocalRemoteStatus(unittest.TestCase):
         for tunnels, welcome, compact in [([], "No tunnels", "No tunnels"), ([disabled], "No tunnels", "No tunnels"), ([one, disabled], one["display_address"], "1 tunnel"), ([one, two, disabled], "2 tunnels", "2 tunnels")]:
             with self.subTest(tunnels=tunnels):
                 result = self.lifecycle(tunnels)
-                self.assertTrue(result["connected"])
+                self.assertEqual(result["connected"], any(not t["is_disabled"] for t in tunnels))
                 self.assertEqual(result["tunnels"], tunnels)
                 self.assertEqual(self.helper.display(result), welcome)
                 self.assertEqual(self.helper.display(result, compact=True), compact)
                 self.assertNotIn("SECRET", json.dumps(result))
+
+    def test_v2_v3_same_request_version_and_private_metadata_ignored(self):
+        public = {"display_address": "one.playit.gg:1234", "destination": "127.0.0.1:25565", "is_disabled": False}
+        disabled = dict(public, display_address="disabled.playit.gg:2345", is_disabled=True)
+        for version in (2, 3):
+            with self.subTest(version=version):
+                extra = dict(public, tunnel_id="PRIVATE", agent_id="PRIVATE", notices=["PRIVATE"], secret="PRIVATE")
+                result = self.lifecycle([extra, disabled], version=version)
+                self.assertEqual(result["summary"], "1 tunnel")
+                self.assertTrue(result["connected"])
+                self.assertEqual(result["tunnels"], [public, disabled])
+                self.assertNotIn("PRIVATE", json.dumps(result))
+                result = self.lifecycle([disabled], version=version)
+                self.assertEqual(result["summary"], "No tunnels")
+                self.assertFalse(result["connected"])
+                self.assertEqual(result["tunnels"], [disabled])
+        with self.assertRaises(ValueError):
+            self.lifecycle([], version=3, capabilities=[])
 
     def test_transitions_and_unavailable_or_incompatible_ipc(self):
         self.assertEqual(self.lifecycle(state="starting")["summary"], "Connecting")
@@ -233,7 +252,7 @@ class LocalRemoteStatus(unittest.TestCase):
             self.helper.playit_lifecycle("/nonexistent/justvoxel-playit.sock")
         with patch.object(self.helper, "command", return_value="active"), patch.object(self.helper, "configured", return_value=True), patch.object(self.helper, "playit_lifecycle", side_effect=PermissionError):
             result = self.helper.provider_status("playit")
-            self.assertEqual(result["summary"], "Running")
+            self.assertEqual(result["summary"], "Unavailable")
             self.assertFalse(result["connected"])
             self.assertNotIn("tunnels", result)
 

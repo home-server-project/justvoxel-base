@@ -539,7 +539,7 @@ func TestCanonicalProviderSummariesFollowConfigurationAndService(t *testing.T) {
 		{"netbird", "active", "Not connected", true, false},
 		{"netbird", "inactive", "Stopped", true, false},
 		{"playit", "active", "Not configured", false, false},
-		{"playit", "active", "Running", true, false},
+		{"playit", "active", "Unavailable", true, false},
 		{"playit", "inactive", "Stopped", true, false},
 	} {
 		remoteStat = func(string) (os.FileInfo, error) {
@@ -585,6 +585,13 @@ func TestPlayitLifecyclePresentationDoesNotChangeProviderControls(t *testing.T) 
 	status, err := remoteProviderStatus(context.Background(), provider)
 	if err != nil || !status.Installed || !status.Enabled || !status.Active || !status.Configured || !status.Connected || status.Summary != "2 tunnels" || !reflect.DeepEqual(status.Tunnels, expected.Tunnels) {
 		t.Fatalf("Playit status %+v: %v", status, err)
+	}
+	playitTunnelStatus = func(context.Context) (playitStatusResult, error) {
+		return playitStatusResult{}, os.ErrPermission
+	}
+	status, err = remoteProviderStatus(context.Background(), provider)
+	if err != nil || status.Summary != "Unavailable" || status.Connected || len(status.Tunnels) != 0 {
+		t.Fatalf("IPC failure must not imply running tunnels: %+v %v", status, err)
 	}
 	remoteSystemctl = func(context.Context, ...string) (string, error) {
 		return "LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive", nil

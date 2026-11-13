@@ -142,6 +142,10 @@ func (f *fakeNetworkConfigurationAPI) PlayitSetup(_ context.Context, _ string, s
 	return api.PlayitSetupState{State: "waiting", ClaimURL: "https://playit.gg/claim/0123abcdef"}, nil
 }
 
+func (f *fakeNetworkConfigurationAPI) PlayitRelink(ctx context.Context, session string) (api.PlayitSetupState, error) {
+	return f.PlayitSetup(ctx, session, true)
+}
+
 func TestPlayitSetupProxyAdministratorAndCSRF(t *testing.T) {
 	for _, role := range []string{"administrator", "operator", "viewer"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost} {
@@ -152,6 +156,34 @@ func TestPlayitSetupProxyAdministratorAndCSRF(t *testing.T) {
 					t.Fatal(err)
 				}
 				req := httptest.NewRequest(method, "/api/network/remote-access/playit/setup", strings.NewReader("csrf="+csrf))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+				req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, req)
+				allowed := role == "administrator" && (method == http.MethodGet || csrf == "token")
+				if allowed {
+					if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "https://playit.gg/claim/0123abcdef") || fake.calls != 1 {
+						t.Fatal(rr.Body.String())
+					}
+				} else if rr.Code != http.StatusForbidden || strings.Contains(rr.Body.String(), "0123abcdef") || fake.calls != 0 {
+					t.Fatalf("%s %s csrf=%q: %d %s", role, method, csrf, rr.Code, rr.Body.String())
+				}
+			}
+		}
+	}
+}
+
+func TestPlayitRelinkProxyAdministratorAndCSRF(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		for _, method := range []string{http.MethodPost} {
+			for _, csrf := range []string{"", "token"} {
+				fake := &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: role}}
+				app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(method, "/api/network/remote-access/playit/relink", strings.NewReader("csrf="+csrf))
 				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
 				req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
@@ -260,6 +292,34 @@ for (const id of ["tailscale", "netbird", "playit"]) {
   assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
   assert.equal(link.href, { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[id]);
 }
+for (const service_active of [false, true]) {
+  for (const configured of [false, true]) {
+    nodes = render({ ...base, configured, service_active });
+    const group = nodes.find(n => n.className === "network-playit-actions");
+    assert.deepEqual(group.children.map(n => n.textContent), ["Account", "Activate"]);
+    assert.equal(group.children[0].className, "secondary nav-admin-only network-action-button");
+    assert.equal(group.children[0].disabled, false);
+  }
+}
+for (const id of ["tailscale", "netbird", "nordvpn"]) {
+  assert(!render({ ...base, id }).some(n => n.textContent === "Account" || n.className === "network-playit-actions"));
+}
+for (const busy of [false, true]) {
+  for (const installed of [false, true]) {
+    for (const state of ["idle", "starting", "waiting"]) {
+      remoteBusy = busy; playitSetup = { state };
+      const account = render({ ...base, installed }).find(n => n.textContent === "Account");
+      assert.equal(account.disabled, busy || !installed || state !== "idle");
+    }
+  }
+}
+remoteBusy = false; playitSetup = { state: "idle" };
+for (const summary of ["No tunnels", "Unavailable", "Running"]) {
+  nodes = render({ ...base, configured: true, summary, tunnels: summary === "No tunnels" ? [{ display_address: "disabled.playit.gg", destination: "127.0.0.1:25565", is_disabled: true }] : [] });
+  assert(nodes.some(n => n.textContent === "Tunnels: " + (summary === "Running" ? "Unavailable" : summary)));
+  assert(!nodes.some(n => n.textContent === "Tunnels: Running"));
+  if (summary === "No tunnels") assert(nodes.some(n => n.textContent === "Disabled tunnel: disabled.playit.gg"));
+}
 nodes = render({ ...base, configured: true, connected: true, summary: "2 tunnels", tunnels: [
   { display_address: "one.playit.gg:1234", destination: "127.0.0.1:25565", is_disabled: false },
   { display_address: "two.playit.gg:2345", destination: "127.0.0.1:19132", is_disabled: false },
@@ -268,7 +328,7 @@ nodes = render({ ...base, configured: true, connected: true, summary: "2 tunnels
 for (const text of ["Software: Installed", "Service enabled: Yes", "Service: Running", "Configuration: Configured", "Tunnels: 2 tunnels", "Public tunnel: one.playit.gg:1234", "Public tunnel: two.playit.gg:2345", "Disabled tunnel: disabled.playit.gg:3456", "Local destination: 127.0.0.1:25565", "Local destination: 127.0.0.1:19132", "Local destination: 127.0.0.1:25566"]) assert(nodes.some((n) => n.textContent === text));
 assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
 assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
-for (const summary of ["No tunnels", "Running", "Connecting", "Unavailable"]) {
+for (const summary of ["No tunnels", "Connecting", "Unavailable"]) {
   nodes = render({ ...base, configured: true, summary });
   assert(nodes.some((n) => n.textContent === "Tunnels: " + summary));
   assert(!nodes.some((n) => n.textContent.startsWith("Public tunnel:")));
@@ -309,7 +369,7 @@ for (const state of ["starting", "waiting"]) {
     assert(nodes.indexOf(nodes.find((n) => n.textContent === "Deactivate")) < nodes.indexOf(claim));
     assert.equal(claim.href, playitSetup.claim_url);
     assert.equal(claim.className, "button-link primary network-action-button");
-    assert(!nodes.some((n) => n.textContent === "Activate"));
+    assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
     playitClaimOpened = true;
     assert(render(base).some((n) => n.textContent === "Activate" && n.disabled));
     assert(!render(base).some((n) => n.textContent === "Open Playit setup"));
@@ -350,6 +410,8 @@ assert(!render(base).some((n) => n.textContent === "Set up Playit"));
 	}
 	for _, want := range []string{
 		".network-provider-card .button-link{display:inline-flex;",
+		".network-provider-card>.network-inline-actions.network-playit-lifecycle{grid-template-columns:auto minmax(0,1fr)}",
+		".network-playit-actions{display:flex;justify-content:flex-end;align-items:center;gap:.4rem;flex-wrap:wrap;min-width:0}",
 		".network-provider-card :is(button,.button-link).warning{background:var(--jv-warning);color:var(--jv-surface-sunken)}",
 		".network-provider-card>.network-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));",
 		".network-provider-card>.network-inline-actions>.button-link{grid-column:1/-1;order:-1}",
@@ -1156,5 +1218,80 @@ const renderNetwork = () => { nodes = flatten(renderRemoteAccess()); };
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("remote error rendering: %v\n%s", err, output)
+	}
+}
+
+func TestPlayitAccountConfirmationAndSharedSetup(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const startPlayitAccountSetup =")
+	end := strings.Index(script, "  const validNordAccessToken =")
+	if start < 0 || end <= start {
+		t.Fatal("Playit account flow missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.listeners = {}; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); return node; }
+  setAttribute() {}
+  addEventListener(name, handler) { this.listeners[name] = handler; }
+  showModal() { this.open = true; }
+  close() { this.open = false; this.listeners.close?.(); }
+  remove() {}
+}
+const document = { createElement: tag => new Element(tag), body: new Element("body") };
+const window = { open() { throw new Error("account flow automatically opened browser"); } };
+let remoteBusy = false, playitClaimOpened = true, playitSetup = { state: "idle" };
+const setupRunning = () => ["starting", "waiting"].includes(playitSetup.state);
+let requests = [], popupUpdates = 0, polling = 0, pending, fail = false;
+const closePlayitPopup = () => {};
+const updatePlayitPopup = () => { popupUpdates++; };
+const postForm = async path => {
+  requests.push(path);
+  if (fail) throw new Error("raw backend secret");
+  return { state: "waiting", claim_url: "https://playit.gg/claim/0123abcdef" };
+};
+const runRemoteAction = action => pending = (async () => {
+  await action(); polling++;
+})();
+const flatten = node => [node, ...node.children.flatMap(flatten)];
+` + script[start:end] + `
+(async () => {
+  showPlayitAccountDialog();
+  assert.equal(requests.length, 0);
+  let popup = playitAccountDialog;
+  let nodes = flatten(popup);
+  assert(nodes.some(n => n.textContent === "Playit.gg account"));
+  assert(nodes.some(n => n.textContent.includes("Existing tunnels are not migrated to another account automatically.")));
+  nodes.find(n => n.textContent === "Cancel").listeners.click();
+  assert.equal(requests.length, 0);
+  showPlayitAccountDialog();
+  flatten(playitAccountDialog).find(n => n.textContent === "Relink account").listeners.click();
+  await pending;
+  assert.deepEqual(requests, ["/api/network/remote-access/playit/relink"]);
+  assert.equal(playitAccountDialog, null);
+  assert.equal(playitSetup.state, "waiting");
+  assert.equal(playitSetup.claim_url, "https://playit.gg/claim/0123abcdef");
+  assert.equal(playitClaimOpened, false);
+  assert.equal(popupUpdates, 1); assert.equal(polling, 1);
+  playitSetup = { state: "idle" };
+  await startPlayitAccountSetup(false);
+  assert.equal(requests[1], "/api/network/remote-access/playit/setup");
+  playitSetup = { state: "idle" }; fail = true;
+  await assert.rejects(startPlayitAccountSetup(true), error => error.message === "Playit account could not be relinked. Try again.");
+  remoteBusy = true; showPlayitAccountDialog(); assert.equal(playitAccountDialog, null);
+  remoteBusy = false; playitSetup = { state: "waiting" };
+  showPlayitAccountDialog(); assert.equal(playitAccountDialog, null);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Playit account: %v\n%s", err, output)
 	}
 }

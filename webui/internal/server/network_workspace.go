@@ -27,6 +27,7 @@ type networkAPI interface {
 
 func (a *App) registerNetworkWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/network", a.networkStatus)
+	mux.HandleFunc("POST /api/network/remote-access/playit/relink", a.networkPlayitRelink)
 	mux.HandleFunc("GET /api/network/remote-access/playit/setup", a.networkPlayitSetup)
 	mux.HandleFunc("POST /api/network/remote-access/playit/setup", a.networkPlayitSetup)
 	mux.HandleFunc("POST /api/network/remote-access/nordvpn/login", a.networkNordLogin)
@@ -527,6 +528,32 @@ func (a *App) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := client.PlayitSetup(r.Context(), session, r.Method == http.MethodPost)
 	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, status)
+}
+
+type networkPlayitRelinkAPI interface {
+	PlayitRelink(context.Context, string) (api.PlayitSetupState, error)
+}
+
+func (a *App) networkPlayitRelink(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkPlayitRelinkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Playit account relink unavailable")
+		return
+	}
+	status, err := client.PlayitRelink(r.Context(), session)
+	if err != nil {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Playit account could not be relinked; try again")
 		return
 	}
 	writeNetworkWebJSON(w, http.StatusOK, status)

@@ -318,6 +318,16 @@ func (c *Client) PlayitSetup(ctx context.Context, session string, start bool) (P
 	return out, err
 }
 
+func (c *Client) PlayitRelink(ctx context.Context, session string) (PlayitSetupState, error) {
+	var out PlayitSetupState
+	client := *c
+	httpClient := *c.http
+	httpClient.Timeout = 25 * time.Second
+	client.http = &httpClient
+	err := client.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/playit/relink", session, nil, &out)
+	return out, err
+}
+
 // NordVPNTokenLogin sends an opaque token to the fixed provider operation.
 func (c *Client) NordVPNTokenLogin(ctx context.Context, session, token string) (RemoteAccessChange, error) {
 	var out RemoteAccessChange

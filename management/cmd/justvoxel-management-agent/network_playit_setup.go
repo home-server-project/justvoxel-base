@@ -39,6 +39,14 @@ var playitSetupRun = func(ctx context.Context, output io.Writer) error {
 	return cmd.Run()
 }
 
+// Reset output is deliberately discarded, including on failure.
+var playitResetRun = func(ctx context.Context) error {
+	cmd := playitSetupCommand(ctx, "/usr/bin/playit", "reset")
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	cmd.WaitDelay = time.Second
+	return cmd.Run()
+}
+
 var playitClaimURL = regexp.MustCompile(`^https://playit\.gg/claim/[0-9a-fA-F]{10}$`)
 
 // Retain at most one bounded token until its delimiter arrives; discard all
@@ -79,6 +87,7 @@ func (w *playitClaimWriter) Write(data []byte) (int, error) {
 }
 
 func registerPlayitSetupRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("POST /v1/admin/network/remote-access/playit/relink", s.networkPlayitRelink)
 	mux.HandleFunc("GET /v1/admin/network/remote-access/playit/setup", s.networkPlayitSetup)
 	mux.HandleFunc("POST /v1/admin/network/remote-access/playit/setup", s.networkPlayitSetup)
 }
@@ -107,6 +116,20 @@ func (s *server) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, playitSetup.state)
 		return
 	}
+	s.startPlayitSetup(w, r, actor, false)
+}
+
+// Both entry points hold operation and mu; only explicit relink may reset identity.
+func (s *server) startPlayitSetup(w http.ResponseWriter, r *http.Request, actor session, relink bool) {
+	provider, _ := remoteProviderByID("playit")
+	if playitSetup.done != nil {
+		select {
+		case <-playitSetup.done:
+		default:
+			writeError(w, http.StatusConflict, "Playit setup is still stopping; try again")
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	status, err := remoteProviderStatus(ctx, provider)
@@ -123,6 +146,30 @@ func (s *server) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 		if err := remoteActivate(ctx, provider); err != nil {
 			writeError(w, http.StatusServiceUnavailable, "Playit service could not be activated for setup")
 			return
+		}
+	}
+	if relink {
+		resetErr := playitResetRun(ctx)
+		if s.store != nil {
+			_ = s.store.recordAuditEvent(actor, "network_playit_relink_reset", "playit", resetErr == nil, "packaged reset finished")
+		}
+		if resetErr != nil {
+			writeError(w, http.StatusServiceUnavailable, "Playit account could not be reset; try relinking again")
+			return
+		}
+		// A non-empty config may remain after the vendor reset. Require live
+		// waiting-for-secret evidence instead of reading or modifying credentials.
+		for {
+			result, err := playitTunnelStatus(ctx)
+			if err == nil && result.Summary == "Not configured" && !result.Connected && len(result.Tunnels) == 0 {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				writeError(w, http.StatusServiceUnavailable, "Playit account reset could not be verified; try relinking again")
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
 		}
 	}
 	setupContext, setupCancel := context.WithTimeout(context.Background(), playitSetupTimeout)
@@ -169,4 +216,35 @@ func (s *server) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, playitSetup.state)
+}
+
+func (s *server) networkPlayitRelink(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireAdministrator(w, r)
+	if !ok {
+		return
+	}
+	playitSetup.operation.Lock()
+	defer playitSetup.operation.Unlock()
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	playitSetup.mu.Lock()
+	if playitSetup.cancel != nil {
+		playitSetup.cancel()
+	}
+	done := playitSetup.done
+	playitSetup.generation++
+	playitSetup.state = playitSetupState{State: "idle"}
+	playitSetup.mu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			writeError(w, http.StatusServiceUnavailable, "Playit setup cancellation timed out; try relinking again")
+			return
+		}
+	}
+	playitSetup.mu.Lock()
+	defer playitSetup.mu.Unlock()
+	playitSetup.cancel, playitSetup.done = nil, nil
+	s.startPlayitSetup(w, r.WithContext(ctx), actor, true)
 }

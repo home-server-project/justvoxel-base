@@ -385,3 +385,193 @@ func TestReadOnlyPlayitPendingStatusNeverIncludesClaim(t *testing.T) {
 		t.Fatalf("read-only pending status: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+func relinkRequest(s *server) *httptest.ResponseRecorder {
+	mux := http.NewServeMux()
+	registerNetworkRoutes(mux, s)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, authorizedRequest(http.MethodPost, "/v1/admin/network/remote-access/playit/relink", ""))
+	return rr
+}
+
+func TestPlayitRelinkAuthorization(t *testing.T) {
+	setupFixture(t)
+	for _, role := range []principalRole{roleOperator, roleViewer} {
+		if rr := relinkRequest(roleServerForTest(role)); rr.Code != http.StatusForbidden {
+			t.Fatalf("role %s could relink: %d", role, rr.Code)
+		}
+	}
+}
+
+func TestPlayitRelinkResetThenSharedSetupWithoutOutputOrAuditSecrets(t *testing.T) {
+	path := setupFixture(t)
+	oldReset := playitResetRun
+	t.Cleanup(func() { playitResetRun = oldReset })
+	remoteStat = func(string) (os.FileInfo, error) { return os.Stat(path) }
+	s := adminServerForTest()
+	store, _ := openTestWebUIStore(t)
+	s.store = store
+	if rr := setupRequest(s, http.MethodPost); rr.Code != http.StatusConflict {
+		t.Fatal("normal setup replaced configured identity")
+	}
+	var reset atomic.Bool
+	playitResetRun = func(context.Context) error { reset.Store(true); return nil }
+	playitTunnelStatus = func(context.Context) (playitStatusResult, error) {
+		if reset.Load() {
+			return playitStatusResult{Summary: "Not configured"}, nil
+		}
+		return playitStatusResult{Summary: "1 tunnel", Connected: true}, nil
+	}
+	release := make(chan struct{})
+	playitSetupRun = func(ctx context.Context, output io.Writer) error {
+		if !reset.Load() {
+			t.Error("setup preceded reset")
+		}
+		fmt.Fprintln(output, "private-reset-output https://evil.test/claim/0123abcdef https://playit.gg/claim/abcdef0123")
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if rr := relinkRequest(s); rr.Code != http.StatusAccepted {
+		t.Fatal(rr.Body.String())
+	}
+	waitSetup(t, "waiting")
+	rr := setupRequest(s, http.MethodGet)
+	if !strings.Contains(rr.Body.String(), "https://playit.gg/claim/abcdef0123") || strings.Contains(rr.Body.String(), "private") || strings.Contains(rr.Body.String(), "evil") {
+		t.Fatal(rr.Body.String())
+	}
+	close(release)
+	waitSetup(t, "complete")
+	events, err := store.listAuditEvents(10)
+	payload, _ := json.Marshal(events)
+	if err != nil || strings.Contains(string(payload), "abcdef0123") || strings.Contains(string(payload), "private-reset-output") {
+		t.Fatalf("unsafe audit: %s %v", payload, err)
+	}
+	reset.Store(false)
+	for _, action := range []string{"activate", "deactivate"} {
+		if rr := networkAdminRequest(s, "/v1/admin/network/remote-access/playit", `{"action":"`+action+`"}`); rr.Code != http.StatusOK {
+			t.Fatal(rr.Body.String())
+		}
+		if reset.Load() {
+			t.Fatal("normal lifecycle reset account")
+		}
+	}
+}
+
+func TestPlayitRelinkResetFailureNeverStartsSetup(t *testing.T) {
+	setupFixture(t)
+	oldReset := playitResetRun
+	t.Cleanup(func() { playitResetRun = oldReset })
+	playitResetRun = func(context.Context) error { return fmt.Errorf("private-reset-output") }
+	playitSetupRun = func(context.Context, io.Writer) error { t.Error("setup after failed reset"); return nil }
+	rr := relinkRequest(adminServerForTest())
+	if rr.Code != http.StatusServiceUnavailable || strings.Contains(rr.Body.String(), "private-reset-output") {
+		t.Fatalf("unsafe reset failure: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestPlayitResetSubprocessHelper(t *testing.T) {
+	if os.Getenv("JUSTVOXEL_PLAYIT_RESET_HELPER") != "1" {
+		return
+	}
+	fmt.Fprintln(os.Stdout, "private-reset-output")
+	fmt.Fprintln(os.Stderr, "private-reset-output")
+	os.Exit(0)
+}
+
+func TestPlayitResetOnlyFixedCommandDiscardsOutput(t *testing.T) {
+	setupFixture(t)
+	var command *exec.Cmd
+	playitSetupCommand = func(ctx context.Context, executable string, args ...string) *exec.Cmd {
+		if executable != "/usr/bin/playit" || !reflect.DeepEqual(args, []string{"reset"}) {
+			t.Fatalf("unexpected reset %s %v", executable, args)
+		}
+		command = exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPlayitResetSubprocessHelper$")
+		command.Env = append(os.Environ(), "JUSTVOXEL_PLAYIT_RESET_HELPER=1")
+		return command
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := playitResetRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if command.Stdout != io.Discard || command.Stderr != io.Discard || command.WaitDelay != time.Second {
+		t.Fatal("reset output was captured or unbounded")
+	}
+}
+
+func TestPlayitRelinkWaitsForCancelledSetupBeforeReset(t *testing.T) {
+	setupFixture(t)
+	oldReset := playitResetRun
+	t.Cleanup(func() { playitResetRun = oldReset })
+	var starts atomic.Int32
+	cancelled, release := make(chan struct{}), make(chan struct{})
+	playitSetupRun = func(ctx context.Context, output io.Writer) error {
+		if starts.Add(1) == 1 {
+			fmt.Fprintln(output, "https://playit.gg/claim/0123abcdef")
+			<-ctx.Done()
+			close(cancelled)
+			<-release
+			fmt.Fprintln(output, "https://playit.gg/claim/9999999999")
+			return nil
+		}
+		return os.ErrInvalid
+	}
+	var resets atomic.Int32
+	playitResetRun = func(context.Context) error { resets.Add(1); return nil }
+	playitTunnelStatus = func(context.Context) (playitStatusResult, error) {
+		return playitStatusResult{Summary: "Not configured"}, nil
+	}
+	s := adminServerForTest()
+	if rr := setupRequest(s, http.MethodPost); rr.Code != http.StatusAccepted {
+		t.Fatal(rr.Body.String())
+	}
+	waitSetup(t, "waiting")
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() { result <- relinkRequest(s) }()
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("setup not cancelled")
+	}
+	if resets.Load() != 0 {
+		t.Fatal("reset raced old setup")
+	}
+	close(release)
+	rr := <-result
+	if rr.Code != http.StatusAccepted {
+		t.Fatal(rr.Body.String())
+	}
+	waitSetup(t, "failed")
+	if starts.Load() != 2 || resets.Load() != 1 {
+		t.Fatal("duplicate workflow")
+	}
+	if rr := setupRequest(s, http.MethodGet); strings.Contains(rr.Body.String(), "9999999999") {
+		t.Fatal("stale claim survived")
+	}
+}
+
+func TestPlayitRelinkRequiresVerifiedResetState(t *testing.T) {
+	path := setupFixture(t)
+	oldReset := playitResetRun
+	t.Cleanup(func() { playitResetRun = oldReset })
+	remoteStat = func(string) (os.FileInfo, error) { return os.Stat(path) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	playitResetRun = func(context.Context) error { cancel(); return nil }
+	playitTunnelStatus = func(context.Context) (playitStatusResult, error) {
+		return playitStatusResult{Summary: "1 tunnel", Connected: true}, nil
+	}
+	playitSetupRun = func(context.Context, io.Writer) error { t.Error("unverified reset started setup"); return nil }
+	mux := http.NewServeMux()
+	registerNetworkRoutes(mux, adminServerForTest())
+	rr := httptest.NewRecorder()
+	req := authorizedRequest(http.MethodPost, "/v1/admin/network/remote-access/playit/relink", "").WithContext(ctx)
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable || strings.Contains(rr.Body.String(), "claim_url") {
+		t.Fatalf("unverified reset accepted: %d %s", rr.Code, rr.Body.String())
+	}
+}

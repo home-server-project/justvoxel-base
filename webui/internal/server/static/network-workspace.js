@@ -1019,6 +1019,51 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     return section;
   };
 
+  // Account actions reuse setup state and polling, offering the validated link
+  // for an explicit click. Initial Activate retains its existing popup behavior.
+  const startPlayitAccountSetup = (relink) => {
+    closePlayitPopup();
+    playitClaimOpened = false;
+    return runRemoteAction(async () => {
+      try {
+        playitSetup = await postForm(relink ? "/api/network/remote-access/playit/relink" : "/api/network/remote-access/playit/setup");
+        updatePlayitPopup();
+      } catch (_) {
+        throw new Error(relink ? "Playit account could not be relinked. Try again." : "Playit setup could not be started. Try again.");
+      }
+    });
+  };
+  let playitAccountDialog = null;
+  const showPlayitAccountDialog = () => {
+    if (playitAccountDialog?.open || remoteBusy || setupRunning()) return;
+    const popup = document.createElement("dialog");
+    playitAccountDialog = popup;
+    popup.className = "system-action-dialog";
+    const body = document.createElement("div");
+    body.className = "system-action-dialog-content";
+    const title = document.createElement("h2");
+    title.id = "playit-account-title";
+    title.textContent = "Playit.gg account";
+    popup.setAttribute("aria-labelledby", title.id);
+    const message = document.createElement("p");
+    message.textContent = "Relinking resets this server's saved Playit agent connection and starts the Playit claim flow again. Existing tunnels are not migrated to another account automatically.";
+    const actions = document.createElement("div"); actions.className = "action-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => popup.close());
+    const relink = document.createElement("button");
+    relink.type = "button"; relink.textContent = "Relink account";
+    relink.addEventListener("click", () => {
+      if (remoteBusy || setupRunning()) return;
+      popup.close();
+      startPlayitAccountSetup(true);
+    });
+    actions.append(cancel, relink);
+    body.append(title, message, actions); popup.appendChild(body);
+    popup.addEventListener("close", () => { popup.remove(); playitAccountDialog = null; });
+    document.body.appendChild(popup); popup.showModal();
+  };
+
   const validNordAccessToken = (value) =>
     typeof value === "string" && value.length > 0 && value.length <= 4096 && !/[^\x21-\x7e]/.test(value);
   let nordDialog = null;
@@ -1205,7 +1250,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         if (provider.connected && provider.ip) card.appendChild(row("Tailscale IP", provider.ip.split("/")[0]));
       }
       if (provider.id === "playit") {
-        card.appendChild(row("Tunnels", provider.summary || "Unavailable"));
+        card.appendChild(row("Tunnels", provider.summary === "Running" ? "Unavailable" : provider.summary || "Unavailable"));
         (provider.tunnels || []).forEach((tunnel) => {
           card.appendChild(row(tunnel.is_disabled ? "Disabled tunnel" : "Public tunnel", tunnel.display_address));
           card.appendChild(row("Local destination", tunnel.destination));
@@ -1218,9 +1263,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         progress.textContent = providerProgress.get(provider.id);
         card.appendChild(progress);
       }
-      const needsSetup = provider.id === "playit" && provider.installed && !provider.configured;
+      const needsSetup = provider.id === "playit" && provider.installed && (!provider.configured || setupRunning());
       const actions = document.createElement("div");
       actions.className = "network-inline-actions";
+      if (provider.id === "playit") actions.className += " network-playit-lifecycle";
       if (provider.id === "nordvpn") actions.className += " network-nord-lifecycle";
       if (needsSetup) {
         if (setupRunning()) card.appendChild(row("Setup", playitSetup.state === "waiting" ? "Waiting for approval" : "Preparing…"));
@@ -1234,6 +1280,15 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       deactivate.dataset.action = "deactivate";
       deactivate.disabled = controls.deactivateDisabled;
       actions.appendChild(deactivate);
+      if (provider.id === "playit") {
+        const rightActions = document.createElement("div");
+        rightActions.className = "network-playit-actions";
+        const account = actionButton("Account", "networkProvider", provider.id);
+        account.dataset.action = "account";
+        account.disabled = !provider.installed || remoteBusy || setupRunning();
+        rightActions.append(account, activate);
+        actions.appendChild(rightActions);
+      }
       if (needsSetup && playitSetup.state === "waiting" && !playitClaimOpened && validPlayitClaim(playitSetup.claim_url)) {
         const claim = document.createElement("a");
         claim.href = playitSetup.claim_url;
@@ -1250,7 +1305,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         token.disabled = !provider.installed || remoteBusy;
         rightActions.append(token, activate);
         actions.appendChild(rightActions);
-      } else {
+      } else if (provider.id !== "playit") {
         actions.appendChild(activate);
       }
       if (provider.id === "tailscale" && !provider.connected && validTailscaleLoginURL(tailscaleLoginURL)) {
@@ -1678,6 +1733,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     if (provider) {
       if (provider.disabled || remoteBusy) return;
       const id = provider.dataset.networkProvider;
+      if (id === "playit" && provider.dataset.action === "account") {
+        const current = remoteProviders.find((item) => item.id === id);
+        if (!current?.installed || setupRunning()) return;
+        if (current.configured) showPlayitAccountDialog();
+        else startPlayitAccountSetup(false);
+        return;
+      }
       const needsSetup = id === "playit" && provider.dataset.action === "activate" &&
         !remoteProviders.find((item) => item.id === id)?.configured;
       if (needsSetup) {

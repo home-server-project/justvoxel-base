@@ -391,7 +391,7 @@ func remoteProviderStatus(ctx context.Context, provider remoteProviderMetadata) 
 	} else if status.Configured {
 		status.Summary = "Stopped"
 		if status.Active {
-			status.Summary = "Running" // Service fallback does not confirm tunnels.
+			status.Summary = "Unavailable" // Only authoritative IPC can confirm tunnels.
 			if result, err := playitTunnelStatus(ctx); err == nil {
 				status.Summary, status.Connected, status.Tunnels = result.Summary, result.Connected, result.Tunnels
 			}

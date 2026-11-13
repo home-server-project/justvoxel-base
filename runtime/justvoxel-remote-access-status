@@ -61,7 +61,8 @@ def safe_text(value):
 
 
 def playit_lifecycle(path=PLAYIT_SOCKET):
-    # v1.0.10 playit-ipc: protocol 2, hello then exactly one get_state RPC.
+    # HSP :stable ships Playit 2.0.2 / IPC 3. Accept IPC 2 and 3 for upgrades.
+    # Hello then exactly one get_state RPC; ignore additional provider metadata.
     # A single deadline and frame limits also bound slow or incompatible peers.
     deadline = time.monotonic() + 0.5
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -85,13 +86,14 @@ def playit_lifecycle(path=PLAYIT_SOCKET):
 
         hello = frame()
         protocol = hello.get("data", {}).get("protocol", {})
-        if hello.get("message_kind") != "hello" or protocol.get("ipc_version") != 2 or "lifecycle_state" not in protocol.get("capabilities", []):
+        version = protocol.get("ipc_version")
+        if hello.get("message_kind") != "hello" or type(version) is not int or version not in (2, 3) or not isinstance(protocol.get("capabilities"), list) or "lifecycle_state" not in protocol["capabilities"]:
             raise ValueError("unsupported IPC protocol")
-        client.sendall(b'{"ipc_version":2,"request_id":1,"request":{"type":"get_state"}}\n')
+        client.sendall(json.dumps({"ipc_version": version, "request_id": 1, "request": {"type": "get_state"}}).encode() + b"\n")
         envelope = frame()
         data = envelope.get("data", {})
         response = data.get("response", {})
-        if envelope.get("message_kind") != "response" or data.get("ipc_version") != 2 or data.get("request_id") != 1 or response.get("type") != "state":
+        if envelope.get("message_kind") != "response" or type(data.get("ipc_version")) is not int or data.get("ipc_version") != version or type(data.get("request_id")) is not int or data.get("request_id") != 1 or response.get("type") != "state":
             raise ValueError("invalid IPC response")
         lifecycle = response["data"]
         state = lifecycle.get("state")
@@ -107,7 +109,7 @@ def playit_lifecycle(path=PLAYIT_SOCKET):
                 # Allowlist only public tunnel information, never identity/login fields.
                 tunnels.append({"display_address": address, "destination": destination, "is_disabled": disabled})
             count = sum(not tunnel["is_disabled"] for tunnel in tunnels)
-            return summary("No tunnels" if count == 0 else f"{count} tunnel" + ("s" if count != 1 else ""), True, tunnels=tunnels)
+            return summary("No tunnels" if count == 0 else f"{count} tunnel" + ("s" if count != 1 else ""), count > 0, tunnels=tunnels)
         states = {"starting": "Connecting", "stopping": "Stopping", "waiting_for_secret": "Not configured", "has_invalid_secret": "Not connected", "disabled_over_limit": "Disabled", "error": "Unavailable"}
         if state not in states:
             raise ValueError("unsupported lifecycle")
@@ -183,7 +185,7 @@ def provider_status(provider, ipc_only=False):
         try:
             return playit_lifecycle()
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
-            return summary("Running" if evidence else "Unavailable" if evidence is None else "Not configured")
+            return summary("Unavailable" if evidence is not False else "Not configured")
     if evidence is None:
         return summary("Unavailable")
     if not evidence:

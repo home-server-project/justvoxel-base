@@ -70,6 +70,8 @@
 .network-provider-card>.network-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:auto;padding-top:.5rem}
 .network-provider-card>.network-inline-actions.network-nord-lifecycle{grid-template-columns:auto minmax(0,1fr)}
 .network-nord-actions{display:flex;justify-content:flex-end;align-items:center;gap:.4rem;flex-wrap:wrap;min-width:0}
+.network-provider-card>.network-inline-actions.network-playit-lifecycle{grid-template-columns:auto minmax(0,1fr)}
+.network-playit-actions{display:flex;justify-content:flex-end;align-items:center;gap:.4rem;flex-wrap:wrap;min-width:0}
 .network-provider-card>.network-inline-actions>.button-link{grid-column:1/-1;order:-1}
 .network-provider-card>.network-inline-actions>.button-link.warning{order:-2}
 .network-provider-card .button-link{display:inline-flex;align-items:center;justify-content:center;flex-basis:100%;text-align:center;border:1px solid var(--jv-border-strong);border-radius:8px;font-weight:700;line-height:1.25;text-decoration:none}
