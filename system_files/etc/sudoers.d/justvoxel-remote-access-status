@@ -1,0 +1,1 @@
+voxel ALL=(root) NOPASSWD: /usr/libexec/justvoxel/remote-access-status netbird, /usr/libexec/justvoxel/remote-access-status playit

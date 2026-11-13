@@ -37,16 +37,28 @@ class ProviderMOTD(unittest.TestCase):
             helper = helper.replace(path, str(replacement))
         helper_path = self.directory / "remote-status"
         helper = helper.replace('PLAYIT_SOCKET = "/run/playit/playitd.sock"', f'PLAYIT_SOCKET = {str(self.directory / "missing.sock")!r}')
+        helper = helper.replace('    args = parser.parse_args()', '''    args = parser.parse_args()
+    with open(os.environ["HELPER_LOG"], "a") as log:
+        log.write(json.dumps([args.provider, os.environ.get("STATUS_VIA_SUDO", "0")]) + "\\n")''')
         helper_path.write_text(helper)
         helper_path.chmod(0o755)
         self.source = self.source.replace("/usr/libexec/justvoxel/remote-access-status", str(helper_path))
+        self.source = self.source.replace("/usr/bin/sudo", str(self.directory / "sudo"))
         self.script = self.directory / "motd"
         self.script.write_text(self.source)
         self.env = dict(os.environ, PATH=f"{self.directory}:{os.environ['PATH']}",
                         TS_JSON='{"BackendState":"NeedsLogin"}', TS_FAIL="0",
                         NB_JSON='{}', PLAYIT_ACTIVE="0", NORD_LOAD="loaded",
-                        NORD_STATE="inactive", NORD_IP_JSON="[]", NORD_IP_FAIL="0")
+                        NORD_STATE="inactive", NORD_IP_JSON="[]", NORD_IP_FAIL="0",
+                        SUDO_FAIL="0", SUDO_LOG=str(self.directory / "sudo.log"),
+                        HELPER_LOG=str(self.directory / "helper.log"), STATUS_VIA_SUDO="0")
         commands = {
+            "sudo": '''printf '%s\\n' "$*" >> "$SUDO_LOG"
+[[ $# == 3 && $1 == -n && $2 == "$EXPECTED_HELPER" ]] || exit 99
+[[ $3 == netbird || $3 == playit ]] || exit 99
+[[ $SUDO_FAIL == 0 ]] || exit 1
+export STATUS_VIA_SUDO=1
+exec "$2" "$3"''',
             "ip": '[[ $* == "-j -4 address show scope global" ]] || exit 2\n[[ $NORD_IP_FAIL == 0 ]] || exit 1\nprintf "%s" "$NORD_IP_JSON"',
             "nordvpn": 'echo "NordVPN CLI must never be invoked" >&2; exit 99',
             "nmcli": "exit 0",
@@ -56,6 +68,7 @@ class ProviderMOTD(unittest.TestCase):
             "tailscale": '[[ $* == "status --json" ]] || exit 2\n[[ $TS_FAIL == 0 ]] || exit 1\nprintf "%s" "$TS_JSON"',
             "netbird": '[[ $* == "status --json" ]] || exit 2\nprintf "%s" "$NB_JSON"',
         }
+        self.env["EXPECTED_HELPER"] = str(helper_path)
         for name, body in commands.items():
             path = self.directory / name
             path.write_text("#!/usr/bin/bash\n" + body + "\n")
@@ -63,7 +76,7 @@ class ProviderMOTD(unittest.TestCase):
 
     def rows(self, issue=False, labels="Tailscale|NetBird|Playit"):
         result = subprocess.run(["bash", str(self.script)] + (["--issue"] if issue else []),
-                                env=self.env, capture_output=True, text=True, check=True)
+                                env=self.env, capture_output=True, text=True, check=True, timeout=10)
         text = re.sub(r"\\e\[[0-9;]*m", "", result.stdout)
         return dict(re.findall(rf"^\s*({labels}):\s+([^\n]+)", text, re.M))
 
@@ -174,6 +187,80 @@ class ProviderMOTD(unittest.TestCase):
         self.assertIn("/usr/libexec/justvoxel/motd --issue", (ROOT / "runtime/justvoxel-console-issue").read_text())
         self.assertIn("exec /usr/libexec/justvoxel/motd", (ROOT / "mjust/libexec/welcome").read_text())
 
+    def test_only_netbird_and_playit_use_exact_noninteractive_sudo(self):
+        source = (ROOT / "runtime/justvoxel-motd").read_text()
+        sudo_lines = [line for line in source.splitlines() if "sudo" in line]
+        self.assertEqual(sudo_lines, [
+            'netbird_value="$(/usr/bin/sudo -n "${remote_status}" netbird 2>/dev/null || printf \'%s\' \'Unavailable\')"',
+            'playit_value="$(/usr/bin/sudo -n "${remote_status}" playit 2>/dev/null || printf \'%s\' \'Unavailable\')"',
+        ])
+        self.rows(labels="Tailscale|NetBird|Playit|NordVPN")
+        helper = str(self.directory / "remote-status")
+        self.assertEqual((self.directory / "sudo.log").read_text().splitlines(),
+                         [f"-n {helper} netbird", f"-n {helper} playit"])
+        calls = [json.loads(line) for line in (self.directory / "helper.log").read_text().splitlines()]
+        self.assertEqual(calls, [["tailscale", "0"], ["netbird", "1"],
+                                 ["nordvpn", "0"], ["playit", "1"]])
+
+    def test_failed_sudo_falls_back_without_prompting(self):
+        self.env["SUDO_FAIL"] = "1"
+        self.env["TS_JSON"] = '{"BackendState":"Running","TailscaleIPs":["100.102.16.12"]}'
+        self.env.update(NORD_STATE="active", NORD_IP_JSON=json.dumps([
+            {"ifname": "nordlynx", "addr_info": [
+                {"family": "inet", "scope": "global", "local": "100.122.64.28"}]}]))
+        self.assertEqual(self.rows(labels="Tailscale|NetBird|Playit|NordVPN"), {
+            "Tailscale": "100.102.16.12", "NetBird": "Unavailable",
+            "Playit": "Unavailable", "NordVPN": "100.122.64.28"})
+        calls = [json.loads(line) for line in (self.directory / "helper.log").read_text().splitlines()]
+        self.assertEqual(calls, [["tailscale", "0"], ["nordvpn", "0"]])
+
+    def test_live_playit_tunnels_through_sudo(self):
+        self.env["PLAYIT_ACTIVE"] = "1"
+        public = {"display_address": "one.playit.gg:1234", "destination": "127.0.0.1:25565",
+                  "is_disabled": False}
+        for disabled, expected in [(False, public["display_address"]), (True, "No tunnels")]:
+            with self.subTest(disabled=disabled):
+                path = self.directory / "missing.sock"
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                    listener.bind(str(path))
+                    listener.listen(1)
+                    listener.settimeout(10)
+                    requests = []
+                    def serve():
+                        with listener.accept()[0] as client:
+                            client.settimeout(2)
+                            client.sendall(json.dumps({"message_kind": "hello", "data": {"protocol": {
+                                "ipc_version": 3, "capabilities": ["lifecycle_state"]}}}).encode() + b"\n")
+                            with client.makefile("rb") as reader:
+                                requests.append(json.loads(reader.readline()))
+                            client.sendall(json.dumps({"message_kind": "response", "data": {
+                                "ipc_version": 3, "request_id": 1, "response": {"type": "state", "data": {
+                                    "state": "running", "data": {"tunnels": [dict(public, is_disabled=disabled)],
+                                                                  "secret": "PRIVATE"}}}}}).encode() + b"\n")
+                    thread = threading.Thread(target=serve, daemon=True)
+                    thread.start()
+                    try:
+                        self.assertEqual(self.rows()["Playit"], expected)
+                    finally:
+                        thread.join(10)
+                        path.unlink()
+                    self.assertFalse(thread.is_alive())
+                    self.assertEqual(requests, [{"ipc_version": 3, "request_id": 1,
+                                                 "request": {"type": "get_state"}}])
+
+    def test_sudoers_source_and_image_install_contract(self):
+        fragment = "justvoxel-remote-access-status"
+        rule = ("voxel ALL=(root) NOPASSWD: /usr/libexec/justvoxel/remote-access-status netbird, "
+                "/usr/libexec/justvoxel/remote-access-status playit\n")
+        source = (ROOT / "system_files/etc/sudoers.d" / fragment).read_text()
+        self.assertEqual(source, rule)
+        self.assertNotIn("*", source)
+        self.assertEqual(source.split("NOPASSWD: ", 1)[1].strip().split(", "), [
+            "/usr/libexec/justvoxel/remote-access-status netbird",
+            "/usr/libexec/justvoxel/remote-access-status playit"])
+        self.assertIn(f"install -m0440 /ctx/system_files/etc/sudoers.d/{fragment} /etc/sudoers.d/{fragment}",
+                      (ROOT / "build_files/build-common.sh").read_text())
+
 
 class LocalRemoteStatus(unittest.TestCase):
     def setUp(self):
@@ -228,7 +315,8 @@ class LocalRemoteStatus(unittest.TestCase):
         disabled = dict(public, display_address="disabled.playit.gg:2345", is_disabled=True)
         for version in (2, 3):
             with self.subTest(version=version):
-                extra = dict(public, tunnel_id="PRIVATE", agent_id="PRIVATE", notices=["PRIVATE"], secret="PRIVATE")
+                extra = dict(public, tunnel_id="PRIVATE", agent_id="PRIVATE", notices=["PRIVATE"],
+                             secret="PRIVATE", account="PRIVATE", identity="PRIVATE", login_url="PRIVATE")
                 result = self.lifecycle([extra, disabled], version=version)
                 self.assertEqual(result["summary"], "1 tunnel")
                 self.assertTrue(result["connected"])
@@ -305,18 +393,38 @@ class LocalRemoteStatus(unittest.TestCase):
                 self.assertEqual(result["summary"], expected)
                 self.assertFalse(result["connected"])
 
-    def test_normal_user_ssh_uses_live_status_without_credentials_or_sudo(self):
+    def test_helper_uses_live_status_without_credentials_or_internal_sudo(self):
         for provider, data, expected in [
             ("tailscale", {"BackendState": "Running", "TailscaleIPs": ["100.64.0.3/16"]}, "100.64.0.3"),
             ("netbird", {"daemonStatus": "Connected", "management": {"connected": True}, "netbirdIp": "100.64.0.4/16"}, "100.64.0.4")]:
             calls = []
-            def command(*args):
+            def command(*args, **kwargs):
                 calls.append(args)
+                self.assertEqual(kwargs, {"timeout": 1.0} if args[0] == "netbird" else {})
                 return "active" if args[0] == "systemctl" else json.dumps(data)
             with patch.object(self.helper.os, "stat", side_effect=PermissionError), patch.object(self.helper, "command", side_effect=command):
                 self.assertEqual(self.helper.display(self.helper.provider_status(provider)), expected)
             self.assertTrue(all(args[0] != "sudo" for args in calls))
             self.assertIn((provider, "status", "--json"), calls)
+
+    def test_only_netbird_status_has_dedicated_bounded_timeout(self):
+        data = {"daemonStatus": "Connected", "management": {"connected": True},
+                "netbirdIp": "100.104.147.174/16"}
+        def run(args, **kwargs):
+            output = json.dumps(data).encode() if args[0] == "netbird" else b"active"
+            return subprocess.CompletedProcess(args, 0, stdout=output)
+        with patch.object(self.helper.subprocess, "run", side_effect=run) as execute, patch.object(
+                self.helper, "configured", return_value=True):
+            self.assertEqual(self.helper.command("cheap-command"), "active")
+            self.assertEqual(self.helper.display(self.helper.provider_status("netbird")), "100.104.147.174")
+        self.assertEqual(execute.call_args_list, [
+            unittest.mock.call(("cheap-command",), capture_output=True, timeout=0.5, check=True),
+            unittest.mock.call(("systemctl", "show", "--property=ActiveState", "--value", "netbird.service"),
+                               capture_output=True, timeout=0.5, check=True),
+            unittest.mock.call(("netbird", "status", "--json"), capture_output=True, timeout=1.0, check=True),
+        ])
+        with patch.object(self.helper.subprocess, "run", side_effect=subprocess.TimeoutExpired("netbird", 1.0)):
+            self.assertEqual(self.helper.command("netbird", "status", "--json", timeout=1.0), "")
 
     def test_stopped_service_never_proves_connection_with_stale_ip(self):
         def command(*args):

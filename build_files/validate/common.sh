@@ -94,6 +94,14 @@ test "$(stat -c '%a %U %G' /etc/sudoers.d/justvoxel-ups-event)" = '440 root root
 grep -Fqx 'nut ALL=(root) NOPASSWD: /usr/libexec/justvoxel/ups-emergency-poweroff "", /usr/libexec/justvoxel/ups-primary-fsd ""' /etc/sudoers.d/justvoxel-ups-event
 visudo -cf /etc/sudoers.d/justvoxel-ups-event >/dev/null
 
+test -f /etc/sudoers.d/justvoxel-remote-access-status
+test "$(stat -c '%a %U %G' /etc/sudoers.d/justvoxel-remote-access-status)" = '440 root root'
+grep -Fqx 'voxel ALL=(root) NOPASSWD: /usr/libexec/justvoxel/remote-access-status netbird, /usr/libexec/justvoxel/remote-access-status playit' /etc/sudoers.d/justvoxel-remote-access-status
+test "$(wc -l < /etc/sudoers.d/justvoxel-remote-access-status)" -eq 1
+if command -v visudo >/dev/null 2>&1; then
+    visudo -cf /etc/sudoers.d/justvoxel-remote-access-status >/dev/null
+fi
+
 test -x /usr/lib/systemd/system-generators/zram-generator
 test -f /etc/systemd/zram-generator.conf
 grep -Fqx '[zram0]' /etc/systemd/zram-generator.conf

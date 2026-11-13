@@ -17,9 +17,9 @@ CONFIGS = {
 }
 
 
-def command(*args):
+def command(*args, timeout=0.5):
     try:
-        result = subprocess.run(args, capture_output=True, timeout=0.5, check=True)
+        result = subprocess.run(args, capture_output=True, timeout=timeout, check=True)
         if len(result.stdout) <= MAX_FRAME:
             return result.stdout.decode("utf-8")
     except (OSError, subprocess.SubprocessError, UnicodeError):
@@ -173,7 +173,7 @@ def provider_status(provider, ipc_only=False):
             return summary(state)
         return summary("Not configured")
     if provider == "netbird":
-        text = command("netbird", "status", "--json") if active == "active" else ""
+        text = command("netbird", "status", "--json", timeout=1.0) if active == "active" else ""
         data = json.loads(text) if text else {}
         if active == "active" and data.get("daemonStatus") == "Connected" and data.get("management", {}).get("connected") is True:
             return summary("Connected", True, ipv4(data.get("netbirdIp", "")))
