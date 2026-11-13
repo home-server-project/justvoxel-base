@@ -320,14 +320,14 @@ func TestNordBrowserTokenValidationAndPrivacy(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 class Element {
-  constructor(tag) { this.tag = tag; this.children = []; this.textContent = ""; this.listeners = {}; this.value = ""; }
+  constructor(tag) { this.tag = tag; this.children = []; this.textContent = ""; this.listeners = {}; this.value = ""; this.disabled = false; this.open = false; }
   append(...nodes) { this.children.push(...nodes); }
   appendChild(node) { this.append(node); return node; }
   replaceChildren(...nodes) { this.children = nodes; }
   setAttribute() {}
   addEventListener(name, handler) { this.listeners[name] = handler; }
   showModal() { this.open = true; }
-  close() { this.open = false; this.listeners.close?.(); }
+  close() { assert.equal(this.open, true, "do not close an already closed dialog"); this.open = false; this.listeners.close?.(); }
   remove() {}
 }
 const document = { createElement: tag => new Element(tag), body: new Element("body") };
@@ -335,6 +335,7 @@ const window = { open: () => { throw new Error("automatic Nord tab"); } };
 const flatten = node => [node, ...node.children.flatMap(flatten)];
 const secret = "never_reflect_this+/_-.~=opaque";
 let submitted, input, fail = true, failure = new Error(secret), refreshed = 0;
+let pendingRequest = null, completeRequest;
 let remoteBusy = false, activationCalls = 0, loginRequired = true;
 const renderNetwork = () => {};
 const runRemoteAction = async action => {
@@ -353,6 +354,7 @@ const postForm = async (path, request) => {
   assert.equal(input.value, "", "clear field before async POST");
   assert.deepEqual(request, { token: secret });
   submitted = request.token;
+  if (pendingRequest) await pendingRequest;
   if (fail) throw failure;
 };
 const refreshRemoteAccess = async () => { refreshed++; };
@@ -368,6 +370,24 @@ const refreshRemoteAccess = async () => { refreshed++; };
   let popup = document.body.children.at(-1);
   const button = label => flatten(popup).find(node => node.tag === "button" && node.textContent === label);
   input = flatten(popup).find(node => node.tag === "input");
+  let cancel = button("Cancel"), reconnect = button("Reconnect with new token");
+  const assertReady = () => {
+    assert.equal(cancel.disabled, false);
+    assert.equal(input.disabled, false);
+    assert.equal(reconnect.disabled, false);
+    assert.equal(reconnect.textContent, "Reconnect with new token");
+  };
+  const assertSubmitting = () => {
+    assert.equal(cancel.disabled, true);
+    assert.equal(input.disabled, true);
+    assert.equal(reconnect.disabled, true);
+    assert.equal(reconnect.textContent, "Reconnecting…");
+    assert.equal(input.value, "");
+    assert.equal(remoteBusy, true);
+    cancel.listeners.click(); // Invoke the handler even though the button is disabled.
+    assert.equal(popup.open, true, "Cancel must not close a submitting dialog");
+  };
+  assertReady();
   assert.equal(input.type, "password"); assert.equal(input.maxLength, 4096);
   assert.equal(input.autocomplete, "off"); assert.equal(input.spellcheck, false);
   assert.equal(input.autocapitalize, "off");
@@ -382,6 +402,7 @@ const refreshRemoteAccess = async () => { refreshed++; };
   await button("Reconnect with new token").listeners.click();
   assert.equal(submitted, undefined);
   assert.equal(input.value, "");
+  assertReady();
   const loginFailure = "NordVPN login could not be completed. Check the access token and retry.";
   const meshnetFailure = "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot.";
   for (const [error, expected] of [
@@ -395,7 +416,14 @@ const refreshRemoteAccess = async () => { refreshed++; };
   ]) {
     failure = error;
     input.value = secret;
-    await button("Reconnect with new token").listeners.click();
+    pendingRequest = new Promise(resolve => { completeRequest = resolve; });
+    const reconnecting = reconnect.listeners.click();
+    assertSubmitting();
+    completeRequest();
+    await reconnecting;
+    pendingRequest = null;
+    assertReady();
+    assert.equal(remoteBusy, false);
     assert.equal(submitted, secret);
     assert.equal(input.value, "");
     assert.equal(popup.open, true);
@@ -413,6 +441,44 @@ const refreshRemoteAccess = async () => { refreshed++; };
   input.value = secret;
   await button("Reconnect with new token").listeners.click();
   assert.equal(popup.open, false); assert.equal(input.value, ""); assert.equal(refreshed, 1);
+  assertReady();
+  assert.equal(remoteBusy, false);
+  // Escape may close the dialog while a login request is still pending.
+  // Exercise both successful and failed completion after that native close.
+  for (const shouldFail of [false, true]) {
+    fail = shouldFail;
+    showNordAccountDialog();
+    popup = document.body.children.at(-1);
+    input = flatten(popup).find(node => node.tag === "input");
+    cancel = button("Cancel"); reconnect = button("Reconnect with new token");
+    const status = flatten(popup).find(node => node.tag === "p" && node.textContent === "");
+    assertReady();
+    input.value = secret;
+    pendingRequest = new Promise(resolve => { completeRequest = resolve; });
+    const beforeRefresh = refreshed, beforeDialogs = document.body.children.length;
+    let completed = false;
+    const reconnecting = reconnect.listeners.click().then(() => { completed = true; });
+    assertSubmitting();
+    popup.listeners.cancel?.({ preventDefault() { throw new Error("Escape must remain available"); } });
+    popup.close(); // Simulate the native dialog close after an uncancelled Escape.
+    assert.equal(popup.open, false);
+    assert.equal(input.value, "");
+    await Promise.resolve();
+    assert.equal(completed, false, "Escape must leave the backend request pending");
+    assert.equal(remoteBusy, true);
+    assert.equal(refreshed, beforeRefresh);
+    completeRequest();
+    await reconnecting;
+    pendingRequest = null;
+    assert.equal(completed, true);
+    assert.equal(popup.open, false);
+    assert.equal(document.body.children.length, beforeDialogs, "do not reopen the dialog");
+    assert.equal(remoteBusy, false);
+    assert.equal(refreshed, beforeRefresh + (shouldFail ? 0 : 1));
+    assert.equal(status.textContent, "", "do not display errors in a closed dialog");
+    assert.equal(input.value, "");
+    assertReady();
+  }
   showNordAccountDialog();
   popup = document.body.children.at(-1);
   input = flatten(popup).find(node => node.tag === "input");

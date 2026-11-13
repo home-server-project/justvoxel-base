@@ -1114,9 +1114,14 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     details.append(existing, dashboard, newAccount, referral, heading, instructions, note, label);
     const status = document.createElement("p"); status.setAttribute("role", "status");
     const actions = document.createElement("div"); actions.className = "action-row";
+    let submitting = false;
     const cancel = document.createElement("button");
     cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
-    cancel.addEventListener("click", () => { input.value = ""; popup.close(); });
+    cancel.addEventListener("click", () => {
+      if (submitting) return;
+      input.value = "";
+      popup.close();
+    });
     const login = document.createElement("button"); login.type = "button"; login.textContent = "Reconnect with new token";
     login.addEventListener("click", async () => {
       if (remoteBusy) return;
@@ -1127,25 +1132,35 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       }
       let token = input.value;
       input.value = "";
+      submitting = true;
+      input.disabled = true;
+      cancel.disabled = true;
       login.disabled = true;
+      login.textContent = "Reconnecting…";
       remoteBusy = true;
       renderNetwork();
       try {
         await postForm("/api/network/remote-access/nordvpn/login", { token: token });
-        popup.close();
+        if (popup.open) popup.close();
         await refreshRemoteAccess();
       } catch (error) {
         const nordLoginFailureMessages = new Set([
           "NordVPN login could not be completed. Check the access token and retry.",
           "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot."
         ]);
-        status.textContent = nordLoginFailureMessages.has(error?.message)
-          ? error.message
-          : "NordVPN login could not be completed. Check the access token and retry.";
+        if (popup.open) {
+          status.textContent = nordLoginFailureMessages.has(error?.message)
+            ? error.message
+            : "NordVPN login could not be completed. Check the access token and retry.";
+        }
       } finally {
         token = "";
         input.value = "";
+        submitting = false;
+        input.disabled = false;
+        cancel.disabled = false;
         login.disabled = false;
+        login.textContent = "Reconnect with new token";
         remoteBusy = false;
         renderNetwork();
       }
