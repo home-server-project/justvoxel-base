@@ -6329,6 +6329,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       list.appendChild(row);
     });
     built.panel.appendChild(list);
+    const externalLink = (text, url) => {
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = text;
+      return link;
+    };
     const project = document.createElement("div");
     project.className = "about-project";
     const projectHeading = document.createElement("h3");
@@ -6343,17 +6351,58 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const dt = document.createElement("dt");
       dt.textContent = label;
       const dd = document.createElement("dd");
-      const link = document.createElement("a");
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.textContent = text;
-      dd.appendChild(link);
+      dd.appendChild(externalLink(text, url));
       row.append(dt, dd);
       projectList.appendChild(row);
     });
     project.append(projectHeading, projectList);
     built.panel.appendChild(project);
+    const appendLinkSection = (title, rows) => {
+      const section = document.createElement("div");
+      section.className = "about-project";
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      const links = document.createElement("dl");
+      rows.forEach(([label, entries]) => {
+        const row = document.createElement("div");
+        const dt = document.createElement("dt");
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        entries.forEach(([text, url], index) => {
+          if (index) dd.append(" · ");
+          dd.appendChild(externalLink(text, url));
+        });
+        row.append(dt, dd);
+        links.appendChild(row);
+      });
+      section.append(heading, links);
+      built.panel.appendChild(section);
+    };
+    appendLinkSection("Third-party software", [
+      ["CLI", [
+        ["btop", "https://github.com/aristocratos/btop"],
+        ["Superfile", "https://github.com/yorukot/superfile"],
+        ["just", "https://github.com/casey/just"],
+        ["gum", "https://github.com/charmbracelet/gum"],
+        ["fzf", "https://github.com/junegunn/fzf"],
+        ["ujust / ugum inspiration", "https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just"],
+      ]],
+      ["WebUI", [
+        ["ttyd", "https://github.com/tsl0922/ttyd"],
+        ["File Browser", "https://github.com/gtsteffaniak/filebrowser"],
+        ["Glances", "https://github.com/nicolargo/glances"],
+      ]],
+    ]);
+    appendLinkSection("Remote access", [
+      ["VPN / Mesh", [
+        ["Tailscale", "https://tailscale.com/"],
+        ["NetBird", "https://netbird.io/"],
+        ["NordVPN Meshnet", "https://nordvpn.com/meshnet/"],
+      ]],
+      ["Public game access", [
+        ["Playit.gg", "https://playit.gg/"],
+      ]],
+    ]);
     const disclaimer = document.createElement("p");
     disclaimer.className = "disclaimer";
     disclaimer.textContent = "NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.";

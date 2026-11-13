@@ -1102,10 +1102,13 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .system-reset-arm{margin-top:.5rem;padding:.55rem .65rem}
 .system-reset-check{margin:.45rem 0}
 .system-reset-actions{margin-top:.5rem}
+.system-about-view{display:flex;flex-direction:column;min-height:100%;padding-bottom:.2rem}
+.system-about-view>.panel{flex-shrink:0}
 .system-about-view dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 .9rem}
 .system-about-view dl>div{min-width:0}
+.system-about-view .about-project dd{min-width:0}
 .system-about-view .about-project{margin-top:.55rem;padding-top:.45rem;border-top:1px solid var(--jv-border)}
-.system-about-view .disclaimer{margin:.45rem 0 0}
+.system-about-view .disclaimer{margin:auto 0 0;padding-top:.45rem}
 .system-ups-overview{gap:.5rem}
 .system-ups-source,.system-ups-card,.system-ups-source-panel{padding:.55rem .65rem}
 .system-ups-device-grid{gap:.5rem}

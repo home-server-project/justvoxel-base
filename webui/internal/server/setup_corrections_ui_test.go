@@ -383,10 +383,39 @@ const flatten = n => [n.textContent || "", ...(n.children || []).flatMap(flatten
     for (const value of [payload.justvoxel, payload.webui, payload.management_api, payload.commit, payload.username]) assert(text.includes(value));
     assert(!text.includes("JustVoxel About"));
     const links = [];
-    function visit(n) { if (n.href) links.push(n.href); (n.children || []).forEach(visit); }
+    function visit(n) { if (n.href) links.push([n.textContent, n.href, n.target, n.rel]); (n.children || []).forEach(visit); }
     visit(content);
-    assert.equal(links.length, 3);
-    assert(links.includes("https://github.com/home-server-project/justvoxel/issues"));
+    const expectedLinks = [
+      ["JustVoxel on GitHub", "https://github.com/home-server-project/justvoxel"],
+      ["Home Server Project", "https://github.com/home-server-project"],
+      ["Report an issue", "https://github.com/home-server-project/justvoxel/issues"],
+      ["btop", "https://github.com/aristocratos/btop"],
+      ["Superfile", "https://github.com/yorukot/superfile"],
+      ["just", "https://github.com/casey/just"],
+      ["gum", "https://github.com/charmbracelet/gum"],
+      ["fzf", "https://github.com/junegunn/fzf"],
+      ["ujust / ugum inspiration", "https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just"],
+      ["ttyd", "https://github.com/tsl0922/ttyd"],
+      ["File Browser", "https://github.com/gtsteffaniak/filebrowser"],
+      ["Glances", "https://github.com/nicolargo/glances"],
+      ["Tailscale", "https://tailscale.com/"],
+      ["NetBird", "https://netbird.io/"],
+      ["NordVPN Meshnet", "https://nordvpn.com/meshnet/"],
+      ["Playit.gg", "https://playit.gg/"],
+    ];
+    assert.deepEqual(links, expectedLinks.map(link => [...link, "_blank", "noopener noreferrer"]));
+    const root = content.children[0];
+    const [panel, disclaimer] = root.children;
+    assert.equal(root.className, "system-about-view");
+    assert.equal(root.children.length, 2);
+    assert.equal(disclaimer.className, "disclaimer");
+    assert.equal(disclaimer.textContent, "NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.");
+    const sections = panel.children.filter(n => n.className === "about-project");
+    assert.deepEqual(sections.map(n => n.children[0].textContent), ["Project", "Third-party software", "Remote access"]);
+    assert.deepEqual(sections.map(n => n.children[1].children.map(row => row.children[0].textContent)), [
+      ["Repository", "Organization", "Support / Bugs"], ["CLI", "WebUI"], ["VPN / Mesh", "Public game access"],
+    ]);
+    assert.deepEqual(sections.map(n => n.children[1].children.map(row => row.children[1].children.filter(child => child.href).length)), [[1, 1, 1], [6, 3], [3, 1]]);
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `

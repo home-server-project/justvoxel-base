@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -61,7 +62,25 @@ func TestProjectLinksInDashboardAndAbout(t *testing.T) {
 		t.Fatal("System About renderer not found")
 	}
 	about = about[start : start+end]
-	for _, link := range links {
+	aboutLinks := append(links, []struct {
+		label string
+		url   string
+	}{
+		{"btop", "https://github.com/aristocratos/btop"},
+		{"Superfile", "https://github.com/yorukot/superfile"},
+		{"just", "https://github.com/casey/just"},
+		{"gum", "https://github.com/charmbracelet/gum"},
+		{"fzf", "https://github.com/junegunn/fzf"},
+		{"ujust / ugum inspiration", "https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just"},
+		{"ttyd", "https://github.com/tsl0922/ttyd"},
+		{"File Browser", "https://github.com/gtsteffaniak/filebrowser"},
+		{"Glances", "https://github.com/nicolargo/glances"},
+		{"Tailscale", "https://tailscale.com/"},
+		{"NetBird", "https://netbird.io/"},
+		{"NordVPN Meshnet", "https://nordvpn.com/meshnet/"},
+		{"Playit.gg", "https://playit.gg/"},
+	}...)
+	for _, link := range aboutLinks {
 		row := `"` + link.label + `", "` + link.url + `"`
 		if !strings.Contains(about, row) {
 			t.Errorf("System About is missing %q", row)
@@ -73,12 +92,48 @@ func TestProjectLinksInDashboardAndAbout(t *testing.T) {
 		`link.href = url`,
 		`link.target = "_blank"`,
 		`link.rel = "noopener noreferrer"`,
-		`dd.appendChild(link)`,
+		`dd.appendChild(externalLink(text, url))`,
 		`projectList.appendChild(row)`,
 		`built.panel.appendChild(project)`,
+		`appendLinkSection("Third-party software", [`,
+		`appendLinkSection("Remote access", [`,
+		`["CLI", [`, `["WebUI", [`, `["VPN / Mesh", [`, `["Public game access", [`,
+		`root.append(built.panel, disclaimer)`,
+		`disclaimer.textContent = "NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT."`,
 	} {
 		if !strings.Contains(about, required) {
 			t.Errorf("System About is missing %q", required)
+		}
+	}
+}
+
+func TestAboutFlexLayoutAndMobileMetadata(t *testing.T) {
+	cssBytes, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(cssBytes)
+	for _, required := range []string{
+		`.system-about-view{display:flex;flex-direction:column;min-height:100%;padding-bottom:.2rem}`,
+		`.system-about-view>.panel{flex-shrink:0}`,
+		`.system-about-view .disclaimer{margin:auto 0 0;padding-top:.45rem}`,
+		`.system-about-view dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 .9rem}`,
+		`.system-about-view dl>div{min-width:0}`,
+		`.system-about-view .about-project dd{min-width:0}`,
+	} {
+		if !strings.Contains(css, required) {
+			t.Errorf("About layout missing %q", required)
+		}
+	}
+	if !regexp.MustCompile(`(?s)@media\(max-width:600px\)\{[^}]*\.system-security-form,\.system-about-view dl\{grid-template-columns:1fr\}`).MatchString(css) {
+		t.Error("About mobile single-column rule missing")
+	}
+	for _, rule := range regexp.MustCompile(`[^{}]+\{[^{}]*\}`).FindAllString(css, -1) {
+		if !strings.Contains(strings.SplitN(rule, "{", 2)[0], ".system-about-view") {
+			continue
+		}
+		if regexp.MustCompile(`position\s*:\s*(absolute|fixed)|transform\s*:|overflow\s*:\s*hidden|white-space\s*:\s*nowrap`).MatchString(rule) {
+			t.Errorf("About must retain normal flow and wrapping: %s", rule)
 		}
 	}
 }
