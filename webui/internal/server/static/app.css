@@ -1433,8 +1433,8 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;position:sticky;top:4px;z-index:1000;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
 /* Anchor the desktop Control Center directly to the floating topbar outer borders. */
 @media(min-width:601px){.app-header .control-center{position:absolute;top:-1px;right:-1px;height:32px;margin:0}}
-.app-header .brand-mark{min-height:32px;padding:1px .35rem}
-.app-header .brand-logo{width:28px;height:28px}
+.app-header .brand-mark{width:30px;height:30px;min-height:30px;padding:2px;margin-left:-.5rem;align-self:center;justify-self:start}
+.app-header .brand-logo{width:26px;height:26px}
 .app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:#303942}
 @media(min-width:601px){
   .app-header .control-center-trigger{min-height:32px;height:32px;border-radius:10px 12px 12px 10px;border-color:#303942;background:#151a1f}
@@ -1453,6 +1453,7 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 @media(max-width:900px){.system-monitor-profile{grid-template-columns:minmax(0,1fr) max-content}}
 @media(max-width:600px){
   .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}
+  .app-header .brand-mark{margin-left:-.3rem}
   .quick-look{left:4px;right:4px}
   .app-header .control-center-trigger{width:32px;padding:0}
   .topbar-clock{display:grid;gap:0;font-size:.72rem;line-height:1.15}

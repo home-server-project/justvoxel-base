@@ -561,6 +561,8 @@ func TestDesktopControlCenterRoundedButtonGeometry(t *testing.T) {
 	css := string(data)
 	for _, want := range []string{
 		`.app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;position:sticky;top:4px;z-index:1000;border:1px solid #303942;border-radius:12px;background:#151a1f`,
+		`.app-header .brand-mark{width:30px;height:30px;min-height:30px;padding:2px;margin-left:-.5rem;align-self:center;justify-self:start}`,
+		`.app-header .brand-logo{width:26px;height:26px}`,
 		`@media(min-width:601px){.app-header .control-center{position:absolute;top:-1px;right:-1px;height:32px;margin:0}}`,
 		"@media(min-width:601px){\n  .app-header .control-center-trigger{min-height:32px;height:32px;border-radius:10px 12px 12px 10px;border-color:#303942;background:#151a1f}",
 		`.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{background:#1d2a23;color:#c8f2d7}`,
@@ -580,6 +582,7 @@ func TestDesktopControlCenterRoundedButtonGeometry(t *testing.T) {
 		`:root{--jv-panel-gap:4px}`,
 		`.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}`,
 		"@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}",
+		"@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}\n  .app-header .brand-mark{margin-left:-.3rem}",
 		`.control-center-panel{position:fixed;top:50px;left:.45rem;right:.45rem;bottom:.45rem;width:auto;`,
 	} {
 		if !strings.Contains(css, want) {
@@ -587,6 +590,9 @@ func TestDesktopControlCenterRoundedButtonGeometry(t *testing.T) {
 		}
 	}
 	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1) {
+		if strings.Contains(rule[1], ".app-header .brand-mark") && regexp.MustCompile(`(?:^|;)\s*(?:position\s*:\s*absolute|(?:transform|translate|top|bottom)\s*:)`).MatchString(rule[2]) {
+			t.Errorf("app-header brand mark must stay in Grid flow without positioning offsets or transforms: %s", rule[0])
+		}
 		if !regexp.MustCompile(`\.(?:control-center(?:-trigger|-panel)?|topbar)(?:[^a-zA-Z0-9_-]|$)`).MatchString(rule[1]) {
 			continue
 		}
