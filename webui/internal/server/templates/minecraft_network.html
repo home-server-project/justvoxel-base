@@ -25,7 +25,7 @@
         {{range .SupportedServers}}<label class="minecraft-network-server">
           <input type="checkbox" name="members" value="{{.ID}}"{{if .Selected}} checked{{end}}>
           {{if .SoftwareIcon}}<img class="minecraft-network-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}
-          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} · {{.State}}</span></span>
+          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} <span class="badge minecraft-network-state {{.StateClass}}" data-network-server-state="{{.ID}}">{{.StateLabel}}</span></span></span>
         </label>{{end}}
       </div>
       {{if .UnsupportedServers}}<details class="minecraft-network-unsupported">
@@ -33,7 +33,7 @@
         <div class="minecraft-network-unsupported-grid">
         {{range .UnsupportedServers}}<div class="minecraft-network-server">
           {{if .SoftwareIcon}}<img class="minecraft-network-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}
-          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} · {{.State}}</span><span class="muted minecraft-network-unavailable">Not supported by Minecraft Network</span></span>
+          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} <span class="badge minecraft-network-state {{.StateClass}}" data-network-server-state="{{.ID}}">{{.StateLabel}}</span></span><span class="muted minecraft-network-unavailable">{{.CompatibilityReason}}</span></span>
         </div>{{end}}
         </div>
       </details>{{end}}

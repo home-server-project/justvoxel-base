@@ -1868,6 +1868,11 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .minecraft-network .minecraft-network-server{flex:0 1 auto;max-width:100%;display:flex;align-items:center;gap:.6rem;margin:0;padding:.35rem .5rem;min-width:0;border:1px solid #303942;border-radius:.4rem;background:rgba(255,255,255,.025)}
 .minecraft-network .minecraft-network-software-icon{flex:none;width:1.6rem;height:1.6rem;object-fit:contain}
 .minecraft-network .minecraft-network-server-details{display:grid;gap:.1rem;min-width:0;overflow-wrap:anywhere}
+.minecraft-network .minecraft-network-state{display:inline-block;padding:.12rem .4rem;line-height:1.2;white-space:nowrap;vertical-align:middle}
+.minecraft-network .minecraft-network-state.good{background:color-mix(in srgb,var(--jv-success) 14%,transparent);color:var(--jv-success)}
+.minecraft-network .minecraft-network-state.danger{background:color-mix(in srgb,var(--jv-error) 14%,transparent);color:var(--jv-error)}
+.minecraft-network .minecraft-network-state.warning{background:color-mix(in srgb,var(--jv-warning) 14%,transparent);color:var(--jv-warning)}
+.minecraft-network .minecraft-network-state.muted{background:transparent;color:var(--jv-muted)}
 .minecraft-network .minecraft-network-unsupported{margin-top:.5rem}
 .minecraft-network .minecraft-network-unsupported summary{cursor:pointer;margin-bottom:.35rem}
 .minecraft-network .minecraft-network-unavailable{font-size:.85rem}

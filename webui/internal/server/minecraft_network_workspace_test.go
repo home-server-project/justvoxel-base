@@ -227,6 +227,11 @@ const vm = require("node:vm");
 const element = () => ({events: {}, addEventListener(name, fn) {this.events[name] = fn;}});
 const content = element(), state = element(), refresh = element(), close = element();
 const classes = new Set();
+const timers = new Map(); let timerID = 0;
+const setTimeout = (fn, delay) => {timers.set(++timerID, {fn, delay}); return timerID;};
+const clearTimeout = id => timers.delete(id);
+const runtimeBadge = {dataset: {networkServerState: "jv-family1"}, textContent: "Stopped", className: "badge minecraft-network-state danger"};
+let runtimeState = "running";
 state.classList = {toggle(name, on) {on ? classes.add(name) : classes.delete(name);}, remove(...names) {names.forEach(name => classes.delete(name));}};
 let role = "administrator", savedOpen = false, form, success = false, failOperation = false;
 const toggle = {setAttribute(name, value) {this[name] = value;}}, badge = {}, heading = {};
@@ -260,10 +265,12 @@ content.querySelector = selector => ({
   ".notice.success": success ? {} : null,
 })[selector];
 content.querySelectorAll = selector => {
+  if (selector === "[data-network-server-state]") return [runtimeBadge];
   assert.equal(selector, ".notice.success");
   return success ? [{remove() {success = false;}}] : [];
 };
 const dialog = element();
+dialog.open = false; dialog.isConnected = true;
 dialog.querySelector = key => ({
   "[data-minecraft-network-content]": content, "[data-minecraft-network-state]": state,
   "[data-minecraft-network-refresh]": refresh, "[data-minecraft-network-close]": close
@@ -287,13 +294,17 @@ let opened = 0, closed = 0;
 const requests = [];
 vm.runInNewContext(source, {
   document, window, controlCenter, URL, URLSearchParams, FormData, HTMLFormElement: Form,
+  setTimeout, clearTimeout, AbortController,
   readWorkspaceWindowState: () => ({open: savedOpen}),
   setupWorkspaceWindow: (target, options) => {
     assert.equal(target, dialog);
     dialog.addEventListener("close", options.onClose);
-    return {open() {opened++; return options.onOpen();}, close() {closed++; dialog.events.close();}};
+    return {open() {opened++; dialog.open = true; return options.onOpen();}, close() {closed++; dialog.open = false; dialog.events.close();}};
   },
   fetch: async (url, options) => {
+    if (url === "/workspace/minecraft-network?runtime_only=true") {
+      return {ok: true, redirected: false, json: async () => ({servers: [{id: "jv-family1", state: runtimeState}]})};
+    }
     assert.equal(url, "/workspace/minecraft-network");
     requests.push({url, options});
     if (options.method === "POST") {
@@ -432,6 +443,28 @@ const launch = () => {
   const beforeRefresh = posts(); refresh.events.click(); await settle(); clean();
   assert.equal(requests.at(-1).options.method, "GET"); assert.equal(posts(), beforeRefresh);
   assert.equal(serverRefreshes, 2);
+  // Runtime polling preserves dirty fields, membership and operation notices.
+  success = true;
+  field("welcome_message").value = "Keep my unsaved draft"; content.events.input(); dirty();
+  const draftForm = form, rendersBeforePoll = rendered.length;
+  const poll = async () => {
+    const timer = [...timers.entries()].find(([, value]) => value.delay === 5000);
+    assert.ok(timer, "runtime refresh not scheduled");
+    timers.delete(timer[0]); await timer[1].fn(); await settle();
+  };
+  for (const [value,label,style] of [["running","Running","good"],["stopped","Stopped","danger"],
+      ["failed","Failed","danger"],["starting","Starting","warning"],["stopping","Stopping","warning"],["unknown","Unavailable","muted"]]) {
+    runtimeState = value; await poll();
+    assert.equal(runtimeBadge.textContent, label);
+    assert.equal(runtimeBadge.className, "badge minecraft-network-state " + style);
+    assert.equal(form, draftForm); assert.equal(rendered.length, rendersBeforePoll);
+    assert.equal(field("welcome_message").value, "Keep my unsaved draft");
+    assert.equal(success, true); dirty();
+  }
+  close.events.click();
+  assert.equal(timers.size, 0, "close left polling active");
+  launch(); await settle(); dialog.isConnected = false; await poll();
+  assert.equal(timers.size, 0, "disconnected workspace kept polling");
   const wasOpened = opened;
   role = "operator";
   document.events.click({target: {closest() {return {}; }}, preventDefault() {throw new Error("non-admin launcher accepted");}});

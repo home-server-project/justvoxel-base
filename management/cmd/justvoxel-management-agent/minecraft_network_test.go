@@ -1649,6 +1649,12 @@ func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
 					mu.Lock()
 					if command == minecraftNetworkHelper {
 						switch args[0] {
+						case "backend-availability-key":
+							mu.Unlock()
+							return []byte(strings.Repeat("a", 64)), nil
+						case "backend-availability":
+							mu.Unlock()
+							return []byte(`{"status":"supported"}`), nil
 						case "prepare":
 							if prepared || disrupted {
 								t.Error("infrastructure resolved again after preparation or shutdown")
@@ -1678,6 +1684,16 @@ func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
 					}
 					mu.Unlock()
 					return original(ctx, command, args...)
+				}
+				// A verified presentation result must never substitute for Apply preflight.
+				for _, id := range c.Members {
+					record, e := f.backend.readRecord(id)
+					if e != nil {
+						t.Fatal(e)
+					}
+					if result := f.backend.networkCompatibility(context.Background(), record); result.Status != "supported" {
+						t.Fatal(result)
+					}
 				}
 				err := networkApply(context.Background(), f.backend, c)
 				if failure == "" {

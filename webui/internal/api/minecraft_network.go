@@ -20,10 +20,12 @@ type MinecraftNetworkPlayer struct {
 	Platform string `json:"platform"`
 }
 type MinecraftNetworkServer struct {
-	ID       string `json:"id"`
-	Software string `json:"software"`
-	Eligible bool   `json:"eligible"`
-	State    string `json:"state"`
+	CompatibilityStatus string `json:"compatibility_status"`
+	CompatibilityReason string `json:"compatibility_reason"`
+	ID                  string `json:"id"`
+	Software            string `json:"software"`
+	Eligible            bool   `json:"eligible"`
+	State               string `json:"state"`
 }
 type MinecraftNetworkStatus struct {
 	RuntimeReady      bool                     `json:"runtime_ready"`
@@ -43,7 +45,15 @@ type MinecraftConnection struct {
 
 func (c *Client) MinecraftNetwork(ctx context.Context, session string) (MinecraftNetworkStatus, error) {
 	var out MinecraftNetworkStatus
-	err := c.do(ctx, http.MethodGet, "/v1/minecraft/network", session, nil, &out)
+	client := *c.http
+	client.Timeout = 170 * time.Second
+	caller := &Client{http: &client}
+	err := caller.do(ctx, http.MethodGet, "/v1/minecraft/network", session, nil, &out)
+	return out, err
+}
+func (c *Client) MinecraftNetworkRuntime(ctx context.Context, session string) (MinecraftNetworkStatus, error) {
+	var out MinecraftNetworkStatus
+	err := c.do(ctx, http.MethodGet, "/v1/minecraft/network?runtime_only=true", session, nil, &out)
 	return out, err
 }
 func (c *Client) ConfigureMinecraftNetwork(ctx context.Context, session string, config MinecraftNetworkConfig) error {

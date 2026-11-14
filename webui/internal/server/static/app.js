@@ -8209,6 +8209,71 @@ if (minecraftNetworkDialog) {
   let configureForm = null;
   let baseline = "";
   let originalFields = [];
+  let runtimeTimer = null;
+  let runtimeRequest = null;
+  let runtimeGeneration = 0;
+  const stopRuntimePolling = () => {
+    runtimeGeneration++;
+    clearTimeout(runtimeTimer);
+    runtimeTimer = null;
+    runtimeRequest?.abort();
+    runtimeRequest = null;
+  };
+  const stateBadge = (value) => {
+    const states = {
+      running: ["Running", "good"], stopped: ["Stopped", "danger"],
+      failed: ["Failed", "danger"], starting: ["Starting", "warning"],
+      stopping: ["Stopping", "warning"],
+    };
+    return Object.hasOwn(states, value) ? states[value] : ["Unavailable", "muted"];
+  };
+  const scheduleRuntimePolling = () => {
+    if (!minecraftNetworkDialog.open || !minecraftNetworkDialog.isConnected) return;
+    clearTimeout(runtimeTimer);
+    runtimeTimer = setTimeout(pollRuntime, 5000);
+  };
+  const pollRuntime = async () => {
+    if (!minecraftNetworkDialog.open || !minecraftNetworkDialog.isConnected) {
+      stopRuntimePolling();
+      return;
+    }
+    if (saving) { scheduleRuntimePolling(); return; }
+    const generation = runtimeGeneration;
+    const current = sequence;
+    const request = new AbortController();
+    runtimeRequest = request;
+    const timeout = setTimeout(() => request.abort(), 10000);
+    try {
+      const response = await fetch("/workspace/minecraft-network?runtime_only=true", {
+        credentials: "same-origin", cache: "no-store", signal: request.signal,
+      });
+      if (!response.ok || response.redirected) throw new Error("status unavailable");
+      const status = await response.json();
+      if (generation !== runtimeGeneration || current !== sequence || saving || !minecraftNetworkDialog.open || !minecraftNetworkDialog.isConnected) return;
+      const states = new Map((status.servers || []).map(server => [server.id, server.state]));
+      // Only badges change. Draft inputs, membership, notices and the baseline
+      // remain exactly as they were before this runtime observation.
+      for (const badge of content.querySelectorAll("[data-network-server-state]")) {
+        const [label, style] = stateBadge(states.get(badge.dataset.networkServerState));
+        badge.textContent = label;
+        badge.className = `badge minecraft-network-state ${style}`;
+      }
+    } catch (_) {
+      // A failed poll cannot establish that a previously running server is stopped.
+      if (generation === runtimeGeneration && current === sequence && !saving) {
+        for (const badge of content.querySelectorAll("[data-network-server-state]")) {
+          badge.textContent = "Unavailable";
+          badge.className = "badge minecraft-network-state muted";
+        }
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (generation === runtimeGeneration) {
+        runtimeRequest = null;
+        scheduleRuntimePolling();
+      }
+    }
+  };
   const configuration = () => {
     if (!configureForm) return "";
     const data = new FormData(configureForm);
@@ -8262,6 +8327,7 @@ if (minecraftNetworkDialog) {
   });
   const load = async (body = null) => {
     if (saving) return;
+    stopRuntimePolling();
     const current = ++sequence;
     saving = body !== null;
     content.inert = saving;
@@ -8298,11 +8364,14 @@ if (minecraftNetworkDialog) {
       if (current === sequence) {
         saving = false;
         content.inert = false;
+        scheduleRuntimePolling();
       }
     }
   };
-  const workspaceWindow = setupWorkspaceWindow(minecraftNetworkDialog, { onOpen: () => load(), onClose: discardDraft });
-  minecraftNetworkDialog.addEventListener("cancel", discardDraft);
+  const closeNetwork = () => { stopRuntimePolling(); discardDraft(); };
+  const workspaceWindow = setupWorkspaceWindow(minecraftNetworkDialog, { onOpen: () => load(), onClose: closeNetwork });
+  minecraftNetworkDialog.addEventListener("cancel", closeNetwork);
+  minecraftNetworkDialog.addEventListener("close", closeNetwork);
   // Delegation also covers the dynamically loaded Minecraft Servers action bar.
   document.addEventListener("click", (event) => {
     const launcher = event.target.closest("[data-minecraft-network-open]");

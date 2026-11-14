@@ -27,6 +27,9 @@ func (f *networkTestAPI) MinecraftNetwork(context.Context, string) (api.Minecraf
 	f.reads++
 	return f.network, nil
 }
+func (f *networkTestAPI) MinecraftNetworkRuntime(context.Context, string) (api.MinecraftNetworkStatus, error) {
+	return api.MinecraftNetworkStatus{Servers: f.network.Servers}, nil
+}
 func (f *networkTestAPI) ConfigureMinecraftNetwork(_ context.Context, _ string, c api.MinecraftNetworkConfig) error {
 	f.network.Config = c
 	f.writes++
@@ -132,6 +135,7 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 			}
 		}
 		for _, server := range f.network.Servers {
+			stateMarker := `data-network-server-state="` + server.ID + `"`
 			row := regexp.MustCompile(`(?s)name="members" value="` + regexp.QuoteMeta(server.ID) + `".*?</label>`).FindString(body)
 			if !server.Eligible {
 				if row != "" {
@@ -139,7 +143,7 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 				}
 				details := regexp.MustCompile(`(?s)<details class="minecraft-network-unsupported">.*?</details>`).FindString(body)
 				for _, candidate := range regexp.MustCompile(`(?s)<div class="minecraft-network-server">.*?</div>`).FindAllString(details, -1) {
-					if strings.Contains(candidate, " · "+serverSoftware(server.Software)+" · "+server.State) {
+					if strings.Contains(candidate, stateMarker) {
 						row = candidate
 						break
 					}
@@ -148,6 +152,14 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 			if row == "" {
 				t.Errorf("server %s is missing its card", server.ID)
 			}
+			stateLabel, stateClass := minecraftNetworkStateBadge(server.State)
+			badge := `<span class="badge minecraft-network-state ` + stateClass + `" ` + stateMarker + `>` + stateLabel + `</span>`
+			if !strings.Contains(row, " · "+serverSoftware(server.Software)+" "+badge) {
+				t.Errorf("server %s must render its normalized software text and state badge in its own card", server.ID)
+			}
+			if strings.Contains(row, `name="members" value="`+server.ID+`"`) != server.Eligible {
+				t.Errorf("server %s has incorrect member checkbox availability", server.ID)
+			}
 			icon := serverSoftwareIcon(server.Software)
 			if icon == "" {
 				if strings.Contains(row, "<img") {
@@ -155,7 +167,7 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 				}
 				continue
 			}
-			if !strings.HasPrefix(icon, "/static/server-software/") || !strings.Contains(row, `src="`+icon+`" alt="">`) || !strings.Contains(row, " · "+serverSoftware(server.Software)+" · "+server.State) {
+			if !strings.HasPrefix(icon, "/static/server-software/") || !strings.Contains(row, `src="`+icon+`" alt="">`) {
 				t.Errorf("server %s must render its own shared icon and text", server.ID)
 			}
 			if _, err := assets.ReadFile(strings.TrimPrefix(icon, "/")); err != nil {
@@ -385,7 +397,7 @@ func TestMinecraftNetworkAutomaticLifecycleAndEligibilityPresentation(t *testing
 		t.Fatal("unsupported details must be informational and retain shared icons", details)
 	}
 	grid := regexp.MustCompile(`(?s)<div class="minecraft-network-servers">.*?</div>`).FindString(body)
-	if strings.Contains(grid, "paper.svg") || !strings.Contains(grid, "vanilla.svg") || !strings.Contains(grid, " · Vanilla · stopped") {
+	if strings.Contains(grid, "paper.svg") || !strings.Contains(grid, "vanilla.svg") || !strings.Contains(grid, ` · Vanilla <span class="badge minecraft-network-state danger"`) {
 		t.Fatal("grid classification did not follow Eligible", grid)
 	}
 }
@@ -412,5 +424,77 @@ func TestMinecraftNetworkRuntimePresentation(t *testing.T) {
 		if !tc.enabled && strings.Contains(body, "Proxy unavailable") {
 			t.Fatal("disabled presentation changed", body)
 		}
+	}
+}
+
+func TestMinecraftNetworkDynamicCardsAndBadges(t *testing.T) {
+	for _, tc := range []struct{ state, label, style string }{
+		{"running", "Running", "good"}, {"stopped", "Stopped", "danger"}, {"failed", "Failed", "danger"},
+		{"starting", "Starting", "warning"}, {"stopping", "Stopping", "warning"}, {"unknown", "Unavailable", "muted"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			for _, eligible := range []bool{false, true} {
+				app, f := newNetworkTestApp(t)
+				f.network.Servers = []api.MinecraftNetworkServer{{ID: "jv-family1", Software: "forge", Eligible: eligible, State: tc.state,
+					CompatibilityReason: "Network compatibility is not currently available for Minecraft 26.3."}}
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-network", ""))
+				body := rr.Body.String()
+				badge := `class="badge minecraft-network-state ` + tc.style + `" data-network-server-state="jv-family1">` + tc.label + `</span>`
+				if rr.Code != 200 || !strings.Contains(body, badge) {
+					t.Fatal(rr.Code, body)
+				}
+				checkbox := strings.Contains(body, `name="members" value="jv-family1"`)
+				if checkbox != eligible {
+					t.Fatal("incorrect dynamic selectability", body)
+				}
+				if !eligible && (!strings.Contains(body, "Standalone / unsupported servers (1)") || !strings.Contains(body, f.network.Servers[0].CompatibilityReason)) {
+					t.Fatal("unavailable backend missing reason", body)
+				}
+			}
+		})
+	}
+}
+
+type authoritativeNetworkSaveAPI struct {
+	*networkTestAPI
+	savedEnabled bool
+}
+
+func (f *authoritativeNetworkSaveAPI) ConfigureMinecraftNetwork(ctx context.Context, session string, c api.MinecraftNetworkConfig) error {
+	c.Enabled = f.savedEnabled
+	return f.networkTestAPI.ConfigureMinecraftNetwork(ctx, session, c)
+}
+func TestMinecraftNetworkSaveMessageUsesAuthoritativeStatus(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		_, base := newNetworkTestApp(t)
+		f := &authoritativeNetworkSaveAPI{networkTestAPI: base, savedEnabled: enabled}
+		app, err := New(f, Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Deliberately submit the opposite of the status returned after saving.
+		body := "csrf=csrf-token&action=configure&java_port=25565&bedrock_port=19132"
+		if !enabled {
+			body += "&enabled=on"
+		}
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/minecraft-network", body))
+		want := "Minecraft Network settings saved. Network remains disabled."
+		if enabled {
+			want = "Minecraft Network was updated."
+		}
+		if rr.Code != 200 || !strings.Contains(rr.Body.String(), want) || f.reads != 1 {
+			t.Fatal(rr.Code, rr.Body.String(), f.reads)
+		}
+	}
+}
+
+func TestMinecraftNetworkRuntimeFragmentIsReadOnlyJSON(t *testing.T) {
+	app, f := newNetworkTestApp(t)
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-network?runtime_only=true", ""))
+	if rr.Code != 200 || rr.Header().Get("Content-Type") != "application/json" || !strings.Contains(rr.Body.String(), `"state":"stopped"`) || f.reads != 0 || f.writes != 0 {
+		t.Fatal(rr.Code, rr.Body.String())
 	}
 }

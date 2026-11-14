@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -342,14 +343,46 @@ func (s *server) minecraftNetworkStatus(w http.ResponseWriter, r *http.Request) 
 		instanceRuntimeError(w, err, "")
 		return
 	}
-	members := []map[string]any{}
-	for _, record := range records {
-		state, e := instanceRuntimes.observe(r.Context(), record.Runtime.ID)
+	members := make([]map[string]any, len(records))
+	checkContext, cancel := context.WithTimeout(r.Context(), 160*time.Second)
+	defer cancel()
+	var checks sync.WaitGroup
+	slots := make(chan struct{}, 4)
+	for index, record := range records {
+		checks.Add(1)
+		go func(index int, record instanceRuntimeRecord) {
+			defer checks.Done()
+			compatibility := networkCompatibilityPublic("compatibility-check-unavailable", "")
+			if r.URL.Query().Get("runtime_only") != "true" {
+				select {
+				case slots <- struct{}{}:
+					compatibility = instanceRuntimes.networkCompatibility(checkContext, record)
+					<-slots
+				case <-checkContext.Done():
+				}
+			}
+			member := map[string]any{"id": record.Runtime.ID, "software": record.Runtime.Software}
+			if r.URL.Query().Get("runtime_only") != "true" {
+				member["eligible"] = compatibility.Status == "supported"
+				member["compatibility_status"] = compatibility.Status
+				member["compatibility_reason"] = compatibility.Reason
+			}
+			members[index] = member
+		}(index, record)
+	}
+	checks.Wait()
+	for index, record := range records {
+		observed, err := instanceRuntimes.observe(r.Context(), record.Runtime.ID)
 		status := "unavailable"
-		if e == nil {
-			status = state.State
+		if err == nil {
+			status = observed.State
 		}
-		members = append(members, map[string]any{"id": record.Runtime.ID, "software": record.Runtime.Software, "eligible": networkRecordEligible(record.Runtime), "state": status})
+		members[index]["state"] = status
+	}
+
+	if r.URL.Query().Get("runtime_only") == "true" {
+		writeJSON(w, 200, map[string]any{"servers": members})
+		return
 	}
 	players := []map[string]string{}
 	for _, p := range n.Whitelist {

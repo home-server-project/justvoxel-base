@@ -19,6 +19,23 @@ Supported Network backends:
 - Managed forge-family: Forge and NeoForge, using automatically managed
   [Proxy Compatible Forge (PCF)](https://modrinth.com/mod/proxy-compatible-forge).
 
+Managed backend availability is checked against each server's exact current game,
+loader, Java context and installed mods. Fabric/Quilt require verified
+FabricProxy-Lite compatibility; Forge/NeoForge require verified Proxy Compatible
+Forge compatibility. Unavailable combinations remain standalone, with a short
+reason under **Standalone / unsupported servers** in Network. Availability can
+change when upstream publishes a newly compatible release that passes the same
+strict artifact and packaged contract verification. Refresh Network to check
+again; verified availability is cached in the Management Agent for up to five
+minutes, with a shorter retry period for check failures. Provider/check failures
+never force-enable a backend. Status checks do not stage or install components.
+Apply always repeats authoritative pre-downtime verification and does not trust
+the status cache.
+
+Server state badges refresh every five seconds while the Network workspace is
+open. These observations preserve unsaved settings and operation notices; use
+Refresh for a full authoritative configuration and compatibility refresh.
+
 Spigot, Vanilla and native Bedrock remain standalone.
 [FabricProxy-Lite](https://modrinth.com/mod/fabricproxy-lite) is prepared
 automatically; users do not need to install it in Mods. Fabric API is installed only when the selected release needs an external
@@ -155,13 +172,14 @@ only the minimal forwarding table. Leaving Network restores the exact original
 PCF config, or removes it if Network created it, and removes only the verified
 Network-owned PCF JAR. Changed or unowned artifacts are preserved.
 
-The reviewed PCF configuration generation is bounded to publisher versions 1.3.0
-and 1.3.1, checked against the selected JAR's version and packaged configuration
-metadata. These tags' [Constants](https://github.com/adde0109/Proxy-Compatible-Forge/blob/v1.3.0/common/src/main/java-templates/org/adde0109/pcf/Constants.java.peb)
-and [EarlyConfig](https://github.com/adde0109/Proxy-Compatible-Forge/blob/v1.3.0/common/src/main/java/org/adde0109/pcf/EarlyConfig.java)
-source establishes the config path and forwarding structure. Historical
-`pcf-common.toml` configurations and unreviewed generations are not selected.
-If no verified PCF release matches, Apply fails safely before downtime.
+PCF's publisher version must agree with the packaged mod version. Its packaged
+Constants and EarlyConfig classes must prove `proxy-compatible-forge.toml` and
+`forwarding.enabled`, `forwarding.mode`, `forwarding.secret`; the forwarding Mode
+must prove `MODERN`. There is no version-number allowlist: a future release with
+the same verified contract can become available without a JustVoxel update.
+Changed or missing contract evidence, historical `pcf-common.toml` configurations,
+and incompatible game/platform/loader ranges fail closed. If no verified PCF
+release matches, Apply fails safely before downtime.
 
 Verified jars and bounded context/hash metadata live in each instance's private
 `network-staging` directory, outside `/data`. Publication and startup consume that

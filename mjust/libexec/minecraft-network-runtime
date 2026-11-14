@@ -297,11 +297,16 @@ COMPONENT_BYTES = 0
 
 
 def numeric(value):
-    match = re.fullmatch(r'([0-9]+(?:\.[0-9]+){0,3})(?:-(alpha|beta|rc)(?:[.-]([0-9]+))?)?(?:\+[A-Za-z0-9.-]+)?', value)
+    match = re.fullmatch(r'([0-9]+(?:\.[0-9]+){0,3})(?:-(alpha|beta|rc)(?:[.-]([0-9]+(?:\.[0-9]+){0,2})(?:\.([a-z]))?)?)?(?:\+[A-Za-z0-9.-]+)?', value)
     if not match:
         raise ValueError('unrecognized dependency version')
     parts = tuple(map(int, match[1].split('.')))
-    return parts + (0,) * (4-len(parts)) + ({None:0, 'alpha':-3, 'beta':-2, 'rc':-1}[match[2]], int(match[3] or 0))
+    # Numeric prerelease identifiers sort numerically; the historical snapshot
+    # letter is a separate textual identifier, never an arbitrary version string.
+    prerelease = tuple((0,int(n)) for n in match[3].split('.')) if match[3] else ()
+    if match[4]:
+        prerelease += ((1,match[4]),)
+    return parts + (0,) * (4-len(parts)) + ({None:0, 'alpha':-3, 'beta':-2, 'rc':-1}[match[2]],prerelease)
 
 
 def accepts(rule, value):
@@ -309,8 +314,14 @@ def accepts(rule, value):
         return 0 < len(rule) <= 32 and any(accepts(item,value) for item in rule)
     if not isinstance(rule,str) or len(rule)>128:
         return False
-    if rule == '*' or rule in (value,'='+value,'~'+value):
+    if rule == '*':
         return True
+    if rule in (value,'='+value,'~'+value):
+        try:
+            numeric(value)
+            return True
+        except (ValueError,TypeError):
+            return False
     match = re.fullmatch(r'~([0-9]+)\.([0-9]+)-',rule)
     if match:
         return numeric(value)[:2] == (int(match[1]),int(match[2]))
@@ -327,9 +338,10 @@ def accepts(rule, value):
     match = re.fullmatch(r'\[([0-9.]+),([0-9.]+)?\)',rule)
     if match:
         return numeric(match[1]) <= numeric(value) and (not match[2] or numeric(value)<numeric(match[2]))
-    if re.fullmatch(r'(?:>=|>|<=|<|=)?[0-9.]+(?: (?:>=|>|<=|<|=)?[0-9.]+)*',rule):
+    version = r'[0-9]+(?:\.[0-9]+){0,3}(?:-(?:alpha|beta|rc)(?:[.-][0-9]+(?:\.[0-9]+){0,2}(?:\.[a-z])?)?)?(?:\+[A-Za-z0-9.-]+)?'
+    if re.fullmatch(r'(?:>=|>|<=|<|=)?'+version+r'(?: (?:>=|>|<=|<|=)?'+version+r')*',rule):
         for clause in rule.split():
-            match = re.fullmatch(r'(>=|>|<=|<|=)?([0-9.]+)',clause)
+            match = re.fullmatch(r'(>=|>|<=|<|=)?('+version+r')',clause)
             a,b = numeric(value),numeric(match[2])
             if not {None:a==b,'=':a==b,'>=':a>=b,'>':a>b,'<=':a<=b,'<':a<b}[match[1]]:
                 return False
@@ -401,7 +413,10 @@ def verify_dependencies(mods, game, loader, java, external=None):
 
 
 def modrinth_metadata(url):
-    return json.loads(fetch_modrinth_artifact(url,2*1024*1024))
+    try:
+        return json.loads(fetch_modrinth_artifact(url,2*1024*1024))
+    except (json.JSONDecodeError,UnicodeDecodeError) as error:
+        raise CompatibilityCheckUnavailable() from error
 
 
 def modrinth_release(project, game, version_id=None, platform="fabric"):
@@ -466,12 +481,25 @@ def release_artifact(release,project,game,identity):
     return data,mods,entry
 
 
+class CompatibilityCheckUnavailable(Exception):
+    pass
+
+
 def fetch_modrinth_artifact(url,limit=MAX_JAR):
+    import urllib.error
+    import http.client
+    try:
+        return fetch_compatibility_bytes(url,limit)
+    except (urllib.error.URLError,TimeoutError,OSError,http.client.HTTPException) as error:
+        raise CompatibilityCheckUnavailable() from error
+
+
+def fetch_compatibility_bytes(url,limit=MAX_JAR):
     global COMPONENT_REQUESTS, COMPONENT_BYTES
     COMPONENT_REQUESTS += 1
     remaining = COMPONENT_DEADLINE-time.monotonic() if COMPONENT_DEADLINE is not None else 30
     if remaining<=0 or COMPONENT_REQUESTS>40 or COMPONENT_BYTES>256*1024*1024:
-        raise ValueError('compatibility preparation budget exceeded')
+        raise CompatibilityCheckUnavailable()
     # No redirect can change the selected CDN/path identity.
     request = urllib.request.Request(url,headers={'User-Agent':'JustVoxel/MinecraftNetwork'})
     with urllib.request.build_opener(NoRedirect()).open(request,timeout=min(30,remaining)) as response:
@@ -480,7 +508,7 @@ def fetch_modrinth_artifact(url,limit=MAX_JAR):
         data = response.read(limit+1)
     COMPONENT_BYTES += len(data)
     if len(data)>limit or COMPONENT_BYTES>256*1024*1024 or (COMPONENT_DEADLINE is not None and time.monotonic()>COMPONENT_DEADLINE):
-        raise ValueError('compatibility preparation budget exceeded')
+        raise CompatibilityCheckUnavailable()
     return data
 
 
@@ -500,12 +528,18 @@ def fabric_context(record):
     return {'profile':'fabric-family','software':software,'game':game,'loader':loader,'java':java,'data_path':record['storage']['data_path']}
 
 
-def fabric_loader(record):
+def selected_runtime(record,context):
     import subprocess
+    try:
+        subprocess.run(['/usr/libexec/justvoxel/mjust/instance-runtime-prerequisites','version',context['software'],context['game'],record['runtime'].get('paper_channel','default'),context['loader']],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=60)
+    except (subprocess.SubprocessError,OSError) as error:
+        # The upstream runtime verifier cannot distinguish absence from outage.
+        raise CompatibilityCheckUnavailable() from error
+
+
+def fabric_loader(record):
     context = fabric_context(record)
-    # Reuse the existing exact game/loader verifier, including Quilt's selected
-    # server inheritance, KnotServer main class and exact Maven coordinate.
-    subprocess.run(['/usr/libexec/justvoxel/mjust/instance-runtime-prerequisites','version',context['software'],context['game'],record['runtime'].get('paper_channel','default'),context['loader']],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=60)
+    selected_runtime(record,context)
     if context['software']=='fabric':
         return context['loader']
     # Quilt's version is NOT a Fabric Loader version. Only the selected official
@@ -678,16 +712,7 @@ def load_fabric_stage(instance,record,root,evidence,strict_inventory=True):
     return manifest
 
 
-def prepare_fabric(instance,record,root,evidence):
-    global COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES
-    COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES = time.monotonic()+150, 0, 0
-    if evidence:
-        manifest = load_fabric_stage(instance,record,root,evidence,strict_inventory=False)
-        # Mods may legitimately change between Network operations. Bind this
-        # Apply to its current verified inventory without resolving new releases.
-        manifest['inventory'],_ = scan_fabric_mods(root,manifest['artifacts'])
-        atomic(INSTANCE_ROOT+'/'+instance+'/network-staging/manifest.json',json.dumps(manifest).encode())
-        return
+def resolve_fabric(record,root):
     if os.path.lexists(safe(root+'/'+PORTABLE_NAME)):
         # Standalone startup owns portable restoration. Do not consume imported
         # evidence as a side effect of an enrollment that has not committed.
@@ -762,6 +787,20 @@ def prepare_fabric(instance,record,root,evidence):
             continue
     if selected is None:
         raise ValueError('no verified compatibility component')
+    return context,loader,inventory,original,selected
+
+
+def prepare_fabric(instance,record,root,evidence):
+    global COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES
+    COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES = time.monotonic()+150, 0, 0
+    if evidence:
+        manifest = load_fabric_stage(instance,record,root,evidence,strict_inventory=False)
+        # Mods may legitimately change between Network operations. Bind this
+        # Apply to its current verified inventory without resolving new releases.
+        manifest['inventory'],_ = scan_fabric_mods(root,manifest['artifacts'])
+        atomic(INSTANCE_ROOT+'/'+instance+'/network-staging/manifest.json',json.dumps(manifest).encode())
+        return
+    context,loader,inventory,original,selected = resolve_fabric(record,root)
     folder = INSTANCE_ROOT+'/'+instance+'/network-staging'
     directory(folder)
     for name,(data,entry) in selected.items():
@@ -836,8 +875,7 @@ PCF_CONFIG = 'config/proxy-compatible-forge.toml'
 # Reviewed tags: Constants.CONFIG_FILE_NAME and EarlyConfig.load, plus the
 # publisher version and matching packaged class/descriptor metadata below.
 # https://github.com/adde0109/Proxy-Compatible-Forge/tree/v1.3.0/common/src/main
-# v1.3.1 retains this exact configuration generation. Unknown releases need review.
-PCF_CONFIG_VERSIONS = frozenset(('1.3.0','1.3.1'))
+# Later versions must prove this same packaged contract; version alone grants nothing.
 
 
 def forge_descriptors(data, platform=None, selected_descriptors=None):
@@ -919,7 +957,7 @@ def verify_pcf(data,context,version):
     import zipfile
     selected_descriptors = []
     desc,mods = forge_descriptors(data,context['software'],selected_descriptors)
-    if set(m['modId'] for m in desc['mods']) != {'pcf'} or mods.get('pcf')!=version or version not in PCF_CONFIG_VERSIONS or desc.get('modLoader')!='javafml':
+    if set(m['modId'] for m in desc['mods']) != {'pcf'} or mods.get('pcf')!=version or not isinstance(version,str) or not 0<len(version)<=128 or desc.get('modLoader')!='javafml':
         raise ValueError('unproven PCF identity/configuration generation')
     # loaderVersion describes FML, not the Forge/NeoForge distribution version.
     # Require the explicit distribution dependency, never substitute FML's range.
@@ -1094,7 +1132,7 @@ def resolve_pcf(context):
         raise ValueError('unexpected PCF project identity')
     for release in modrinth_release(project['id'],context['game'],platform=context['software']):
         try:
-            if (release.get('version_number') not in PCF_CONFIG_VERSIONS or release.get('status')!='listed'
+            if (not isinstance(release.get('version_number'),str) or release.get('status')!='listed'
                     or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z',release.get('date_published',''))):
                 continue
             dependencies = release.get('dependencies',[])
@@ -1146,6 +1184,17 @@ def load_forge_stage(instance,record,root,evidence,strict_inventory=True):
     return manifest
 
 
+def resolve_forge(record,root):
+    if os.path.lexists(safe(root+'/'+PORTABLE_NAME)):
+        raise ValueError('complete standalone restoration before Network enrollment')
+    context = forge_context(record)
+    inventory = scan_forge_mods(root)
+    forge_config(root,'0'*64)
+    selected_runtime(record,context)
+    data,entry = resolve_pcf(context)
+    return context,inventory,data,entry
+
+
 def prepare_forge(instance,record,root,evidence):
     global COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES
     COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES = time.monotonic()+150,0,0
@@ -1154,14 +1203,7 @@ def prepare_forge(instance,record,root,evidence):
         manifest['inventory'] = scan_forge_mods(root,manifest['artifacts'])
         atomic(INSTANCE_ROOT+'/'+instance+'/network-staging/manifest.json',json.dumps(manifest).encode())
         return
-    if os.path.lexists(safe(root+'/'+PORTABLE_NAME)):
-        raise ValueError('complete standalone restoration before Network enrollment')
-    context = forge_context(record)
-    inventory = scan_forge_mods(root)
-    forge_config(root,'0'*64)
-    import subprocess
-    subprocess.run(['/usr/libexec/justvoxel/mjust/instance-runtime-prerequisites','version',context['software'],context['game'],record['runtime'].get('paper_channel','default'),context['loader']],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=60)
-    data,entry = resolve_pcf(context)
+    context,inventory,data,entry = resolve_forge(record,root)
     folder = safe(INSTANCE_ROOT+'/'+instance+'/network-staging')
     directory(folder)
     atomic(folder+'/'+PCF_FILE.split('/')[-1],data)
@@ -1263,6 +1305,83 @@ def backend_context(instance):
     else:
         profile = backend_profile(record['runtime']['software'])
     return record,root,profile,evidence
+
+
+def availability_key(instance):
+    record,root,profile,evidence = backend_context(instance)
+    digest = hashlib.sha256(json.dumps(record,sort_keys=True).encode())
+    root_info = os.stat(root)
+    digest.update(str((root_info.st_dev,root_info.st_ino)).encode())
+    # Use the verifier's per-file/count bounds, rather than a smaller aggregate
+    # modpack limit that could hide a valid installed inventory from Network.
+    folders = ((root+'/mods',True),
+               (INSTANCE_ROOT+'/'+instance+'/network-staging',False))
+    config = FPL_CONFIG if profile=='fabric-family' else PCF_CONFIG
+    paths = [INSTANCE_ROOT+'/'+instance+'/network-before.json',root+'/'+PORTABLE_NAME,root+'/'+config]
+    for folder,jars_only in folders:
+        safe(folder)
+        digest.update(folder.encode())
+        if os.path.lexists(folder):
+            info = os.stat(folder)
+            digest.update(str((info.st_uid,info.st_gid,info.st_mode,info.st_ino)).encode())
+        else:
+            digest.update(b'absent')
+        names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+        if len(names)>1024:
+            raise ValueError('inventory too large')
+        for name in names:
+            path = safe(folder+'/'+name)
+            if jars_only and not name.lower().endswith('.jar'):
+                continue
+            if os.path.isdir(path):
+                continue
+            paths.append(path)
+    for path in sorted(paths):
+        safe(path)
+        digest.update(path.encode())
+        if not os.path.lexists(path):
+            digest.update(b'absent')
+            continue
+        info = os.stat(path)
+        digest.update(str((info.st_uid,info.st_gid,info.st_mode,info.st_ino)).encode())
+        data = read(path,MAX_JAR)
+        digest.update(hashlib.sha256(data).digest())
+    return digest.hexdigest()
+
+
+def backend_availability(instance):
+    global COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES
+    COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES = time.monotonic()+150,0,0
+    phase = 'local'
+    try:
+        record,root,profile,evidence = backend_context(instance)
+        if profile == 'paper-family':
+            return 'supported'
+        if evidence:
+            # Existing private publisher evidence and staged bytes remain subject
+            # to the same context, hash, dependency and ownership checks as Apply.
+            if profile == 'fabric-family':
+                validate_fabric_owned(instance,root,evidence)
+                load_fabric_stage(instance,record,root,evidence,strict_inventory=False)
+            else:
+                validate_forge_owned(instance,root,evidence)
+                load_forge_stage(instance,record,root,evidence,strict_inventory=False)
+            return 'supported'
+        # Identify local conflicts before contacting any provider.
+        if profile == 'fabric-family':
+            scan_fabric_mods(root)
+        else:
+            scan_forge_mods(root)
+        phase = 'provider'
+        if profile == 'fabric-family':
+            resolve_fabric(record,root)
+        else:
+            resolve_forge(record,root)
+        return 'supported'
+    except CompatibilityCheckUnavailable:
+        return 'compatibility-check-unavailable'
+    except Exception:
+        return 'compatibility-conflict' if phase=='local' else 'compatibility-unavailable'
 
 
 def backend_preflight(instance, joining=True):
@@ -1553,6 +1672,10 @@ def main():
     elif sys.argv[1:] == ['start-velocity']:
         check()
         publish(sys.argv[1].removeprefix('start-'))
+    elif len(sys.argv) == 3 and sys.argv[1] == 'backend-availability-key':
+        print(availability_key(sys.argv[2]))
+    elif len(sys.argv) == 3 and sys.argv[1] == 'backend-availability':
+        print(json.dumps({'status':backend_availability(sys.argv[2])}))
     elif len(sys.argv) == 4 and sys.argv[1] == 'backend-preflight' and sys.argv[3] in ['member','standalone']:
         backend_preflight(sys.argv[2],joining=sys.argv[3] == 'member')
     elif len(sys.argv) == 3 and sys.argv[1] in ['backend','backend-publish']:

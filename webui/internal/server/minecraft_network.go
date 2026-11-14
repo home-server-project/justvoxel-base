@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -16,13 +17,31 @@ type minecraftNetworkAPI interface {
 	MinecraftNetworkWhitelist(context.Context, string, string, string, string) error
 }
 type minecraftNetworkRow struct {
-	ID, Name, Software, SoftwareIcon, State string
-	Eligible, Selected                      bool
+	ID, Name, Software, SoftwareIcon, State     string
+	StateLabel, StateClass, CompatibilityReason string
+	Eligible, Selected                          bool
 }
 type minecraftNetworkPage struct {
 	Title, Version, ManagementAPI, CSRF, Error, Message string
 	Network                                             api.MinecraftNetworkStatus
 	SupportedServers, UnsupportedServers                []minecraftNetworkRow
+}
+
+func minecraftNetworkStateBadge(state string) (string, string) {
+	switch state {
+	case "running":
+		return "Running", "good"
+	case "stopped":
+		return "Stopped", "danger"
+	case "failed":
+		return "Failed", "danger"
+	case "starting":
+		return "Starting", "warning"
+	case "stopping":
+		return "Stopping", "warning"
+	default:
+		return "Unavailable", "muted"
+	}
 }
 
 func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +64,26 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 	client, ok := a.api.(minecraftNetworkAPI)
 	if !ok {
 		http.Error(w, "Minecraft Network is unavailable.", 503)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Query().Get("runtime_only") == "true" {
+		runtimeClient, ok := a.api.(interface {
+			MinecraftNetworkRuntime(context.Context, string) (api.MinecraftNetworkStatus, error)
+		})
+		if !ok {
+			http.Error(w, "Minecraft Network status is unavailable.", 503)
+			return
+		}
+		status, err := runtimeClient.MinecraftNetworkRuntime(r.Context(), session)
+		if err != nil {
+			http.Error(w, "Minecraft Network status is unavailable.", 503)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(struct {
+			Servers []api.MinecraftNetworkServer `json:"servers"`
+		}{status.Servers})
 		return
 	}
 	data := minecraftNetworkPage{Title: "Minecraft Network", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r)}
@@ -81,6 +120,9 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Minecraft Network status is unavailable.", 503)
 		return
 	}
+	if data.Message != "" && r.FormValue("action") == "configure" && !network.Config.Enabled {
+		data.Message = "Minecraft Network settings saved. Network remains disabled."
+	}
 	data.Network = network
 	inventory, err := a.independentServerInventory(r.Context(), session)
 	if err != nil {
@@ -99,6 +141,11 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		row := minecraftNetworkRow{ID: server.ID, Name: names[server.ID], Software: serverSoftware(server.Software), SoftwareIcon: serverSoftwareIcon(server.Software), State: server.State, Eligible: server.Eligible, Selected: selected}
+		row.StateLabel, row.StateClass = minecraftNetworkStateBadge(server.State)
+		row.CompatibilityReason = server.CompatibilityReason
+		if row.CompatibilityReason == "" {
+			row.CompatibilityReason = "Not supported by Minecraft Network"
+		}
 		if server.Eligible {
 			data.SupportedServers = append(data.SupportedServers, row)
 		} else {

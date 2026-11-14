@@ -973,7 +973,60 @@ class FabricNetworkLifecycle(unittest.TestCase):
         self.assert_unowned()
 
 
+    def test_real_26_3_user_api_and_fpl_are_verified_without_writes(self):
+        self.record['runtime'].update(version='26.3',version_policy='pinned',loader_version='0.20.1',image_tag='java25')
+        self.save_record()
+        networking = fabric_jar('fabric-networking-api-v1',version='6.0.0',dependencies={
+            'minecraft':'>=26.1-rc.2','fabricloader':'>=0.18.5','java':'>=25'})
+        nested = {'networking.jar':networking}
+        for i,rule in enumerate(('>=1.20.5-beta.1','>1.19-alpha.22.11.a','>=1.15-alpha.19.37.a')):
+            nested[str(i)+'.jar'] = fabric_jar('api-module-'+str(i),dependencies={'minecraft':rule})
+        api = fabric_jar('fabric-api',version='0.166.2+26.3',nested=nested,
+                         dependencies={'minecraft':'~26.3-','fabricloader':'>=0.18.5','java':'>=25'})
+        fpl = fabric_jar(version='2.12.0',dependencies={'minecraft':'>=26.1','fabricloader':'>=0.18.5',
+                         'java':'>=25','fabric-api':'>=0.144.3+26.1','fabric-networking-api-v1':'*'})
+        self.write('mods/user-fabric-api.jar',api)
+        release = fabric_release(runtime['FPL_PROJECT'],fpl)
+        release.update(game_versions=['26.3'],version_number='2.12.0')
+        before = self.data_bytes()
+        forbidden = mock.Mock(side_effect=AssertionError('status attempted a write'))
+        with mock.patch.dict(runtime,{'fabric_loader':lambda record:'0.20.1',
+                'modrinth_release':lambda *args,**kwargs:[release],
+                'fetch_modrinth_artifact':lambda *args,**kwargs:fpl,
+                'atomic':forbidden,'directory':forbidden}):
+            self.assertEqual(runtime['backend_availability'](self.instance),'supported')
+        forbidden.assert_not_called()
+        self.assertEqual(self.data_bytes(),before)
+        self.assertEqual((self.root/'mods/user-fabric-api.jar').read_bytes(),api)
+        self.assertFalse((self.private/'network-staging').exists())
+        self.assertFalse((self.private/'network-before.json').exists())
+        self.assertFalse((self.private/'network-before').exists())
+        self.assertFalse((self.root/runtime['PORTABLE_NAME']).exists())
+        # The same resolver feeds Apply's complete staging verification.
+        with mock.patch.dict(runtime,{'fabric_loader':lambda record:'0.20.1',
+                'modrinth_release':lambda *args,**kwargs:[release],
+                'fetch_modrinth_artifact':lambda *args,**kwargs:fpl}):
+            runtime['backend_preflight'](self.instance)
+        manifest = json.loads((self.private/'network-staging/manifest.json').read_text())
+        self.assertEqual(set(manifest['artifacts']),{runtime['FPL_FILE']})
+        self.assertEqual((self.root/'mods/user-fabric-api.jar').read_bytes(),api)
+
+    def test_local_conflict_is_safe_and_read_only(self):
+        self.write('mods/user-fpl.jar',self.fpl)
+        before = self.data_bytes()
+        provider = mock.Mock(side_effect=AssertionError('provider called despite local conflict'))
+        with mock.patch.dict(runtime,{'modrinth_release':provider}):
+            self.assertEqual(runtime['backend_availability'](self.instance),'compatibility-conflict')
+        provider.assert_not_called()
+        self.assertEqual(self.data_bytes(),before)
+
+    def test_provider_outage_is_distinct(self):
+        with mock.patch.dict(runtime,{'modrinth_release':mock.Mock(side_effect=runtime['CompatibilityCheckUnavailable']())}):
+            self.assertEqual(runtime['backend_availability'](self.instance),'compatibility-check-unavailable')
+
+
 # Synthetic publisher JARs: metadata only; never execute downloaded code.
+
 def forge_jar(platform='forge', identity='pcf', game='[1.20.5,1.21)', loader='[50,51)',
               version='1.3.0', extra='', contract=True, nested=None):
     import io
@@ -1092,6 +1145,77 @@ class ForgeResolution(unittest.TestCase):
                 'fetch_modrinth_artifact':lambda url:bad if '/newer/' in url else good}):
             _,entry = runtime['resolve_pcf']({'software':'forge','game':'1.20.6','loader':'50.1.0'})
             self.assertEqual(entry['release_id'],'release1')
+
+
+class DynamicPCFContract(unittest.TestCase):
+    def test_future_version_uses_verified_contract_not_version_allowlist(self):
+        context = {'software':'forge','game':'26.3','loader':'66.1.0'}
+        project = {'id':'resolvedPCF','slug':'proxy-compatible-forge','title':'Proxy Compatible Forge',
+                   'project_type':'mod','source_url':'https://github.com/adde0109/Proxy-Compatible-Forge'}
+        for contract in (True,False):
+            data = forge_jar(game='[26.3,26.4)',loader='[66.1,67)',version='9.4.2',contract=contract)
+            release = pcf_release(data)
+            release.update(version_number='9.4.2',game_versions=['26.3'])
+            with self.subTest(contract=contract), mock.patch.dict(runtime,{
+                    'modrinth_metadata':lambda url:project if url.endswith('/proxy-compatible-forge') else [release],
+                    'fetch_modrinth_artifact':lambda url:data}):
+                if contract:
+                    actual,entry = runtime['resolve_pcf'](context)
+                    self.assertEqual(actual,data)
+                    self.assertEqual(entry['version'],'9.4.2')
+                else:
+                    with self.assertRaises(ValueError): runtime['resolve_pcf'](context)
+        self.assertNotIn('PCF_CONFIG_VERSIONS',payload)
+
+    def test_future_contract_markers_must_each_be_present(self):
+        import io
+        import zipfile
+        context = {'software':'forge','game':'26.3','loader':'66.1.0'}
+        original = forge_jar(game='[26.3,26.4)',loader='[66.1,67)',version='9.4.2')
+        for marker in (b'proxy-compatible-forge.toml',b'forwarding.enabled',b'forwarding.mode',b'forwarding.secret',b'MODERN'):
+            output = io.BytesIO()
+            with zipfile.ZipFile(io.BytesIO(original)) as source, zipfile.ZipFile(output,'w') as target:
+                for entry in source.infolist():
+                    target.writestr(entry.filename,source.read(entry).replace(marker,b'changed-contract'))
+            with self.subTest(marker=marker), self.assertRaises(ValueError):
+                runtime['verify_pcf'](output.getvalue(),context,'9.4.2')
+
+    def test_future_release_still_requires_exact_runtime(self):
+        data = forge_jar(game='[26.3,26.4)',loader='[66.1,67)',version='9.4.2')
+        for context in ({'software':'forge','game':'26.2','loader':'66.1.0'},
+                        {'software':'forge','game':'26.3','loader':'65.0.0'},
+                        {'software':'neoforge','game':'26.3','loader':'26.3.0.102'}):
+            with self.subTest(context=context), self.assertRaises(ValueError):
+                runtime['verify_pcf'](data,context,'9.4.2')
+
+
+    def test_transport_errors_are_not_incompatible_candidates(self):
+        import urllib.error
+        opener = mock.Mock()
+        opener.open.side_effect = urllib.error.URLError('private provider failure')
+        with mock.patch('urllib.request.build_opener',return_value=opener), self.assertRaises(runtime['CompatibilityCheckUnavailable']):
+            runtime['fetch_modrinth_artifact']('https://api.modrinth.com/v2/project/proxy-compatible-forge')
+
+
+class FabricObservedPrereleases(unittest.TestCase):
+    def test_real_metadata_rules_and_ordering(self):
+        for rule in ('~26.3-','>=26.1-rc.2','>=1.20.5-beta.1',
+                     '>1.19-alpha.22.11.a','>=1.15-alpha.19.37.a'):
+            with self.subTest(rule=rule): self.assertTrue(runtime['accepts'](rule,'26.3'))
+        for lower,upper in (('26.1-rc.2','26.1'),('1.20.5-beta.1','1.20.5'),
+                            ('1.19-alpha.22.11.a','1.19-alpha.22.11.b'),
+                            ('1.19-alpha.22.9.a','1.19-alpha.22.11.a'),
+                            ('26.3-beta.2','26.3-rc.1'),('26.3-rc.2','26.3-rc.10')):
+            self.assertLess(runtime['numeric'](lower),runtime['numeric'](upper))
+            self.assertFalse(runtime['accepts']('>='+upper,lower))
+        for rule in ('>=26.3-preview.1','>=26.3-rc..2','>=1.19-alpha.a',
+                     '>1.19-alpha.22.11.aa','>=26.3-rc.2 || *','>=26.3-rc.2 trailing',
+                     '>=26.3-rc.2-', '>=26.3-alpha.1.2.3.4'):
+            with self.subTest(rule=rule): self.assertFalse(runtime['accepts'](rule,'26.3'))
+        self.assertFalse(runtime['accepts']('26.3-preview.1','26.3-preview.1'))
+        for rule in ('26.3','=26.3','26.*','~26.3','[26.1,27)', ['26.2','26.3']):
+            self.assertTrue(runtime['accepts'](rule,'26.3'))
+
 
 
 class ForgeForwardingConfig(unittest.TestCase):
@@ -1293,6 +1417,36 @@ class ForgeNetworkLifecycle(unittest.TestCase):
         self.assertEqual(self.data_bytes(),before)
         with self.assertRaises(ValueError): runtime['restore_portable'](str(self.root),os.getuid(),os.getgid(),'forge-family')
         self.assertEqual(self.data_bytes(),before)
+
+    def test_read_only_availability_absence_outage_and_verified_candidate(self):
+        before = self.data_bytes()
+        for result in ('supported','compatibility-unavailable','compatibility-check-unavailable'):
+            forbidden = mock.Mock(side_effect=AssertionError('read-only check attempted a write'))
+            patch = {'atomic':forbidden,'directory':forbidden}
+            if result=='compatibility-unavailable':
+                patch['modrinth_metadata'] = lambda url: ({'id':'resolvedPCF','slug':'proxy-compatible-forge',
+                    'title':'Proxy Compatible Forge','project_type':'mod',
+                    'source_url':'https://github.com/adde0109/Proxy-Compatible-Forge'} if url.endswith('/proxy-compatible-forge') else [])
+            elif result=='compatibility-check-unavailable':
+                patch['modrinth_metadata'] = mock.Mock(side_effect=runtime['CompatibilityCheckUnavailable']())
+            with mock.patch.dict(runtime,patch), mock.patch('subprocess.run') as commands:
+                self.assertEqual(runtime['backend_availability'](self.instance),result)
+            for call in commands.call_args_list:
+                self.assertEqual(call.args[0][:2],['/usr/libexec/justvoxel/mjust/instance-runtime-prerequisites','version'])
+            forbidden.assert_not_called()
+            self.assertEqual(self.data_bytes(),before)
+            for path in (self.private/'network-staging',self.private/'network-before',
+                         self.private/'network-before.json',self.root/runtime['PORTABLE_NAME']):
+                self.assertFalse(path.exists())
+
+    def test_availability_key_binds_runtime_and_mod_bytes(self):
+        first = runtime['availability_key'](self.instance)
+        self.write('mods/user.jar',forge_jar(identity='unrelated',version='1.0.1'))
+        second = runtime['availability_key'](self.instance)
+        self.assertNotEqual(first,second)
+        self.record['runtime']['loader_version']='50.2.0'
+        self.save_record()
+        self.assertNotEqual(second,runtime['availability_key'](self.instance))
 
 
 if __name__ == '__main__':

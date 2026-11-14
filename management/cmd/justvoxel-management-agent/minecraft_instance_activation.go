@@ -64,12 +64,13 @@ type instanceActivationEvidence struct {
 	Changes        []instanceFirewallChange `json:"changes"`
 }
 type instanceRuntimeBackend struct {
-	root, quadlets, staging string
-	networkRoot             string // tests may isolate private Minecraft Network state
-	store                   *minecraftInstanceStore
-	command                 func(context.Context, string, ...string) ([]byte, error)
-	pause                   func(context.Context, time.Duration) error
-	snapshot                func(context.Context) (minecraftInstanceRuntimeContext, uint32, uint32, error)
+	networkCompatibilityCache *networkCompatibilityCache
+	root, quadlets, staging   string
+	networkRoot               string // tests may isolate private Minecraft Network state
+	store                     *minecraftInstanceStore
+	command                   func(context.Context, string, ...string) ([]byte, error)
+	pause                     func(context.Context, time.Duration) error
+	snapshot                  func(context.Context) (minecraftInstanceRuntimeContext, uint32, uint32, error)
 }
 
 var instanceRuntimes = &instanceRuntimeBackend{
