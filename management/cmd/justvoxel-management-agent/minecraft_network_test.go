@@ -430,6 +430,11 @@ func TestMinecraftNetworkRemovedFailureTransactionBoundaries(t *testing.T) {
 			b.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 				if command == "systemctl" && len(args) > 0 {
 					if args[0] == "show" && len(args) > 1 && args[1] == "--property=LoadState,ActiveState" {
+						unit := args[len(args)-1]
+						if unit != "justvoxel-velocity.service" && unit != "justvoxel-minecraft-network-network.service" {
+							// Normal instance Start performs authoritative RAM inspection.
+							return original(ctx, command, args...)
+						}
 						if !reloaded || networkPending(b) != nil {
 							t.Fatal("cleanup before successful reload and pending-state clearance")
 						}
@@ -442,17 +447,22 @@ func TestMinecraftNetworkRemovedFailureTransactionBoundaries(t *testing.T) {
 								t.Fatal("cleanup before infrastructure removal", name, err)
 							}
 						}
-						unit := args[len(args)-1]
-						if unit != "justvoxel-velocity.service" && unit != "justvoxel-minecraft-network-network.service" {
-							t.Fatal("unrelated service inspected", args)
-						}
 						inspected = append(inspected, unit)
 						return []byte("LoadState=not-found\nActiveState=failed\n"), nil
 					}
 					if args[0] == "reset-failed" {
 						unit := args[len(args)-1]
-						if !reflect.DeepEqual(args, []string{"reset-failed", "--", unit}) || !networkContains(inspected, unit) {
+						if !reflect.DeepEqual(args, []string{"reset-failed", "--", unit}) || !networkContains(inspected, unit) || !reloaded || networkPending(b) != nil {
 							t.Fatal("global, unrelated, or premature reset", args)
+						}
+						n, err := networkRead(b)
+						if err != nil || n.Config.Enabled {
+							t.Fatal("reset before disabled state was saved/restored", err)
+						}
+						for _, name := range []string{"justvoxel-velocity.container", "justvoxel-minecraft-network.network"} {
+							if _, err := os.Stat(filepath.Join(b.quadlets, name)); !errors.Is(err, os.ErrNotExist) {
+								t.Fatal("reset before infrastructure removal", name, err)
+							}
 						}
 						reset = append(reset, unit)
 						return nil, nil
@@ -545,7 +555,7 @@ func TestMinecraftNetworkRemovedFailurePostCommitErrors(t *testing.T) {
 			if !strings.Contains(err.Error(), wantCleanupError) {
 				t.Fatal("cleanup diagnosis was lost", err)
 			}
-			restorationMessage := "Minecraft Network configuration was saved, but one or more previously running servers could not be started. Use their normal Start controls after checking server status."
+			restorationMessage := "Minecraft Network configuration was saved, but one or more Network-managed or previously running servers could not be started. Check server status and use their normal Start controls."
 			if strings.Contains(err.Error(), restorationMessage) != h.failStart || strings.Contains(err.Error(), "mock start failure") {
 				t.Fatal("incorrect joined server restoration error", err)
 			}
@@ -931,7 +941,7 @@ func TestMinecraftNetworkUnknownPlayersPreservesConfiguration(t *testing.T) {
 	}
 }
 
-func TestMinecraftNetworkStoppedAndSafelyFailedMembersRemainNonRunning(t *testing.T) {
+func TestMinecraftNetworkStoppedAndSafelyFailedMembersStartAfterCommit(t *testing.T) {
 	for _, state := range []string{"inactive", "failed"} {
 		f, c := networkTransactionFixture(t)
 		id := f.configs[0].ID
@@ -940,8 +950,8 @@ func TestMinecraftNetworkStoppedAndSafelyFailedMembersRemainNonRunning(t *testin
 		if err := networkApply(context.Background(), f.backend, c); err != nil {
 			t.Fatal(err)
 		}
-		if len(h.stops) != 0 || len(h.starts) != 0 || f.states[id] != state {
-			t.Fatal("non-running member was started")
+		if len(h.stops) != 0 || !reflect.DeepEqual(h.starts, []string{id}) || f.states[id] != "active" {
+			t.Fatal("selected non-running member did not start after commit")
 		}
 	}
 }
@@ -1426,12 +1436,20 @@ func networkLegacyFixture(t *testing.T) (*instanceActivationFixture, minecraftNe
 	return f, c, legacy
 }
 
-func TestMinecraftNetworkMigratesLegacyQuadletAndStartsOnlyVelocity(t *testing.T) {
+func TestMinecraftNetworkMigratesLegacyQuadletAndStartsVelocityAndSelectedBackend(t *testing.T) {
 	f, c, _ := networkLegacyFixture(t)
+	// Exercise the selected-stopped case under Network lifecycle ownership.
+	id := c.Members[0]
+	f.states[id], f.containers[id] = "inactive", "exited"
 	original := f.backend.command
-	stoppedLegacy, reloadAfterRemoval, startedVelocity := false, false, false
+	stoppedLegacy, reloadAfterRemoval, startedVelocity, startedBackend := false, false, false, false
 	f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
 		if cmd == "systemctl" {
+			for _, arg := range args {
+				if arg == "restart" || (arg == "start" && (len(args) < 2 || args[0] != "--no-block" || args[1] != "start")) {
+					t.Fatal("unexpected start or restart outside the exact migration allowlist", args)
+				}
+			}
 			if len(args) > 0 && args[0] == "show" && args[len(args)-1] == "justvoxel-picolobby.service" {
 				return []byte("LoadState=loaded\nActiveState=active\nSubState=running\n"), nil
 			}
@@ -1443,13 +1461,28 @@ func TestMinecraftNetworkMigratesLegacyQuadletAndStartsOnlyVelocity(t *testing.T
 				reloadAfterRemoval = errors.Is(err, os.ErrNotExist)
 			}
 			if len(args) > 1 && args[0] == "--no-block" && args[1] == "start" {
-				if !reflect.DeepEqual(args, []string{"--no-block", "start", "--", "justvoxel-velocity.service"}) {
-					t.Fatal("legacy infrastructure restarted", args)
+				if !stoppedLegacy || !reloadAfterRemoval || networkPending(f.backend) != nil {
+					t.Fatal("started before legacy cleanup and durable commit")
 				}
-				if !stoppedLegacy || !reloadAfterRemoval {
-					t.Fatal("started before legacy cleanup")
+				n, err := networkRead(f.backend)
+				record, recordErr := f.backend.readRecord(id)
+				if err != nil || !n.Config.Enabled || !reflect.DeepEqual(n.Config, c) || recordErr != nil || !record.NetworkMember || f.backend.verifyHashes(record) != nil {
+					t.Fatal("started before committed Network membership", err, recordErr)
 				}
-				startedVelocity = true
+				switch {
+				case reflect.DeepEqual(args, []string{"--no-block", "start", "--", "justvoxel-velocity.service"}):
+					if startedVelocity || startedBackend {
+						t.Fatal("Velocity start out of order or duplicated")
+					}
+					startedVelocity = true
+				case reflect.DeepEqual(args, []string{"--no-block", "start", "--", "minecraft-" + id + ".service"}):
+					if !startedVelocity || startedBackend {
+						t.Fatal("selected backend start out of order or duplicated")
+					}
+					startedBackend = true
+				default:
+					t.Fatal("legacy or unrelated server started", args)
+				}
 			}
 		}
 		return original(ctx, cmd, args...)
@@ -1457,7 +1490,7 @@ func TestMinecraftNetworkMigratesLegacyQuadletAndStartsOnlyVelocity(t *testing.T
 	if err := networkApply(context.Background(), f.backend, c); err != nil {
 		t.Fatal(err)
 	}
-	if !stoppedLegacy || !reloadAfterRemoval || !startedVelocity {
+	if !stoppedLegacy || !reloadAfterRemoval || !startedVelocity || !startedBackend {
 		t.Fatal("migration lifecycle incomplete")
 	}
 	for _, path := range []string{filepath.Join(f.backend.quadlets, "justvoxel-picolobby.container"), filepath.Join(f.backend.networkDirectory(), "legacy-rollback.json")} {

@@ -95,6 +95,10 @@ class Element {
     }
     return this.tag === selector;
   }
+  closest(selector) {
+    for (let node = this; node; node = node.parentElement) if (node.matches(selector)) return node;
+    return null;
+  }
   querySelector(selector) { return this.all().slice(1).find(node => node.matches(selector)); }
   querySelectorAll(selector) {
     if (selector.startsWith('[data-destructive-confirmation]')) return this.all().filter(node => node.matches('[data-destructive-confirmation]') && !node.dataset.destructiveReady);
@@ -121,7 +125,7 @@ class Element {
   remove() { this.removed = true; }
 }
 const submit = {preventDefault() {}};
-function harness({motd = 'Old welcome', plan = {review: 'real-fingerprint', warnings: ['The server stays stopped. Start it normally when ready.']}, apply = {applied: true}, renameError, deleteError, runtimeState = 'stopped', lifecycle = {ok: true}} = {}) {
+function harness({networkMember = false, savedStartOnBoot = true, motd = 'Old welcome', plan = {review: 'real-fingerprint', warnings: ['The server stays stopped. Start it normally when ready.']}, apply = {applied: true}, renameError, deleteError, runtimeState = 'stopped', lifecycle = {ok: true}} = {}) {
   const calls = [], reviews = [], redirects = [];
   const body = new Element('body'), content = new Element('content'), state = {};
   let reloads = 0, refreshes = 0;
@@ -139,7 +143,7 @@ function harness({motd = 'Old welcome', plan = {review: 'real-fingerprint', warn
       url = url.split('?')[0];
       if (url.endsWith('/snapshot') || url === '/api/dashboard-status') return {status: {minecraft: {configured: true, state: runtimeState}}, players: {online: 0}};
       if (url.endsWith('/selection')) return {selected: {id: 'jv-family1', name: 'Family'}, servers: [{id: 'jv-family1', name: 'Family'}]};
-      if (url.endsWith('/settings')) return {configured: true, minecraft: {motd, max_players: 23, game_mode: 'creative', start_on_boot: true}};
+      if (url.endsWith('/settings')) return {configured: true, minecraft: {motd, max_players: 23, game_mode: 'creative', start_on_boot: savedStartOnBoot, network_member: networkMember}};
       if (url.endsWith('/lifecycle')) return typeof lifecycle === 'function' ? lifecycle() : lifecycle;
       if (url.endsWith('/plan')) return typeof plan === 'function' ? plan() : plan;
       if (url.endsWith('/apply')) return apply;
@@ -546,10 +550,23 @@ test('Reviewed settings reuse confirmed graceful lifecycle and preserve protecte
   // Pin the protected policy files independently of any RAM controls in app.js.
   const {createHash} = require('node:crypto');
   const protectedFiles = {
-    'webui/internal/server/static/settings.js': '54e77f57fca811b4c303d4c56326bbdcc958f738ac697986e0a4925e32fbd5ea',
-    'mjust/libexec/common.sh': 'ae8cdd7fa4e64b93902d3470b9dd71b60fbbf1ab6d08f73674098afa39fdf765',
+    'webui/internal/server/static/settings.js': '9f819e016f7ddafb76f7597b738673d214a4aca36c80a743b204b5b5a16e7944',
+    'mjust/libexec/common.sh': '43ff235f98495f5c02528a85185ff052707480625578bff584256f20c7349df0',
   };
   for (const [path, expected] of Object.entries(protectedFiles)) {
     assert.equal(createHash('sha256').update(readFileSync(`${__dirname}/../${path}`)).digest('hex'), expected, path);
   }
+});
+
+
+test('Network member Overview locks effective boot without changing saved preference', async () => {
+  const r = harness({networkMember: true, savedStartOnBoot: false});
+  await r.context.render(1);
+  const boot = r.content.querySelector('[name="start_on_boot"]');
+  assert.equal(boot.checked, true);
+  assert.equal(boot.disabled, true);
+  assert.equal(boot.closest('label').querySelector('span').textContent, 'Start on Boot · Managed by Network');
+  boot.checked = false;
+  await boot.events.change();
+  assert.equal(r.calls.some(call => call.body), false);
 });

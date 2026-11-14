@@ -650,3 +650,29 @@ func TestMinecraftServerCardAuthoritativeConnectionPorts(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkMemberEffectiveBootControlsPreservePreference(t *testing.T) {
+	for _, state := range []string{"running", "stopped", "failed"} {
+		app, f := newServerInventoryApp(t)
+		id := "jv-family1"
+		config := f.runtimes[id]
+		config.StartOnBoot = false
+		f.runtimes[id] = config
+		f.connections = map[string]api.MinecraftConnection{id: {ID: id, NetworkMember: true, JavaPort: 25565}}
+		f.states[id] = api.MinecraftInstanceStatus{ID: id, State: state}
+		summary := app.independentServerSummary(context.Background(), "session", api.RegisteredMinecraftInstance{ID: id})
+		if !summary.StartOnBoot || summary.CanConfigureBoot || !summary.CanSwitch || (state == "running" && !summary.CanRestart) {
+			t.Fatal("member effective boot or lifecycle controls incorrect", summary)
+		}
+		body := inventoryRequest(app, "GET", "", "").Body.String()
+		cards := regexp.MustCompile(`(?s)<article[^>]*data-server-id="` + id + `".*?</article>`).FindString(body)
+		for _, want := range []string{`data-network-member="true"`, "Managed by Network", `data-server-boot aria-label="Start on Boot for `, `checked disabled`, "Settings</a>", "Backups</a>", "Update</a>", "Migration</a>", "Plugins &amp; Mods</a>"} {
+			if !strings.Contains(cards, want) {
+				t.Fatal("missing Network member control", want, cards)
+			}
+		}
+		if f.runtimes[id].StartOnBoot {
+			t.Fatal("display rewrote saved preference")
+		}
+	}
+}

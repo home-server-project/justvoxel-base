@@ -124,7 +124,7 @@
           const running = card.querySelector('[data-server-running]');
           if (running) {
             running.checked = row.running;
-            running.disabled = !row.can_switch;
+            running.disabled = !(row.can_switch || (card.dataset.networkMember === 'true' && row.state === 'Failed'));
           }
           if (tile) tile.dataset.serverState = row.state;
         }
@@ -190,9 +190,10 @@
     const selected = path => path + (path.includes('?') ? '&' : '?') + new URLSearchParams({server: id});
     const settingsURL = selected('/?workspace=minecraft');
     const connectURL = selected('/minecraft/how-to-connect');
-    const feedback = (message, connect = false, review = false) => {
+    const feedback = (message, connect = false, review = false, warning = false) => {
       const node = root.querySelector('[data-server-feedback]');
       if (!node) return;
+      node.className = warning ? 'notice warning' : 'notice error';
       node.textContent = message;
       node.hidden = !message;
       if (connect || review) {
@@ -238,6 +239,10 @@
     running?.addEventListener('change', () => {
       const requested = running.checked;
       running.checked = !requested;
+      if (!requested && card.dataset.networkMember === 'true') {
+        feedback('Managed by Minecraft Network. Remove this server from Network or disable Minecraft Network before stopping it.', false, false, true);
+        return;
+      }
       operation(() => mutate(async () => {
         const status = card.querySelector('.minecraft-server-state');
         if (status) {

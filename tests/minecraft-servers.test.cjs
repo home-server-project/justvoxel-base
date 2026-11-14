@@ -250,8 +250,8 @@ test('dynamic inventory initialization is idempotent', () => {
 });
 
 // Exercise the production card coordination without starting the whole dashboard.
-function cardHarness({responses = [], bootChecked = false, runningChecked = false, connected = true, helperAvailable = true, launcherAvailable = true} = {}) {
-  const card = new Element('card', {serverId: ids[1], serverName: 'Kids Creative'});
+function cardHarness({member = false, responses = [], bootChecked = false, runningChecked = false, connected = true, helperAvailable = true, launcherAvailable = true} = {}) {
+  const card = new Element('card', {serverId: ids[1], serverName: 'Kids Creative', networkMember: String(member)});
   card.isConnected = connected;
   const status = card.appendChild(new Element('.minecraft-server-state'));
   status.textContent = runningChecked ? 'Running' : 'Stopped';
@@ -939,4 +939,51 @@ test('Minecraft overflow menu uses Update with the existing version destination 
  const storage=readFileSync(`${root}static/storage-browser.css`,'utf8');
  const shared=storage.match(/\.storage-action-menu-popover :is\(button,a\)\{([^}]+)\}/)[1];
  assert.ok(shared.includes('font-size:.82rem'));assert.ok(shared.includes('font-weight:650'));
+});
+
+
+test('Network running OFF restores ON, warns in yellow and sends no Stop', async () => {
+  const f = cardHarness({member: true, runningChecked: true});
+  f.running.checked = false;
+  f.fire(f.running, 'change');
+  await f.settle();
+  assert.equal(f.running.checked, true);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.refreshes(), 0);
+  assert.equal(f.feedback.className, 'notice warning');
+  assert.equal(f.feedback.hidden, false);
+  assert.equal(f.feedback.textContent, 'Managed by Minecraft Network. Remove this server from Network or disable Minecraft Network before stopping it.');
+  const css = readFileSync(`${root}static/minecraft-servers.css`, 'utf8');
+  assert.match(css, /\[data-server-feedback\]\.notice\.warning[^}]*var\(--jv-warning\)/);
+});
+
+test('standalone Stop, stopped member Start, and member Restart retain mutations', async () => {
+  for (const [member, runningChecked, action] of [[false, true, 'stop'], [true, false, 'start'], [true, true, 'restart']]) {
+    const f = cardHarness({member, runningChecked});
+    if (action === 'restart') f.fire(f.restart, 'click');
+    else {
+      f.running.checked = !runningChecked;
+      f.fire(f.running, 'change');
+    }
+    await f.settle();
+    assert.equal(f.calls.length, 1);
+    const {url, body} = f.calls[0];
+    if (action === 'restart') assert.ok(url.includes('/restart?server=' + ids[1]));
+    else assert.equal(body.get('action'), action);
+    assert.equal(body.get('csrf'), 'csrf-token');
+    assert.notEqual(f.feedback.className, 'notice warning');
+  }
+});
+
+
+test('Network informational warning does not change backend error treatment', async () => {
+  const f = cardHarness({member: true, runningChecked: true, responses: [{error: 'Restart could not be completed.'}]});
+  f.running.checked = false;
+  f.fire(f.running, 'change');
+  assert.equal(f.feedback.className, 'notice warning');
+  f.fire(f.restart, 'click');
+  await f.settle();
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.feedback.className, 'notice error');
+  assert.equal(f.feedback.textContent, 'Restart could not be completed.');
 });

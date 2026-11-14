@@ -6,6 +6,7 @@ import (
 )
 
 const minecraftMemoryReserveMiB int64 = 1024
+const minecraftNetworkProxyMemoryMiB int64 = 512
 
 func instanceMemoryCapacity(total, used, required int64) bool {
 	return total >= 2048 && total <= 16777216 && used >= 0 && required >= 512 && required <= total-minecraftMemoryReserveMiB && used <= total-minecraftMemoryReserveMiB-required
@@ -18,7 +19,14 @@ func (b *instanceRuntimeBackend) admitMemory(ctx context.Context, total int64, r
 	if err != nil {
 		return instanceRuntimeFailure("Minecraft memory capacity could not be verified.")
 	}
+	network, err := networkRead(b)
+	if err != nil {
+		return instanceRuntimeFailure("Minecraft Network memory reservation could not be verified.")
+	}
 	var used int64
+	if network.Config.Enabled {
+		used = minecraftNetworkProxyMemoryMiB
+	}
 	seen := map[string]bool{}
 	for _, record := range records {
 		c := record.Runtime
@@ -29,7 +37,7 @@ func (b *instanceRuntimeBackend) admitMemory(ctx context.Context, total int64, r
 		if c.ID == candidate.ID {
 			continue
 		}
-		count := c.StartOnBoot
+		count := c.StartOnBoot || record.NetworkMember
 		if !boot {
 			var err error
 			count, err = b.memoryInUse(ctx, c.ID)
@@ -97,4 +105,49 @@ func (b *instanceRuntimeBackend) memoryInUse(ctx context.Context, id string) (bo
 		}
 	}
 	return false, unavailable
+}
+
+// Validate the complete desired runtime and reboot sets before Network preparation
+// or downtime. Selection replaces membership; saved standalone boot stays intact.
+func (b *instanceRuntimeBackend) admitNetworkMemory(ctx context.Context, total int64, records []instanceRuntimeRecord, target minecraftNetworkConfig) error {
+	if !target.Enabled {
+		return nil
+	}
+	var live, boot int64
+	seen := map[string]bool{}
+	for _, record := range records {
+		c := record.Runtime
+		if seen[c.ID] || !instanceIDPattern.MatchString(c.ID) {
+			return errInstanceRecovery
+		}
+		seen[c.ID] = true
+		selected := networkContains(target.Members, c.ID)
+		active := selected
+		if !selected {
+			var err error
+			active, err = b.memoryInUse(ctx, c.ID)
+			if err != nil {
+				return err
+			}
+		}
+		limit, err := instanceRuntimeMemoryMiB(c.ContainerMemory)
+		if err != nil {
+			return instanceRuntimeFailure("Minecraft memory capacity could not be verified.")
+		}
+		if active {
+			live += limit
+		}
+		if selected || c.StartOnBoot {
+			boot += limit
+		}
+	}
+	for _, id := range target.Members {
+		if !seen[id] {
+			return instanceRuntimeFailure("A selected Minecraft server is unavailable.")
+		}
+	}
+	if !instanceMemoryCapacity(total, live, minecraftNetworkProxyMemoryMiB) || !instanceMemoryCapacity(total, boot, minecraftNetworkProxyMemoryMiB) {
+		return instanceRuntimeFailure("Minecraft Network cannot start all selected servers within available memory. Reduce server memory limits, select fewer Network servers, or stop another standalone server. Both running and Start on Boot reservations must fit.")
+	}
+	return nil
 }

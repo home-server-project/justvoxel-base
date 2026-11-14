@@ -3898,8 +3898,9 @@ if (minecraftOpen && minecraftDialog) {
       const runtimeState = String(minecraft.state || "").toLowerCase();
       running.checked = runtimeState === "running";
       running.disabled = !minecraft.configured || !["running", "stopped"].includes(runtimeState);
-      boot.checked = Boolean(settings.start_on_boot);
-      boot.disabled = !payload.configured || !["running", "stopped"].includes(runtimeState);
+      boot.checked = Boolean(settings.network_member || settings.start_on_boot);
+      if (settings.network_member) boot.closest('label').querySelector('span').textContent = 'Start on Boot · Managed by Network';
+      boot.disabled = Boolean(settings.network_member) || !payload.configured || !["running", "stopped"].includes(runtimeState);
       const selectedID = context.selected.id;
       const selectedRequest = (path, body) => requestWorkspaceJSON(path + "?" + new URLSearchParams({server: selectedID}), {method: "POST", body});
       const requiresCondition = plan => plan.compatibility_blocked || Object.entries(plan).some(([key, value]) => key.endsWith("_required") && value === true);

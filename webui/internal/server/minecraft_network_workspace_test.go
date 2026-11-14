@@ -204,6 +204,14 @@ func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if path == "static/minecraft-servers.css" {
+			// Only the approved, scoped lifecycle warning may extend the frozen CSS.
+			const warning = "\n.minecraft-server-inventory [data-server-feedback].notice.warning { border: 1px solid var(--jv-warning); background: #4c3f1f55; }\n@media (prefers-color-scheme: light) { .minecraft-server-inventory [data-server-feedback].notice.warning { background: #fff7df; } }\n"
+			if !strings.HasSuffix(string(data), warning) {
+				t.Fatal("scoped Minecraft Servers warning must use the existing warning variable and colors")
+			}
+			data = []byte(strings.TrimSuffix(string(data), warning))
+		}
 		if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != want {
 			t.Errorf("stylesheet changed outside approved Network correction: %s", path)
 		}

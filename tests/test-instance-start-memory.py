@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = (REPO / 'mjust/libexec/validate-instance-start-memory').read_text()
@@ -27,7 +28,8 @@ class StartupMemory(unittest.TestCase):
         meminfo.write_text('MemTotal: 8055808 kB\nMemAvailable: 999999999 kB\nSwapTotal: 999999999 kB\n')  # 7867 MiB
         self.ns = {}
         exec(compile(DEFINITIONS, str(REPO / 'mjust/libexec/validate-instance-start-memory'), 'exec'), self.ns)
-        self.ns.update(ROOT=self.root, QUADLETS=self.quadlets, MEMINFO=meminfo, command=self.command)
+        self.network = base / 'network' / 'state.json'
+        self.ns.update(NETWORK=self.network, ROOT=self.root, QUADLETS=self.quadlets, MEMINFO=meminfo, command=self.command)
         self.states = {}
         self.config('jv-aaaaaa', '6G')
         self.config('jv-bbbbbb', '6G')
@@ -49,6 +51,82 @@ class StartupMemory(unittest.TestCase):
 
     def admit(self):
         self.ns['admit']('jv-bbbbbb')
+
+    def network_state(self, enabled):
+        self.network.parent.mkdir(mode=0o700, exist_ok=True)
+        state = {'schema': 1, 'config': {'enabled': enabled, 'java_port': 25565, 'bedrock_port': 19132, 'members': [], 'welcome_message': ''}, 'forwarding_secret': 'a' * 64, 'floodgate_key': 'YWFhYWFhYWFhYWFhYWFhYQ=='}
+        self.network.write_text(json.dumps(state))
+        self.network.chmod(0o600)
+
+    def test_network_proxy_exact_boundary_and_disabled(self):
+        self.config('jv-bbbbbb', '2048M')
+        self.ns['MEMINFO'].write_text('MemTotal: 3670016 kB\n')  # 2048 + 512 + 1024
+        self.network_state(True)
+        self.admit()
+        self.ns['MEMINFO'].write_text('MemTotal: 3668992 kB\n')
+        with self.assertRaises(ValueError):
+            self.admit()
+        self.network_state(False)
+        self.ns['MEMINFO'].write_text('MemTotal: 3145728 kB\n')  # 2048 + 1024, no Velocity
+        self.admit()
+        self.ns['MEMINFO'].write_text('MemTotal: 3144704 kB\n')
+        with self.assertRaises(ValueError):
+            self.admit()
+
+    def test_network_active_limits_and_proxy_count_once(self):
+        self.config('jv-aaaaaa', '2048M')
+        self.config('jv-bbbbbb', '2048M')
+        self.network_state(True)
+        self.states['jv-bbbbbb'] = 'activating'
+        for state in ('active', 'activating', 'reloading'):
+            with self.subTest(state=state):
+                self.states['jv-aaaaaa'] = state
+                self.ns['MEMINFO'].write_text('MemTotal: 5767168 kB\n')  # 4096 + 512 + 1024
+                self.admit()
+                self.ns['MEMINFO'].write_text('MemTotal: 5766144 kB\n')
+                with self.assertRaises(ValueError):
+                    self.admit()
+
+    def test_untrusted_network_state_fails_closed(self):
+        for mutation in ('malformed', 'schema', 'enabled', 'mode', 'symlink', 'directory_symlink', 'owner'):
+            with self.subTest(mutation=mutation):
+                self.network_state(True)
+                original = self.network.read_text()
+                if mutation == 'malformed':
+                    self.network.write_text('{')
+                elif mutation in ('schema', 'enabled'):
+                    state = json.loads(original)
+                    if mutation == 'schema':
+                        state['schema'] = 2
+                    else:
+                        state['config']['enabled'] = 'false'
+                    self.network.write_text(json.dumps(state))
+                elif mutation == 'mode':
+                    self.network.chmod(0o644)
+                elif mutation == 'symlink':
+                    other = self.network.with_name('other.json')
+                    other.write_text(original)
+                    other.chmod(0o600)
+                    self.network.unlink()
+                    self.network.symlink_to(other)
+                elif mutation == 'directory_symlink':
+                    parent = self.network.parent
+                    renamed = parent.with_name('renamed')
+                    parent.rename(renamed)
+                    parent.symlink_to(renamed, target_is_directory=True)
+                else:
+                    # Model foreign ownership without requiring a privileged test runner.
+                    with patch('os.geteuid', return_value=os.geteuid() + 1):
+                        with self.assertRaises(ValueError):
+                            self.ns['network_reservation']()
+                    continue
+                with self.assertRaises(ValueError):
+                    self.admit()
+                if mutation == 'directory_symlink':
+                    parent.unlink()
+                    renamed.rename(parent)
+                if mutation == 'symlink':
+                    self.network.unlink()
 
     def test_stopped_configs_and_many_installed_are_ignored(self):
         self.config('jv-cccccc', '6G')

@@ -220,6 +220,13 @@ func (a *App) independentServerSummary(ctx context.Context, session string, inst
 			s.setState(status.State)
 		}
 	}
+	if s.NetworkMember {
+		s.StartOnBoot = true
+		s.CanConfigureBoot = false
+		if s.CanStart {
+			s.CanSwitch = true
+		}
+	}
 	// A summary whose configuration cannot be checked offers no lifecycle controls.
 	if !s.ConfigurationAvailable {
 		s.CanStart, s.CanStop, s.CanRestart = false, false, false

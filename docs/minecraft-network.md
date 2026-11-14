@@ -54,9 +54,37 @@ Forge 1.13–1.20.1 range that needs it. PCF includes its own CrossStitch suppor
 no separate CrossStitch mod is installed or configured.
 If no verified compatible artifact exists, Apply fails before downtime and leaves
 the server unchanged. Apply saves the complete network definition, starts the
-infrastructure, and restarts backends that were running before the change. Their
-Start on Boot choices are retained. Removing a member or disabling the network
-restores its saved standalone publications and managed cross-play configuration.
+infrastructure, and requests Start for every selected member, including servers
+that were stopped before Apply. An enabled Network owns its active members'
+running and boot lifecycle: every member is expected to run. Previously running
+servers removed from Network are restarted in standalone mode; previously stopped
+unselected servers are not started, including when Network is disabled.
+
+Membership temporarily makes generated member services start at host boot without
+changing the saved standalone **Start on Boot** preference. Minecraft Servers
+shows effective boot enabled and **Managed by Network**, with that control locked.
+Removing a member or disabling Network restores its original standalone boot
+preference, publications and managed cross-play configuration. Individual Stop is
+blocked while membership is active; remove the server from Network or disable
+Network first. Start remains available for a stopped or failed member, and Restart
+remains available for maintenance. Internal maintenance can still stop members
+safely. If a member cannot start after Apply saves the configuration, the saved
+configuration remains committed and status shows the actual stopped or failed
+state; check server status and retry Start.
+
+Before compatibility preparation or downtime, Apply validates two complete
+configured RAM reservations against physical memory. The immediate runtime budget
+includes every selected member (even stopped selections) and other active or
+starting standalone servers. The reboot budget includes every selected member
+regardless of its saved boot preference, plus standalone servers with saved Start
+on Boot enabled, even when currently stopped. Each budget counts a server once,
+adds **512 MiB for Velocity** and the existing **1 GiB appliance reserve**, and
+must fit. Reduce memory limits, select fewer members, or stop a standalone server
+when capacity is insufficient; stopping a boot-enabled standalone server does not
+remove its reboot reservation. Individual Start and the startup guard also reserve
+Velocity once while Network is enabled. Disabled Network does not reserve
+Velocity. Accounting uses configured container limits, never current RSS or free
+memory.
 A member must leave the network before it can be deleted or reset.
 
 The defaults are Java TCP 25565 and Bedrock TCP/UDP 19132, matching JustVoxel's

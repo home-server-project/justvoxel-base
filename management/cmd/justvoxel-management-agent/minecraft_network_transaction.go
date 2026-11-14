@@ -72,6 +72,13 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 	if err != nil {
 		return err
 	}
+	snapshot, _, _, err := b.snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if err = b.admitNetworkMemory(ctx, snapshot.TotalMemoryMiB, records, c); err != nil {
+		return err
+	}
 	after := before
 	after.Config = c
 	after.Imported = append([]string{}, before.Imported...)
@@ -141,10 +148,6 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 				}
 			}
 		}
-	}
-	snapshot, _, _, err := b.snapshot(ctx)
-	if err != nil {
-		return err
 	}
 	snapshot.NetworkTransition = true
 	rendered, err := b.render(snapshot, nextRecords)
@@ -428,8 +431,17 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 			result = errors.Join(result, instanceRuntimeFailure(networkNotReadyMessage))
 		}
 	}
-	if networkRestartStopped(ctx, b, stopped) != nil {
-		result = errors.Join(result, instanceRuntimeFailure("Minecraft Network configuration was saved, but one or more previously running servers could not be started. Use their normal Start controls after checking server status."))
+	startIDs := append([]string{}, stopped...)
+	if c.Enabled {
+		for _, record := range nextRecords {
+			if record.NetworkMember && !networkContains(startIDs, record.Runtime.ID) {
+				startIDs = append(startIDs, record.Runtime.ID)
+			}
+		}
+	}
+	sort.Strings(startIDs)
+	if networkStartCommitted(ctx, b, startIDs) != nil {
+		result = errors.Join(result, instanceRuntimeFailure("Minecraft Network configuration was saved, but one or more Network-managed or previously running servers could not be started. Check server status and use their normal Start controls."))
 	}
 	return result
 }
@@ -474,6 +486,20 @@ func networkRestartStopped(ctx context.Context, b *instanceRuntimeBackend, ids [
 	}
 	return errors.Join(failures...)
 }
+
+// After durable commit, every selected member receives normal Start semantics,
+// including safely failed members and already-running idempotent requests.
+func networkStartCommitted(ctx context.Context, b *instanceRuntimeBackend, ids []string) error {
+	var failures []error
+	for _, id := range ids {
+		if err := networkPending(b); err != nil {
+			return err
+		}
+		failures = append(failures, b.action(ctx, id, "start"))
+	}
+	return errors.Join(failures...)
+}
+
 func instanceReservedPorts(c minecraftInstanceRuntimeConfig) []int {
 	if c.Software == "bedrock" {
 		ports := []int{c.BedrockTCPPort}
@@ -798,7 +824,7 @@ func networkQuadlets(n minecraftNetworkState) map[string][]byte {
 	guard := "\n[Service]\nExecStartPre=" + minecraftNetworkHelper + " check\nRestart=always\nRestartSec=10\nTimeoutStartSec=900\nTimeoutStopSec=240\n[Install]\nWantedBy=multi-user.target\n"
 	return map[string][]byte{
 		minecraftNetworkName + ".network": []byte("[Network]\nNetworkName=" + minecraftNetworkName + "\nDriver=bridge\n"),
-		"justvoxel-velocity.container":    []byte(unit + "Image=docker.io/itzg/mc-proxy:java25\nContainerName=justvoxel-velocity\nNetworkAlias=justvoxel-velocity\nEnvironment=TYPE=VELOCITY\nEnvironment=MEMORY=512m\nEnvironment=ENABLE_RCON=false\nEnvironment=SKIP_CHOWN_DATA=true\nVolume=" + minecraftNetworkRoot + "/velocity:/server:Z\n" + fmt.Sprintf("PublishPort=%d:25565/tcp\nPublishPort=%d:19132/tcp\nPublishPort=%d:19132/udp\n", n.Config.JavaPort, n.Config.BedrockPort, n.Config.BedrockPort) + "LogDriver=journald\n" + strings.Replace(guard, " check\n", " start-velocity\n", 1)),
+		"justvoxel-velocity.container":    []byte(unit + "Image=docker.io/itzg/mc-proxy:java25\nContainerName=justvoxel-velocity\nNetworkAlias=justvoxel-velocity\nEnvironment=TYPE=VELOCITY\nEnvironment=MEMORY=" + fmt.Sprint(minecraftNetworkProxyMemoryMiB) + "m\nEnvironment=ENABLE_RCON=false\nEnvironment=SKIP_CHOWN_DATA=true\nVolume=" + minecraftNetworkRoot + "/velocity:/server:Z\n" + fmt.Sprintf("PublishPort=%d:25565/tcp\nPublishPort=%d:19132/tcp\nPublishPort=%d:19132/udp\n", n.Config.JavaPort, n.Config.BedrockPort, n.Config.BedrockPort) + "LogDriver=journald\n" + strings.Replace(guard, " check\n", " start-velocity\n", 1)),
 	}
 }
 func networkPublishWhitelist(ctx context.Context, b *instanceRuntimeBackend, before, after minecraftNetworkState) error {

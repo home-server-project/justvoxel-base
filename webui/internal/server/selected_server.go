@@ -146,6 +146,13 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 		raw, _ := json.Marshal(current)
 		var minecraft map[string]any
 		_ = json.Unmarshal(raw, &minecraft)
+		if connections, ok := a.api.(interface {
+			MinecraftInstanceConnection(context.Context, string, string) (api.MinecraftConnection, error)
+		}); ok {
+			if connection, err := connections.MinecraftInstanceConnection(r.Context(), session, selected.ID); err == nil && connection.ID == selected.ID {
+				minecraft["network_member"] = connection.NetworkMember
+			}
+		}
 		minecraft["server_type"] = current.Software
 		minecraft["version_mode"] = current.VersionPolicy
 		if current.VersionPolicy == "" {

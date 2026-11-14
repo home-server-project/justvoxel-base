@@ -628,3 +628,30 @@ func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftI
 	}
 	return id, nil
 }
+
+const networkManagedStopMessage = "This server is managed by Minecraft Network. Remove it from Network or disable Minecraft Network before stopping it."
+
+// Public lifecycle protection deliberately leaves maintenance Stop callers intact.
+func (b *instanceRuntimeBackend) publicActionWithWarnings(ctx context.Context, id, action string, warnings bool) error {
+	if action == "stop" {
+		record, err := b.readRecord(id)
+		if err != nil {
+			return err
+		}
+		network, err := networkRead(b)
+		if err != nil {
+			return err
+		}
+		if network.Config.Enabled && record.NetworkMember {
+			return instanceRuntimeFailure(networkManagedStopMessage)
+		}
+	}
+	return b.actionWithWarnings(ctx, id, action, warnings)
+}
+
+func networkProtectBootPreference(record instanceRuntimeRecord, requested bool) error {
+	if record.NetworkMember && requested != record.Runtime.StartOnBoot {
+		return instanceRuntimeFailure("Start on Boot is managed by Minecraft Network. Remove this server from Network or disable Minecraft Network before changing its standalone boot preference.")
+	}
+	return nil
+}

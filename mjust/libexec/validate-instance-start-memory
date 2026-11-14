@@ -4,6 +4,7 @@ set -euo pipefail
 # complete limit even before their own preparation acquires that lock.
 [[ $EUID == 0 && $# == 1 && $1 =~ ^jv-[a-z0-9]{6,12}$ ]] || exit 1
 python3 - "$1" <<'PY'
+import base64
 import json
 import os
 import re
@@ -15,6 +16,8 @@ from pathlib import Path
 ROOT = Path('/etc/justvoxel/instances')
 QUADLETS = Path('/etc/containers/systemd')
 MEMINFO = Path('/proc/meminfo')
+NETWORK = Path('/etc/justvoxel/minecraft-network/state.json')
+NETWORK_PROXY_MEMORY_MIB = 512
 ID = re.compile(r'jv-[a-z0-9]{6,12}')
 
 
@@ -54,6 +57,72 @@ def limit(identifier):
     return value
 
 
+def network_reservation():
+    # A missing optional state means disabled; unsafe paths never mean disabled.
+    if NETWORK.resolve() != NETWORK:
+        raise ValueError()
+    try:
+        info = NETWORK.parent.lstat()
+    except FileNotFoundError:
+        return 0
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o700:
+        raise ValueError()
+    try:
+        state = private_json(NETWORK)
+    except FileNotFoundError:
+        return 0
+    if type(state.get('schema')) is not int or state['schema'] != 1 or set(state) - {'schema', 'config', 'imported', 'whitelist', 'forwarding_secret', 'floodgate_key', 'firewall'}:
+        raise ValueError()
+    config = state['config']
+    if type(config.get('enabled')) is not bool or set(config) - {'enabled', 'java_port', 'bedrock_port', 'members', 'welcome_message', 'whitelist_enforced'}:
+        raise ValueError()
+    ports = [config['java_port'], config['bedrock_port']]
+    if any(type(port) is not int or not 1024 <= port <= 65535 for port in ports) or ports[0] == ports[1]:
+        raise ValueError()
+    members = config.get('members')
+    if members is None:
+        members = []
+    if not isinstance(members, list) or len(members) > 27 or any(not isinstance(member, str) or not ID.fullmatch(member) for member in members) or len(set(members)) != len(members):
+        raise ValueError()
+    welcome = config.get('welcome_message', '')
+    if not isinstance(welcome, str) or len(welcome.encode()) > 512 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in welcome):
+        raise ValueError()
+    if config.get('whitelist_enforced') is not None and type(config['whitelist_enforced']) is not bool:
+        raise ValueError()
+    # Match the authoritative schema's typed private fields as well as the
+    # capacity-bearing switch. Corrupt state must not become disabled evidence.
+    imported = state.get('imported')
+    if imported is not None and (not isinstance(imported, list) or any(not isinstance(value, str) for value in imported)):
+        raise ValueError()
+    whitelist = state.get('whitelist')
+    if whitelist is not None:
+        if not isinstance(whitelist, list):
+            raise ValueError()
+        for player in whitelist:
+            if not isinstance(player, dict) or set(player) - {'uuid', 'name'} or not re.fullmatch(r'[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}', player.get('uuid', '')):
+                raise ValueError()
+            name = player.get('name', '')
+            if not isinstance(name, str) or not 1 <= len(name.encode()) <= 32 or any(c in name for c in ('\x00', '\r', '\n')):
+                raise ValueError()
+    firewall = state.get('firewall')
+    if firewall is not None:
+        if not isinstance(firewall, list):
+            raise ValueError()
+        for rule in firewall:
+            if not isinstance(rule, dict) or set(rule) - {'zone', 'port', 'permanent', 'protocol'} or not isinstance(rule.get('zone', ''), str) or type(rule.get('port', 0)) is not int or type(rule.get('permanent', False)) is not bool or not isinstance(rule.get('protocol', ''), str):
+                raise ValueError()
+    secret = state.get('forwarding_secret', '')
+    key = state.get('floodgate_key')
+    if not isinstance(secret, str) or (key is not None and not isinstance(key, str)):
+        raise ValueError()
+    key = base64.b64decode(key or '', validate=True)
+    if config['enabled']:
+        if not re.fullmatch(r'[a-fA-F0-9]{32,128}', secret) or len(key) != 16:
+            raise ValueError()
+        return NETWORK_PROXY_MEMORY_MIB
+    return 0
+
+
 def admit(candidate):
     if not ID.fullmatch(candidate):
         raise ValueError()
@@ -82,7 +151,7 @@ def admit(candidate):
         if not ID.fullmatch(identifier):
             raise ValueError()
         identifiers.add(identifier)
-    used = limit(candidate)
+    used = limit(candidate) + network_reservation()
     for identifier in sorted(identifiers):
         if identifier == candidate:
             continue

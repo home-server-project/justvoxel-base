@@ -655,7 +655,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			files = f
 		}
 	}
-	if next.Runtime.StartOnBoot {
+	if next.Runtime.StartOnBoot || next.NetworkMember {
 		if err = b.admitMemory(ctx, snapshot.TotalMemoryMiB, records, next.Runtime, true); err != nil {
 			return err
 		}

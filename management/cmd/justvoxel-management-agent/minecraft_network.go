@@ -249,6 +249,12 @@ func networkOverlay(f minecraftInstanceRuntimeFiles, r instanceRuntimeRecord) (m
 	if !networkRecordEligible(r.Runtime) {
 		return f, instanceRuntimeFailure("This server software remains standalone.")
 	}
+	// The overlay changes only generated boot ownership, never the saved preference.
+	if !bytes.Contains(f.Quadlet, []byte("[Install]")) {
+		f.Quadlet = append(f.Quadlet, []byte("\n[Install]\nWantedBy=multi-user.target\n")...)
+	} else if !bytes.Contains(f.Quadlet, []byte("WantedBy=multi-user.target")) {
+		f.Quadlet = bytes.Replace(f.Quadlet, []byte("[Install]\n"), []byte("[Install]\nWantedBy=multi-user.target\n"), 1)
+	}
 	profile, _ := networkBackendProfile(r.Runtime.Software)
 	f.Quadlet = regexp.MustCompile(`(?m)^PublishPort=.*\n`).ReplaceAll(f.Quadlet, nil)
 	f.Quadlet = bytes.Replace(f.Quadlet, []byte("[Container]\n"), []byte("[Container]\nNetwork="+minecraftNetworkName+".network\nNetworkAlias="+r.Runtime.ID+"\n"), 1)
@@ -419,7 +425,7 @@ func (s *server) minecraftNetworkConnection(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	java, bedrock, enabled := record.Runtime.JavaPort, record.Runtime.BedrockPort, record.Runtime.BedrockEnabled
-	member := n.Config.Enabled && networkContains(n.Config.Members, id)
+	member := n.Config.Enabled && record.NetworkMember
 	if member {
 		java, bedrock, enabled = n.Config.JavaPort, n.Config.BedrockPort, true
 	}

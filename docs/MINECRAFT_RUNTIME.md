@@ -24,8 +24,9 @@ the ID cannot. Typical active files include
 `/etc/justvoxel/instances/<id>/minecraft.env`, and
 `/etc/containers/systemd/minecraft-<id>.container`. Persistent data normally lives
 below `<appliance storage root>/minecraft-instances/<id>/data`. Stopped instances
-continue to reserve their configured ports and memory so a sibling cannot take
-resources needed for their next start.
+continue to reserve their configured ports. Their stored container limits are
+checked again at Start and when admitting boot configuration; stopped standalone
+servers do not consume the live running memory budget.
 
 Software/version changes use reviewed, per-instance maintenance transactions with
 player checks, cold backup, graceful stop, rendering, restart, verification, and
@@ -130,9 +131,19 @@ The default appliance storage root `/var/lib/justvoxel` yields `/var/lib/justvox
 
 The trusted internal caller must supply **every configured instance, including stopped instances**, plus a fresh appliance physical RAM/configured-storage snapshot. There is no fixed-server port or memory reservation. This phase does not yet provide the authoritative persistent multi-instance configuration store or activation lock. Validation reserves Java TCP and managed Geyser TCP/UDP ports, rejects collisions across all configured instances, and checks the 1–65535 range. A managed Geyser reservation cannot share its numeric port with Java or another Geyser instance. Unrelated TCP and UDP listeners may share a numeric port when neither conflicts with managed Geyser. Disabled Bedrock requires a zero port. Phase 2 originally rejected enabled instance Bedrock after validation. Phase 3B adds the independent startup helper described below; the legacy global `managed-crossplay-start` is never attached to independent units.
 
-Memory uses positive `M`/`G` values (case insensitive), between 512 MiB and 1 TiB per quantity. Each container must allow at least 512 MiB above its Java allocation. Combined configured container limits, including stopped instances, must leave at least 1 GiB of physical RAM for the appliance. Free memory, listening sockets, swap, and zram do not determine reservations. Startup values and immutable IDs are validated before any output is returned; malformed JSON and unknown fields are rejected by the internal decoder. There are no arbitrary environment, image repository, unit, or data-path overrides.
+Memory uses positive `M`/`G` values (case insensitive), between 512 MiB and 1 TiB per quantity. Each container must allow at least 512 MiB above its Java allocation. Admitted live and boot reservation sets must each leave at least 1 GiB of physical RAM for the appliance; installed stopped standalone instances are not live reservations. Free memory, listening sockets, swap, and zram do not determine reservations. Startup values and immutable IDs are validated before any output is returned; malformed JSON and unknown fields are rejected by the internal decoder. There are no arbitrary environment, image repository, unit, or data-path overrides.
 
-Start on Boot ON renders `[Install]` with `WantedBy=multi-user.target`. OFF omits boot installation while retaining the complete Quadlet for manual service startup after explicit activation. It is independent of running state and never calls `systemctl enable` on generated services. The runtime preserves `:Z`, journald, `Restart=always`, `RestartSec=10`, `StopTimeout=180`, `TimeoutStartSec=900`, and `TimeoutStopSec=240`.
+Memory admission uses configured container limits and physical RAM, retaining the
+1 GiB appliance reserve. Live Start counts active/activating instances and the
+candidate once; stopped standalone instances do not consume live reservations.
+Boot admission counts standalone saved Start on Boot preferences and authoritative
+Network members regardless of their saved preference. Enabled Minecraft Network
+adds one 512 MiB Velocity reservation to both budgets and to the startup guard.
+Network Apply checks the complete desired runtime and reboot sets before
+preparation or downtime, including all selected members it will start. Unknown
+runtime or untrusted Network evidence fails closed.
+
+Start on Boot ON renders `[Install]` with `WantedBy=multi-user.target`. OFF omits boot installation while retaining the complete Quadlet for manual service startup after explicit activation. Active Network membership overlays boot installation without changing that saved preference; removal restores standalone rendering. It is independent of running state and never calls `systemctl enable` on generated services. The runtime preserves `:Z`, journald, `Restart=always`, `RestartSec=10`, `StopTimeout=180`, `TimeoutStartSec=900`, and `TimeoutStopSec=240`.
 
 `validate-instance-data-mount` receives the immutable ID, storage root, derived data path, and configured mount identity directly from the Quadlet. It does not load legacy configuration. It requires existing canonical directories, rejects symlinks and another instance's path, and checks the exact configured mount's UUID/source with the established identity function. Configured mounts require identity evidence. `RequiresMountsFor` remains present. The helper performs no world creation, permission repair, or SELinux changes.
 

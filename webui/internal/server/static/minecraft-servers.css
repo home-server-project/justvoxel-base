@@ -43,3 +43,6 @@
 @media (max-width: 700px) { .minecraft-server-inventory .minecraft-server-entries { grid-template-columns: min(100%,420px); } }
 
 @container (max-width: 600px) { .minecraft-server-inventory .minecraft-server-entries { grid-template-columns: min(100%,420px); } }
+
+.minecraft-server-inventory [data-server-feedback].notice.warning { border: 1px solid var(--jv-warning); background: #4c3f1f55; }
+@media (prefers-color-scheme: light) { .minecraft-server-inventory [data-server-feedback].notice.warning { background: #fff7df; } }

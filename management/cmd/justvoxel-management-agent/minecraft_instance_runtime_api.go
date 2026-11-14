@@ -198,6 +198,9 @@ func (s *server) instanceRuntimeConfigure(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return err
 		}
+		if err := networkProtectBootPreference(old, request.Runtime.StartOnBoot); err != nil {
+			return err
+		}
 		next := old
 		next.Runtime = request.Runtime.runtime(id, old.Runtime.UID, old.Runtime.GID, old.Runtime.RCONPassword)
 		next.Runtime.ImageDigest = old.Runtime.ImageDigest
@@ -411,7 +414,7 @@ func (s *server) instanceRuntimeAction(w http.ResponseWriter, r *http.Request, a
 	if request.ConfirmPlayers != nil {
 		warnings = *request.ConfirmPlayers
 	}
-	err = instanceRuntimes.actionWithWarnings(ctx, id, action, warnings)
+	err = instanceRuntimes.publicActionWithWarnings(ctx, id, action, warnings)
 	cancel()
 	releaseErr := release()
 	var confirmation *instancePlayersConfirmation
