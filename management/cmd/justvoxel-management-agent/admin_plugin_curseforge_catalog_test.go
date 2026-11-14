@@ -587,7 +587,11 @@ func TestCurseForgeDiscoverServerEnvironment(t *testing.T) {
 						t.Fatal(err)
 					}
 					update := func(f *curseForgeFile) {
-						f.GameVersions = append([]string{"1.21.8", "Fabric"}, markers...)
+						platform := "Fabric"
+						if loader == "paper" {
+							platform = "Paper"
+						}
+						f.GameVersions = append([]string{"1.21.8", platform}, markers...)
 					}
 					if r.URL.Path == "/v1/mods/10/files" {
 						var files []curseForgeFile
