@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -67,11 +69,26 @@ func openContentDirectory(dataPath, target string) (*os.File, error) {
 	}
 	return os.NewFile(uintptr(fd), "mods"), nil
 }
-func verifyContentStartup(path string, expected []string, target string) error {
+func verifyContentStartup(ctx context.Context, instanceID, path string, expected []string, target string, server pluginServerContext) error {
+	if target != javaServerContentKind(server.ServerType) {
+		return errors.New("Content runtime server context mismatch")
+	}
 	if target == "mods" {
-		return nil
-	} // Runtime health is checked independently; arbitrary mod functionality is not proven.
-	return verifyPluginStartup(path, expected)
+		return nil // Runtime health is checked independently; arbitrary mod functionality is not proven.
+	}
+	if javaServerPaperFamily(server.ServerType) {
+		return verifyPluginStartup(path, expected)
+	}
+	if server.ServerType != "spigot" || validatePluginInstance(instanceID, "") != nil || server.InstanceID != instanceID {
+		return errors.New("Unsupported plugin runtime server context")
+	}
+	probe, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	raw, err := pluginInstallCommand(probe, "podman", "exec", "minecraft-"+instanceID, "rcon-cli", "plugins")
+	if err != nil || !spigotPluginNamesLoaded(raw, expected) {
+		return errors.New("Installed plugin runtime state could not be verified")
+	}
+	return nil
 }
 
 func modDescriptor(loader string) string {

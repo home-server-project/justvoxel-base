@@ -227,12 +227,30 @@ func curseForgeRelease(n int) string {
 	}
 	return ""
 }
-func curseForgeCompatible(f curseForgeFile, server pluginServerContext) bool {
-	if server.MinecraftVersion == "" || !slices.Contains(f.GameVersions, server.MinecraftVersion) {
-		return false
+
+// Exact provider platform markers only. Numeric Minecraft versions, generic
+// category labels and unrelated words never establish a server platform.
+func curseForgePlatforms(f curseForgeFile) []string {
+	out := []string{}
+	for _, marker := range f.GameVersions {
+		platform := strings.ToLower(marker)
+		switch platform {
+		case "bukkit", "spigot", "paper", "purpur", "pufferfish", "leaf", "fabric", "forge", "neoforge", "quilt":
+			if !slices.Contains(out, platform) {
+				out = append(out, platform)
+			}
+		}
 	}
-	_, loader := curseForgeLoader(server)
-	return javaServerContentKind(server.ServerType) == "plugins" || loader != "" && slices.Contains(f.GameVersions, loader)
+	return out
+}
+func curseForgeCompatible(f curseForgeFile, server pluginServerContext) bool {
+	return server.MinecraftVersion != "" && slices.Contains(f.GameVersions, server.MinecraftVersion) && pluginLoaderOverlap(curseForgePlatforms(f), server.ServerType)
+}
+
+// Missing plugin platform evidence is eligible for exact artifact Review, not
+// positive catalog compatibility. Explicit contradictory platforms still fail.
+func curseForgeArtifactEligible(f curseForgeFile, server pluginServerContext) bool {
+	return curseForgeCompatible(f, server) || javaServerContentKind(server.ServerType) == "plugins" && server.MinecraftVersion != "" && slices.Contains(f.GameVersions, server.MinecraftVersion) && len(curseForgePlatforms(f)) == 0
 }
 
 var curseForgeSHA1 = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -345,7 +363,7 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 	if a.VersionNumber == "" {
 		a.VersionNumber = f.Filename
 	}
-	if !positiveCurseForgeID(project) || strconv.FormatInt(f.ModID, 10) != project || f.Game != scope.Game || !positiveCurseForgeID(a.VersionID) || !f.Available || f.Status != 4 || f.Release != 1 || !curseForgeCompatible(f, server) || len(a.VersionNumber) > 256 || len(f.Dependencies) > 128 || len(f.Hashes) > 8 || len(f.GameVersions) > 256 {
+	if !positiveCurseForgeID(project) || strconv.FormatInt(f.ModID, 10) != project || f.Game != scope.Game || !positiveCurseForgeID(a.VersionID) || !f.Available || f.Status != 4 || f.Release != 1 || !curseForgeArtifactEligible(f, server) || len(a.VersionNumber) > 256 || len(f.Dependencies) > 128 || len(f.Hashes) > 8 || len(f.GameVersions) > 256 {
 		return a, errors.New("CurseForge file identity, availability or exact server compatibility could not be verified")
 	}
 	for _, h := range f.Hashes {
@@ -479,11 +497,11 @@ func selectCurseForgeFile(ctx context.Context, project string, server pluginServ
 			if discover && !curseForgeDiscoverServerCapable(v, server) {
 				continue
 			}
-			if !v.Available || v.Status != 4 || curseForgeRelease(v.Release) == "" || release && v.Release != 1 || compatible && !curseForgeCompatible(v, server) {
+			if !v.Available || v.Status != 4 || curseForgeRelease(v.Release) == "" || release && v.Release != 1 || compatible && !(curseForgeCompatible(v, server) || !discover && curseForgeArtifactEligible(v, server)) {
 				continue
 			}
 			_, loader := curseForgeLoader(server)
-			if loader != "" && !slices.Contains(v.GameVersions, loader) {
+			if loader != "" && !slices.Contains(curseForgePlatforms(v), strings.ToLower(loader)) {
 				continue
 			}
 			exact, err := exactCurseForgeFile(ctx, project, strconv.FormatInt(v.ID, 10))
@@ -493,7 +511,7 @@ func selectCurseForgeFile(ctx context.Context, project string, server pluginServ
 			if discover && !curseForgeDiscoverServerCapable(exact, server) {
 				continue
 			}
-			if !exact.Available || exact.Status != 4 || curseForgeRelease(exact.Release) == "" || release && exact.Release != 1 || compatible && !curseForgeCompatible(exact, server) || loader != "" && !slices.Contains(exact.GameVersions, loader) {
+			if !exact.Available || exact.Status != 4 || curseForgeRelease(exact.Release) == "" || release && exact.Release != 1 || compatible && !(curseForgeCompatible(exact, server) || !discover && curseForgeArtifactEligible(exact, server)) || loader != "" && !slices.Contains(curseForgePlatforms(exact), strings.ToLower(loader)) {
 				continue
 			}
 			return &exact, nil
@@ -557,16 +575,16 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 			} else if f == nil {
 				continue
 			} else {
-				loaders := []string{}
-				if _, loader := curseForgeLoader(server); loader != "" {
-					loaders = append(loaders, loader)
-				}
+				loaders := curseForgePlatforms(*f)
 				project.Version = &pluginCatalogVersion{ID: strconv.FormatInt(f.ID, 10), ProjectID: id, Number: f.DisplayName, Type: curseForgeRelease(f.Release), Published: f.Published, GameVersions: f.GameVersions, Loaders: loaders, Dependencies: []pluginDependency{}}
 				for _, d := range f.Dependencies {
 					project.Version.Dependencies = append(project.Version.Dependencies, pluginDependency{Source: "CurseForge", ProjectID: strconv.FormatInt(d.ModID, 10), Type: curseForgeRelation(d.Relation)})
 				}
 				project.Compatible = curseForgeCompatible(*f, server)
 				project.Compatibility = "Not listed as compatible according to publisher metadata"
+				if javaServerContentKind(server.ServerType) == "plugins" && len(loaders) == 0 {
+					project.Compatibility = "Plugin platform compatibility unknown; exact artifact validation required during Review."
+				}
 				if project.Compatible {
 					project.Compatibility = "Compatible Minecraft/loader release. Dedicated-server eligibility is checked during Review."
 				}
@@ -696,6 +714,9 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 		a, err := curseForgeArtifact(ctx, f, project, server, scope)
 		if err != nil {
 			return err
+		}
+		if target == "plugins" && !curseForgeCompatible(f, server) {
+			plan.Compatibility = "Plugin platform compatibility unknown; exact JAR structure is checked before downtime and activation after restart."
 		}
 		a.Name, a.Requested = metadata.Name, parent == ""
 		if parent != "" {

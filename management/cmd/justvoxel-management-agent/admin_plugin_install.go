@@ -1823,7 +1823,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	for _, a := range created {
 		expected = append(expected, a.PluginName)
 	}
-	if err := verifyContentStartup(plan.DataPath, expected, javaServerContentKind(plan.Server.ServerType)); err != nil {
+	if err := verifyContentStartup(ctx, pluginInstanceID(ctx), plan.DataPath, expected, javaServerContentKind(plan.Server.ServerType), plan.Server); err != nil {
 		recordPluginFailure(s.operations, id, "startup_verification", err)
 		recordPluginStartupEvidence(s.operations, id, plan.DataPath, expected)
 		return rollback(err)
@@ -2553,7 +2553,7 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 			for _, a := range tx.Artifacts {
 				expected = append(expected, a.PluginName)
 			}
-			if err := verifyContentStartup(dataPath, expected, pluginTarget(tx.Target)); err != nil {
+			if err := verifyContentStartup(ctx, pluginInstanceID(ctx), dataPath, expected, pluginTarget(tx.Target), serverContext); err != nil {
 				writeError(w, 409, "Installed plugin runtime state could not be verified")
 				return
 			}

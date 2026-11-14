@@ -290,6 +290,21 @@ field is absent; malformed environment evidence fails closed. No side field is
 invented for Quilt or NeoForge. Unknown side evidence retains final runtime
 verification. Hangar retains its authoritative server-platform checks.
 
+Server capability inheritance is normalized centrally for every catalog result.
+Compatibility requires exact provider release Minecraft-version evidence and a
+matching accepted platform: Spigot accepts Bukkit/Spigot, never Paper-only;
+Paper-family software accepts its applicable inherited platforms. Mod loaders
+remain separate families. These rules are independent of Minecraft release number.
+CurseForge file platform markers are normalized case-insensitively. A Bukkit
+project classification alone does not establish file platform compatibility.
+Files without explicit platform evidence stay compatibility unknown in broad
+Discover and are excluded by Compatible only. They may proceed to exact artifact
+Review; vague metadata is never promoted to positive compatibility. Explicit
+incompatible platform evidence blocks installation. Downloaded JAR structure is
+checked before downtime: Spigot requires a direct usable Bukkit `plugin.yml`,
+while Paper-family descriptor acceptance is preserved. Runtime activation proof
+remains mandatory after restart and provider metadata cannot override failure.
+
 Compatibility means publisher Minecraft/loader compatibility, never verified
 third-party runtime compatibility. With Compatible only OFF, other Paper versions
 can be browsed without claiming compatibility. Unknown active Minecraft versions
@@ -475,9 +490,17 @@ placement has private durable transaction evidence under
 `/var/lib/justvoxel/management/plugin-install/<operation-id>/`.
 
 Minecraft starts for bounded RCON `rcon-cli list` readiness and the existing
-`verify-minecraft-stack` checks. `rcon-cli plugins` is not used for plugin identity.
-Every newly installed plugin/dependency must appear by exact descriptor name
-in the current Paper startup log, `<DataPath>/logs/latest.log`: both a Paper or
+`verify-minecraft-stack` checks. Activation proof is selected from authoritative
+server software, independently of Minecraft release number. Spigot uses a bounded,
+direct `podman exec minecraft-<instance> rcon-cli plugins` command without a shell.
+Every newly installed plugin/dependency must appear by exact normalized
+`plugin.yml` identity in that live enabled inventory. Disabled entries, malformed
+or oversized responses, duplicate identities and incomplete inventories fail
+verification. Formatting cannot manufacture a matching identity. Installation
+and recovery re-check use the same software-aware contract.
+
+For Paper, Purpur, Pufferfish and Leaf, every newly installed plugin/dependency
+must appear by exact descriptor name in the current Paper startup log, `<DataPath>/logs/latest.log`: both a Paper or
 Bukkit PluginInitializerManager inventory entry and `[PluginName] Enabling ...`
 evidence are required. The logger identity is authoritative even if the enable
 message spells the name differently. Only evidence after the last

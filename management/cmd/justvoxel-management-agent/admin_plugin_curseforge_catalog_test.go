@@ -40,7 +40,7 @@ func curseForgeCatalogFixture(t *testing.T, loader string) (*pluginInstallFixtur
 	c.MinecraftVersion = "1.21.8"
 	raw := f.jars["root.jar"]
 	class := int64(5)
-	versions := []string{"1.21.8"}
+	versions := []string{"1.21.8", "Bukkit"}
 	if c.ContentKind == "mods" {
 		if err := os.Mkdir(filepath.Join(f.data, "mods"), 0700); err != nil {
 			t.Fatal(err)
@@ -48,7 +48,7 @@ func curseForgeCatalogFixture(t *testing.T, loader string) (*pluginInstallFixtur
 		raw = resetModJar(t, loader)
 		class = 6
 		_, name := curseForgeLoader(c)
-		versions = append(versions, name, "Server")
+		versions = []string{"1.21.8", name, "Server"}
 	}
 	sum := sha1.Sum(raw)
 	file := curseForgeFile{ID: 20, ModID: 10, Game: 1, Available: true, Filename: "root.jar", DisplayName: "1", Size: int64(len(raw)), URL: "https://edge.forgecdn.net/files/1234/567/root.jar", GameVersions: versions, Release: 1, Status: 4, Published: "2026-01-01T00:00:00Z", Dependencies: []curseForgeDependency{}}
@@ -204,7 +204,7 @@ func curseForgeDiscoverFixture(t *testing.T, projects []curseForgeProject, rejec
 			if err != nil {
 				t.Fatal(err)
 			}
-			file := curseForgeFile{ID: 20, ModID: id, Game: 1, Available: true, Status: 4, Release: 1, Filename: "root.jar", DisplayName: "1", Size: 3, URL: "https://edge.forgecdn.net/files/123/456/root.jar", GameVersions: []string{"1.21.8"}}
+			file := curseForgeFile{ID: 20, ModID: id, Game: 1, Available: true, Status: 4, Release: 1, Filename: "root.jar", DisplayName: "1", Size: 3, URL: "https://edge.forgecdn.net/files/123/456/root.jar", GameVersions: []string{"1.21.8", "Bukkit"}}
 			file.Hashes = append(file.Hashes, struct {
 				Value string `json:"value"`
 				Algo  int    `json:"algo"`

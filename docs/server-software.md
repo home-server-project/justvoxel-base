@@ -53,7 +53,12 @@ proven or the user disables cross-play.
 Spigot's Hangar provider stays unavailable: the current Hangar platform mapping
 only proves Paper compatibility. Modrinth releases must explicitly include
 `spigot` or `bukkit` and the exact Minecraft version; installation also requires
-a usable Bukkit `plugin.yml` descriptor.
+a usable Bukkit `plugin.yml` descriptor. CurseForge exact file platform markers
+must provide positive evidence for Compatible only; absent evidence stays unknown
+and requires artifact validation. Platform inheritance and exact release checks
+apply independently of Minecraft release number. Spigot proves installed plugin
+activation from live RCON plugin inventory; the Paper family retains strict
+PluginInitializerManager startup-log proof.
 
 Geyser-Fabric and Geyser-NeoForge downloads come only from the fixed official
 GeyserMC download API. Their publisher SHA-256 hashes are checked before replacement.

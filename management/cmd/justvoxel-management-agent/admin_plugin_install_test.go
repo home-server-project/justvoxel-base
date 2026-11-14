@@ -24,6 +24,8 @@ import (
 )
 
 type pluginInstallFixture struct {
+	software           string
+	minecraftVersion   string
 	s                  *server
 	data               string
 	versions           map[string]pluginCatalogVersion
@@ -53,7 +55,7 @@ func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 
 func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginInstallFixture {
 	t.Helper()
-	f := &pluginInstallFixture{data: pluginTestDataFor(t, software, version), versions: map[string]pluginCatalogVersion{}, slugs: map[string]string{}, jars: map[string][]byte{}, active: true}
+	f := &pluginInstallFixture{software: software, minecraftVersion: version, data: pluginTestDataFor(t, software, version), versions: map[string]pluginCatalogVersion{}, slugs: map[string]string{}, jars: map[string][]byte{}, active: true}
 	if err := os.Mkdir(filepath.Join(f.data, "plugins"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -194,8 +196,13 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 		case command == "podman" && args[len(args)-1] == "list":
 			return []byte("There are 0 of a max of 20 players online:"), nil
 		case command == "podman" && args[len(args)-1] == "plugins":
-			t.Fatal("plugin identity must not use the RCON plugins command")
-			return nil, errors.New("unexpected RCON plugins command")
+			if software != "spigot" {
+				t.Fatal("Paper-family identity must use startup logs")
+			}
+			if f.missingPlugin || f.failedPlugin {
+				return []byte("Plugins (1): Dependency"), nil
+			}
+			return []byte("Plugins (2): Root, Dependency"), nil
 		default:
 			t.Fatalf("unexpected privileged command %s", action)
 			return nil, errors.New("unexpected")
@@ -299,7 +306,7 @@ func (f *pluginInstallFixture) addJar(t *testing.T, project, version, filename, 
 }
 func (f *pluginInstallFixture) plan(t *testing.T) pluginInstallPlan {
 	t.Helper()
-	plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Configured: true, ServerType: "paper", ServerSoftware: "Paper", MinecraftVersion: "1.21.8", Supported: true}, f.data, "root", "release")
+	plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Configured: true, ServerType: f.software, ServerSoftware: pluginContentContext(f.software).ServerSoftware, MinecraftVersion: f.minecraftVersion, Supported: true}, f.data, "root", "release")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,8 +320,8 @@ func (f *pluginInstallFixture) execute(t *testing.T, plan pluginInstallPlan, con
 	}
 	_ = executePluginInstall(context.Background(), f.s, journal.OperationID, plan, confirm, session{})
 	for _, command := range f.commands {
-		if strings.HasSuffix(command, "rcon-cli plugins") {
-			t.Fatal("RCON plugins used for identity")
+		if strings.HasSuffix(command, "rcon-cli plugins") && plan.Server.ServerType != "spigot" {
+			t.Fatal("RCON plugins used for Paper-family identity")
 		}
 	}
 	journal, err = f.s.operations.get(journal.OperationID)

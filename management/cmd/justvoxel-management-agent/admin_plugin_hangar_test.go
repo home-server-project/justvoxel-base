@@ -79,7 +79,7 @@ func newHangarInstallFixture(t *testing.T, serverType string) *hangarInstallFixt
 			metadata.Namespace.Slug = "Project" + id
 			payload = metadata
 		case 6:
-			if parts[5] != "versions" || r.URL.Query().Get("platform") != "PAPER" || r.URL.Query().Get("platformVersion") != "1.21.8" {
+			if parts[5] != "versions" || r.URL.Query().Get("platform") != "PAPER" || r.URL.Query().Get("platformVersion") != f.minecraftVersion {
 				t.Fatal("selected target lost", r.URL)
 			}
 			payload = map[string]any{"pagination": map[string]int{"count": 1, "offset": 0, "limit": 25}, "result": []hangarVersion{v}}
