@@ -86,13 +86,19 @@ class BackendProfiles(unittest.TestCase):
     def test_supported_paper_family_software_resolves(self):
         for software in ('paper', 'purpur', 'pufferfish', 'leaf'):
             self.assertEqual(runtime['backend_profile'](software), 'paper-family')
-        for software in ('fabric', 'quilt', 'forge', 'neoforge',
+        for software in ('forge', 'neoforge',
                          'spigot', 'vanilla', 'bedrock', '', 'unknown'):
             with self.subTest(software=software), self.assertRaises(ValueError):
                 runtime['backend_profile'](software)
 
+    def test_fabric_family_mapping(self):
+        for software in ('fabric','quilt'):
+            self.assertEqual(runtime['backend_profile'](software),'fabric-family')
+        self.assertEqual(runtime['backend_paths']('fabric-family')['files'],
+                         (runtime['FPL_FILE'],runtime['API_FILE'],runtime['FPL_CONFIG']))
+
     def test_exact_ordered_ownership(self):
-        self.assertEqual(set(runtime['BACKEND_PROFILES']), {'paper-family'})
+        self.assertEqual(set(runtime['BACKEND_PROFILES']), {'paper-family','fabric-family'})
         paths = runtime['backend_paths']('paper-family')
         self.assertEqual(paths['files'], self.files)
         self.assertEqual(paths['portable_configs'], self.portable)
@@ -305,7 +311,7 @@ class BackendStandaloneRecovery(unittest.TestCase):
                 if change == 'storage':
                     self.record['storage']['data_path'] = str(self.root.parent)
                 else:
-                    self.record['runtime']['software'] = 'fabric'
+                    self.record['runtime']['software'] = 'forge'
                 self.save_record()
                 with self.assertRaises(ValueError):
                     runtime['backend_preflight'](self.instance)
@@ -406,7 +412,7 @@ class BackendStandaloneRecovery(unittest.TestCase):
                 self.assertTrue(self.snapshot.exists())
                 self.assert_unowned()
 
-    def test_unsupported_software_cannot_publish_as_member(self):
+    def test_unsupported_or_mismatched_software_cannot_publish_as_member(self):
         self.enroll()
         before = self.snapshot.read_bytes()
         for software in ('fabric', 'quilt', 'forge', 'neoforge', 'spigot',
@@ -646,6 +652,318 @@ class NetworkPackageContract(unittest.TestCase):
             workflow = (root/'.github/workflows'/name).read_text()
             self.assertNotIn('actions/setup-java', workflow)
             self.assertNotIn('build-minecraft-network-plugins.sh', workflow)
+
+
+# Tiny synthetic jars carry only descriptors; no large fixtures or downloads.
+def fabric_jar(identity='fabricproxy-lite', dependencies=None, nested=None, version='1.0.0'):
+    import io
+    import zipfile
+    desc = {'schemaVersion':1,'id':identity,'version':version,
+            'depends':dependencies if dependencies is not None else {
+                'minecraft':'~1.20.6','fabricloader':'>=0.15.0'}}
+    if nested:
+        desc['jars'] = [{'file':'META-INF/jars/'+name} for name in nested]
+    output = io.BytesIO()
+    with zipfile.ZipFile(output,'w') as jar:
+        jar.writestr('fabric.mod.json',json.dumps(desc))
+        for name,data in (nested or {}).items():
+            jar.writestr('META-INF/jars/'+name,data)
+    return output.getvalue()
+
+
+def fabric_release(project, data, identity='release1'):
+    return {'project_id':project,'id':identity,'version_type':'release','status':'listed',
+            'date_published':'2026-01-01T00:00:00Z','version_number':'1.0.0',
+            'game_versions':['1.20.6'],'loaders':['fabric'],'dependencies':[],
+            'files':[{'primary':True,'filename':'mod.jar','size':len(data),
+                      'url':'https://cdn.modrinth.com/data/'+project+'/versions/'+identity+'/mod.jar',
+                      'hashes':{'sha512':hashlib.sha512(data).hexdigest()}}]}
+
+
+class FabricResolution(unittest.TestCase):
+    def test_exact_release_and_artifact(self):
+        data = fabric_jar()
+        release = fabric_release(runtime['FPL_PROJECT'],data)
+        with mock.patch.dict(runtime,{'modrinth_metadata':mock.Mock(return_value=[release]),
+                                     'fetch_modrinth_artifact':mock.Mock(return_value=data)}):
+            self.assertEqual(runtime['modrinth_release'](runtime['FPL_PROJECT'],'1.20.6'),[release])
+            blob,mods,entry = runtime['release_artifact'](release,runtime['FPL_PROJECT'],'1.20.6','fabricproxy-lite')
+        self.assertEqual(blob,data)
+        self.assertEqual(entry['release_id'],'release1')
+        runtime['verify_dependencies'](mods,'1.20.6','0.16.14','21.0')
+        with self.assertRaises(ValueError):
+            runtime['verify_dependencies'](mods,'1.20.6','0.14.0','21.0')
+
+    def test_publisher_and_artifact_mismatches(self):
+        for bad in ('project','game','primary','cdn','path','hash','id','dependency'):
+            with self.subTest(bad=bad):
+                data = fabric_jar('wrong-id' if bad=='id' else 'fabricproxy-lite',
+                                  {'minecraft':'~1.20.6','fabricloader':'>=0.15.0','unknown':'*'} if bad=='dependency' else None)
+                release = fabric_release(runtime['FPL_PROJECT'],data)
+                if bad=='project': release['project_id']='wrong'
+                if bad=='game': release['game_versions']=['1.21']
+                if bad=='primary': release['files'][0]['primary']=False
+                if bad=='cdn': release['files'][0]['url']=release['files'][0]['url'].replace('cdn.modrinth.com','example.com')
+                if bad=='path': release['files'][0]['url']=release['files'][0]['url'].replace('release1','other')
+                if bad=='hash': release['files'][0]['hashes']['sha512']='0'*128
+                with mock.patch.dict(runtime,{'fetch_modrinth_artifact':mock.Mock(return_value=data)}), self.assertRaises(ValueError):
+                    _,mods,_ = runtime['release_artifact'](release,runtime['FPL_PROJECT'],'1.20.6','fabricproxy-lite')
+                    runtime['verify_dependencies'](mods,'1.20.6','0.16.14','21.0')
+
+    def test_unknown_ranges_fail_closed(self):
+        self.assertFalse(runtime['accepts']('^0.1 || arbitrary','0.16.14'))
+        self.assertFalse(runtime['accepts']('>=0.17','0.16.14'))
+        self.assertTrue(runtime['accepts']('>=0.15 <0.17','0.16.14'))
+
+    def test_quilt_requires_authoritative_selected_loader_provides(self):
+        import io
+        import zipfile
+        record = {'runtime':{'software':'quilt','version':'1.20.6','loader_version':'0.26.4',
+                             'image_tag':'java21'},'storage':{'data_path':'/unused'}}
+        for valid in (True,False):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output,'w') as jar:
+                jar.writestr('quilt.mod.json',json.dumps({'quilt_loader':{'id':'quilt_loader',
+                    'version':'0.26.4','provides':[{'id':'fabricloader','version':'0.16.14'}] if valid else []}}))
+            data = output.getvalue()
+            def download(url,limit=runtime['MAX_JAR']):
+                return hashlib.sha512(data).hexdigest().encode() if url.endswith('.sha512') else data
+            with mock.patch('subprocess.run') as verifier, mock.patch.dict(runtime,{'fetch_modrinth_artifact':download}):
+                if valid:
+                    self.assertEqual(runtime['fabric_loader'](record),'0.16.14')
+                else:
+                    with self.assertRaises(ValueError): runtime['fabric_loader'](record)
+                self.assertEqual(verifier.call_args.args[0][2:4],['quilt','1.20.6'])
+
+
+class FabricNetworkLifecycle(unittest.TestCase):
+    write = BackendStandaloneRecovery.write
+    save_record = BackendStandaloneRecovery.save_record
+    leave = BackendStandaloneRecovery.leave
+    assert_unowned = BackendStandaloneRecovery.assert_unowned
+
+    def setUp(self):
+        BackendStandaloneRecovery.setUp(self)
+        # Reuse paths and private-file mocks; replace just the Paper-owned fixture.
+        for name in BackendProfiles.files:
+            target = self.root/name
+            if target.exists(): target.unlink()
+        self.original = {}
+        self.record['runtime'].update(software='fabric',version='1.20.6',loader_version='0.16.14',image_tag='java21')
+        self.save_record()
+        self.unowned['mods/user.jar'] = fabric_jar('unrelated-mod')
+        self.write('mods/user.jar',self.unowned['mods/user.jar'])
+        self.state['schema']=1
+        self.state['forwarding_secret']='a'*64
+        (self.network/'state.json').write_text(json.dumps(self.state))
+        real_stat = os.stat
+        def stage_stat(path,*args,**kwargs):
+            info = real_stat(path,*args,**kwargs)
+            if str(path).startswith(str(self.private/'network-staging')):
+                return SimpleNamespace(st_mode=info.st_mode,st_uid=0)
+            return info
+        patch = mock.patch.object(os,'stat',side_effect=stage_stat)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.config = b'# preserve comments\nsecret = "standalone" # keep\nhackEarlySend = true\n'
+        self.write(runtime['FPL_CONFIG'],self.config)
+        self.api = fabric_jar('fabric-api',version='0.100.0+1.20.6')
+        self.fpl = fabric_jar(dependencies={'minecraft':'~1.20.6','fabricloader':'>=0.15.0','fabric-api':'>=0.100.0'})
+        self.releases = {runtime['FPL_PROJECT']:fabric_release(runtime['FPL_PROJECT'],self.fpl),
+                         runtime['API_PROJECT']:fabric_release(runtime['API_PROJECT'],self.api,'api1')}
+        def metadata(url,limit):
+            import urllib.parse
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            self.assertEqual(json.loads(query['loaders'][0]),['fabric'])
+            self.assertEqual(json.loads(query['game_versions'][0]),['1.20.6'])
+            for project,release in self.releases.items():
+                if '/project/'+project+'/' in url: return json.dumps([release]).encode()
+            raise AssertionError('unexpected publisher request')
+        def download(url,limit=runtime['MAX_JAR']):
+            return self.api if '/'+runtime['API_PROJECT']+'/' in url else self.fpl
+        patch = mock.patch.dict(runtime,{'modrinth_metadata':lambda url:json.loads(metadata(url,2*1024*1024)),'fetch_modrinth_artifact':download,
+                                        'fabric_loader':lambda record:'0.16.14'})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def data_bytes(self):
+        return {str(path.relative_to(self.root)):path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+
+    def prepare(self):
+        before = self.data_bytes()
+        runtime['backend_preflight'](self.instance)
+        self.assertEqual(self.data_bytes(),before)
+
+    def publish(self):
+        forbidden = mock.Mock(side_effect=AssertionError('publication made a provider request'))
+        with mock.patch.dict(runtime,{'fetch':forbidden,'fetch_modrinth_artifact':forbidden,'fabric_loader':forbidden}):
+            runtime['backend'](self.instance,publishing=True)
+        forbidden.assert_not_called()
+
+    def test_fabric_and_quilt_roundtrip_uses_exact_staging(self):
+        for software in ('fabric','quilt'):
+            with self.subTest(software=software):
+                self.record['runtime']['software']=software
+                self.record['network_member']=True
+                self.save_record()
+                self.prepare()
+                manifest = json.loads((self.private/'network-staging/manifest.json').read_text())
+                self.assertEqual(manifest['context']['software'],software)
+                self.assertEqual(manifest['context']['profile'],'fabric-family')
+                self.assertEqual(manifest['context']['game'],'1.20.6')
+                self.assertEqual(manifest['context']['loader'],'0.16.14')
+                self.assertEqual(manifest['artifacts'][runtime['FPL_FILE']]['project_id'],runtime['FPL_PROJECT'])
+                self.assertEqual(manifest['artifacts'][runtime['FPL_FILE']]['release_id'],'release1')
+                self.publish()
+                evidence = json.loads(self.snapshot.read_text())
+                self.assertEqual(evidence['profile'],'fabric-family')
+                self.assertEqual(set(evidence['files']),set(runtime['backend_paths']('fabric-family')['files']))
+                self.assertEqual((self.root/runtime['FPL_FILE']).read_bytes(),self.fpl)
+                self.assertEqual((self.root/runtime['API_FILE']).read_bytes(),self.api)
+                self.assertIn(b'hackEarlySend = true', (self.root/runtime['FPL_CONFIG']).read_bytes())
+                self.publish() # ordinary startup remains offline and idempotent
+                self.leave()
+                self.assertEqual((self.root/runtime['FPL_CONFIG']).read_bytes(),self.config)
+                self.assertFalse((self.root/runtime['FPL_FILE']).exists())
+                self.assertFalse((self.root/runtime['API_FILE']).exists())
+                self.assert_unowned()
+
+    def test_user_api_is_preserved_and_not_installed_again(self):
+        self.write('mods/user-fabric-api.jar',self.api)
+        self.prepare()
+        self.publish()
+        self.assertFalse((self.root/runtime['API_FILE']).exists())
+        self.leave()
+        self.assertEqual((self.root/'mods/user-fabric-api.jar').read_bytes(),self.api)
+
+    def test_no_external_api_when_bundled(self):
+        self.fpl = fabric_jar(nested={'api.jar':self.api}, dependencies={
+            'minecraft':'~1.20.6','fabricloader':'>=0.15.0','fabric-api':'>=0.100.0'})
+        self.releases[runtime['FPL_PROJECT']] = fabric_release(runtime['FPL_PROJECT'],self.fpl)
+        self.prepare()
+        self.publish()
+        self.assertFalse((self.root/runtime['API_FILE']).exists())
+
+    def test_conflicts_duplicates_and_symlinks_fail_before_data_changes(self):
+        cases = ('fpl','duplicate-fpl','api','canonical','symlink','unknown-dependency','config')
+        for bad in cases:
+            with self.subTest(bad=bad):
+                # Each case resets only the files created by the preceding case.
+                for name in ('mods/user-fpl.jar','mods/other-fpl.jar','mods/api1.jar','mods/api2.jar',runtime['FPL_FILE']):
+                    target = self.root/name
+                    if target.is_symlink() or target.exists(): target.unlink()
+                self.write(runtime['FPL_CONFIG'],self.config)
+                if bad in ('fpl','duplicate-fpl'): self.write('mods/user-fpl.jar',self.fpl)
+                if bad=='duplicate-fpl': self.write('mods/other-fpl.jar',self.fpl)
+                if bad=='api':
+                    self.write('mods/api1.jar',self.api)
+                    self.write('mods/api2.jar',self.api)
+                if bad=='canonical': self.write(runtime['FPL_FILE'],self.fpl)
+                if bad=='symlink': (self.root/runtime['FPL_FILE']).symlink_to(self.root/'mods/user.jar')
+                if bad=='config': self.write(runtime['FPL_CONFIG'],b'secret = """ambiguous\nvalue"""\n')
+                if bad=='unknown-dependency':
+                    self.releases[runtime['FPL_PROJECT']]['dependencies']=[{'dependency_type':'required','project_id':'unknown'}]
+                else: self.releases[runtime['FPL_PROJECT']]['dependencies']=[]
+                before = self.data_bytes()
+                with self.assertRaises(ValueError): runtime['backend_preflight'](self.instance)
+                self.assertEqual(self.data_bytes(),before)
+                self.assertFalse(self.snapshot.exists())
+
+    def test_modified_staging_and_context_are_rejected_without_publication(self):
+        self.prepare()
+        stage = self.private/'network-staging'
+        manifest = stage/'manifest.json'
+        saved = manifest.read_bytes()
+        before = self.data_bytes()
+        for field in ('profile','software','game','loader','data_path'):
+            changed = json.loads(saved)
+            changed['context'][field]='changed'
+            manifest.write_text(json.dumps(changed))
+            with self.assertRaises(ValueError): self.publish()
+            self.assertEqual(self.data_bytes(),before)
+            self.assertFalse(self.snapshot.exists())
+        manifest.write_bytes(saved)
+        artifact = stage/Path(runtime['FPL_FILE']).name
+        artifact.write_bytes(b'tampered')
+        with self.assertRaises(ValueError): self.publish()
+        self.assertEqual(self.data_bytes(),before)
+
+    def test_portable_standalone_removes_only_verified_network_artifacts(self):
+        self.write('mods/user-fabric-api.jar',self.api)
+        self.prepare()
+        self.publish()
+        evidence = json.loads((self.root/runtime['PORTABLE_NAME']).read_text())
+        self.assertEqual(evidence['schema'],2)
+        self.assertEqual(evidence['artifacts'][runtime['API_FILE']],None)
+        runtime['restore_portable'](str(self.root),os.getuid(),os.getgid(),'fabric-family')
+        self.assertEqual((self.root/runtime['FPL_CONFIG']).read_bytes(),self.config)
+        self.assertFalse((self.root/runtime['FPL_FILE']).exists())
+        self.assertEqual((self.root/'mods/user-fabric-api.jar').read_bytes(),self.api)
+        self.assert_unowned()
+
+    def test_failed_partial_publication_restores_original(self):
+        self.prepare()
+        original = runtime['atomic']
+        def fail(path,*args,**kwargs):
+            if path==str(self.root/runtime['API_FILE']): raise OSError('interrupted copy')
+            return original(path,*args,**kwargs)
+        with mock.patch.dict(runtime,{'atomic':fail}), self.assertRaises(OSError): self.publish()
+        self.leave()
+        self.assertEqual((self.root/runtime['FPL_CONFIG']).read_bytes(),self.config)
+        self.assertFalse((self.root/runtime['FPL_FILE']).exists())
+        self.assert_unowned()
+
+    def test_changed_mod_inventory_fails_apply_but_normal_start_allows_new_unrelated_mod(self):
+        self.prepare()
+        self.write('mods/new-user.jar',fabric_jar('another-mod'))
+        before = self.data_bytes()
+        with self.assertRaises(ValueError): self.publish()
+        self.assertEqual(self.data_bytes(),before)
+        # New preflight binds this Apply to the new inventory.
+        self.prepare()
+        self.publish()
+        self.write('mods/after-enrollment.jar',fabric_jar('later-mod'))
+        forbidden = mock.Mock(side_effect=AssertionError('startup must stay offline'))
+        with mock.patch.dict(runtime,{'fetch':forbidden,'fetch_modrinth_artifact':forbidden}):
+            runtime['backend'](self.instance)
+        self.assertIn(b'later-mod',(self.root/'mods/after-enrollment.jar').read_bytes())
+
+    def test_changed_network_artifact_is_preserved_on_leave_and_portable_restore(self):
+        self.prepare()
+        self.publish()
+        target = self.root/runtime['FPL_FILE']
+        target.write_bytes(fabric_jar('unrelated-mod'))
+        changed = target.read_bytes()
+        with self.assertRaises(ValueError): self.leave()
+        self.assertEqual(target.read_bytes(),changed)
+        with self.assertRaises(ValueError):
+            runtime['restore_portable'](str(self.root),os.getuid(),os.getgid(),'fabric-family')
+        self.assertEqual(target.read_bytes(),changed)
+
+    def test_api_is_not_installed_when_not_required(self):
+        self.fpl = fabric_jar()
+        self.releases[runtime['FPL_PROJECT']] = fabric_release(runtime['FPL_PROJECT'],self.fpl)
+        self.prepare()
+        self.publish()
+        self.assertFalse((self.root/runtime['API_FILE']).exists())
+
+    def test_network_startup_exits_before_standalone_crossplay(self):
+        source = (SOURCE.parent/'instance-crossplay-start').read_text()
+        network = source.index('minecraft-network-runtime backend')
+        standalone = source.index('source /usr/libexec/justvoxel/mjust/managed-crossplay.sh')
+        self.assertLess(network,standalone)
+        self.assertIn('then exit 0; fi',source[network:standalone])
+
+    def test_originally_absent_config_is_removed_on_standalone_restore(self):
+        (self.root/runtime['FPL_CONFIG']).unlink()
+        self.prepare()
+        self.publish()
+        self.assertTrue((self.root/runtime['FPL_CONFIG']).exists())
+        runtime['restore_portable'](str(self.root),os.getuid(),os.getgid(),'fabric-family')
+        self.assertFalse((self.root/runtime['FPL_CONFIG']).exists())
+        self.assertFalse((self.root/runtime['FPL_FILE']).exists())
+        self.assertFalse((self.root/runtime['API_FILE']).exists())
+        self.assert_unowned()
 
 
 if __name__ == '__main__':

@@ -6,15 +6,29 @@ servers do not require a proxy.
 
 Open **Control Center → Minecraft → Network** or **Minecraft Servers → Network**
 as an administrator. Both open the Minecraft Network workspace on the dashboard.
-Choose Paper, Purpur, Pufferfish or Leaf servers, set the public Java and Bedrock
+Choose supported servers, set the public Java and Bedrock
 ports and a lobby welcome message, and
-turn on Enabled. Modern forwarding requires Minecraft 1.13 or later. Fabric,
-NeoForge, Spigot, Vanilla, Forge, Quilt and native Bedrock stay standalone in this
-implementation. Velocity is infrastructure, not an Add Server choice.
+turn on Enabled. Modern forwarding requires Minecraft 1.13 or later.
+Velocity is infrastructure, not an Add Server choice.
 
-Stop selected servers with their normal Stop controls before changing network
-membership, ports or lobby settings. Apply saves the complete network definition
-and starts the infrastructure. Start the backend servers again afterwards. Their
+Supported Network backends:
+
+- Native paper-family: Paper, Purpur, Pufferfish and Leaf.
+- Managed mod-loader profile: Fabric and Quilt, using automatically managed
+  FabricProxy-Lite compatibility and the existing exact game/loader selections.
+
+Forge, NeoForge, Spigot, Vanilla and native Bedrock remain standalone.
+[FabricProxy-Lite](https://modrinth.com/mod/fabricproxy-lite) is prepared
+automatically; users do not need to install it in Mods. Fabric API is installed only when the selected release needs an external
+API and no safely compatible user-owned API is present. Existing user mods are
+preserved; conflicting or ambiguous compatibility mods block Apply.
+CrossStitch is not installed by default. Backend Geyser-Fabric and Floodgate-Fabric
+are not installed for Network compatibility; Geyser and Floodgate run on Velocity.
+
+Apply prepares compatibility components before any player warning or shutdown.
+If no verified compatible artifact exists, Apply fails before downtime and leaves
+the server unchanged. Apply saves the complete network definition, starts the
+infrastructure, and restarts backends that were running before the change. Their
 Start on Boot choices are retained. Removing a member or disabling the network
 restores its saved standalone publications and managed cross-play configuration.
 A member must leave the network before it can be deleted or reset.
@@ -83,7 +97,7 @@ The existing per-instance runtime records retain standalone port settings and
 record whether the active definition is a network member.
 
 Apply resolves and verifies infrastructure artifacts into the private cache and
-runs read-only backend profile preflight before any player-aware server shutdown.
+runs backend profile preflight without changing live server data before any player-aware server shutdown.
 Publication consumes those prepared artifacts without resolving or downloading
 them again. A preparation failure leaves running Minecraft servers running.
 
@@ -99,7 +113,28 @@ visible for diagnosis.
 Standalone configuration and managed artifact snapshots are private to each
 instance. New snapshots bind their exact owned file set to the backend profile
 (`paper-family` for Paper, Purpur, Pufferfish and Leaf). This native profile needs
-no additional proxy plugin or mod. Historical snapshots without a profile remain
+no additional proxy plugin or mod. Fabric and Quilt share `fabric-family`, which
+owns only `mods/justvoxel-network-fabricproxy-lite.jar`, the optional
+`mods/justvoxel-network-fabric-api.jar`, and `config/FabricProxy-Lite.toml`.
+[The official setup](https://github.com/OKTW-Network/FabricProxy-Lite#setup) uses
+the same modern forwarding secret as Velocity; only its
+unambiguous top-level TOML secret changes, preserving other settings. Leaving
+restores the exact original configuration and removes only verified Network-owned
+canonical artifacts. User-owned Fabric API remains untouched.
+
+Fabric-family preflight verifies exact Minecraft publisher metadata, the primary
+Fabric artifact, fixed Modrinth CDN identity, publisher SHA-512 and jar descriptors,
+including required dependencies and conservative exact-loader compatibility.
+Quilt reuses the existing selected loader validation and requires explicit Fabric
+Loader compatibility evidence from the exact official Quilt loader jar. Missing or
+unrecognized evidence fails closed. Quilt uses the Fabric artifact, never an
+invented Quilt-specific release.
+
+Verified jars and bounded context/hash metadata live in each instance's private
+`network-staging` directory, outside `/data`. Publication and startup consume that
+exact staging without provider requests or downloads. Modified staging, changed
+runtime selections, conflicting identities and symlinks fail closed.
+Historical snapshots without a profile remain
 readable only with the selected instance ID and exact historical Paper file set;
 reading them does not rewrite them. Restoration uses the snapshot's ownership,
 while active members must also match the runtime software profile.
@@ -107,7 +142,11 @@ Network-member data also carries bounded original standalone
 configuration evidence so backups and exports can restore original forwarding and
 Floodgate settings when imported as standalone servers. These records contain no
 routing identity or destination host paths. Worlds and per-server whitelists are
-preserved independently.
+preserved independently. Paper portable schema 1 remains unchanged. Fabric-family
+uses bounded schema 2: the original configuration and hashes/absent states for the
+two fixed Network artifact paths, without embedding jars or user mod files.
+Standalone restoration verifies identity and hash before removing a Network-owned
+artifact; changed or ambiguous files are preserved and restoration fails closed.
 
 There is exactly one private infrastructure bind mount:
 
@@ -120,7 +159,7 @@ Existing instance mounts and data labels retain their established model.
 ## Lobby and server selection
 
 Velocity is the only Minecraft Network infrastructure container and the only
-public Java entrance. Selected Paper, Purpur, Pufferfish and Leaf members remain
+public Java entrance. Selected Paper, Purpur, Pufferfish, Leaf, Fabric and Quilt members remain
 private. LimboAPI provides one lightweight virtual lobby inside Velocity; the small JustVoxel Lobby
 Velocity plugin supplies the server selector. No separate full Minecraft lobby
 server or second lobby container exists. Geyser and Floodgate remain on Velocity

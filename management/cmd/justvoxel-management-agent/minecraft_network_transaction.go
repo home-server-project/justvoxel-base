@@ -97,7 +97,7 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 		member := c.Enabled && networkContains(c.Members, id)
 		if networkContains(c.Members, id) {
 			if !networkRecordEligible(record.Runtime) || record.EnvironmentSHA256 == "" {
-				return instanceRuntimeFailure("Only activated Paper and Purpur servers can join Minecraft Network.")
+				return instanceRuntimeFailure("Only activated supported Minecraft servers can join Minecraft Network.")
 			}
 			selected[id] = true
 		}
@@ -172,7 +172,7 @@ func networkApplyWithMaintenanceRelease(ctx context.Context, b *instanceRuntimeB
 			mode = "member"
 		}
 		if _, err = b.command(ctx, minecraftNetworkHelper, "backend-preflight", record.Runtime.ID, mode); err != nil {
-			return instanceRuntimeFailure("Minecraft Network backend preparation failed. Existing servers were preserved.")
+			return instanceRuntimeFailure("No verified Minecraft Network compatibility component is available for this server version and loader, or installed mods conflict. The server was not changed.")
 		}
 	}
 	// Each independent normal lifecycle retains its own player check and bounded

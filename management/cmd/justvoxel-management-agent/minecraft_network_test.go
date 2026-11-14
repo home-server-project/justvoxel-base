@@ -61,16 +61,26 @@ func TestMinecraftNetworkOptionalAndStandaloneOverlay(t *testing.T) {
 }
 func TestMinecraftNetworkSoftwareEligibility(t *testing.T) {
 	for _, software := range []string{"paper", "purpur", "pufferfish", "leaf", "fabric", "neoforge", "spigot", "vanilla", "forge", "quilt", "bedrock", "", "unknown"} {
-		want := software == "paper" || software == "purpur" || software == "pufferfish" || software == "leaf"
+		want := software == "paper" || software == "purpur" || software == "pufferfish" || software == "leaf" || software == "fabric" || software == "quilt"
+		expected := networkPaperFamily
+		if software == "fabric" || software == "quilt" {
+			expected = networkFabricFamily
+		}
 		profile, supported := networkBackendProfile(software)
-		if supported != want || (want && profile != networkPaperFamily) || (!want && profile != "") {
+		if supported != want || (want && profile != expected) || (!want && profile != "") {
 			t.Fatal("unexpected backend profile", software, profile, supported)
 		}
 		if networkEligible(software) != want {
 			t.Fatal(software)
 		}
 		for _, version := range []string{"1.13", "1.20.6", "LATEST"} {
-			if networkRecordEligible(minecraftInstanceRuntimeConfig{Software: software, Version: version}) != want {
+			record := minecraftInstanceRuntimeConfig{Software: software, Version: version}
+			expectedEligible := want
+			if software == "fabric" || software == "quilt" {
+				record.VersionPolicy, record.ImageTag, record.LoaderVersion = "pinned", "java21", "0.16.14"
+				expectedEligible = version == "1.20.6"
+			}
+			if networkRecordEligible(record) != expectedEligible {
 				t.Fatal("unexpected record eligibility", software, version)
 			}
 		}
@@ -1605,60 +1615,94 @@ func TestMinecraftNetworkConfigurePersistsEnforcementWithoutDeletingPlayers(t *t
 // Both infrastructure and every affected profile must be prepared before the
 // first player warning, graceful signal, or Minecraft service Stop.
 func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
-	for _, failure := range []string{"", "prepare", "backend-preflight"} {
-		t.Run(failure, func(t *testing.T) {
-			f, c := networkTransactionFixture(t, true)
-			c.Members = []string{f.configs[0].ID, f.configs[1].ID}
-			for _, id := range c.Members {
-				f.states[id], f.containers[id] = "active", "running"
-			}
-			h := networkLifecycleControls(f)
-			original := f.backend.command
-			prepared, disrupted := false, false
-			checked := map[string]bool{}
-			var mu sync.Mutex
-			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-				mu.Lock()
-				if command == minecraftNetworkHelper {
-					switch args[0] {
-					case "prepare":
-						if prepared || disrupted {
-							t.Error("infrastructure resolved again after preparation or shutdown")
+	for _, software := range []string{"paper", "fabric", "quilt"} {
+		for _, failure := range []string{"", "prepare", "backend-preflight"} {
+			t.Run(software+"/"+failure, func(t *testing.T) {
+				f, c := networkTransactionFixture(t, true)
+				c.Members = []string{f.configs[0].ID, f.configs[1].ID}
+				if software != "paper" {
+					for _, id := range c.Members {
+						record, err := f.backend.readRecord(id)
+						if err != nil {
+							t.Fatal(err)
 						}
-						prepared = true
-					case "backend-preflight":
-						if !prepared || disrupted {
-							t.Error("backend preflight outside preparation boundary")
+						record.Runtime.Software, record.Runtime.Version = software, "1.20.6"
+						record.Runtime.LoaderVersion, record.Runtime.VersionPolicy, record.Runtime.ImageTag = "0.16.14", "pinned", "java21"
+						record.Runtime.BedrockEnabled = false
+						if err := f.backend.writeJSON(filepath.Join(f.backend.root, id, "config.json"), record, true); err != nil {
+							t.Fatal(err)
 						}
-						if len(args) != 3 || args[2] != "member" {
-							t.Error("incorrect profile preflight request", args)
-						}
-						checked[args[1]] = true
-					}
-					if args[0] == failure && (failure != "backend-preflight" || len(checked) == len(c.Members)) {
-						mu.Unlock()
-						return nil, errors.New("mock preflight failure")
 					}
 				}
-				shutdown := command == "podman" && len(args) > 0 && (args[0] == "kill" || args[0] == "exec" && strings.HasPrefix(args[len(args)-1], "say "))
-				shutdown = shutdown || command == "systemctl" && len(args) > 1 && (args[0] == "stop" || args[0] == "--no-block" && args[1] == "stop")
-				if shutdown {
-					disrupted = true
-					if !prepared || len(checked) != len(c.Members) {
-						t.Error("Minecraft shutdown preceded complete preflight")
+				for _, id := range c.Members {
+					f.states[id], f.containers[id] = "active", "running"
+				}
+				h := networkLifecycleControls(f)
+				original := f.backend.command
+				prepared, disrupted := false, false
+				checked := map[string]bool{}
+				var mu sync.Mutex
+				f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+					mu.Lock()
+					if command == minecraftNetworkHelper {
+						switch args[0] {
+						case "prepare":
+							if prepared || disrupted {
+								t.Error("infrastructure resolved again after preparation or shutdown")
+							}
+							prepared = true
+						case "backend-preflight":
+							if !prepared || disrupted {
+								t.Error("backend preflight outside preparation boundary")
+							}
+							if len(args) != 3 || args[2] != "member" {
+								t.Error("incorrect profile preflight request", args)
+							}
+							checked[args[1]] = true
+						}
+						if args[0] == failure && (failure != "backend-preflight" || len(checked) == len(c.Members)) {
+							mu.Unlock()
+							return nil, errors.New("mock preflight failure")
+						}
 					}
+					shutdown := command == "podman" && len(args) > 0 && (args[0] == "kill" || args[0] == "exec" && strings.HasPrefix(args[len(args)-1], "say "))
+					shutdown = shutdown || command == "systemctl" && len(args) > 1 && (args[0] == "stop" || args[0] == "--no-block" && args[1] == "stop")
+					if shutdown {
+						disrupted = true
+						if !prepared || len(checked) != len(c.Members) {
+							t.Error("Minecraft shutdown preceded complete preflight")
+						}
+					}
+					mu.Unlock()
+					return original(ctx, command, args...)
 				}
-				mu.Unlock()
-				return original(ctx, command, args...)
-			}
-			err := networkApply(context.Background(), f.backend, c)
-			if failure == "" {
-				if err != nil || len(h.stops) != len(c.Members) || len(h.starts) != len(c.Members) {
-					t.Fatal("prepared transaction failed", err)
+				err := networkApply(context.Background(), f.backend, c)
+				if failure == "" {
+					if err != nil || len(h.stops) != len(c.Members) || len(h.starts) != len(c.Members) {
+						t.Fatal("prepared transaction failed", err)
+					}
+				} else if err == nil || len(h.stops) != 0 || len(h.starts) != 0 || len(h.signaled) != 0 || h.published {
+					t.Fatal("failed preflight disrupted Minecraft", err)
 				}
-			} else if err == nil || len(h.stops) != 0 || len(h.starts) != 0 || len(h.signaled) != 0 || h.published {
-				t.Fatal("failed preflight disrupted Minecraft", err)
+			})
+		}
+	}
+}
+
+func TestMinecraftNetworkFabricFamilyOverlayAndExactLoader(t *testing.T) {
+	for _, software := range []string{"fabric", "quilt"} {
+		c := minecraftInstanceRuntimeConfig{ID: "jv-a1b2c3", Software: software, Version: "1.20.6", VersionPolicy: "pinned", LoaderVersion: "0.16.14", ImageTag: "java21", StartOnBoot: true, JavaPort: 25566}
+		input := minecraftInstanceRuntimeFiles{Environment: []byte("ONLINE_MODE=TRUE\nEXISTING=value\n"), Quadlet: []byte("[Container]\nPublishPort=25566:25565\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n")}
+		got, err := networkOverlay(input, instanceRuntimeRecord{Runtime: c, NetworkMember: true})
+		if err != nil || string(got.Environment) != "ONLINE_MODE=FALSE\nEXISTING=value\n" || string(got.Quadlet) != "[Container]\nNetwork=justvoxel-minecraft-network.network\nNetworkAlias=jv-a1b2c3\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n" {
+			t.Fatal("fabric-family common overlay or Paper-only patch boundary", software, err)
+		}
+		for _, loader := range []string{"", "LATEST", "arbitrary"} {
+			bad := c
+			bad.LoaderVersion = loader
+			if networkRecordEligible(bad) {
+				t.Fatal("inexact loader became eligible", software, loader)
 			}
-		})
+		}
 	}
 }

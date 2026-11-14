@@ -113,13 +113,18 @@ func networkContains(ids []string, id string) bool {
 
 type minecraftNetworkBackendProfile string
 
-const networkPaperFamily minecraftNetworkBackendProfile = "paper-family"
+const (
+	networkPaperFamily  minecraftNetworkBackendProfile = "paper-family"
+	networkFabricFamily minecraftNetworkBackendProfile = "fabric-family"
+)
 
 // Profiles describe only Network backend preparation, not standalone support.
 func networkBackendProfile(software string) (minecraftNetworkBackendProfile, bool) {
 	switch software {
 	case "paper", "purpur", "pufferfish", "leaf":
 		return networkPaperFamily, true
+	case "fabric", "quilt":
+		return networkFabricFamily, true
 	default:
 		return "", false
 	}
@@ -132,6 +137,11 @@ func networkEligible(software string) bool {
 func networkRecordEligible(c minecraftInstanceRuntimeConfig) bool {
 	if !networkEligible(c.Software) {
 		return false
+	}
+	if c.Software == "fabric" || c.Software == "quilt" {
+		if validateJavaServerSelection(c.Software, c.VersionPolicy, c.Version, c.LoaderVersion, c.ImageTag, c.BedrockEnabled) != nil {
+			return false
+		}
 	}
 	if c.Version == "LATEST" {
 		return true
@@ -244,6 +254,8 @@ func networkOverlay(f minecraftInstanceRuntimeFiles, r instanceRuntimeRecord) (m
 
 func networkBackendOverlay(f minecraftInstanceRuntimeFiles, profile minecraftNetworkBackendProfile) (minecraftInstanceRuntimeFiles, error) {
 	switch profile {
+	case networkFabricFamily:
+		return f, nil
 	case networkPaperFamily:
 		f.Environment = append(f.Environment, []byte("PATCH_DEFINITIONS=/data/.justvoxel-network-patches.json\n")...)
 		return f, nil
