@@ -86,8 +86,7 @@ class BackendProfiles(unittest.TestCase):
     def test_supported_paper_family_software_resolves(self):
         for software in ('paper', 'purpur', 'pufferfish', 'leaf'):
             self.assertEqual(runtime['backend_profile'](software), 'paper-family')
-        for software in ('forge', 'neoforge',
-                         'spigot', 'vanilla', 'bedrock', '', 'unknown'):
+        for software in ('spigot', 'vanilla', 'bedrock', '', 'unknown'):
             with self.subTest(software=software), self.assertRaises(ValueError):
                 runtime['backend_profile'](software)
 
@@ -97,8 +96,16 @@ class BackendProfiles(unittest.TestCase):
         self.assertEqual(runtime['backend_paths']('fabric-family')['files'],
                          (runtime['FPL_FILE'],runtime['API_FILE'],runtime['FPL_CONFIG']))
 
+    def test_forge_family_mapping_and_owned_paths(self):
+        for software in ('forge','neoforge'):
+            self.assertEqual(runtime['backend_profile'](software),'forge-family')
+        self.assertEqual(runtime['backend_paths']('forge-family')['files'],
+                         (runtime['PCF_FILE'],runtime['PCF_CONFIG']))
+        self.assertEqual(runtime['backend_paths']('forge-family')['portable_configs'],
+                         (runtime['PCF_CONFIG'],))
+
     def test_exact_ordered_ownership(self):
-        self.assertEqual(set(runtime['BACKEND_PROFILES']), {'paper-family','fabric-family'})
+        self.assertEqual(set(runtime['BACKEND_PROFILES']), {'paper-family','fabric-family','forge-family'})
         paths = runtime['backend_paths']('paper-family')
         self.assertEqual(paths['files'], self.files)
         self.assertEqual(paths['portable_configs'], self.portable)
@@ -964,6 +971,328 @@ class FabricNetworkLifecycle(unittest.TestCase):
         self.assertFalse((self.root/runtime['FPL_FILE']).exists())
         self.assertFalse((self.root/runtime['API_FILE']).exists())
         self.assert_unowned()
+
+
+# Synthetic publisher JARs: metadata only; never execute downloaded code.
+def forge_jar(platform='forge', identity='pcf', game='[1.20.5,1.21)', loader='[50,51)',
+              version='1.3.0', extra='', contract=True, nested=None):
+    import io
+    import zipfile
+    descriptor = ('META-INF/mods.toml' if platform=='forge' else 'META-INF/neoforge.mods.toml')
+    text = 'modLoader="javafml"\nloaderVersion="[1,)"\n[[mods]]\nmodId="'+identity+'"\nversion="'+version+'"\n'
+    for name,rule in [('minecraft',game),(platform,loader)]:
+        if rule is not None:
+            text += '[[dependencies.'+identity+']]\nmodId="'+name+'"\nmandatory=true\ntype="required"\nversionRange="'+rule+'"\n'
+    text += extra
+    output = io.BytesIO()
+    with zipfile.ZipFile(output,'w') as jar:
+        jar.writestr(descriptor,text)
+        if contract:
+            for name,markers in [('Constants',b'proxy-compatible-forge.toml '+version.encode()),
+                                 ('EarlyConfig',b'forwarding.enabled forwarding.mode forwarding.secret'),
+                                 ('forwarding/Mode',b'MODERN')]:
+                jar.writestr('org/adde0109/pcf/'+name+'.class',b'\xca\xfe\xba\xbe'+markers)
+        if nested:
+            jar.writestr('META-INF/jarjar/metadata.json',json.dumps({'jars':[{'path':'META-INF/jarjar/'+name} for name in nested]}))
+            for name,data in nested.items():
+                jar.writestr('META-INF/jarjar/'+name,data)
+    return output.getvalue()
+
+
+def pcf_release(data,platform='forge',identity='release1'):
+    release = fabric_release('resolvedPCF',data,identity)
+    release.update(version_number='1.3.0',loaders=[platform])
+    return release
+
+
+class ForgeResolution(unittest.TestCase):
+    def test_exact_platform_and_descriptor_evidence(self):
+        for platform,loader,rule in [('forge','50.1.0','[50,51)'),('neoforge','20.6.119','[20.6,20.7)')]:
+            context = {'software':platform,'game':'1.20.6','loader':loader}
+            for bad in ('','id','missing-game','missing-loader','game','loader','range','external','contract','old-config'):
+                with self.subTest(platform=platform,bad=bad):
+                    data = forge_jar(platform,identity='wrong' if bad=='id' else 'pcf',
+                        game=None if bad=='missing-game' else '[1.21,)' if bad=='game' else '[1.20.5,1.21)',
+                        loader=None if bad=='missing-loader' else '[99,)' if bad=='loader' else 'unknown' if bad=='range' else rule,
+                        extra='[[dependencies.pcf]]\nmodId="external"\ntype="required"\nversionRange="[1,)"\n' if bad=='external' else '',
+                        contract=bad!='contract',version='1.2.0' if bad=='old-config' else '1.3.0')
+                    if bad:
+                        with self.assertRaises(ValueError): runtime['verify_pcf'](data,context,'1.3.0')
+                    else:
+                        self.assertIn('pcf',runtime['verify_pcf'](data,context,'1.3.0'))
+
+    def test_selected_platform_descriptor_and_duplicate_identity(self):
+        import io
+        import zipfile
+        for platform,other in [('forge','neoforge'),('neoforge','forge')]:
+            context={'software':platform,'game':'1.20.6','loader':'50.1.0'}
+            with self.subTest(platform=platform),self.assertRaises(ValueError):
+                runtime['verify_pcf'](forge_jar(other),context,'1.3.0')
+        data=forge_jar(nested={'duplicate.jar':forge_jar()})
+        with self.assertRaises(ValueError): runtime['forge_descriptors'](data)
+        output=io.BytesIO()
+        with zipfile.ZipFile(output,'w') as jar:
+            jar.writestr('META-INF/mods.toml','[[mods]]\nmodId="pcf"\nversion="1.3.0"\n[[mods]]\nmodId="pcf"\nversion="1.3.0"\n')
+        with self.assertRaises(ValueError): runtime['forge_descriptors'](output.getvalue())
+
+    def test_nested_dependency_is_allowed_only_when_bundled(self):
+        context = {'software':'forge','game':'1.20.6','loader':'50.1.0'}
+        dependency = '[[dependencies.pcf]]\nmodId="bundled"\ntype="required"\nversionRange="[1,)"\n'
+        nested = forge_jar(identity='bundled',version='1.0.0')
+        data = forge_jar(extra=dependency,nested={'bundled.jar':nested})
+        self.assertIn('bundled',runtime['verify_pcf'](data,context,'1.3.0'))
+        with self.assertRaises(ValueError):
+            runtime['verify_pcf'](forge_jar(extra=dependency),context,'1.3.0')
+
+    def test_slug_project_and_release_failures(self):
+        import copy
+        context = {'software':'forge','game':'1.20.6','loader':'50.1.0'}
+        project = {'id':'resolvedPCF','slug':'proxy-compatible-forge','title':'Proxy Compatible Forge',
+                   'project_type':'mod','source_url':'https://github.com/adde0109/Proxy-Compatible-Forge'}
+        data = forge_jar()
+        for bad in ('','slug','title','source','project','platform','game','beta','unlisted','primary','cdn','path','hash','required','version','version-id'):
+            p,r = copy.deepcopy(project),pcf_release(data)
+            if bad in ('slug','title'): p[bad]='wrong'
+            if bad=='source': p['source_url']='https://example.com/pcf'
+            if bad=='project': r['project_id']='wrong'
+            if bad=='platform': r['loaders']=['neoforge']
+            if bad=='game': r['game_versions']=['1.20.1']
+            if bad=='beta': r['version_type']='beta'
+            if bad=='unlisted': r['status']='unlisted'
+            if bad=='primary': r['files'].append(copy.deepcopy(r['files'][0]))
+            if bad=='cdn': r['files'][0]['url']=r['files'][0]['url'].replace('cdn.modrinth.com','example.com')
+            if bad=='path': r['files'][0]['url']=r['files'][0]['url'].replace('release1','wrong')
+            if bad=='hash': r['files'][0]['hashes']['sha512']='0'*128
+            if bad=='required': r['dependencies']=[{'dependency_type':'required','project_id':'unknown'}]
+            if bad=='version': r['version_number']='1.2.0'
+            if bad=='version-id': r['id']='../wrong'
+            def metadata(url):
+                if url=='https://api.modrinth.com/v2/project/proxy-compatible-forge': return p
+                self.assertIn('/project/resolvedPCF/version?',url)
+                self.assertIn('forge',url)
+                self.assertIn('1.20.6',url)
+                return [r]
+            with self.subTest(bad=bad), mock.patch.dict(runtime,{'modrinth_metadata':metadata,'fetch_modrinth_artifact':mock.Mock(return_value=data)}):
+                if bad:
+                    with self.assertRaises(ValueError): runtime['resolve_pcf'](context)
+                else:
+                    actual,entry = runtime['resolve_pcf'](context)
+                    self.assertEqual(actual,data)
+                    self.assertEqual(entry['project_id'],'resolvedPCF')
+                    self.assertEqual(entry['release_id'],'release1')
+                    self.assertEqual(entry['destination'],runtime['PCF_FILE'])
+
+    def test_newest_compatible_candidate_after_descriptor_checks(self):
+        good,bad = forge_jar(),forge_jar(identity='wrong')
+        newer = pcf_release(bad,identity='newer')
+        newer['date_published']='2026-11-01T00:00:00Z'
+        project = {'id':'resolvedPCF','slug':'proxy-compatible-forge','title':'Proxy Compatible Forge',
+                   'project_type':'mod','source_url':'https://github.com/adde0109/Proxy-Compatible-Forge'}
+        with mock.patch.dict(runtime,{'modrinth_metadata':lambda url:project if url.endswith('/proxy-compatible-forge') else [pcf_release(good),newer],
+                'fetch_modrinth_artifact':lambda url:bad if '/newer/' in url else good}):
+            _,entry = runtime['resolve_pcf']({'software':'forge','game':'1.20.6','loader':'50.1.0'})
+            self.assertEqual(entry['release_id'],'release1')
+
+
+class ForgeForwardingConfig(unittest.TestCase):
+    original = (b'# preamble\n[forwarding] # keep\nenabled = false # toggle\nmode = "LEGACY"\nsecret = "old" # private\n'
+                b'approvedProxyHosts = ["127.0.0.1"]\n[crossStitch]\nenabled = false\n'
+                b'[advanced]\nmodernForwardingVersion = "NO_OVERRIDE"\n[debug]\nenabled = true\n')
+
+    def test_only_forwarding_targets_change(self):
+        expected = self.original.replace(b'enabled = false # toggle',b'enabled = true # toggle').replace(b'"LEGACY"',b'"MODERN"').replace(b'"old"',('"'+'a'*64+'"').encode())
+        self.assertEqual(runtime['pcf_config'](self.original,'a'*64),expected)
+        self.assertEqual(runtime['pcf_config'](expected,'a'*64),expected)
+
+    def test_ambiguous_or_wrong_type_preserves_input(self):
+        for data in (b'',b'forwarding.enabled=false\n',b'["forwarding"]\nenabled=false\n',
+                     b'[forwarding]\nenabled=false\nenabled=true\n',b'[forwarding]\nenabled="false"\n',
+                     b'[forwarding]\nmode=1\n',b'[forwarding]\nsecret="""multi\nline"""\n',
+                     b'[forwarding]\n"secret"="old"\n',b'[forwarding]\nsecret.child="old"\n'):
+            with self.subTest(data=data), self.assertRaises(ValueError): runtime['pcf_config'](data,'a'*64)
+
+
+class ForgeNetworkLifecycle(unittest.TestCase):
+    write = BackendStandaloneRecovery.write
+    save_record = BackendStandaloneRecovery.save_record
+    leave = BackendStandaloneRecovery.leave
+    assert_unowned = BackendStandaloneRecovery.assert_unowned
+    data_bytes = FabricNetworkLifecycle.data_bytes
+
+    def setUp(self):
+        BackendStandaloneRecovery.setUp(self)
+        for name in BackendProfiles.files:
+            target = self.root/name
+            if target.exists(): target.unlink()
+        self.record['runtime'].update(software='forge',version='1.20.6',loader_version='50.1.0',
+                                      version_policy='pinned',image_tag='java21')
+        self.save_record()
+        self.unowned['mods/user.jar']=forge_jar(identity='unrelated',version='1.0.0')
+        self.write('mods/user.jar',self.unowned['mods/user.jar'])
+        self.config = ForgeForwardingConfig.original
+        self.write(runtime['PCF_CONFIG'],self.config)
+        self.state.update(schema=1,forwarding_secret='a'*64)
+        (self.network/'state.json').write_text(json.dumps(self.state))
+        real_stat = os.stat
+        def stage_stat(path,*args,**kwargs):
+            info = real_stat(path,*args,**kwargs)
+            if str(path).startswith(str(self.private/'network-staging')):
+                return SimpleNamespace(st_mode=info.st_mode,st_uid=0)
+            return info
+        patch=mock.patch.object(os,'stat',side_effect=stage_stat)
+        patch.start()
+        self.addCleanup(patch.stop)
+        project = {'id':'resolvedPCF','slug':'proxy-compatible-forge','title':'Proxy Compatible Forge',
+                   'project_type':'mod','source_url':'https://github.com/adde0109/Proxy-Compatible-Forge'}
+        def metadata(url):
+            if url.endswith('/proxy-compatible-forge'): return project
+            return [pcf_release(self.pcf,self.record['runtime']['software'])]
+        patch=mock.patch.dict(runtime,{'modrinth_metadata':metadata,'fetch_modrinth_artifact':lambda url,limit=runtime['MAX_JAR']:self.pcf})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.pcf = forge_jar()
+
+    def prepare(self):
+        before = self.data_bytes()
+        runtime['backend_preflight'](self.instance)
+        self.assertEqual(self.data_bytes(),before)
+
+    def publish(self):
+        forbidden=mock.Mock(side_effect=AssertionError('provider request after downtime'))
+        with mock.patch.dict(runtime,{'fetch':forbidden,'fetch_modrinth_artifact':forbidden,'modrinth_metadata':forbidden}), mock.patch('subprocess.run',forbidden):
+            runtime['backend'](self.instance,publishing=True)
+        forbidden.assert_not_called()
+
+    def test_join_publish_leave_and_portable_restore(self):
+        for software in ('forge','neoforge'):
+            for existing in (True,False):
+                with self.subTest(software=software,existing=existing):
+                    self.record['runtime'].update(software=software,loader_version='50.1.0' if software=='forge' else '20.6.119')
+                    self.record['network_member']=True
+                    self.save_record()
+                    self.pcf=forge_jar(software,loader='[50,51)' if software=='forge' else '[20.6,20.7)')
+                    config=self.root/runtime['PCF_CONFIG']
+                    if existing: self.write(runtime['PCF_CONFIG'],self.config)
+                    elif config.exists(): config.unlink()
+                    self.prepare()
+                    manifest=json.loads((self.private/'network-staging/manifest.json').read_text())
+                    self.assertEqual(manifest['context']['profile'],'forge-family')
+                    self.assertEqual(manifest['context']['software'],software)
+                    self.assertEqual(manifest['context']['loader'],self.record['runtime']['loader_version'])
+                    self.assertEqual(manifest['project_id'],'resolvedPCF')
+                    self.publish()
+                    evidence=json.loads(self.snapshot.read_text())
+                    self.assertEqual(evidence['profile'],'forge-family')
+                    self.assertEqual(set(evidence['files']),{runtime['PCF_FILE'],runtime['PCF_CONFIG']})
+                    self.assertEqual((self.root/runtime['PCF_FILE']).read_bytes(),self.pcf)
+                    if not existing:
+                        self.assertEqual(config.read_bytes(),('[forwarding]\nenabled = true\nmode = "MODERN"\nsecret = "'+'a'*64+'"\n').encode())
+                    self.publish()
+                    portable=json.loads((self.root/runtime['PORTABLE_NAME']).read_text())
+                    self.assertEqual(portable['schema'],3)
+                    self.assertEqual(set(portable['artifacts']),{runtime['PCF_FILE']})
+                    self.assertNotIn('data',portable['artifacts'])
+                    runtime['restore_portable'](str(self.root),os.getuid(),os.getgid(),'forge-family')
+                    self.assertFalse((self.root/runtime['PCF_FILE']).exists())
+                    self.assertEqual(config.read_bytes() if config.exists() else None,self.config if existing else None)
+                    # Private recovery uses the same snapshot after portable restore.
+                    self.publish()
+                    self.leave()
+                    self.assertEqual(config.read_bytes() if config.exists() else None,self.config if existing else None)
+                    self.assert_unowned()
+
+    def test_staged_and_runtime_context_changes_fail_before_data_writes(self):
+        self.prepare()
+        staged=self.private/'network-staging'/runtime['PCF_FILE'].split('/')[-1]
+        data=staged.read_bytes()
+        staged.write_bytes(data+b'changed')
+        before=self.data_bytes()
+        with self.assertRaises(ValueError): self.publish()
+        self.assertEqual(self.data_bytes(),before)
+        staged.write_bytes(data)
+        for key,value in [('software','neoforge'),('version','1.21'),('loader_version','50.2.0'),('image_tag','java25')]:
+            old=self.record['runtime'][key]
+            self.record['runtime'][key]=value
+            self.save_record()
+            with self.subTest(key=key),self.assertRaises(ValueError): self.publish()
+            self.assertEqual(self.data_bytes(),before)
+            self.record['runtime'][key]=old
+            self.save_record()
+
+    def test_ownership_conflicts_preserve_user_files(self):
+        import zipfile
+        for kind in ('user','duplicate','canonical','symlink','malformed'):
+            paths=[]
+            with self.subTest(kind=kind):
+                if kind=='canonical': paths=[self.root/runtime['PCF_FILE']]
+                else: paths=[self.root/'mods/pcf-user.jar']
+                if kind=='duplicate': paths.append(self.root/'mods/another.jar')
+                for path in paths:
+                    if kind=='symlink': path.symlink_to(self.root/'mods/user.jar')
+                    else: path.write_bytes(b'invalid' if kind=='malformed' else forge_jar())
+                before=self.data_bytes()
+                with self.assertRaises((ValueError,zipfile.BadZipFile)): self.prepare()
+                self.assertEqual(self.data_bytes(),before)
+                for path in paths: path.unlink()
+
+    def test_private_manifest_and_stage_identity_are_required(self):
+        self.prepare()
+        path=self.private/'network-staging/manifest.json'
+        original=json.loads(path.read_text())
+        before=self.data_bytes()
+        import copy
+        for field in ('schema','instance','profile','project','release','destination','sha256','sha512'):
+            manifest=copy.deepcopy(original)
+            entry=manifest['artifacts'][runtime['PCF_FILE']]
+            if field=='schema': manifest['schema']=99
+            if field=='instance': manifest['instance']='jv-other1'
+            if field=='profile': manifest['context']['profile']='fabric-family'
+            if field=='project': entry['project_id']='other'
+            if field=='release': entry['release_id']='../other'
+            if field=='destination': entry['destination']='mods/user.jar'
+            if field in ('sha256','sha512'): entry[field]='0'*len(entry[field])
+            path.write_text(json.dumps(manifest))
+            with self.subTest(field=field),self.assertRaises(ValueError): self.publish()
+            self.assertEqual(self.data_bytes(),before)
+        path.write_text(json.dumps(original))
+        staged=self.private/'network-staging'/runtime['PCF_FILE'].split('/')[-1]
+        data=staged.read_bytes()
+        staged.unlink()
+        target=self.private/'outside.jar'
+        target.write_bytes(data)
+        staged.symlink_to(target)
+        with self.assertRaises(ValueError): self.publish()
+        self.assertEqual(self.data_bytes(),before)
+        staged.unlink()
+        staged.write_bytes(data)
+        os.chmod(staged,0o644)
+        with self.assertRaises(ValueError): self.publish()
+        self.assertEqual(self.data_bytes(),before)
+
+    def test_storage_identity_and_original_config_are_bound_before_publication(self):
+        self.prepare()
+        self.record['storage']['uuid']='changed'
+        self.save_record()
+        before=self.data_bytes()
+        with self.assertRaises(ValueError): self.publish()
+        self.assertEqual(self.data_bytes(),before)
+        del self.record['storage']['uuid']
+        self.save_record()
+        self.write(runtime['PCF_CONFIG'],self.config+b'# changed after preflight\n')
+        before=self.data_bytes()
+        with self.assertRaises(ValueError): self.publish()
+        self.assertEqual(self.data_bytes(),before)
+
+    def test_modified_network_artifact_preserved_on_leave_and_portable_restore(self):
+        self.prepare()
+        self.publish()
+        jar=self.root/runtime['PCF_FILE']
+        jar.write_bytes(forge_jar(version='1.3.1'))
+        before=self.data_bytes()
+        with self.assertRaises(ValueError): self.leave()
+        self.assertEqual(self.data_bytes(),before)
+        with self.assertRaises(ValueError): runtime['restore_portable'](str(self.root),os.getuid(),os.getgid(),'forge-family')
+        self.assertEqual(self.data_bytes(),before)
 
 
 if __name__ == '__main__':

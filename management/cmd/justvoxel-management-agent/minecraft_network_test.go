@@ -61,10 +61,13 @@ func TestMinecraftNetworkOptionalAndStandaloneOverlay(t *testing.T) {
 }
 func TestMinecraftNetworkSoftwareEligibility(t *testing.T) {
 	for _, software := range []string{"paper", "purpur", "pufferfish", "leaf", "fabric", "neoforge", "spigot", "vanilla", "forge", "quilt", "bedrock", "", "unknown"} {
-		want := software == "paper" || software == "purpur" || software == "pufferfish" || software == "leaf" || software == "fabric" || software == "quilt"
+		want := software == "paper" || software == "purpur" || software == "pufferfish" || software == "leaf" || software == "fabric" || software == "quilt" || software == "forge" || software == "neoforge"
 		expected := networkPaperFamily
 		if software == "fabric" || software == "quilt" {
 			expected = networkFabricFamily
+		}
+		if software == "forge" || software == "neoforge" {
+			expected = networkForgeFamily
 		}
 		profile, supported := networkBackendProfile(software)
 		if supported != want || (want && profile != expected) || (!want && profile != "") {
@@ -76,7 +79,7 @@ func TestMinecraftNetworkSoftwareEligibility(t *testing.T) {
 		for _, version := range []string{"1.13", "1.20.6", "LATEST"} {
 			record := minecraftInstanceRuntimeConfig{Software: software, Version: version}
 			expectedEligible := want
-			if software == "fabric" || software == "quilt" {
+			if software == "fabric" || software == "quilt" || software == "forge" || software == "neoforge" {
 				record.VersionPolicy, record.ImageTag, record.LoaderVersion = "pinned", "java21", "0.16.14"
 				expectedEligible = version == "1.20.6"
 			}
@@ -1615,7 +1618,7 @@ func TestMinecraftNetworkConfigurePersistsEnforcementWithoutDeletingPlayers(t *t
 // Both infrastructure and every affected profile must be prepared before the
 // first player warning, graceful signal, or Minecraft service Stop.
 func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
-	for _, software := range []string{"paper", "fabric", "quilt"} {
+	for _, software := range []string{"paper", "fabric", "quilt", "forge", "neoforge"} {
 		for _, failure := range []string{"", "prepare", "backend-preflight"} {
 			t.Run(software+"/"+failure, func(t *testing.T) {
 				f, c := networkTransactionFixture(t, true)
@@ -1689,19 +1692,41 @@ func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
 	}
 }
 
-func TestMinecraftNetworkFabricFamilyOverlayAndExactLoader(t *testing.T) {
-	for _, software := range []string{"fabric", "quilt"} {
+func TestMinecraftNetworkManagedProfilesOverlayAndExactLoader(t *testing.T) {
+	for _, software := range []string{"fabric", "quilt", "forge", "neoforge"} {
 		c := minecraftInstanceRuntimeConfig{ID: "jv-a1b2c3", Software: software, Version: "1.20.6", VersionPolicy: "pinned", LoaderVersion: "0.16.14", ImageTag: "java21", StartOnBoot: true, JavaPort: 25566}
 		input := minecraftInstanceRuntimeFiles{Environment: []byte("ONLINE_MODE=TRUE\nEXISTING=value\n"), Quadlet: []byte("[Container]\nPublishPort=25566:25565\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n")}
 		got, err := networkOverlay(input, instanceRuntimeRecord{Runtime: c, NetworkMember: true})
 		if err != nil || string(got.Environment) != "ONLINE_MODE=FALSE\nEXISTING=value\n" || string(got.Quadlet) != "[Container]\nNetwork=justvoxel-minecraft-network.network\nNetworkAlias=jv-a1b2c3\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n" {
-			t.Fatal("fabric-family common overlay or Paper-only patch boundary", software, err)
+			t.Fatal("managed profile common overlay or Paper-only patch boundary", software, err)
 		}
 		for _, loader := range []string{"", "LATEST", "arbitrary"} {
 			bad := c
 			bad.LoaderVersion = loader
 			if networkRecordEligible(bad) {
 				t.Fatal("inexact loader became eligible", software, loader)
+			}
+		}
+	}
+}
+
+// Forge support remains exactly the established Java selection policy, including
+// old releases that upstream PCF supports but JustVoxel does not.
+func TestMinecraftNetworkForgeSelectionPolicy(t *testing.T) {
+	for _, software := range []string{"forge", "neoforge"} {
+		base := minecraftInstanceRuntimeConfig{Software: software, VersionPolicy: "pinned", Version: "1.20.6", LoaderVersion: "50.1.0", ImageTag: "java21"}
+		for _, game := range []string{"1.13", "1.20.1", "1.20.4", "1.20.6", "1.21.11", "26.3", "LATEST"} {
+			for _, policy := range []string{"pinned", "latest", ""} {
+				for _, loader := range []string{"", "LATEST", "arbitrary", "50.1.0"} {
+					for _, image := range []string{"java21", "java25", "stable"} {
+						c := base
+						c.Version, c.VersionPolicy, c.LoaderVersion, c.ImageTag = game, policy, loader, image
+						want := validateJavaServerSelection(software, policy, game, loader, image, false) == nil
+						if networkRecordEligible(c) != want {
+							t.Fatal("Network eligibility differs from Java selection", c)
+						}
+					}
+				}
 			}
 		}
 	}

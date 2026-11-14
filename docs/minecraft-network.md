@@ -14,10 +14,12 @@ Velocity is infrastructure, not an Add Server choice.
 Supported Network backends:
 
 - Native paper-family: Paper, Purpur, Pufferfish and Leaf.
-- Managed mod-loader profile: Fabric and Quilt, using automatically managed
+- Managed fabric-family: Fabric and Quilt, using automatically managed
   FabricProxy-Lite compatibility and the existing exact game/loader selections.
+- Managed forge-family: Forge and NeoForge, using automatically managed
+  [Proxy Compatible Forge (PCF)](https://modrinth.com/mod/proxy-compatible-forge).
 
-Forge, NeoForge, Spigot, Vanilla and native Bedrock remain standalone.
+Spigot, Vanilla and native Bedrock remain standalone.
 [FabricProxy-Lite](https://modrinth.com/mod/fabricproxy-lite) is prepared
 automatically; users do not need to install it in Mods. Fabric API is installed only when the selected release needs an external
 API and no safely compatible user-owned API is present. Existing user mods are
@@ -25,7 +27,14 @@ preserved; conflicting or ambiguous compatibility mods block Apply.
 CrossStitch is not installed by default. Backend Geyser-Fabric and Floodgate-Fabric
 are not installed for Network compatibility; Geyser and Floodgate run on Velocity.
 
-Apply prepares compatibility components before any player warning or shutdown.
+Apply checks the exact selected game and loader compatibility and prepares
+compatibility components before any player warning or shutdown. Forge and
+NeoForge keep the existing JustVoxel pinned game, exact loader and Java image
+policy; PCF's broader upstream version support does not expand that policy.
+PCF is automatically prepared for Velocity modern forwarding. Ambassador is not
+installed because JustVoxel's supported Forge range is newer than the legacy
+Forge 1.13–1.20.1 range that needs it. PCF includes its own CrossStitch support;
+no separate CrossStitch mod is installed or configured.
 If no verified compatible artifact exists, Apply fails before downtime and leaves
 the server unchanged. Apply saves the complete network definition, starts the
 infrastructure, and restarts backends that were running before the change. Their
@@ -130,6 +139,30 @@ Loader compatibility evidence from the exact official Quilt loader jar. Missing 
 unrecognized evidence fails closed. Quilt uses the Fabric artifact, never an
 invented Quilt-specific release.
 
+Forge and NeoForge share `forge-family`, owning only
+`mods/justvoxel-network-proxy-compatible-forge.jar` and
+`config/proxy-compatible-forge.toml`. PCF is resolved through its fixed Modrinth
+slug, then bound to the returned immutable project ID, exact release, platform,
+game and publisher SHA-512. The selected JAR must identify as `pcf`, prove exact
+game and Forge/NeoForge loader compatibility, and require no unbundled external
+mods. Existing user PCF installations conflict with enrollment and are preserved.
+
+Only PCF's forwarding `enabled`, `mode` and `secret` entries change: modern
+forwarding is enabled with the same secret as Velocity. Other settings and
+comments, including approved proxy hosts, CrossStitch, debug and advanced
+settings, are preserved. Ambiguous TOML fails closed. An absent config receives
+only the minimal forwarding table. Leaving Network restores the exact original
+PCF config, or removes it if Network created it, and removes only the verified
+Network-owned PCF JAR. Changed or unowned artifacts are preserved.
+
+The reviewed PCF configuration generation is bounded to publisher versions 1.3.0
+and 1.3.1, checked against the selected JAR's version and packaged configuration
+metadata. These tags' [Constants](https://github.com/adde0109/Proxy-Compatible-Forge/blob/v1.3.0/common/src/main/java-templates/org/adde0109/pcf/Constants.java.peb)
+and [EarlyConfig](https://github.com/adde0109/Proxy-Compatible-Forge/blob/v1.3.0/common/src/main/java/org/adde0109/pcf/EarlyConfig.java)
+source establishes the config path and forwarding structure. Historical
+`pcf-common.toml` configurations and unreviewed generations are not selected.
+If no verified PCF release matches, Apply fails safely before downtime.
+
 Verified jars and bounded context/hash metadata live in each instance's private
 `network-staging` directory, outside `/data`. Publication and startup consume that
 exact staging without provider requests or downloads. Modified staging, changed
@@ -147,6 +180,10 @@ uses bounded schema 2: the original configuration and hashes/absent states for t
 two fixed Network artifact paths, without embedding jars or user mod files.
 Standalone restoration verifies identity and hash before removing a Network-owned
 artifact; changed or ambiguous files are preserved and restoration fails closed.
+Forge-family uses bounded portable schema 3 with only the original PCF config
+content/hash or absent state and the fixed Network PCF ownership hash. It embeds
+no JAR bytes. Standalone restore verifies PCF identity and ownership before
+removing that artifact. Paper schema 1 and Fabric schema 2 are unchanged.
 
 There is exactly one private infrastructure bind mount:
 
@@ -159,7 +196,7 @@ Existing instance mounts and data labels retain their established model.
 ## Lobby and server selection
 
 Velocity is the only Minecraft Network infrastructure container and the only
-public Java entrance. Selected Paper, Purpur, Pufferfish, Leaf, Fabric and Quilt members remain
+public Java entrance. Selected Paper, Purpur, Pufferfish, Leaf, Fabric, Quilt, Forge and NeoForge members remain
 private. LimboAPI provides one lightweight virtual lobby inside Velocity; the small JustVoxel Lobby
 Velocity plugin supplies the server selector. No separate full Minecraft lobby
 server or second lobby container exists. Geyser and Floodgate remain on Velocity
