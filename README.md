@@ -1,4 +1,6 @@
-# JustVoxel Base
+# Migrated to https://github.com/home-server-project/justvoxel 
+
+## JustVoxel Base
 
 JustVoxel Base is the shared, VM-ready immutable appliance image used to develop and release the JustVoxel Minecraft server platform.
 
